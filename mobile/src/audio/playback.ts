@@ -19,26 +19,30 @@ export async function playVoiceAttachment(options: {
   keys: { dataKey: Buffer };
   userId: string;
   clientEntryId: string;
+  cancelled?: () => boolean;
 }): Promise<PlayingVoice> {
-  const fetched = await options.fetchBlob();
-  const plaintext = decryptAudio(options.keys, options.userId, options.clientEntryId, fetched.blob);
-  const scratchName = `voice-${options.clientEntryId}-${Date.now()}.m4a`;
-  const uri = `${FileSystem.cacheDirectory}${scratchName}`;
-  await FileSystem.writeAsStringAsync(uri, plaintext.toString("base64"), {
-    encoding: FileSystem.EncodingType.Base64,
-  });
-  let released = false;
-  return {
-    uri,
-    durationSeconds: fetched.duration_seconds,
-    release: async (): Promise<void> => {
-      if (released) return;
-      released = true;
-      try {
-        await FileSystem.deleteAsync(uri, { idempotent: true });
-      } catch {
-        // the cache dir is reclaimed by the OS regardless
-      }
-    },
-  };
+  const key = Buffer.from(options.keys.dataKey);
+  let plaintext: Buffer | null = null;
+  let uri: string | null = null;
+  try {
+    const fetched = await options.fetchBlob();
+    if (options.cancelled?.()) throw new Error("Playback cancelled");
+    plaintext = decryptAudio({ dataKey: key }, options.userId, options.clientEntryId, fetched.blob);
+    uri = `${FileSystem.cacheDirectory}voice-${Date.now()}-${Math.random().toString(36).slice(2)}.m4a`;
+    await FileSystem.writeAsStringAsync(uri, plaintext.toString("base64"), { encoding: FileSystem.EncodingType.Base64 });
+    if (options.cancelled?.()) throw new Error("Playback cancelled");
+    const scratch = uri;
+    let released = false;
+    return {
+      uri: scratch, durationSeconds: fetched.duration_seconds,
+      release: async () => {
+        if (released) return;
+        await FileSystem.deleteAsync(scratch, { idempotent: true });
+        released = true;
+      },
+    };
+  } catch (err) {
+    if (uri) await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
+    throw err;
+  } finally { key.fill(0); plaintext?.fill(0); }
 }

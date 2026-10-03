@@ -18,7 +18,7 @@ import { ApiError, api, sessionUserId } from "./api/client";
 import { buildAad } from "./crypto/aad";
 import { decrypt, encrypt, fromBase64, toBase64, zeroize, type Bytes } from "./crypto/core";
 import { currentOrigin, withLock } from "./platform";
-import { kv } from "./kvstore";
+import { kv,StorageCommitError,type WritePermit } from "./kvstore";
 
 /** The single Web Lock name for EVERY queue operation (audit 2026-09-26
  *  MEDIUM): the flush path already serialized drains cross-tab; the
@@ -97,6 +97,7 @@ interface QueueScope {
   queue: string;
   rejected: string;
   quarantine: string;
+  permit: WritePermit;
 }
 
 function scopeId(origin: string, userId: string): string {
@@ -120,6 +121,7 @@ async function scopeFor(userId: string): Promise<QueueScope> {
     queue: `${STORAGE_PREFIX}.items.${id}`,
     rejected: `${STORAGE_PREFIX}.rejected.${id}`,
     quarantine: `${STORAGE_PREFIX}.quarantine.${id}`,
+    permit:await kv.captureWritePermit(userId),
   };
 }
 
@@ -207,7 +209,7 @@ async function appendQuarantine(scope: QueueScope, raw: string, generation: numb
   })() : [];
   records.push(raw);
   while (records.length > QUARANTINE_MAX_RECORDS) records.shift();
-  await kv.setItem(scope.quarantine, JSON.stringify({ v: 1, records }));
+  await kv.setItem(scope.quarantine, JSON.stringify({ v: 1, records }),scope.permit);
 }
 
 async function readItems(key: string, scope: QueueScope, generation: number): Promise<QueuedEntry[]> {
@@ -221,7 +223,7 @@ async function readItems(key: string, scope: QueueScope, generation: number): Pr
       // unparseable bytes: quarantine it, then clear the key — leaving it
       // in place would only delay the loss to the next overwrite.
       await appendQuarantine(scope, raw, generation);
-      if (!wipedSince(generation)) await kv.removeItem(key);
+      if (!wipedSince(generation)) await kv.removeItem(key,scope.permit);
       return [];
     }
     if (parsed.malformedRaw.length > 0) {
@@ -231,7 +233,7 @@ async function readItems(key: string, scope: QueueScope, generation: number): Pr
       for (const slot of parsed.malformedRaw) {
         await appendQuarantine(scope, slot, generation);
       }
-      if (!wipedSince(generation)) await writeItems(key, parsed.items);
+      if (!wipedSince(generation)) await writeItems(key, parsed.items,scope.permit);
     }
     const own = parsed.items.filter((item) => item.userId === scope.userId);
     const foreign = parsed.items.filter((item) => item.userId !== scope.userId);
@@ -242,21 +244,21 @@ async function readItems(key: string, scope: QueueScope, generation: number): Pr
       for (const item of foreign) {
         await appendQuarantine(scope, serializeItems([item]), generation);
       }
-      if (!wipedSince(generation)) await writeItems(key, own);
+      if (!wipedSince(generation)) await writeItems(key, own,scope.permit);
     }
     return own;
   } catch {
     await appendQuarantine(scope, raw ?? JSON.stringify({ v: 1, unreadable: true, key }), generation);
-    if (!wipedSince(generation)) await kv.removeItem(key);
+    if (!wipedSince(generation)) await kv.removeItem(key,scope.permit);
     return [];
   }
 }
 
-async function writeItems(key: string, items: QueuedEntry[]): Promise<void> {
+async function writeItems(key: string, items: QueuedEntry[],permit:WritePermit): Promise<void> {
   if (items.length === 0) {
-    await kv.removeItem(key);
+    await kv.removeItem(key,permit);
   } else {
-    await kv.setItem(key, serializeItems(items));
+    await kv.setItem(key, serializeItems(items),permit);
   }
 }
 
@@ -275,7 +277,7 @@ async function appendRejected(scope: QueueScope, items: QueuedEntry[], generatio
       ids.add(item.clientEntryId);
     }
   }
-  if (!wipedSince(generation)) await writeItems(scope.rejected, existing);
+  if (!wipedSince(generation)) await writeItems(scope.rejected, existing,scope.permit);
 }
 
 export async function quarantinedQueueExists(userId?: string): Promise<boolean> {
@@ -299,15 +301,20 @@ export async function rejectedEntryCount(userId?: string): Promise<number> {
   return (await rejectedEntries(userId)).length;
 }
 
-export async function enqueue(item: QueuedEntry): Promise<void> {
+export async function enqueue(item: QueuedEntry,producerPermit?:WritePermit): Promise<void> {
+  const generation = queueGeneration; // capture before storage/lock awaits
   const scope = await scopeFor(item.userId);
+  if(producerPermit){
+    if(!producerPermit.keyBound || producerPermit.owner!==item.userId)throw new StorageCommitError("A queued entry requires its producer's account-key generation permit.");
+    scope.permit=producerPermit;
+  }else if(scope.permit.generation!==null)throw new StorageCommitError("An old queued entry cannot be inserted without its encryption generation permit; the ciphertext was retained by its caller.");
   // Cross-tab serialization FIRST (Web Lock), per-process serialization
   // second (the mutex): two signed-in tabs used to interleave their
   // read→write windows — the per-process mutex could not see the other
   // tab — and last-write-wins silently dropped a queued entry (audit
   // 2026-09-26 MEDIUM).
   return withLock(QUEUE_LOCK_NAME, () => serialized(async () => {
-    const generation = queueGeneration;
+    if(wipedSince(generation))throw new QueueAbandonedError();
     const queue = await readItems(scope.queue, scope, generation);
     if (wipedSince(generation)) throw new QueueAbandonedError();
     if (queue.length >= MAX_QUEUE_LENGTH) throw new QueueFullError();
@@ -320,7 +327,7 @@ export async function enqueue(item: QueuedEntry): Promise<void> {
     const candidate = [...queue, { ...item, userId: scope.userId }];
     if (serializedBytes(candidate) > MAX_QUEUE_BYTES) throw new QueueFullError("over 1 MB of pending entries");
     if (wipedSince(generation)) throw new QueueAbandonedError();
-    await writeItems(scope.queue, candidate);
+    await writeItems(scope.queue, candidate,scope.permit);
     // Post-commit fence check (audit 2026-09-25 → corrected 2026-09-28,
     // H-3): the generation can only have moved here if abortInFlightFlush()
     // fired during the write — a sign-out/idle/expiry lockDown. Those
@@ -489,6 +496,7 @@ export async function flushQueue(currentUserId: string): Promise<number> {
         current
           .filter((entry) => !removed.has(entry.clientEntryId))
           .map((entry) => requeued.get(entry.clientEntryId) ?? entry),
+        scope.permit,
       );
       return true;
     });
@@ -531,9 +539,9 @@ export async function requeueRejected(userId?: string): Promise<number> {
       moved += 1;
     }
     if (wipedSince(generation)) return 0;
-    await writeItems(scope.queue, queue);
+    await writeItems(scope.queue, queue,scope.permit);
     if (wipedSince(generation)) return 0;
-    await writeItems(scope.rejected, stillRejected);
+    await writeItems(scope.rejected, stillRejected,scope.permit);
     return moved;
   }));
 }
@@ -560,7 +568,7 @@ export async function clearQueue(userId?: string): Promise<void> {
   const scope = await scopeFor(await resolveUserId(userId));
   await withLock(QUEUE_LOCK_NAME, async () => {
     queueGeneration += 1;
-    await kv.multiRemove([scope.queue, scope.rejected, scope.quarantine]);
+    for(const key of [scope.queue,scope.rejected,scope.quarantine])await kv.removeItem(key,scope.permit);
   });
 }
 
@@ -627,6 +635,7 @@ async function rewrapEntryBlob(item: QueuedEntry, oldKey: Bytes, newKey: Bytes):
  *  may block or unwind the completed rotation. */
 export async function rewrapQueue(owner: string, oldKey: Bytes, newKey: Bytes): Promise<void> {
   const scope = await scopeFor(owner);
+  scope.permit=await kv.captureWritePermit(owner,newKey);
   await withLock(QUEUE_LOCK_NAME, () => serialized(async () => {
     const generation = queueGeneration;
     const [queue, rejected] = await Promise.all([
@@ -644,9 +653,8 @@ export async function rewrapQueue(owner: string, oldKey: Bytes, newKey: Bytes): 
     const items = await rewrap(queue);
     const rejects = await rewrap(rejected);
     if (wipedSince(generation)) return;
-    await writeItems(scope.queue, items);
+    await writeItems(scope.queue, items,scope.permit);
     if (wipedSince(generation)) return;
-    await writeItems(scope.rejected, rejects);
+    await writeItems(scope.rejected, rejects,scope.permit);
   }));
 }
-

@@ -3098,7 +3098,7 @@ def _detect_themes(
         mood_without_theme = [(e, s) for e, s in without_theme if e.text or e.sentiment is not None]
         moods_with = _day_means(mood_with_theme)
         moods_without = _day_means(mood_without_theme)
-        if len(moods_without) >= MOOD_MIN_PER_SIDE:
+        if len(moods_with) >= MOOD_MIN_PER_SIDE and len(moods_without) >= MOOD_MIN_PER_SIDE:
             delta = sum(moods_without) / len(moods_without) - sum(moods_with) / len(moods_with)
             effect = statsig.cohens_d(moods_with, moods_without, variance_floor=MOOD_SD_FLOOR)
             _, pvalue = statsig.welch_test(
@@ -5281,6 +5281,7 @@ def update(
     muted_records = muted_records[:MUTED_SURFACED_CAP]
 
     n_window_entries = len(per_entry)
+    n_window_days = len({entry.entry_date for entry, _themes, _tokens, _score in per_entry})
     surfaced: list[Pattern] = []
     patterns_new = 0
     patterns_fading = 0
@@ -5317,7 +5318,8 @@ def update(
                     "first_seen": record.first_seen,
                     "last_seen": record.last_seen,
                     "is_new": is_new,
-                    "sample_days": n_window_entries,
+                    "sample_days": n_window_days,
+                    "sample_entries": n_window_entries,
                     # The days whose entries fed this pattern (capped at
                     # EVIDENCE_DATES_CAP). Powers the evidence drill-down: the
                     # patient's app and the therapist portal fetch the entries

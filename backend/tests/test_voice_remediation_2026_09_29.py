@@ -278,6 +278,10 @@ async def test_account_erasure_removes_audio_objects(client, app, settings):
 class _FakeBody:
     def __init__(self, data: bytes):
         self._data = data
+        self.closed = False
+
+    def close(self):
+        self.closed = True
 
     def read(self, limit=-1):
         return self._data if limit < 0 else self._data[:limit]

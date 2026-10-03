@@ -3,10 +3,11 @@ import { AppState, StyleSheet, View } from "react-native";
 import { NavigationContainer } from "@react-navigation/native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { SessionProvider } from "./src/store";
-import { AppNavigator } from "./src/navigation";
+import { AppNavigator, navigationRef } from "./src/navigation";
 import { ThemeProvider, useTheme } from "./src/theme";
 import { startNotificationPressRouting } from "./src/nativeFeatures";
 import { applyStoredLanguageChoice } from "./src/languagePref";
+import { notifyNavigationReady } from "./src/notificationRoute";
 import { ErrorBoundary } from "./src/ErrorBoundary";
 
 /**
@@ -33,17 +34,19 @@ export default function App(): React.JSX.Element {
  * when a user chose an override. */
 function ThemedApp(): React.JSX.Element {
   const t = useTheme();
+  const [languageReady, setLanguageReady] = useState(false);
   const [shielded, setShielded] = useState(AppState.currentState !== "active");
 
   useEffect(() => {
     // 2026-09-29 deep audit (P2): apply the stored language override
     // before the first meaningful render (unreadable storage keeps the
     // device-detected locale — boot never blocks on it).
-    void applyStoredLanguageChoice();
+    let cancelled = false;
+    void applyStoredLanguageChoice().finally(() => { if (!cancelled) setLanguageReady(true); });
     const sub = AppState.addEventListener("change", (state) => {
       setShielded(state !== "active");
     });
-    return () => sub.remove();
+    return () => { cancelled = true; sub.remove(); };
   }, []);
 
   // Notification-tap routing (2026-09-27): a tap on the measure check-in
@@ -51,15 +54,20 @@ function ThemedApp(): React.JSX.Element {
   // when the main flow is entered. Quiet no-op while the notification
   // module is unlinked in this build (the seam's own guarantee).
   useEffect(() => {
-    void startNotificationPressRouting().catch(() => {});
+    let cancelled = false;
+    let dispose: (() => void) | null = null;
+    void startNotificationPressRouting().then((stop) => {
+      if (cancelled) stop?.(); else dispose = stop;
+    }).catch(() => {});
+    return () => { cancelled = true; dispose?.(); };
   }, []);
 
   return (
     <SafeAreaProvider>
       <SessionProvider>
-        <NavigationContainer>
-          <AppNavigator />
-          {shielded && <View style={[styles.shield, { backgroundColor: t.colors.bg }]} pointerEvents="none" />}
+        <NavigationContainer ref={navigationRef} onReady={notifyNavigationReady}>
+          {languageReady && <AppNavigator />}
+          {shielded && <View style={[styles.shield, { backgroundColor: t.colors.bg }]} pointerEvents="auto" accessibilityViewIsModal importantForAccessibility="yes" accessibilityLabel="Fathom" />}
         </NavigationContainer>
       </SessionProvider>
     </SafeAreaProvider>

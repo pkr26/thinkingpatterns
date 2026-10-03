@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""365-day, 13-user MindPattern end-to-end simulation + full-API campaign.
+"""365-day, 13-user MindPattern scoped end-to-end simulation.
 
 Successor of reports/simulation60 (60 days, 5 users, 5 endpoints): the
 same live-API philosophy — every entry synced through the real server
 with the real client crypto — extended to a full year, thirteen
-personas, and EVERY route the backend mounts, plus every functionality
-that only a year of data exercises.
+personas and the explicitly exercised routes. This is not a current
+all-route guarantee; recovery/kit administration and newer clinician routes
+require their own integration evidence.
 
 2026-09-29 VOICE EXTENSION: the campaign now exercises the whole voice
 journaling surface as three additional real users who MIX voice and
@@ -67,8 +68,8 @@ Everything below is the standing year-long campaign:
   * negative paths: wrong verifiers, dead tokens, stale revisions,
     duplicate ids, out-of-range dates, oversize bodies, role
     boundaries, cross-therapist isolation;
-  * at-rest zero-knowledge: every stored blob column is ciphertext and
-    the raw database file contains none of the journal plaintext;
+  * sampled at-rest ciphertext checks and nine fixed plaintext probes
+    of the raw database file;
   * rate limiting verified against the default ops bucket.
 
 Every check prints [PASS]/[FAIL]; the process exits non-zero if any

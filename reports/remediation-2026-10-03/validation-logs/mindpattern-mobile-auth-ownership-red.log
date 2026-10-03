@@ -1,0 +1,105 @@
+npm notice run mindpattern-mobile@1.0.0 npx
+npm notice run 'vitest' run tests/screens/authOwnership.test.tsx
+
+ RUN  v4.1.11 /Users/pradeepreddy/Desktop/mental_health_application/mobile
+
+stderr | tests/screens/authOwnership.test.tsx > authentication attempt custody > does not dispatch an old-origin verifier after suspended login derivation
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/authOwnership.test.tsx > authentication attempt custody > does not dispatch an old-origin verifier after suspended login derivation
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/authOwnership.test.tsx > authentication attempt custody > does not dispatch an old-origin verifier after suspended login derivation
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/authOwnership.test.tsx > authentication attempt custody > does not dispatch an old-origin verifier after suspended login derivation
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/authOwnership.test.tsx > authentication attempt custody > does not dispatch an old-origin verifier after suspended login derivation
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/authOwnership.test.tsx > authentication attempt custody > does not dispatch an old-origin verifier after suspended login derivation
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/authOwnership.test.tsx > authentication attempt custody > does not dispatch an old-origin verifier after suspended login derivation
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/authOwnership.test.tsx > authentication attempt custody > does not dispatch an old-origin verifier after suspended login derivation
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/authOwnership.test.tsx > authentication attempt custody > does not reinstall a biometric key after unmount and replacement login
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/authOwnership.test.tsx > authentication attempt custody > does not reinstall a biometric key after unmount and replacement login
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/authOwnership.test.tsx > authentication attempt custody > does not reinstall a biometric key after unmount and replacement login
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/authOwnership.test.tsx > authentication attempt custody > does not reinstall a biometric key after unmount and replacement login
+The current testing environment is not configured to support act(...)
+
+ ❯ tests/screens/authOwnership.test.tsx (4 tests | 3 failed) 51ms
+     × does not dispatch an old-origin verifier after suspended login derivation 20ms
+     × does not reinstall a biometric key after unmount and replacement login 14ms
+     × does not reset or clear a replacement session after suspended recovery derivation 8ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/screens/authOwnership.test.tsx > authentication attempt custody > does not dispatch an old-origin verifier after suspended login derivation
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      "alice",
+      "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM=",
+    ]
+
+
+Number of calls: 1
+
+ ❯ tests/screens/authOwnership.test.tsx:40:25
+     38|   const root=await login();await firePress(root,"Sign in");await flush…
+     39|   await act(async()=>{gate.resolve(owned);});await flush();
+     40|   expect(api.login).not.toHaveBeenCalled();expect(vault.isUnlocked()).…
+       |                         ^
+     41|  });
+     42|  it("does not reinstall a biometric key after unmount and replacement …
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  tests/screens/authOwnership.test.tsx > authentication attempt custody > does not reinstall a biometric key after unmount and replacement login
+AssertionError: expected 'user-1' to be 'user-2' // Object.is equality
+
+Expected: "user-2"
+Received: "user-1"
+
+ ❯ tests/screens/authOwnership.test.tsx:47:31
+     45|   await act(async()=>root.unmount());changeLocalSessionOwner(B);vault.…
+     46|   await act(async()=>{gate.resolve(owned);});await flush();
+     47|   expect(vault.ownerUserId()).toBe(B);expect(vault.get().dataKey).toEq…
+       |                               ^
+     48|  });
+     49|  it("does not lock a replacement vault when a stale password derivatio…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  tests/screens/authOwnership.test.tsx > authentication attempt custody > does not reset or clear a replacement session after suspended recovery derivation
+AssertionError: expected { userId: 'user-1', …(3) } to be an instance of Error
+ ❯ tests/screens/authOwnership.test.tsx:62:25
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 1 passed (4)
+   Start at  11:49:05
+   Duration  297ms (transform 129ms, setup 54ms, import 127ms, tests 51ms, environment 0ms)
+

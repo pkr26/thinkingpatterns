@@ -481,7 +481,7 @@ async def test_export_timestamps_are_iso8601_with_offsets(client):
     from app.schemas import ExportBundle
 
     parsed = ExportBundle.model_validate(bundle)
-    assert parsed.version == 1 and len(parsed.entries) == 32
+    assert parsed.version == 2 and len(parsed.entries) == 32
 
     # ...and every timestamp is ISO-8601 with an explicit offset — never the
     # str(datetime) form ("2026-09-07 12:00:00+00:00", note the space).

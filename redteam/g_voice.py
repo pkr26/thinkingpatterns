@@ -38,15 +38,26 @@ import asyncio
 import base64
 import os
 import tempfile
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
-from common import derive_keys, encrypt_entry, make_app, make_client, make_settings, run, section, verdict
+from common import (
+    derive_keys,
+    encrypt_entry,
+    make_app,
+    make_client,
+    make_settings,
+    run,
+    section,
+    verdict,
+)
 
-TODAY = date.today()
+TODAY = datetime.now(timezone.utc).date()
 FAKE_AUDIO = b"RIFF-redteam-voice-take" * 64
 
 
-def _audio_body(audio: bytes = FAKE_AUDIO, duration: int = 60, mime: str = "audio/webm"):
+def _audio_body(
+    audio: bytes = FAKE_AUDIO, duration: int = 60, mime: str = "audio/webm"
+):
     return {
         "audio_b64": base64.b64encode(audio).decode("ascii"),
         "mime": mime,
@@ -85,12 +96,17 @@ async def _consent_voice(client, user):
 
 
 async def _make_entry(client, user, entry_id):
-    blob = encrypt_entry(user["data_key"], user["user_id"], entry_id,
-                         "voice day", TODAY.isoformat())
+    blob = encrypt_entry(
+        user["data_key"], user["user_id"], entry_id, "voice day", TODAY.isoformat()
+    )
     r = await client.post(
         "/api/v1/entries",
         headers=user["headers"],
-        json={"client_entry_id": entry_id, "blob": blob, "entry_date": TODAY.isoformat()},
+        json={
+            "client_entry_id": entry_id,
+            "blob": blob,
+            "entry_date": TODAY.isoformat(),
+        },
     )
     assert r.status_code in (200, 201), r.text
     return entry_id
@@ -140,11 +156,11 @@ async def main() -> None:
 
 
 async def _campaign(app, client, settings) -> None:
-    from sqlalchemy import select
-
-    from app.models import AccessLog, AudioAttachment, Consent, User as UserModel, utcnow
+    from app.models import AccessLog, AudioAttachment, Consent, utcnow
+    from app.models import User as UserModel
     from app.services import stt as stt_service
     from app.services.audio_store import get_audio_store
+    from sqlalchemy import select
 
     # --- V-1: flag-off hides every voice surface ------------------------------------
     section("V-1: flag-off hides every voice surface (patient, therapist, toggle)")
@@ -189,7 +205,9 @@ async def _campaign(app, client, settings) -> None:
     section("V-2: consent wall (none / stale fingerprint)")
     no_consent = await _register(client, "gvoice-noconsent")
     denied = await client.post(
-        "/api/v1/audio/transcriptions", headers=no_consent["headers"], json=_audio_body()
+        "/api/v1/audio/transcriptions",
+        headers=no_consent["headers"],
+        json=_audio_body(),
     )
     consented = await _register(client, "gvoice-consented")
     await _consent_voice(client, consented)
@@ -221,7 +239,9 @@ async def _campaign(app, client, settings) -> None:
     section("V-4: route-scoped caps refuse oversized decoded audio / duration")
     big = b"\x00" * (settings.audio_max_body_bytes + 1)
     oversized = await client.post(
-        "/api/v1/audio/transcriptions", headers=consented["headers"], json=_audio_body(big)
+        "/api/v1/audio/transcriptions",
+        headers=consented["headers"],
+        json=_audio_body(big),
     )
     over_duration = await client.post(
         "/api/v1/audio/transcriptions",
@@ -292,7 +312,9 @@ async def _campaign(app, client, settings) -> None:
         f"/api/v1/audio/attachments/{attachment_id}", headers=stranger["headers"]
     )
     idor_delete = await client.request(
-        "DELETE", f"/api/v1/audio/attachments/{attachment_id}", headers=stranger["headers"]
+        "DELETE",
+        f"/api/v1/audio/attachments/{attachment_id}",
+        headers=stranger["headers"],
     )
     still_there = await client.get(
         f"/api/v1/audio/attachments/{attachment_id}", headers=owner["headers"]
@@ -314,14 +336,20 @@ async def _campaign(app, client, settings) -> None:
     shared = await _register(client, "gvoice-shared")
     await _consent_voice(client, shared)
     shared_entry = await _make_entry(client, shared, "e-redteam-shared")
-    shared_created = await _upload(client, shared, shared_entry, b"RIFF-shared-take" + b"2" * 40)
+    shared_created = await _upload(
+        client, shared, shared_entry, b"RIFF-shared-take" + b"2" * 40
+    )
 
     therapist = await _register(client, "gvoice-therapist")
     async with app.state.sessionmaker() as session:
         t_row = (
-            (await session.execute(
-                select(UserModel).where(UserModel.id == therapist["user_id"]))
-            ).scalars().one()
+            (
+                await session.execute(
+                    select(UserModel).where(UserModel.id == therapist["user_id"])
+                )
+            )
+            .scalars()
+            .one()
         )
         t_row.role = "therapist"
         session.add(t_row)
@@ -336,9 +364,24 @@ async def _campaign(app, client, settings) -> None:
         )
         await session.commit()
         consent_id = (
-            (await session.execute(select(Consent.id).where(
-                Consent.user_id == shared["user_id"]))).scalars().one()
+            (
+                await session.execute(
+                    select(Consent.id).where(Consent.user_id == shared["user_id"])
+                )
+            )
+            .scalars()
+            .one()
         )
+
+    # Promotion changes the authoritative role. The old patient-purpose
+    # token must remain invalid, and cannot exercise a therapist consent
+    # gate. Obtain the real role-bound login before testing voice access.
+    login = await client.post(
+        "/api/v1/auth/login",
+        json={"username": "gvoice-therapist", "verifier": therapist["verifier"]},
+    )
+    assert login.status_code == 200, login.text
+    therapist["headers"] = {"Authorization": "Bearer " + login.json()["token"]}
 
     audio_url = (
         f"/api/therapist/patients/{shared['user_id']}/audio/"
@@ -347,10 +390,17 @@ async def _campaign(app, client, settings) -> None:
     denied_fetch = await client.get(audio_url, headers=therapist["headers"])
     async with app.state.sessionmaker() as session:
         audit_before = (
-            await session.execute(select(AccessLog).where(
-                AccessLog.user_id == shared["user_id"],
-                AccessLog.action == "audio_access"))
-        ).scalars().all()
+            (
+                await session.execute(
+                    select(AccessLog).where(
+                        AccessLog.user_id == shared["user_id"],
+                        AccessLog.action == "audio_access",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
     grant = await client.put(
         f"/api/consents/{consent_id}/share-voice",
         headers={**shared["headers"], "X-Account-Verifier": shared["verifier"]},
@@ -360,10 +410,17 @@ async def _campaign(app, client, settings) -> None:
     served = await client.get(audio_url, headers=therapist["headers"])
     async with app.state.sessionmaker() as session:
         audit_after = (
-            await session.execute(select(AccessLog).where(
-                AccessLog.user_id == shared["user_id"],
-                AccessLog.action == "audio_access"))
-        ).scalars().all()
+            (
+                await session.execute(
+                    select(AccessLog).where(
+                        AccessLog.user_id == shared["user_id"],
+                        AccessLog.action == "audio_access",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
     ok = (
         denied_fetch.status_code == 403
         and denied_fetch.json()["code"] == "consent_voice_share_required"
@@ -435,7 +492,6 @@ async def _campaign(app, client, settings) -> None:
     # --- V-12: upstream retry against the REAL SpeechToText client ---------------------------------
     section("V-12: upstream retry — exactly once on 429, never on 400")
     import httpx
-
     from app.services.stt import SpeechToText
 
     engine = SpeechToText("https://stt.redteam.example/v1", "k")
@@ -446,8 +502,11 @@ async def _campaign(app, client, settings) -> None:
         if calls["n"] == 1:
             request = httpx.Request("POST", engine.url + "/audio/transcriptions")
             raise httpx.HTTPStatusError(
-                "busy", request=request,
-                response=httpx.Response(429, request=request, headers={"retry-after": "0"}),
+                "busy",
+                request=request,
+                response=httpx.Response(
+                    429, request=request, headers={"retry-after": "0"}
+                ),
             )
         return {"text": "after retry", "language": "english"}
 
@@ -478,7 +537,12 @@ async def _campaign(app, client, settings) -> None:
         await engine2.transcribe(b"audio", "audio/webm")
     except httpx.HTTPStatusError:
         raised = True
-    ok = retried.text == "after retry" and calls["n"] == 2 and raised and calls2["n"] == 1
+    ok = (
+        retried.text == "after retry"
+        and calls["n"] == 2
+        and raised
+        and calls2["n"] == 1
+    )
     verdict(
         "G-VOICE.V-12-retry",
         "BLOCKED" if ok else "FINDING",
@@ -491,9 +555,16 @@ async def _campaign(app, client, settings) -> None:
     section("V-9 spot: lazy expiry enforces retention on the fetch path")
     async with app.state.sessionmaker() as session:
         row = (
-            await session.execute(select(AudioAttachment).where(
-                AudioAttachment.id == shared_created["attachment_id"]))
-        ).scalars().one()
+            (
+                await session.execute(
+                    select(AudioAttachment).where(
+                        AudioAttachment.id == shared_created["attachment_id"]
+                    )
+                )
+            )
+            .scalars()
+            .one()
+        )
         row.expires_at = utcnow() - timedelta(seconds=1)
         expired_key = row.storage_key
         await session.commit()
@@ -506,10 +577,21 @@ async def _campaign(app, client, settings) -> None:
     )
     async with app.state.sessionmaker() as session:
         remaining = (
-            await session.execute(select(AudioAttachment).where(
-                AudioAttachment.id == shared_created["attachment_id"]))
-        ).scalars().all()
-    ok = expired.status_code == 410 and remaining == [] and not expired_object_path.exists()
+            (
+                await session.execute(
+                    select(AudioAttachment).where(
+                        AudioAttachment.id == shared_created["attachment_id"]
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    ok = (
+        expired.status_code == 410
+        and remaining == []
+        and not expired_object_path.exists()
+    )
     verdict(
         "G-VOICE.V-9-lazy-expiry",
         "BLOCKED" if ok else "FINDING",

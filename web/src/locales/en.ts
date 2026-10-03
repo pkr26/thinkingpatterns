@@ -135,7 +135,7 @@ export const en: Record<string, string> = {
   "login.strengthFairHint": "Good start — more length or a symbol makes it stronger.",
   "login.mismatchInline": "Passwords don't match.",
   "login.mismatchTitle": "Passwords don't match",
-  "login.mismatchBody": "Type the same password twice — there is no reset if it's lost.",
+  "login.mismatchBody": "Type the same password twice and keep it safe. The server cannot reset it for you.",
   "login.policyShortTitle": "Password too short",
   "login.policyVarietyTitle": "Password needs more variety",
   "login.policyMin": "Use at least 12 characters — this password derives your encryption keys.",
@@ -144,13 +144,13 @@ export const en: Record<string, string> = {
   "login.serverLabel": "Server: {server}",
   "login.serverA11y": "Selected server address",
   "login.serverChangedWarning":
-    "This server is different from the one you usually sign in to. Check the address before typing your password — your password is your encryption key and there is no reset.",
+    "This server is different from the one you usually sign in to. Check the address before typing your password — your password protects your encryption keys and the server cannot reset it for you.",
   "login.serverChangedA11y": "Warning: server address changed",
   "login.trustThisServer": "I trust this server",
   "login.policyHint":
     "Choose a password of at least 12 characters — a 16-character passphrase, or 12–15 characters from at least three character types.",
   "login.noReset":
-    "There is no password reset. If you forget this password, no one — including us — can recover your journal.",
+    "The server cannot reset your password or decrypt your journal. If you created a recovery kit in the mobile app, keep it safe; without your password or recovery kit, your journal cannot be recovered.",
   "login.signIn": "Sign in",
   "login.createAccount": "Create account",
   "login.switchToRegister": "New here? Create an account",
@@ -172,10 +172,10 @@ export const en: Record<string, string> = {
     "After 30 days of writing, the app shows you patterns too slow to notice on your own — every one with the evidence behind it. Never advice, never a diagnosis.",
   "onboarding.panel2Title": "Your words stay yours",
   "onboarding.panel2Body":
-    "Your password derives the encryption keys on this device, and everything you write is encrypted before it leaves — the server stores only ciphertext. The one exception: when you start a pattern analysis yourself, your key is used once — held in memory for up to 5 minutes, then destroyed. It is never stored.",
+    "Your password unlocks your encryption keys on this device, and everything you write is encrypted before it leaves — the server stores only ciphertext. The one exception: when you start a pattern analysis yourself, your key is used once — held in memory for up to 5 minutes, then destroyed. It is never stored.",
   "onboarding.panel3Title": "Keep your password safe",
   "onboarding.panel3Body":
-    "There is no password reset — write your password down somewhere safe. If it is lost, no one, including us, can recover your journal.",
+    "Keep your password and any mobile recovery kit somewhere safe. The server cannot decrypt your journal for you; without your password or recovery kit, it cannot be recovered.",
   "onboarding.stepOf": "{current} of {total}",
   "onboarding.remindQuestion": "Want a gentle reminder each day? You can change it anytime in Settings.",
   "onboarding.readPrivacy": "Read the privacy policy",
@@ -187,7 +187,7 @@ export const en: Record<string, string> = {
   "privacy.headline": "Privacy, in plain language",
   "privacy.s1Title": "What is encrypted",
   "privacy.s1Body":
-    "Everything you write. Your password derives the encryption keys on this device, and entries are encrypted before they leave it. The server stores only ciphertext. There is no password reset. If you forget your password, no one — including us — can recover your journal.",
+    "Everything you write. Your password unlocks your encryption keys on this device, and entries are encrypted before they leave it. The server stores only ciphertext. The server cannot reset your password or decrypt your journal. A recovery kit created in the mobile app can restore access; without your password or recovery kit, the journal cannot be recovered.",
   "privacy.s2Title": "What the server sees",
   "privacy.s2Body":
     "Your username, the calendar dates you wrote on, when each entry arrived, and how large each encrypted entry is. A leak of the server's database reveals when and how much you wrote — never what.",
@@ -858,6 +858,9 @@ export const en: Record<string, string> = {
   "crisis.webSafeMessaging": "Talking to a real person helps. These lines follow safe-messaging practice (#chatsafe) — what you share stays with them.",
   "crisis.webYouDeserve": "You deserve support. Reaching out is a strong move.",
   "entry.title": "Today's entry",
+  "entry.retryDraft": "Retry restoring encrypted draft",
+  "entry.draftSaved": "Draft saved encrypted on this device.",
+  "entry.draftFailed": "Draft could not be saved. Keep this view open and retry.",
   "entry.question": "How was today?",
   "entry.placeholderWeb": "Write freely. Only you can read this.",
   "entry.empty": "Write something first — even one honest sentence counts.",
@@ -924,7 +927,11 @@ export const en: Record<string, string> = {
   "insights.seenOne": "seen {count} time",
   "insights.seenMany": "seen {count} times",
   "insights.lastSeen": "last: {date}",
-  "insights.evidenceLine": "Window: the last {days} days of your journal. Sample: {count} occurrences. Confidence: {confidence}%. Method: {method} First seen: {firstSeen}.",
+  "history.readFullEntry": "Read full entry",
+  "insights.evidenceLine": "Distinct writing days: {days}. Window entries: {entries}. Mentions: {count}. Evidence heuristic: {confidence}% (not a diagnostic probability). Method: {method} First seen: {firstSeen}.",
+  "insights.trendData": "Mood chart data",
+  "insights.chartDate": "Date",
+  "insights.chartMood": "Recorded mood",
   "insights.evidenceFootnoteWeb": "No advice, no diagnosis, no prediction — an observation with its evidence. Mute it below if it is not useful.",
   "insights.muteVerbWeb": "Mute",
   "insights.noneYetWeb": "No patterns surfaced yet — the engine only speaks when the evidence clears its statistical bars.",
@@ -958,7 +965,7 @@ export const en: Record<string, string> = {
   "login.webUsernamePlaceholder": "e.g. quiet.morning",
   "login.webPassword": "Password",
   "login.webConfirm": "Confirm password",
-  "login.webRegisterNote": "12+ characters (16+, or three character classes, keeps it strong). If you forget it, nobody can recover it — that is the point.",
+  "login.webRegisterNote": "12+ characters (16+, or three character classes, keeps it strong). Keep it and any mobile recovery kit safe; without either, your encrypted journal cannot be recovered.",
   "login.webCreateJournal": "Create journal",
   "login.webCreateAccount": "Create an account",
   "login.webHaveAccount": "I have an account",
@@ -1180,6 +1187,8 @@ export const en: Record<string, string> = {
   "settings.cadenceIntervalA11y": "Check-in reminder interval",
   "nav.safetyPlan": "Safety plan",
   "plan.title": "My safety plan",
+  "plan.restoreFirst": "Restore the existing encrypted plan before saving changes.",
+  "plan.retryRestore": "Retry restoring saved plan",
   "plan.intro":
     "A personal plan you write and keep close: your warning signs, what helps you cope, who you can reach. It is not shared with anyone — not even your therapist — and never leaves this device unencrypted.",
   "plan.localNote":
@@ -1255,4 +1264,10 @@ export const en: Record<string, string> = {
   "share.voiceOn": "Therapist can hear my recordings",
   "share.voiceOff": "Therapist cannot hear my recordings",
   "share.voiceToggleFailed": "Could not change what this therapist may hear — try again.",
+  "app.erasureTitle": "Unfinished local deletion",
+  "app.erasureExplanation": "Encrypted records for an account-deletion request still need removal from this browser. Other accounts are kept. Confirmed requests are retried automatically.",
+  "app.erasureRetry": "Retry local cleanup",
+  "app.erasureIncomplete": "The account was deleted remotely, but cleanup on this device has not finished. Encrypted records are retained in a deletion checkpoint; retry local cleanup before sharing this browser.",
+  "app.erasureUnconfirmed": "Deletion for account {account} could not be confirmed. Keep these records if you canceled deletion. If the account is already deleted, explicitly remove its local encrypted records below.",
+  "app.erasureConfirm": "I confirmed deletion — remove its local records",
 };

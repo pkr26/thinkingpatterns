@@ -185,6 +185,28 @@ class ProcessingSessionResponse(BaseModel):
     expires_in: int
 
 
+class RekeyConsentWrap(StrictRequestModel):
+    consent_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    therapist_wrap_pub_key: str = Field(min_length=1, max_length=256)
+    ephemeral_pub: str = Field(min_length=1, max_length=256)
+    wrapped_key: str = Field(min_length=1, max_length=128)
+
+
+class RekeyRequest(StrictRequestModel):
+    """Persist this exact payload until the atomic rotation is confirmed."""
+
+    operation_id: str = Field(
+        pattern=r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    )
+    new_salt: str = Field(min_length=1, max_length=MAX_SALT_B64)
+    new_verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
+    new_wrapped_data_key: str | None = Field(
+        default=None, min_length=1, max_length=MAX_WRAPPED_DATA_KEY_B64
+    )
+    new_kdf_params: object | None = None
+    consent_wraps: list[RekeyConsentWrap] = Field(default_factory=list, max_length=1000)
+
+
 class RekeyResponse(BaseModel):
     """Result of POST /processing/rekey (2026-09-20, audit fix H-1).
 
@@ -196,6 +218,11 @@ class RekeyResponse(BaseModel):
     entries: int
     insights: int
     measures: int
+    audio: int = 0
+    recovery_invalidated: bool = False
+    credential_rotated: bool = True
+    operation_id: str | None = None
+    consents_rewrapped: int = 0
 
 
 class RecomputeResponse(BaseModel):
@@ -322,6 +349,7 @@ class RecoveryLoginRequest(StrictRequestModel):
 
 
 class RecoveryLoginResponse(BaseModel):
+    username: str | None = None
     token: str
     user_id: str
     expires_in: int
@@ -584,6 +612,8 @@ class AudioExportRow(BaseModel):
     mime_type: str
     duration_seconds: int
     size_bytes: int
+    content_version: int = 1
+    created_at: datetime | None = None
     expires_at: datetime
     blob: str  # base64 of the stored ciphertext object
 
@@ -591,11 +621,9 @@ class AudioExportRow(BaseModel):
 class ExportBundle(BaseModel):
     version: int
     exported_at: datetime
-    # No username (2026-09-16 remediation, finding H2): the export is the
-    # user's own document; a cleartext name was a free account marker for
-    # anyone who obtained the file. user_id + salt stay — the AAD binding
-    # needs the id, and any future re-import needs the salt.
-    user_id: str  # required by the AAD binding — without it the bundle is undecryptable
+    # Canonical account name is required to open the v2 key-envelope AAD.
+    username: str | None = None
+    user_id: str
     salt: str
     llm_consent: bool
     # Same Art. 7 record as the consent endpoint (additive; null when off).
@@ -702,6 +730,7 @@ class TherapistRegisterRequest(StrictRequestModel):
 
 
 class TherapistMeResponse(BaseModel):
+    user_id: str = ""
     username: str
     display_name: str
     wrap_pub_key: str
@@ -709,6 +738,25 @@ class TherapistMeResponse(BaseModel):
     # Additive (2026-09-22): lets the security panel show the honest TOTP
     # state without a probing round-trip. Existing clients ignore it.
     totp_enabled: bool = False
+    notes_keyring_blob: str | None = None
+    custody_version: int = 0
+
+
+class TherapistCustodyRequest(StrictRequestModel):
+    verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
+    operation_id: str = Field(
+        pattern=r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    )
+    expected_custody_version: int = Field(ge=0, le=2**63 - 2)
+    custody_version: int = Field(ge=1, le=2**63 - 1)
+    notes_keyring_blob: str = Field(min_length=1, max_length=87384)
+
+
+class TherapistPasswordRequest(TherapistCustodyRequest):
+    new_salt: str = Field(min_length=1, max_length=MAX_SALT_B64)
+    new_verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
+    wrap_pub_key: str = Field(min_length=1, max_length=MAX_SPKI_B64)
+    wrap_key_blob: str = Field(min_length=1, max_length=MAX_THERAPIST_KEY_BLOB_B64)
 
 
 class WrapKeyRotateRequest(StrictRequestModel):
@@ -719,6 +767,7 @@ class WrapKeyRotateRequest(StrictRequestModel):
 
     wrap_pub_key: str = Field(min_length=1, max_length=MAX_SPKI_B64)
     wrap_key_blob: str = Field(min_length=1, max_length=MAX_THERAPIST_KEY_BLOB_B64)
+    expected_custody_version: int | None = Field(default=None, ge=0, le=2**63 - 1)
 
 
 class PatientAccessLogOut(BaseModel):
@@ -907,6 +956,8 @@ class NoteCreateRequest(StrictRequestModel):
     pattern_pid: str | None = Field(default=None, min_length=1, max_length=200)
     blob: str = Field(min_length=1, max_length=MAX_BLOB_B64)
 
+    custody_version: int | None = Field(default=None, ge=0, le=2**63 - 1)
+
 
 class NoteRekeyRevisionItem(StrictRequestModel):
     """One revision row to swap during a note rekey (2026-10-01 audit C3)."""
@@ -937,6 +988,8 @@ class NoteRekeyRequest(StrictRequestModel):
 
     items: list[NoteRekeyItem] = Field(min_length=1, max_length=50)
 
+    custody_version: int | None = Field(default=None, ge=0, le=2**63 - 1)
+
 
 class NoteUpdateRequest(StrictRequestModel):
     """PATCH /therapist/notes/{id} payload (2026-09-26 audit item 15).
@@ -951,6 +1004,8 @@ class NoteUpdateRequest(StrictRequestModel):
 
     blob: str = Field(min_length=1, max_length=MAX_BLOB_B64)
     base_version: int | None = Field(default=None, ge=1, le=2**63 - 1)
+
+    custody_version: int | None = Field(default=None, ge=0, le=2**63 - 1)
 
 
 class NoteOut(BaseModel):

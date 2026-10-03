@@ -18,18 +18,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
 import { ScrollView, Text, TouchableOpacity, View } from "react-native";
 
-vi.mock("../../src/api/client", async () => {
+vi.mock("../../src/api/client", async (importOriginal) => {
+  const actualApi = await importOriginal<typeof import("../../src/api/client")>();
   const { makeApiMock, ApiError } = await import("../helpers/apiMock");
-  return { ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
+  return { ...actualApi, ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
 });
 
 const refreshActiveDays = vi.fn(async () => {});
 // L-59: the screen adopts the already-fetched count instead of re-fetching.
 const applyActiveDays = vi.fn();
+const beginProgressRead = vi.fn(async () => ({ owner: "user-1", generation: 0, request: 0 }));
+const finishProgressRead = vi.fn();
 const touchActivity = vi.fn();
 vi.mock("../../src/store", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/store")>();
-  return { ...actual, useSession: () => ({ refreshActiveDays, applyActiveDays, unlockDays: 30, touchActivity }) };
+  return { ...actual, useSession: () => ({ refreshActiveDays, applyActiveDays, beginProgressRead, finishProgressRead, unlockDays: 30, touchActivity }) };
 });
 
 const { api } = await import("../../src/api/client");
@@ -189,7 +192,32 @@ describe("InsightsScreen pins: evidence-row presence guards", () => {
     const root = await renderExpanded([
       pattern({ kind: "mood_shift", detail: { shift: -0.2 } }),
     ]);
-    expect(textOf(root)).toContain("+0.20 against your baseline of —");
+    expect(textOf(root)).toContain("−0.20 against your baseline of —");
+  });
+
+  it("keeps legacy signed measurements consistent between summary and evidence", async () => {
+    for (const direction of [undefined, "unrecognized", "lower", "higher"]) {
+      const root = await renderExpanded([pattern({ kind: "mood_correlation", detail: { mood_delta: -0.4, direction } })]);
+      const expected = direction === "higher" ? "higher" : "lower";
+      expect(textOf(root)).toContain(`entries read ${expected} by 0.40`);
+      expect(textOf(root)).toContain(`${expected} by 0.4`);
+      root.unmount();
+    }
+    const root = await renderExpanded([pattern({ kind: "mood_shift", detail: { shift: 0, direction: "lower" } })]);
+    expect(textOf(root)).toContain("No difference was measured");
+    expect(textOf(root)).not.toContain("−0.00");
+  });
+
+  it("does not manufacture zero baselines or a direction from incomplete cached evidence", async () => {
+    const root = await renderExpanded([pattern({ kind: "avoidance", detail: { silences: 3, observed: 10 } })]);
+    expect(textOf(root)).toContain("your usual silent-day rate is unavailable");
+    expect(textOf(root)).not.toContain("silent-day rate is 0%");
+    root.unmount();
+    for (const direction of [undefined, "narrowed", "widened"]) {
+      const activity = await renderExpanded([pattern({ kind: "activity_diversity", detail: { entropy_recent: 1.2, entropy_earlier: 2, direction } })]);
+      expect(textOf(activity)).toContain(direction ? `has ${direction}` : "Details for this observation are unavailable");
+      activity.unmount();
+    }
   });
 });
 
@@ -235,8 +263,8 @@ describe("InsightsScreen pins: describe() tolerates absent detail per kind", () 
     const root = await render(<InsightsScreen />);
     await flush();
     const text = textOf(root);
-    expect(text).toContain("The day after 'sleep' comes up, your entries read lower than usual for you.");
-    expect(text).toContain("Your entries have read lower than your usual baseline lately (a shift of 0.0).");
+    expect(text).not.toContain("your entries read lower than usual");
+    expect(text).toContain("Details for this observation are unavailable. Refresh your observations to see the evidence.");
   });
 
   it("a steady topic without a share renders the sentence with nothing wedged in", async () => {
@@ -466,7 +494,7 @@ describe("InsightsScreen pins: card chrome, chips and styles", () => {
     };
     expect(styleOfText("Evidence window")).toContainEqual({ color: "#a29a8c" });
     expect(styleOfText("Based on")).toContainEqual({ color: "#a29a8c" });
-    expect(styleOfText("63 entries in your analysis window")).toContainEqual({ color: "#cfc7ba" });
+    expect(styleOfText("63 journal entries")).toContainEqual({ color: "#cfc7ba" });
     expect(styleOfText("Hide technical details")).toContainEqual({ color: "#a29a8c" });
     expect(styleOfText("Significance")).toContainEqual({ color: "#a29a8c" });
     expect(styleOfText("p = 1.0e-3")).toContainEqual({ color: "#cfc7ba" });

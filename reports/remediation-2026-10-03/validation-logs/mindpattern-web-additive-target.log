@@ -1,0 +1,11 @@
+npm notice run mindpattern-web@0.1.0 npx
+npm notice run 'vitest' run tests/history.test.tsx tests/crypto.test.ts
+
+ RUN  v5.0.2 /Users/pradeepreddy/Desktop/mental_health_application/web
+
+
+ Test Files  2 passed (2)
+      Tests  82 passed (82)
+   Start at  09:58:17
+   Duration  5.47s (tests 92%, transform 6%, setup 1%, import 1%)
+

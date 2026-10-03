@@ -20,7 +20,6 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
-import { decryptInsights } from "../crypto/patient";
 import { matchesCrisisSuppress } from "../crisisDetect";
 import { recentMoods } from "../moodLog";
 import { recordPatternMute } from "../questionFeedback";
@@ -46,6 +45,7 @@ export interface PatternPayload {
     last_seen?: string;
     is_new?: boolean;
     sample_days?: number;
+    sample_entries?: number;
     evidence_dates?: string[];
     sensitive?: boolean;
     [key: string]: unknown;
@@ -108,6 +108,7 @@ function MoodTrendChart({ days }: { days: { date: string; value: number }[] }): 
   const mid = height / 2;
   const scale = 34; // |value| ≤ 1 → max 34px of bar
   return (
+    <>
     <svg
       className="chart"
       viewBox={`0 0 ${Math.max(width, 120)} ${height + 16}`}
@@ -129,6 +130,11 @@ function MoodTrendChart({ days }: { days: { date: string; value: number }[] }): 
       <text x={0} y={height + 12} className="chart__axis">{days[0]!.date.slice(5)}</text>
       <text x={Math.max(width, 120)} y={height + 12} textAnchor="end" className="chart__axis">{days[days.length - 1]!.date.slice(5)}</text>
     </svg>
+    <details className="disclosure"><summary>{t("insights.trendData")}</summary>
+      <table><thead><tr><th scope="col">{t("insights.chartDate")}</th><th scope="col">{t("insights.chartMood")}</th></tr></thead>
+      <tbody>{days.map((row,index) => <tr key={`${row.date}:${index}`}><th scope="row">{row.date}</th><td>{row.value.toFixed(2)}</td></tr>)}</tbody></table>
+    </details>
+    </>
   );
 }
 
@@ -183,7 +189,7 @@ export function PatternsView(props: { onCrisis: () => void }): React.JSX.Element
     // vault.get()'s throw as an unhandled rejection.
     if (!vault.isUnlocked()) return;
     const keys = vault.get();
-    const summary = await api.insights().catch(() => null);
+    const summary = outcome.summary;
     if (!summary || generation.current !== run) {
       if (!summary) setError(t("insights.summaryFailedWeb"));
       return;
@@ -200,7 +206,8 @@ export function PatternsView(props: { onCrisis: () => void }): React.JSX.Element
     setProgress({ activeDays: summary.active_days, remaining: summary.days_remaining });
     if (summary.blob) {
       try {
-        const payload = await decryptInsights(keys.dataKey, owner, summary.blob);
+        const payload = outcome.payload;
+        if (!payload) throw new Error("Missing verified insights payload");
         const stats = payload.stats as { patterns?: PatternPayload[] } | undefined;
         setPatterns(Array.isArray(stats?.patterns) ? stats!.patterns! : []);
         // The one-time threshold-crossing notice (P6.5).
@@ -329,7 +336,7 @@ export function PatternsView(props: { onCrisis: () => void }): React.JSX.Element
                 {t("insights.whySeeing")}
               </summary>
               <div className="disclosure__body">
-                <Note tone="muted">{t("insights.evidenceLine", { days: pattern.detail.sample_days ?? 180, count: pattern.occurrences, confidence: (pattern.confidence * 100).toFixed(0), method, firstSeen: pattern.detail.first_seen ?? "—" })}</Note>
+                <Note tone="muted">{t("insights.evidenceLine", { days: pattern.detail.sample_entries !== undefined ? (pattern.detail.sample_days ?? "—") : "—", entries: pattern.detail.sample_entries ?? "—", count: pattern.occurrences, confidence: (pattern.confidence * 100).toFixed(0), method, firstSeen: pattern.detail.first_seen ?? "—" })}</Note>
                 <Note tone="muted">{t("insights.evidenceFootnoteWeb")}</Note>
               </div>
             </details>

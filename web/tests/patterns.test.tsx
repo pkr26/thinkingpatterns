@@ -95,7 +95,7 @@ describe("PatternsView", () => {
     expect(textOf(root)).toContain("new");
     // The evidence panel's content (the summary element itself is not in
     // textOf's joined node set; its expanded content is):
-    expect(textOf(root)).toContain("Window: the last 180 days");
+    expect(textOf(root)).toContain("Distinct writing days: —");
     expect(textOf(root)).toContain("your own writing schedule");
     expect(textOf(root)).toContain("No advice, no diagnosis");
   });

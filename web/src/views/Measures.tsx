@@ -33,6 +33,7 @@ import { cadenceDue, readMeasureCadence, snoozeCadence, writeMeasureCadence, typ
 import { loadPendingMeasure, savePendingMeasure, clearPendingMeasure, type PendingMeasure } from "../pendingMeasure";
 import { randomBytes } from "../platform";
 import { vault } from "../vault";
+import { kv,type WritePermit } from "../kvstore";
 import { Button, Card, Chip, ErrorBanner, Note, ProgressTrack, SegmentedControl, Skeleton } from "../ui";
 
 interface DecodedMeasure {
@@ -314,6 +315,7 @@ export function MeasuresView(props: { onCrisis: () => void }): React.JSX.Element
         picks: responses as number[],
         date: localDateISO(),
       };
+    let writePermit:WritePermit|undefined;
     try {
       // independent audit 2026-09-27 (P1): snapshot the data key BEFORE the
       // awaits — vault.get()'s buffers are SHARED, and a lock landing during
@@ -325,6 +327,7 @@ export function MeasuresView(props: { onCrisis: () => void }): React.JSX.Element
       const dataKey = new Uint8Array(new ArrayBuffer(keys.dataKey.length));
       dataKey.set(keys.dataKey);
       try {
+        writePermit=await kv.captureWritePermit(owner,dataKey);
         // Persist BEFORE the send (a status-0 failure can be a timeout AFTER
         // the server committed; the stable id is what makes every retry
         // idempotent). A persistence failure never blocks the send — the
@@ -345,7 +348,7 @@ export function MeasuresView(props: { onCrisis: () => void }): React.JSX.Element
         } finally {
           zeroize(encoded);
         }
-        await clearPendingMeasure(owner).catch(() => undefined);
+        await clearPendingMeasure(owner,writePermit).catch(() => undefined);
         pendingRef.current = null;
         // Item 9 (self-harm) endorsement: point at support AFTER the save.
         if (safetyItemEndorsed(record.kind, record.picks)) setItem9(true);
@@ -358,7 +361,7 @@ export function MeasuresView(props: { onCrisis: () => void }): React.JSX.Element
       if (err instanceof ApiError && err.status === 409) {
         // Idempotent retry of a send that already landed: the record dies
         // here too, or every mount would retry it forever.
-        await clearPendingMeasure(owner).catch(() => undefined);
+        await clearPendingMeasure(owner,writePermit).catch(() => undefined);
         pendingRef.current = null;
         setSavedNote(t("measures.alreadyToday"));
         await load();

@@ -93,7 +93,7 @@ vi.mock("../src/crypto", async (importOriginal) => {
     encryptNote: vi.fn(async () => ({ blobB64: "SEALEDNOTE==" })),
     decryptNote: decryptNoteMock,
     decryptNoteAny: vi.fn(async (...args: unknown[]) =>
-      decryptNoteMock(...(args.slice(1) as Parameters<typeof decryptNoteMock>)),
+      decryptNoteMock(...(args.slice(1,6) as Parameters<typeof decryptNoteMock>)),
     ),
   };
 });
@@ -966,7 +966,7 @@ describe("PatientView", () => {
     await flush();
     expect(textOf(root)).toContain("carrying over day to day");
     expect(textOf(root)).toContain("swung more widely");
-    expect(textOf(root)).toContain("taking up more space");
+    expect(textOf(root)).toContain("steady presence");
     expect(textOf(root)).toContain("3 mentions");
     expect(textOf(root)).toContain("'feeling better' has returned 3 times");
   });
@@ -2042,6 +2042,42 @@ describe("PatientsView dead-view cancellation (2026-09-26 audit round, M)", () =
   });
 });
 
+describe("PatientView authoritative note edit indicators", () => {
+  it.each([
+    { label: "version 1 with separate create defaults", version: 1, updated: "2026-09-10T00:00:00.000002Z", edited: false },
+    { label: "version 2 with equal timestamps", version: 2, updated: "2026-09-10T00:00:00.000001Z", edited: true },
+    { label: "legacy edited row", version: undefined, updated: "2026-09-12T00:00:00Z", edited: true },
+    { label: "legacy unedited row", version: undefined, updated: "2026-09-10T00:00:00.000001Z", edited: false },
+    { label: "invalid provided version", version: 0, updated: "2026-09-12T00:00:00Z", edited: false },
+  ])("uses the canonical version and legacy fallback for $label", async ({ version, updated, edited }) => {
+    mockedApi.notes.mockResolvedValueOnce({
+      notes: [{ id: "versioned-note", client_note_id: "versioned-client", pattern_pid: null, blob: "current", created_at: "2026-09-10T00:00:00.000001Z", updated_at: updated, ...(version === undefined ? {} : { version }) }],
+      nextOffset: null,
+    });
+    mockedCrypto.decryptNote.mockResolvedValueOnce("Canonical current note");
+    const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+    try {
+      await flush(6);
+      expect(buttonByLabel(root, "View history")).toBe(edited);
+      const printedMarkers = root.root.findAllByType("span").filter((node) => node.props.className === "print-edited" && rtr.textOfNode(node) === "edited");
+      expect(printedMarkers).toHaveLength(edited ? 1 : 0);
+      expect(mockedApi.noteRevisions).not.toHaveBeenCalled();
+      if (edited) {
+        mockedApi.noteRevisions.mockResolvedValueOnce([{ id: "prior-version", blob: "earlier", created_at: "2026-09-10T00:00:00Z" }]);
+        mockedCrypto.decryptNote.mockResolvedValueOnce("Actual earlier clinical text");
+        await press(root, "View history");
+        await flush(8);
+        expect(mockedApi.noteRevisions).toHaveBeenCalledWith("versioned-note");
+        expect(textOf(root)).toContain("previous (1): Actual earlier clinical text");
+        const printOnly = root.root.findAllByType("div").find((node) => node.props.className === "print-only");
+        expect(rtr.textOfNode(printOnly!)).toContain("previous (1): Actual earlier clinical text");
+      }
+    } finally {
+      await act(async () => root.unmount());
+    }
+  });
+});
+
 describe("PatientView note history decrypt failure (2026-09-26 audit round, L)", () => {
   it("a revision blob that fails to decrypt is NOT rendered as 'no earlier text recorded'", async () => {
     // One edited note; the live blob decrypts, the revision blob does not
@@ -2180,4 +2216,15 @@ describe("PatientView idempotent note creation (2026-09-26 audit round, L)", () 
     expect(calls[1]![1].blob).toBe("SEALEDNOTE-2==");
     expect(textOf(root)).toContain("Version conflict then retry.");
   });
+});
+
+it("a stale note edit preserves its draft, displays the winning version, and retries against the refreshed custody-fenced version", async () => {
+ const note={id:'conflicted-note',client_note_id:'client-conflict',pattern_pid:null,blob:'old',created_at:'2026-09-16T00:00:00Z',updated_at:'2026-09-16T00:00:00Z',version:4};
+ mockedApi.notes.mockResolvedValueOnce({notes:[note],nextOffset:null}).mockResolvedValueOnce({notes:[{...note,version:5,blob:'winning'}],nextOffset:null});
+ mockedCrypto.decryptNote.mockResolvedValueOnce('original saved note').mockResolvedValueOnce('current colleague note');
+ mockedApi.updateNote.mockRejectedValueOnce(new ApiError(409,'version conflict','version_conflict')).mockResolvedValueOnce({...note,version:6});
+ const root=await render(<PatientView patient={patient} session={{...session,custodyVersion:3}} onBack={vi.fn()}/>);await flush(6);
+ await press(root,'Edit');await typeTextarea(root,'Editing note…','my preserved draft');await press(root,'Save edit');await flush(6);
+ expect(root.root.findAllByType('textarea').find(node=>node.props.placeholder==='Editing note…')!.props.value).toBe('my preserved draft');expect(textOf(root)).toContain('current colleague note');
+ await press(root,'Save edit');await flush(6);expect(mockedApi.updateNote).toHaveBeenLastCalledWith('conflicted-note','SEALEDNOTE==',5,3);expect(textOf(root)).toContain('my preserved draft');
 });

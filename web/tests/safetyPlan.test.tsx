@@ -70,10 +70,10 @@ describe("safetyPlan storage (the entryDraft/pendingMeasure idiom)", () => {
     expect(loaded).toEqual(PLAN);
   });
 
-  it("a wrong key (account switch / tampered slot) reads as absent, never throws", async () => {
+  it("a wrong key reports an unreadable plan and preserves its ciphertext", async () => {
     await saveSafetyPlan(vault.get().dataKey, USER, PLAN);
     const wrong = new Uint8Array(new ArrayBuffer(32)).fill(9);
-    expect(await loadSafetyPlan(wrong, USER)).toBeNull();
+    await expect(loadSafetyPlan(wrong, USER)).rejects.toThrow("could not be authenticated");
   });
 
   it("rotation re-seals the plan under the new key; the old key no longer opens it", async () => {
@@ -81,7 +81,7 @@ describe("safetyPlan storage (the entryDraft/pendingMeasure idiom)", () => {
     const newKey = new Uint8Array(new ArrayBuffer(32)).fill(7);
     await rewrapSafetyPlan(vault.get().dataKey, newKey, USER);
     expect(await loadSafetyPlan(newKey, USER)).toEqual(PLAN);
-    expect(await loadSafetyPlan(vault.get().dataKey, USER)).toBeNull();
+    await expect(loadSafetyPlan(vault.get().dataKey, USER)).rejects.toThrow("could not be authenticated");
     await clearSafetyPlan(USER);
     expect(await loadSafetyPlan(newKey, USER)).toBeNull();
   });

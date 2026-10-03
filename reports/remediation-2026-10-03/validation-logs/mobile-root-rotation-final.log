@@ -1,0 +1,11 @@
+npm notice run mindpattern-mobile@1.0.0 npx
+npm notice run 'vitest' run tests/securityPins.test.ts tests/mutation_2026_09_22_frontend.pins.test.ts tests/client.rotation.test.ts
+
+ RUN  v4.1.11 /Users/pradeepreddy/Desktop/mental_health_application/mobile
+
+
+ Test Files  3 passed (3)
+      Tests  63 passed (63)
+   Start at  11:56:26
+   Duration  2.59s (transform 312ms, setup 150ms, import 287ms, tests 2.43s, environment 0ms)
+

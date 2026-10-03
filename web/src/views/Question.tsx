@@ -18,7 +18,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api/client";
-import { toBase64 } from "../crypto/core";
+import { toBase64,zeroize } from "../crypto/core";
 import { decryptQuestion } from "../crypto/patient";
 import { genericQuestionForDate } from "../genericQuestions";
 import { localDateISO } from "../dates";
@@ -27,6 +27,7 @@ import { reconcile } from "../sync";
 import { isOnline } from "../platform";
 import { getLocale, t } from "../strings";
 import { vault } from "../vault";
+import { kv } from "../kvstore";
 import { Button, Card, Chip, ErrorBanner, Icon, Note } from "../ui";
 
 export function QuestionView(props: { onRefreshed: (message: string) => void }): React.JSX.Element {
@@ -105,13 +106,15 @@ export function QuestionView(props: { onRefreshed: (message: string) => void }):
     setBusy(true);
     setError("");
     const keys = vault.get();
+    const dataKey=new Uint8Array(keys.dataKey);
     try {
+      const permit=await kv.captureWritePermit(owner,dataKey);
       // The ONLY place the data key leaves the client: a single-use,
       // TTL-bounded processing session opened by this explicit button.
-      const session = await api.openProcessingSession(toBase64(keys.dataKey));
-      const feedback = await buildFeedbackBlob(keys.dataKey, owner).catch(() => null);
+      const session = await api.openProcessingSession(toBase64(dataKey));
+      const feedback = await buildFeedbackBlob(dataKey, owner).catch(() => null);
       const result = await api.recompute(session.session_token, feedback ?? undefined);
-      if (feedback) await clearFeedback(owner).catch(() => undefined);
+      if (feedback) await clearFeedback(owner,permit).catch(() => undefined);
       await reconcile().catch(() => undefined);
       props.onRefreshed(
         result.phase === "baseline"
@@ -124,6 +127,7 @@ export function QuestionView(props: { onRefreshed: (message: string) => void }):
     } catch (err) {
       setError(err instanceof Error ? err.message : t("question.refreshFailed"));
     } finally {
+      zeroize(dataKey);
       setBusy(false);
     }
   }, [load, props]);

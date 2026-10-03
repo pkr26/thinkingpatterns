@@ -1,0 +1,8 @@
+
+=== C1: multi-worker breakage (uvicorn --workers 2, documented-forbidden) =
+AUDIT|C1.server-boot|BLOCKED|second-worker startup refusal signature=True; first worker remains healthy=True. A healthy surviving first worker does not establish that both workers serve.
+AUDIT|C1.rate-limit-fragmentation|BLOCKED|12 concurrent exports (separate connections) against the 5/min export bucket: 2 allowed, statuses=[200, 429, 503] — each worker keeps its own counter
+AUDIT|C1.quota-race|BLOCKED|12 concurrent creates against a 5-entry quota: 5 created (statuses [201, 413]); second-worker refusal=True. This observes the current guarded SQLite deployment, not an unsupported unguarded PostgreSQL topology.
+AUDIT|C1.keystore-fragmentation|BLOCKED|one session token fed to 6 recomputes across connections: 1 key-required insight recomputes succeeded (statuses [200, 403], second-worker refusal=True). Baseline successes were not evidence of key use; this checks actual single-use consumption and does not claim cross-process memory inspection.
+
+[c1_multiworker] 4 verdicts, 0 harness errors

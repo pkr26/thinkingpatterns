@@ -58,6 +58,7 @@ export interface LoginSuccess {
  *  families the mobile on-device unlock oracle would otherwise crack in
  *  minutes on a stolen phone. */
 const COMMON_PASSWORD_WORDS = [
+  "fathom",
   "password", "qwerty", "123456", "12345678", "123456789", "letmein",
   "iloveyou", "welcome", "admin", "monkey", "dragon", "sunshine",
   "princess", "football", "baseball", "master", "abc123", "111111",

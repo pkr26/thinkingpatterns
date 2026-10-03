@@ -1,0 +1,657 @@
+........................................................................ [  3%]
+......F...F...........................F................................. [  7%]
+...................................s.................................... [ 10%]
+........................................................................ [ 14%]
+........................................................................ [ 18%]
+........................................................................ [ 21%]
+........................................................................ [ 25%]
+.......F................................................................ [ 29%]
+........................................................................ [ 32%]
+........................................................................ [ 36%]
+........................................................................ [ 40%]
+F....................................................................... [ 43%]
+........................................................................ [ 47%]
+........................................................................ [ 51%]
+........................................................................ [ 54%]
+........................................................................ [ 58%]
+........................................................................ [ 62%]
+........................................................................ [ 65%]
+........................................................................ [ 69%]
+........................................................................ [ 73%]
+........................................................................ [ 76%]
+...................F.................................................... [ 80%]
+........................................................................ [ 84%]
+..........s............................................................. [ 87%]
+........................................................................ [ 91%]
+........................................................................ [ 95%]
+................................F....................................... [ 98%]
+.........................                                                [100%]
+=================================== FAILURES ===================================
+________________ test_recompute_rechecks_phase_inside_the_fence ________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x11ba42e40>
+
+    async def test_recompute_rechecks_phase_inside_the_fence(monkeypatch):
+        """Entries deleted while the recompute waited on the fence drop the
+        account back to baseline: nothing may be decrypted or stored."""
+        answers = [
+            [TODAY - timedelta(days=i) for i in range(30)],  # pre-fence read: insight
+            [TODAY - timedelta(days=i) for i in range(5)],  # in-fence re-read: baseline
+        ]
+    
+        async def dates(_session, _user_id):
+            return answers.pop(0)
+    
+        executed: list[str] = []
+    
+        class _Session:
+            async def get(self, _model, _user_id, *, populate_existing=False):
+                return _user("m11-user", epoch=1)
+    
+            async def execute(self, statement):
+                executed.append(str(statement))
+                return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: []))
+    
+        @asynccontextmanager
+        async def sessionmaker():
+            yield _Session()
+    
+        state = SimpleNamespace(
+            settings=SimpleNamespace(unlock_threshold_days=30),
+            key_store=SimpleNamespace(pop=lambda *_a, **_k: bytearray(crypto.KEY_SIZE)),
+            sessionmaker=sessionmaker,
+        )
+        monkeypatch.setattr(insights_api, "_entry_dates", dates)
+    
+>       response = await insights_api.recompute(
+            _request(state), _user("m11-user", epoch=1), "session-token"
+        )
+
+tests/test_api_pins.py:573: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/api/insights.py:1545: in recompute
+    status_code=400,
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+session = <tests.test_api_pins.test_recompute_rechecks_phase_inside_the_fence.<locals>._Session object at 0x11bab96d0>
+user_id = 'm11-user'
+
+        is not None
+    ):
+>       raise ApiError(
+         ^^^^^^^^^^^^^^
+            status_code=409,
+            detail="complete the pending key rotation before writing",
+            code="rekey_in_progress",
+        )
+E       AttributeError: '_Session' object has no attribute 'scalar'
+
+app/deps.py:240: AttributeError
+______ test_duplicate_retry_at_quota_boundary_answers_conflict_not_quota _______
+
+    async def test_duplicate_retry_at_quota_boundary_answers_conflict_not_quota():
+        """Measures (and entries — see test_api_resilience_coverage) must answer
+        409 for an already-stored client id even at the quota boundary, so an
+        offline queue can tell 'already applied' from 'genuinely full'."""
+        user = _user("l6-user", epoch=1)
+        body = measures_api.MeasureCreate(
+            client_measure_id="l6-dup",
+            blob=base64.b64encode(b"x" * 64).decode(),
+            measure_date=TODAY,
+        )
+        with pytest.raises(ApiError) as excinfo:
+>           await measures_api.create_measure(
+                body=body,
+                request=_request(SimpleNamespace(settings=SimpleNamespace())),
+                user=user,
+                session=_QuotaBoundarySession(user),
+            )
+
+tests/test_api_pins.py:732: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/api/measures.py:229: in create_measure
+    fresh_user = await _fresh_active_measure_user(session, user.id, expected_epoch)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+app/api/measures.py:193: in _fresh_active_measure_user
+    await ensure_no_rekey(session, user_id)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+session = <tests.test_api_pins._QuotaBoundarySession object at 0x11be723c0>
+user_id = 'l6-user'
+
+        is not None
+    ):
+>       raise ApiError(
+         ^^^^^^^^^^^^^^
+            status_code=409,
+            detail="complete the pending key rotation before writing",
+            code="rekey_in_progress",
+        )
+E       AttributeError: '_QuotaBoundarySession' object has no attribute 'scalar'
+
+app/deps.py:240: AttributeError
+______ test_entry_nonunique_commit_error_is_not_mislabeled_as_a_conflict _______
+
+settings = Settings(environment='development', audit_journal_path='', scrypt_n=131072, token_ttl_seconds=86400, processing_sessio...interval_seconds=900, therapist_sharing_enabled=True, cors_origins=[], trust_proxy_headers=False, trusted_proxy_ips=[])
+
+            await entries_api._assert_replacement_within_quota(
+                None, heavy, old_size=1, incoming=2, settings=settings
+            )
+        assert raised.value.code == "blob_quota_exceeded"
+    
+    
+    async def test_entry_nonunique_commit_error_is_not_mislabeled_as_a_conflict(settings):
+        """Only duplicate-key errors become 409; integrity faults must propagate."""
+        from app.api import entries as entries_api
+    
+        class NonUniqueCommitSession:
+            bind = SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
+    
+            def __init__(self, user):
+                self.user = user
+                self.executions = 0
+                self.rolled_back = False
+    
+            async def get(self, model, user_id, *, populate_existing=False):
+                return self.user
+    
+            async def scalar(self, statement):
+                return self.user.entries_revision
+    
+            async def execute(self, statement):
+                self.executions += 1
+                # Call order follows the handler: the duplicate idempotency
+                # check runs BEFORE the quota read (audit L-6, 2026-09-20 — a
+                # retry at the quota boundary must answer 409, not 413).
+                # Wave 4 (2026-09-30): the quota read is O(1) off the User row
+                # now (no corpus SELECT) — #2 is the revision advance and #3 the
+                # counter UPDATE, both successful DML.
+                if self.executions == 1:
+                    return SimpleNamespace(scalar_one_or_none=lambda: None)
+                if self.executions == 2:
+                    return SimpleNamespace(rowcount=1)
+                return SimpleNamespace(rowcount=1)
+    
+            async def refresh(self, user, attribute_names=None):
+                if attribute_names == ["entries_revision"]:
+                    user.entries_revision += 1
+    
+            def add(self, row):
+                pass
+    
+            async def commit(self):
+                raise IntegrityError("INSERT", {}, Exception("CHECK constraint failed"))
+    
+            async def rollback(self):
+                self.rolled_back = True
+    
+        user = _race_user("entry-nonunique")
+        session = NonUniqueCommitSession(user)
+        request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(settings=settings)))
+>       body = entries_api.EntryCreate(
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            client_entry_id="nonunique-entry",
+            blob=base64.b64encode(b"x" * 64).decode(),
+            entry_date=date.today(),
+        )
+
+tests/test_api_resilience_coverage.py:762: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/api/entries.py:328: in create_entry
+    async with _user_locks.hold(f"entries:{user.id}"):
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+app/api/entries.py:300: in _fresh_active_entry_user
+    raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+session = <tests.test_api_resilience_coverage.test_entry_nonunique_commit_error_is_not_mislabeled_as_a_conflict.<locals>.NonUniqueCommitSession object at 0x11e4774d0>
+user_id = 'entry-nonunique'
+
+        is not None
+    ):
+        raise ApiError(
+>           status_code=409,
+            detail="complete the pending key rotation before writing",
+            code="rekey_in_progress",
+        )
+E       app.deps.ApiError: 409: complete the pending key rotation before writing
+
+app/deps.py:241: ApiError
+_ TestRekeyMidTransactionAtomicity.test_failure_after_entry_updates_rolls_everything_back _
+
+self = <tests.test_checklist_round1_crypto_auth.TestRekeyMidTransactionAtomicity object at 0x10f100050>
+client = <httpx.AsyncClient object at 0x135d46f90>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x13598a2e0>
+
+    class TestRekeyMidTransactionAtomicity:
+        async def test_failure_after_entry_updates_rolls_everything_back(self, client, monkeypatch):
+            emu = ClientEmulator("rekey-atomic", "pw-hunter2")
+            await emu.register(client)
+            await emu.create_entry(client, "one", TODAY, "e-1", content_version=1)
+            await emu.create_entry(client, "two", TODAY, "e-2", content_version=1)
+            # A measure row exercises the second blob-batch phase (no threshold
+            # seeding needed: measures exist in the baseline phase).
+            measure_blob = base64.b64encode(
+                crypto.encrypt(
+                    emu.data_key,
+                    b'{"v":1,"measure":"phq9","score":4}',
+                    crypto.build_aad("measure", emu.user_id, "m-1"),
+                )
+            ).decode("ascii")
+            response = await client.post(
+                "/api/measures",
+                headers=emu.headers,
+                json={
+                    "client_measure_id": "m-1",
+                    "blob": measure_blob,
+                    "measure_date": TODAY.isoformat(),
+                },
+            )
+            assert response.status_code == 201, response.text
+    
+            app = client._transport.app  # noqa: SLF001 — test reachability into state
+    
+            async def snapshot() -> dict:
+                async with app.state.sessionmaker() as session:
+                    entries = (
+                        await session.execute(
+                            select(Entry.client_entry_id, Entry.blob).where(
+                                Entry.user_id == emu.user_id
+                            )
+                        )
+                    ).all()
+                    measures = (
+                        await session.execute(
+                            select(Measure.client_measure_id, Measure.blob).where(
+                                Measure.user_id == emu.user_id
+                            )
+                        )
+                    ).all()
+                    return {
+                        "entries": {cid: bytes(blob) for cid, blob in entries},
+                        "measures": {mid: bytes(blob) for mid, blob in measures},
+                    }
+    
+            def explode(*args, **kwargs):
+                # Reached only AFTER the entry-phase UPDATEs have executed
+                # inside the open transaction (the entries phase uses
+                # _rekey_entry_batch; this is the insights/measures phase).
+                raise RuntimeError("simulated crash mid-rekey, after entry writes")
+    
+            original_blob_batch = insights_api._rekey_blob_batch
+            monkeypatch.setattr(insights_api, "_rekey_blob_batch", explode)
+            old_verifier = emu.auth_key_b64
+            old_key = emu.data_key
+            old_password, old_salt = emu.password, emu.salt
+            emu.derive_new_generation("pw-rotated-99")
+            old_token = await emu.open_processing_session_for(client, old_key)
+            new_token = await emu.open_processing_session_for(client, emu.data_key)
+            # The emulator's rekey() asserts 200; call the endpoint directly so
+            # the 500 is observable. The verifier is the OLD credential — the
+            # server has not seen the new one yet.
+            response = await client.post(
+                "/api/processing/rekey",
+                headers={
+                    **emu.headers,
+                    "X-Processing-Token": old_token,
+                    "X-New-Processing-Token": new_token,
+                    "X-Account-Verifier": old_verifier,
+                },
+                json=emu.rekey_payload(),
+            )
+            assert response.status_code == 500
+            assert response.json()["code"] == "internal_error"
+    
+            # 2026-09-26 audit item 12 evolved this pin (rekey transaction
+            # restructure, audit item 11): each batch commits in its own SHORT
+            # transaction with the progress journal, so a crash after the entry
+            # phase leaves those batches rekeyed — the all-or-nothing contract
+            # is replaced by crash-safe RESUMABILITY. What must still hold:
+            #   * every blob decrypts under exactly ONE of the two keys (no
+            #     torn/corrupt rows — each batch is all-or-nothing);
+            #   * the journal recorded the completed stage for the retry;
+            #   * a retry with the same keys finishes the rotation idempotently.
+            after = await snapshot()
+            from app.models import RekeyJournal
+    
+            async with app.state.sessionmaker() as session:
+                journal = (
+                    await session.execute(
+                        select(RekeyJournal).where(RekeyJournal.user_id == emu.user_id)
+                    )
+                ).scalar_one_or_none()
+            assert journal is not None, "an interrupted rotation must leave a resumable journal"
+            assert journal.stage == "entries"
+            assert journal.entries_done == 2
+            for cid, blob in after["entries"].items():
+                # Both entries were in the crashed run's FIRST stage: new key,
+                # upgraded to the v2 (version-bound) AAD like every rekey.
+                plain = crypto.decrypt(emu.data_key, blob, crypto.entry_aad_v2(emu.user_id, cid, 1))
+                assert json.loads(plain)["text"] in ("one", "two")
+            for mid, blob in after["measures"].items():
+                # The crash fired in the insights phase: measures untouched (old key).
+                plain = crypto.decrypt(old_key, blob, crypto.build_aad("measure", emu.user_id, mid))
+                assert json.loads(plain)["v"] == 1
+    
+            # The retry (fresh single-use sessions, same two keys) resumes from
+            # the journal: entries authenticate under the NEW key and are
+            # skipped idempotently; measures rotate; the journal is retired.
+            monkeypatch.setattr(insights_api, "_rekey_blob_batch", original_blob_batch)
+            old_token2 = await emu.open_processing_session_for(client, old_key)
+            new_token2 = await emu.open_processing_session_for(client, emu.data_key)
+            response = await client.post(
+                "/api/processing/rekey",
+                headers={
+                    **emu.headers,
+                    "X-Processing-Token": old_token2,
+                    "X-New-Processing-Token": new_token2,
+                    "X-Account-Verifier": old_verifier,
+                },
+                json=emu.rekey_payload(),
+            )
+            assert response.status_code == 200, response.text
+            counts = response.json()
+            assert counts == {
+                "entries": 2,
+                "insights": 0,
+                "measures": 1,
+                "audio": 0,
+                "recovery_invalidated": False,
+                "credential_rotated": True,
+                "operation_id": emu.rekey_payload()["operation_id"],
+                "consents_rewrapped": 0,
+            }
+            async with app.state.sessionmaker() as session:
+                journal2 = (
+                    await session.execute(
+                        select(RekeyJournal).where(RekeyJournal.user_id == emu.user_id)
+                    )
+>               ).scalar_one_or_none()
+
+tests/test_checklist_round1_crypto_auth.py:343: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <tests.helpers.ClientEmulator object at 0x13597ead0>
+client = <httpx.AsyncClient object at 0x135d46f90>
+
+    async def login(self, client: AsyncClient) -> dict:
+        response = await client.post(
+            "/api/auth/login",
+            json={
+                "username": self.username,
+                "verifier": self.auth_key_b64,
+            },
+        )
+>       assert response.status_code == 200, response.text
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: {"detail":"invalid credentials","code":"invalid_credentials"}
+
+tests/helpers.py:140: AssertionError
+------------------------------ Captured log call -------------------------------
+ERROR    mindpattern:middleware.py:695 unhandled error serving method=POST
+Traceback (most recent call last):
+  File "/Users/pradeepreddy/Desktop/mental_health_application/backend/app/middleware.py", line 674, in _call_admitted
+    # through the route dependencies and are counted there).
+  File "/Users/pradeepreddy/Desktop/mental_health_application/backend/app/metrics.py", line 136, in __call__
+    await self.app(scope, receive, send_wrapper)
+  File "/Users/pradeepreddy/Desktop/mental_health_application/backend/.venv/lib/python3.14/site-packages/starlette/middleware/cors.py", line 88, in __call__
+    await self.app(scope, receive, send)
+  File "/Users/pradeepreddy/Desktop/mental_health_application/backend/.venv/lib/python3.14/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/Users/pradeepreddy/Desktop/mental_health_application/backend/.venv/lib/python3.14/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/Users/pradeepreddy/Desktop/mental_health_application/backend/.venv/lib/python3.14/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/Users/pradeepreddy/Desktop/mental_health_application/backend/.venv/lib/python3.14/site-packages/fastapi/middleware/asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "/Users/pradeepreddy/Desktop/mental_health_application/backend/.venv/lib/python3.14/site-packages/starlette/routing.py", line 670, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/Users/pradeepreddy/Desktop/mental_health_application/backend/.venv/lib/python3.14/site-packages/fastapi/routing.py", line 2734, in app
+    await route.handle(scope, receive, send)
+  File "/Users/pradeepreddy/Desktop/mental_health_application/backend/.venv/lib/python3.14/site-packages/fastapi/routing.py", line 1780, in handle
+    await self.original_router.handle(scope, receive, send)
+  File "/Users/pradeepreddy/Desktop/mental_health_application/backend/.venv/lib/python3.14/site-packages/fastapi/routing.py", line 2789, in handle
+    await included_router._handle_selected(scope, receive, send)
+  File "/Users/pradeepreddy/Desktop/mental_health_application/backend/.venv/lib/python3.14/site-packages/fastapi/routing.py", line 1791, in _handle_selected
+    await route.handle(scope, receive, send)
+  File "/Users/pradeepreddy/Desktop/mental_health_application/backend/.venv/lib/python3.14/site-packages/fastapi/routing.py", line 1780, in handle
+    await self.original_router.handle(scope, receive, send)
+  File "/Users/pradeepreddy/Desktop/mental_health_application/backend/.venv/lib/python3.14/site-packages/fastapi/routing.py", line 2789, in handle
+    await included_router._handle_selected(scope, receive, send)
+  File "/Users/pradeepreddy/Desktop/mental_health_application/backend/.venv/lib/python3.14/site-packages/fastapi/routing.py", line 1800, in _handle_selected
+    await original_route.handle(scope, receive, send)
+  File "/Users/pradeepreddy/Desktop/mental_health_application/backend/.venv/lib/python3.14/site-packages/fastapi/routing.py", line 1279, in handle
+    await app(scope, receive, send)
+  File "/Users/pradeepreddy/Desktop/mental_health_application/backend/.venv/lib/python3.14/site-packages/fastapi/routing.py", line 158, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "/Users/pradeepreddy/Desktop/mental_health_application/backend/.venv/lib/python3.14/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/Users/pradeepreddy/Desktop/mental_health_application/backend/.venv/lib/python3.14/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/Users/pradeepreddy/Desktop/mental_health_application/backend/.venv/lib/python3.14/site-packages/fastapi/routing.py", line 144, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "/Users/pradeepreddy/Desktop/mental_health_application/backend/.venv/lib/python3.14/site-packages/fastapi/routing.py", line 706, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "/Users/pradeepreddy/Desktop/mental_health_application/backend/.venv/lib/python3.14/site-packages/fastapi/routing.py", line 352, in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/pradeepreddy/Desktop/mental_health_application/backend/app/api/insights.py", line 875, in rekey
+    # create) the resumable journal in its own short transaction.
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<6 lines>...
+        ):
+        ^
+  File "/Users/pradeepreddy/Desktop/mental_health_application/backend/.venv/lib/python3.14/site-packages/anyio/to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/pradeepreddy/Desktop/mental_health_application/backend/.venv/lib/python3.14/site-packages/anyio/_backends/_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "/Users/pradeepreddy/Desktop/mental_health_application/backend/.venv/lib/python3.14/site-packages/anyio/_backends/_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "/Users/pradeepreddy/Desktop/mental_health_application/backend/app/api/insights.py", line 876, in <lambda>
+    async with sessionmaker() as session:
+                    ^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+            session, jti
+            ^
+  File "/Users/pradeepreddy/Desktop/mental_health_application/backend/tests/test_checklist_round1_crypto_auth.py", line 252, in explode
+    # _rekey_entry_batch; this is the insights/measures phase).
+RuntimeError: simulated crash mid-rekey, after entry writes
+_____________ test_entry_integrity_error_path_returns_409_contract _____________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x13dbceba0>
+settings = Settings(environment='development', audit_journal_path='', scrypt_n=131072, token_ttl_seconds=86400, processing_sessio...interval_seconds=900, therapist_sharing_enabled=True, cors_origins=[], trust_proxy_headers=False, trusted_proxy_ips=[])
+
+    async def test_entry_integrity_error_path_returns_409_contract(monkeypatch, settings):
+        """The INSERT-then-IntegrityError race path (behind the per-user lock):
+        a unique violation must surface as the exact 409 contract."""
+        import app.api.entries as e
+    
+        class QuotaResult:
+            def one(self):
+                return (0, 0)
+    
+        class PreCheckResult:
+            def scalar_one_or_none(self):
+                return None
+    
+        class RevisionResult:
+            # The production path advances the owner marker in the same
+            # transaction as the INSERT.  Model a successful DML update so this
+            # fixture reaches the intended insert-IntegrityError race path.
+            rowcount = 1
+    
+        class RacingSession:
+            def __init__(self):
+                self.executions = 0
+    
+            async def get(self, model, user_id, *, populate_existing=False):
+                return user
+    
+            async def execute(self, stmt):
+                self.executions += 1
+                # Call order follows the handler: the duplicate idempotency
+                # pre-check runs BEFORE the quota read (audit L-6, 2026-09-20 —
+                # a retry at the quota boundary must answer 409, not 413).
+                # Wave 4 (2026-09-30): the quota read is now O(1) off the User
+                # row (no corpus SELECT) — execution #2 is the revision advance
+                # and #3 the counter UPDATE, both modeled as successful DML.
+                if self.executions == 1:
+                    return PreCheckResult()
+                if self.executions == 2:
+                    return RevisionResult()
+                return RevisionResult()
+    
+            def add(self, row):
+                pass
+    
+            async def commit(self):
+                raise IntegrityError(
+                    "INSERT", {}, Exception("UNIQUE constraint failed: entries.client_entry_id")
+                )
+    
+            async def rollback(self):
+                pass
+    
+            async def refresh(self, row, *, attribute_names=None):
+                pass
+    
+        user = User(id="u-race", is_active=True, token_epoch=1)
+        request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(settings=settings)))
+        RacingSession.bind = SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
+        body = e.EntryCreate(
+            client_entry_id="e-race", blob=base64.b64encode(b"x" * 64).decode(), entry_date=T0
+        )
+        with pytest.raises(ApiError) as exc_info:
+>           await e.create_entry(body=body, request=request, user=user, session=RacingSession())
+
+tests/test_deep_mutation_pins.py:418: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/api/entries.py:328: in create_entry
+    async with _user_locks.hold(f"entries:{user.id}"):
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+app/api/entries.py:300: in _fresh_active_entry_user
+    raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+session = <tests.test_deep_mutation_pins.test_entry_integrity_error_path_returns_409_contract.<locals>.RacingSession object at 0x13b58d6a0>
+user_id = 'u-race'
+
+        is not None
+    ):
+>       raise ApiError(
+         ^^^^^^^^^^^^^^
+            status_code=409,
+            detail="complete the pending key rotation before writing",
+            code="rekey_in_progress",
+        )
+E       AttributeError: 'RacingSession' object has no attribute 'scalar'
+
+app/deps.py:240: AttributeError
+___________ test_i2_correct_verifier_unaffected_by_partial_failures ____________
+
+client = <httpx.AsyncClient object at 0x1657a28d0>
+verifier_limit_settings = Settings(environment='development', audit_journal_path='', scrypt_n=131072, token_ttl_seconds=86400, processing_sessio...interval_seconds=900, therapist_sharing_enabled=True, cors_origins=[], trust_proxy_headers=False, trusted_proxy_ips=[])
+
+        assert r.status_code == 429, r.text
+        assert r.json()["code"] == "rate_limited"
+    
+    
+    async def test_i2_correct_verifier_unaffected_by_partial_failures(client, verifier_limit_settings):
+        emu = ClientEmulator("i2q", "deep-password")
+        await emu.register(client)
+        wrong = base64.b64encode(b"\x04" * 32).decode()
+        for _ in range(2):  # under the wall of 3
+            r = await client.put(
+>               "/api/account/llm-consent",
+                headers=emu.headers,
+                json={"verifier": wrong, "enabled": True},
+            )
+E           AssertionError: assert (409 == 409 and 'llm_unavailable' == 'llm_unconfigured'
+E            +  where 409 = <Response [409 Conflict]>.status_code
+E             
+E             - llm_unconfigured
+E             + llm_unavailable)
+
+tests/test_pentest_2026_09_29_fixes.py:457: AssertionError
+_________ test_wrap_key_rotation_and_patient_rewrap_without_repairing __________
+
+client = <httpx.AsyncClient object at 0x7007243950>
+app = <fastapi.applications.FastAPI object at 0x7006f65550>
+
+        await emu.login(client)
+    
+    
+    # --- wrap-key rotation (audit C-2) ---------------------------------------------------
+    
+    
+    async def test_wrap_key_rotation_and_patient_rewrap_without_repairing(client, app):
+        therapist = TherapistEmulator("ther-wrap", "deep-password")
+        await therapist.register(client)
+        patient = ClientEmulator("ther-wrap-pat", "deep-password")
+        await patient.register(client)
+        consent_id = await _grant(client, patient, therapist)
+        assert therapist.user_id
+    
+        # A genuinely fresh keypair: same username (the blob's AAD binds it),
+        # new P-256 material, blob wrapped under the CURRENT password KEK.
+        successor = TherapistEmulator("ther-wrap", "deep-password")
+        custody = await client.put(
+            "/api/therapist/custody",
+            headers=therapist.headers,
+            json={
+                "verifier": therapist.auth_key_b64,
+                "operation_id": str(uuid.uuid4()),
+                "expected_custody_version": 0,
+                "custody_version": 1,
+                "notes_keyring_blob": base64.b64encode(os.urandom(60)).decode(),
+            },
+        )
+        assert custody.status_code == 204, custody.text
+        rotation = await client.put(
+            "/api/therapist/wrap-key",
+            headers={**therapist.headers, "X-Account-Verifier": therapist.auth_key_b64},
+            json={
+                "wrap_pub_key": successor.wrap_pub_key,
+>               "wrap_key_blob": successor.wrap_key_blob_b64(),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                "expected_custody_version": 1,
+            },
+        )
+E       AssertionError: assert 'revoked' == 'active'
+E         
+E         - active
+E         + revoked
+
+tests/test_therapist_lifecycle.py:122: AssertionError
+=============================== warnings summary ===============================
+tests/test_coverage_gaps.py::test_recompute_rejects_non_string_text
+  /Users/pradeepreddy/Desktop/mental_health_application/backend/.venv/lib/python3.14/site-packages/pydantic/_internal/_schema_generation_shared.py:72: SAWarning: The garbage collector is trying to clean up non-checked-in connection <AdaptedConnection <asyncpg.connection.Connection object at 0x13b0eac60>>, which will be terminated.  Please ensure that SQLAlchemy pooled connections are returned to the pool explicitly, either by calling ``close()`` or by using appropriate context managers to manage their lifecycle.
+    def __init__(
+
+tests/test_mutation_round4_pins.py::test_wrap_key_rotation_refuses_deactivated_accounts
+  /Users/pradeepreddy/.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/asyncio/locks.py:13: SAWarning: The garbage collector is trying to clean up non-checked-in connection <AdaptedConnection <asyncpg.connection.Connection object at 0x1524509b0>>, which will be terminated.  Please ensure that SQLAlchemy pooled connections are returned to the pool explicitly, either by calling ``close()`` or by using appropriate context managers to manage their lifecycle.
+    async def __aenter__(self):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_api_pins.py::test_recompute_rechecks_phase_inside_the_fence
+FAILED tests/test_api_pins.py::test_duplicate_retry_at_quota_boundary_answers_conflict_not_quota
+FAILED tests/test_api_resilience_coverage.py::test_entry_nonunique_commit_error_is_not_mislabeled_as_a_conflict
+FAILED tests/test_checklist_round1_crypto_auth.py::TestRekeyMidTransactionAtomicity::test_failure_after_entry_updates_rolls_everything_back
+FAILED tests/test_deep_mutation_pins.py::test_entry_integrity_error_path_returns_409_contract
+FAILED tests/test_pentest_2026_09_29_fixes.py::test_i2_correct_verifier_unaffected_by_partial_failures
+FAILED tests/test_therapist_lifecycle.py::test_wrap_key_rotation_and_patient_rewrap_without_repairing
+7 failed, 1960 passed, 2 skipped, 2 warnings in 574.38s (0:09:34)

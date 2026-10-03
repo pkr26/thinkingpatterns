@@ -135,7 +135,7 @@ export const es: Record<string, string> = {
   "login.strengthFairHint": "Buen comienzo — más longitud o un símbolo la hacen más segura.",
   "login.mismatchInline": "Las contraseñas no coinciden.",
   "login.mismatchTitle": "Las contraseñas no coinciden",
-  "login.mismatchBody": "Escriba la misma contraseña dos veces — no hay forma de recuperarla si se pierde.",
+  "login.mismatchBody": "Escriba la misma contraseña dos veces y guárdela. El servidor no puede restablecerla por usted.",
   "login.policyShortTitle": "Contraseña demasiado corta",
   "login.policyVarietyTitle": "La contraseña necesita más variedad",
   "login.policyMin": "Use al menos 12 caracteres — esta contraseña genera sus llaves de cifrado.",
@@ -144,12 +144,12 @@ export const es: Record<string, string> = {
   "login.serverLabel": "Servidor: {server}",
   "login.serverA11y": "Dirección del servidor seleccionado",
   "login.serverChangedWarning":
-    "Este servidor es distinto al que usa normalmente. Verifique la dirección antes de escribir su contraseña: su contraseña es su clave de cifrado y no hay forma de recuperarla.",
+    "Este servidor es distinto al que usa normalmente. Verifique la dirección antes de escribir su contraseña: su contraseña protege sus claves de cifrado y el servidor no puede restablecerla por usted.",
   "login.serverChangedA11y": "Aviso: la dirección del servidor cambió",
   "login.trustThisServer": "Confío en este servidor",  "login.policyHint":
     "Elija una contraseña de al menos 12 caracteres — una frase de 16 caracteres, o 12–15 caracteres de al menos tres tipos distintos.",
   "login.noReset":
-    "No existe recuperación de contraseña. Si la olvida, nadie — incluyéndonos a nosotros — podrá recuperar su diario.",
+    "El servidor no puede restablecer su contraseña ni descifrar su diario. Si creó un kit de recuperación en la aplicación móvil, guárdelo; sin su contraseña ni su kit, el diario no puede recuperarse.",
   "login.signIn": "Iniciar sesión",
   "login.createAccount": "Crear cuenta",
   "login.switchToRegister": "¿Primera vez aquí? Crear una cuenta",
@@ -170,10 +170,10 @@ export const es: Record<string, string> = {
     "Después de 30 días de escritura, la app le muestra patrones demasiado lentos para notarlos por su cuenta — cada uno con la evidencia que lo respalda. Nunca consejos, nunca un diagnóstico.",
   "onboarding.panel2Title": "Sus palabras siguen siendo suyas",
   "onboarding.panel2Body":
-    "Su contraseña genera las llaves de cifrado en este dispositivo, y todo lo que escribe se cifra antes de salir de él — el servidor guarda solo texto cifrado. La única excepción: cuando usted mismo inicia un análisis de patrones, su llave se usa una vez — se mantiene en memoria por un máximo de 5 minutos y luego se destruye. Nunca se guarda.",
+    "Su contraseña desbloquea sus llaves de cifrado en este dispositivo, y todo lo que escribe se cifra antes de salir de él — el servidor guarda solo texto cifrado. La única excepción: cuando usted mismo inicia un análisis de patrones, su llave se usa una vez — se mantiene en memoria por un máximo de 5 minutos y luego se destruye. Nunca se guarda.",
   "onboarding.panel3Title": "Cuide su contraseña",
   "onboarding.panel3Body":
-    "No existe recuperación de contraseña — anote su contraseña en un lugar seguro. Si se pierde, nadie, incluyéndonos a nosotros, podrá recuperar su diario.",
+    "Guarde su contraseña y cualquier kit de recuperación móvil en un lugar seguro. El servidor no puede descifrar su diario por usted; sin la contraseña ni el kit, no puede recuperarse.",
   "onboarding.stepOf": "{current} de {total}",
   "onboarding.remindQuestion": "¿Quiere un recordatorio amable cada día? Puede cambiarlo cuando quiera en Ajustes.",
   "onboarding.readPrivacy": "Leer la política de privacidad",
@@ -185,7 +185,7 @@ export const es: Record<string, string> = {
   "privacy.headline": "Privacidad, en lenguaje claro",
   "privacy.s1Title": "Qué se cifra",
   "privacy.s1Body":
-    "Todo lo que escribe. Su contraseña genera las llaves de cifrado en este dispositivo, y las entradas se cifran antes de salir de él. El servidor guarda solo texto cifrado. No existe recuperación de contraseña. Si la olvida, nadie — incluyéndonos a nosotros — podrá recuperar su diario.",
+    "Todo lo que escribe. Su contraseña desbloquea sus llaves de cifrado en este dispositivo, y las entradas se cifran antes de salir de él. El servidor guarda solo texto cifrado. El servidor no puede restablecer su contraseña ni descifrar su diario. Si creó un kit de recuperación en la aplicación móvil, guárdelo; sin su contraseña ni su kit, el diario no puede recuperarse.",
   "privacy.s2Title": "Qué ve el servidor",
   "privacy.s2Body":
     "Su nombre de usuario, las fechas del calendario en que escribió, cuándo llegó cada entrada y el tamaño de cada entrada cifrada. Una filtración de la base de datos del servidor revela cuándo y cuánto escribió — nunca qué.",
@@ -842,6 +842,9 @@ export const es: Record<string, string> = {
   "crisis.webSafeMessaging": "Hablar con una persona real ayuda. Estas líneas siguen la práctica de mensajería segura (#chatsafe) — lo que comparte se queda con ellas.",
   "crisis.webYouDeserve": "Usted merece apoyo. Buscarlo es un paso valiente.",
   "entry.title": "La entrada de hoy",
+  "entry.retryDraft": "Volver a restaurar el borrador cifrado",
+  "entry.draftSaved": "Borrador guardado cifrado en este dispositivo.",
+  "entry.draftFailed": "No se guardó el borrador. Mantenga esta vista abierta y vuelva a intentarlo.",
   "entry.question": "¿Cómo estuvo hoy?",
   "entry.placeholderWeb": "Escriba con libertad. Solo usted puede leer esto.",
   "entry.empty": "Escriba algo primero — incluso una frase honesta cuenta.",
@@ -908,7 +911,11 @@ export const es: Record<string, string> = {
   "insights.seenOne": "visto {count} vez",
   "insights.seenMany": "visto {count} veces",
   "insights.lastSeen": "último: {date}",
-  "insights.evidenceLine": "Ventana: los últimos {days} días de su diario. Muestra: {count} apariciones. Confianza: {confidence}%. Método: {method} Primera aparición: {firstSeen}.",
+  "history.readFullEntry": "Leer entrada completa",
+  "insights.evidenceLine": "Días distintos: {days}. Entradas de la ventana: {entries}. Menciones: {count}. Heurística de evidencia: {confidence}% (no es una probabilidad diagnóstica). Método: {method} Primera aparición: {firstSeen}.",
+  "insights.trendData": "Datos de la gráfica de ánimo",
+  "insights.chartDate": "Fecha",
+  "insights.chartMood": "Ánimo registrado",
   "insights.evidenceFootnoteWeb": "Sin consejos, sin diagnósticos, sin predicciones — una observación con su evidencia. Silencie abajo si no le resulta útil.",
   "insights.muteVerbWeb": "Silenciar",
   "insights.noneYetWeb": "Aún no hay patrones — el motor solo habla cuando la evidencia supera sus umbrales estadísticos.",
@@ -942,7 +949,7 @@ export const es: Record<string, string> = {
   "login.webUsernamePlaceholder": "p. ej. manana-tranquila",
   "login.webPassword": "Contraseña",
   "login.webConfirm": "Confirmar contraseña",
-  "login.webRegisterNote": "12+ caracteres (16+, o tres tipos de caracteres, la mantienen fuerte). Si la olvida, nadie podrá recuperarla — de eso se trata.",
+  "login.webRegisterNote": "12+ caracteres (16+, o tres tipos de caracteres, la mantienen fuerte). Guárdela junto con cualquier kit de recuperación móvil; sin ninguno, su diario cifrado no puede recuperarse.",
   "login.webCreateJournal": "Crear diario",
   "login.webCreateAccount": "Crear una cuenta",
   "login.webHaveAccount": "Ya tengo una cuenta",
@@ -1164,6 +1171,8 @@ export const es: Record<string, string> = {
   "settings.cadenceIntervalA11y": "Intervalo del recordatorio de registro",
   "nav.safetyPlan": "Plan de seguridad",
   "plan.title": "Mi plan de seguridad",
+  "plan.restoreFirst": "Restaure el plan cifrado existente antes de guardar cambios.",
+  "plan.retryRestore": "Volver a restaurar el plan guardado",
   "plan.intro":
     "Un plan personal que usted escribe y mantiene cerca: sus señales de alerta, lo que le ayuda a afrontar, a quién puede recurrir. No se comparte con nadie — ni siquiera con su terapeuta — y nunca sale de este dispositivo sin cifrar.",
   "plan.localNote":
@@ -1239,4 +1248,10 @@ export const es: Record<string, string> = {
   "share.voiceOn": "Mi terapeuta puede escuchar mis grabaciones",
   "share.voiceOff": "Mi terapeuta no puede escuchar mis grabaciones",
   "share.voiceToggleFailed": "No se pudo cambiar lo que este terapeuta puede escuchar — inténtelo de nuevo.",
+  "app.erasureTitle": "Eliminación local pendiente",
+  "app.erasureExplanation": "Todavía deben eliminarse de este navegador registros cifrados de una solicitud de eliminación de cuenta. Se conservan las otras cuentas. Las solicitudes confirmadas se reintentan automáticamente.",
+  "app.erasureRetry": "Reintentar limpieza local",
+  "app.erasureIncomplete": "La cuenta se eliminó del servidor, pero la limpieza de este dispositivo no terminó. Los registros cifrados se conservan en un punto de recuperación; reintente la limpieza antes de compartir el navegador.",
+  "app.erasureUnconfirmed": "No se pudo confirmar la eliminación de la cuenta {account}. Conserve estos registros si canceló la eliminación. Si la cuenta ya fue eliminada, elimine explícitamente sus registros cifrados locales abajo.",
+  "app.erasureConfirm": "Confirmé la eliminación — eliminar sus registros locales",
 };

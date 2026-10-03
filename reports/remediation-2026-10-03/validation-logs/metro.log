@@ -1,0 +1,800 @@
+
+> mindpattern-mobile@1.0.0 start
+> react-native start --host 127.0.0.1 --port 8081
+
+
+Welcome to React Native v0.87
+Starting dev server on http://127.0.0.1:8081
+
+[34m
+                        ▒▒▓▓▓▓▒▒
+                     ▒▓▓▓▒▒░░▒▒▓▓▓▒
+                  ▒▓▓▓▓░░░▒▒▒▒░░░▓▓▓▓▒
+                 ▓▓▒▒▒▓▓▓▓▓▓▓▓▓▓▓▓▒▒▒▓▓
+                 ▓▓░░░░░▒▓▓▓▓▓▓▒░░░░░▓▓
+                 ▓▓░░▓▓▒░░░▒▒░░░▒▓▒░░▓▓
+                 ▓▓░░▓▓▓▓▓▒▒▒▒▓▓▓▓▒░░▓▓
+                 ▓▓░░▓▓▓▓▓▓▓▓▓▓▓▓▓▒░░▓▓
+                 ▓▓▒░░▒▒▓▓▓▓▓▓▓▓▒░░░▒▓▓
+                  ▒▓▓▓▒░░░▒▓▓▒░░░▒▓▓▓▒
+                     ▒▓▓▓▒░░░░▒▓▓▓▒
+                        ▒▒▓▓▓▓▒▒
+
+[39m
+[34m[1m                Welcome to Metro [37mv0.87.1[39m
+[22m[39m[2m              Fast - Scalable - Integrated
+
+[22m
+[36m[7m[1m INFO [22m[27m[39m Dev server ready. Press Ctrl+C to exit.
+[36m[7m[1m INFO [22m[27m[39m Interactive mode is not supported in this environment
+[33m[7m[1m BUNDLE [22m[27m[39m[0m[2m ./[22m[0m[1mindex.js[22m [32m[42m[49m[39m[47m[37m░░░░░░░░░░░░░░░░[39m[49m[1m 0% [22m[2m(0/1)[22m
+transform[stderr]: (node:55774) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+transform[stderr]: (Use `node --trace-warnings ...` to show where the warning was created)
+[33m[7m[1m WARN [22m[27m[39m Attempted to import the module "/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/react-native/src/private/featureflags/ReactNativeFeatureFlags" which is not listed in the "exports" of "/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/react-native" under the requested subpath "./src/private/featureflags/ReactNativeFeatureFlags". Falling back to file-based resolution. Consider updating the call site or asking the package maintainer(s) to expose this API.
+transform[stderr]: (node:55776) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+transform[stderr]: (Use `node --trace-warnings ...` to show where the warning was created)
+transform[stderr]: (node:55779) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+transform[stderr]: (Use `node --trace-warnings ...` to show where the warning was created)
+transform[stderr]: (node:55777) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+transform[stderr]: (Use `node --trace-warnings ...` to show where the warning was created)
+transform[stderr]: (node:55778) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+transform[stderr]: (Use `node --trace-warnings ...` to show where the warning was created)
+transform[stderr]: (node:55775) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+transform[stderr]: (Use `node --trace-warnings ...` to show where the warning was created)
+transform[stderr]: (node:55780) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+transform[stderr]: (Use `node --trace-warnings ...` to show where the warning was created)
+transform[stderr]: (node:55781) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+transform[stderr]: (Use `node --trace-warnings ...` to show where the warning was created)
+transform[stderr]: (node:55784) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+transform[stderr]: (Use `node --trace-warnings ...` to show where the warning was created)
+transform[stderr]: (node:55783) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+transform[stderr]: (Use `node --trace-warnings ...` to show where the warning was created)
+transform[stderr]: (node:55782) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+transform[stderr]: (Use `node --trace-warnings ...` to show where the warning was created)
+[32m[7m[1m BUNDLE [22m[27m[39m[0m[2m ./[22m[0m[1mindex.js[22m 
+[32m[7m[1m BUNDLE [22m[27m[39m[0m[2m src/[22m[0m[1mnotificationRoute.ts[22m 
+[33m[7m[1m WARN [22m[27m[39m Attempted to import the module "/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/react-native/src/private/featureflags/ReactNativeFeatureFlags" which is not listed in the "exports" of "/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/react-native" under the requested subpath "./src/private/featureflags/ReactNativeFeatureFlags". Falling back to file-based resolution. Consider updating the call site or asking the package maintainer(s) to expose this API.
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project or in these directories:
+  node_modules
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project or in these directories:
+  node_modules
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project or in these directories:
+  node_modules
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project or in these directories:
+  node_modules
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project or in these directories:
+  node_modules
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project or in these directories:
+  node_modules
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project or in these directories:
+  node_modules
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project or in these directories:
+  node_modules
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project or in these directories:
+  node_modules
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project or in these directories:
+  node_modules
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project or in these directories:
+  node_modules
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project or in these directories:
+  node_modules
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project or in these directories:
+  node_modules
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project or in these directories:
+  node_modules
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project or in these directories:
+  node_modules
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project or in these directories:
+  node_modules
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project.
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project.
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project or in these directories:
+  node_modules
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[33m[7m[1m WARN [22m[27m[39m Attempted to import the module "/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/react-native/src/private/featureflags/ReactNativeFeatureFlags" which is not listed in the "exports" of "/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/react-native" under the requested subpath "./src/private/featureflags/ReactNativeFeatureFlags". Falling back to file-based resolution. Consider updating the call site or asking the package maintainer(s) to expose this API.
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module ./LogBoxImages/close.png from /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/react-native/Libraries/LogBox/UI/LogBoxNotificationDismissButton.js: 
+
+None of these files exist:
+  * close.png
+  * node_modules/react-native/Libraries/LogBox/UI/LogBoxImages/close.png
+  37 |         style={styles.press}>
+  38 |         <Image
+> 39 |           source={require('./LogBoxImages/close.png')}
+     |                            ^
+  40 |           style={styles.image}
+  41 |         />
+  42 |       </LogBoxButton>
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:145:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 327)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[33m[7m[1m WARN [22m[27m[39m Attempted to import the module "/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/react-native/src/private/featureflags/ReactNativeFeatureFlags" which is not listed in the "exports" of "/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/react-native" under the requested subpath "./src/private/featureflags/ReactNativeFeatureFlags". Falling back to file-based resolution. Consider updating the call site or asking the package maintainer(s) to expose this API.
+[33m[7m[1m BUNDLE [22m[27m[39m[0m[2m ./[22m[0m[1mindex.js[22m [32m[42m[49m[39m[47m[37m░░░░░░░░░░░░░░░░[39m[49m[1m 0% [22m[2m(0/1)[22m
+[32m[7m[1m BUNDLE [22m[27m[39m[0m[2m ./[22m[0m[1mindex.js[22m 
+[32m[7m[1m BUNDLE [22m[27m[39m[0m[2m src/[22m[0m[1mnotificationRoute.ts[22m 
+[33m[7m[1m BUNDLE [22m[27m[39m[0m[2m ./[22m[0m[1mindex.js[22m [32m[42m[49m[39m[47m[37m░░░░░░░░░░░░░░░░[39m[49m[1m 0% [22m[2m(0/1)[22m
+[32m[7m[1m BUNDLE [22m[27m[39m[0m[2m ./[22m[0m[1mindex.js[22m 
+[32m[7m[1m BUNDLE [22m[27m[39m[0m[2m src/[22m[0m[1mnotificationRoute.ts[22m 
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module expo-sharing from /Users/pradeepreddy/Desktop/mental_health_application/mobile/src/audioQueue.ts: expo-sharing could not be found within the project or in these directories:
+  node_modules
+  234 |   const blob = await bytes(row);
+  235 |   const bundle = { version: 2, user_id: userId, username, salt, key_scheme: envelope?.scheme ?? "v1", kdf_params: envelope?.kdfParams ?? null, wrapped_data_key: envelope?.wrappedB64 ?? null, entries: [], questions: [], measures: [], brain_state: [], audio: [{ client_entry_id: id, blob, mime: row.mime, duration_seconds: row.durationSeconds, content_version: 1, created_at: new Date(row.queuedAt).toISOString() }] };
+> 236 |   const Sharing = await import("expo-sharing");
+      |                                 ^
+  237 |   if (!await Sharing.isAvailableAsync()) throw new Error("File sharing is unavailable on this device");
+  238 |   const dir = `${directoryFor(origin, userId)}exports/`;
+  239 |   await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+[33m[7m[1m WARN [22m[27m[39m Attempted to import the module "/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/react-native/src/private/featureflags/ReactNativeFeatureFlags" which is not listed in the "exports" of "/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/react-native" under the requested subpath "./src/private/featureflags/ReactNativeFeatureFlags". Falling back to file-based resolution. Consider updating the call site or asking the package maintainer(s) to expose this API.
+[33m[7m[1m WARN [22m[27m[39m Attempted to import the module "/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/react-native/src/private/featureflags/ReactNativeFeatureFlags" which is not listed in the "exports" of "/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/react-native" under the requested subpath "./src/private/featureflags/ReactNativeFeatureFlags". Falling back to file-based resolution. Consider updating the call site or asking the package maintainer(s) to expose this API.
+[33m[7m[1m WARN [22m[27m[39m Attempted to import the module "/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/react-native/src/private/featureflags/ReactNativeFeatureFlags" which is not listed in the "exports" of "/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/react-native" under the requested subpath "./src/private/featureflags/ReactNativeFeatureFlags". Falling back to file-based resolution. Consider updating the call site or asking the package maintainer(s) to expose this API.
+[33m[7m[1m WARN [22m[27m[39m Attempted to import the module "/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/react-native/src/private/featureflags/ReactNativeFeatureFlags" which is not listed in the "exports" of "/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/react-native" under the requested subpath "./src/private/featureflags/ReactNativeFeatureFlags". Falling back to file-based resolution. Consider updating the call site or asking the package maintainer(s) to expose this API.
+[33m[7m[1m BUNDLE [22m[27m[39m[0m[2m ./[22m[0m[1mindex.js[22m [32m[42m[49m[39m[47m[37m░░░░░░░░░░░░░░░░[39m[49m[1m 0% [22m[2m(0/1)[22m
+[32m[7m[1m BUNDLE [22m[27m[39m[0m[2m ./[22m[0m[1mindex.js[22m 
+[32m[7m[1m BUNDLE [22m[27m[39m[0m[2m src/[22m[0m[1mnotificationRoute.ts[22m 
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project or in these directories:
+  node_modules
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project or in these directories:
+  node_modules
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project or in these directories:
+  node_modules
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project or in these directories:
+  node_modules
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project or in these directories:
+  node_modules
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project or in these directories:
+  node_modules
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project or in these directories:
+  node_modules
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project or in these directories:
+  node_modules
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project or in these directories:
+  node_modules
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project or in these directories:
+  node_modules
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project or in these directories:
+  node_modules
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project or in these directories:
+  node_modules
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project.
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project.
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project or in these directories:
+  node_modules
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module react-native from /Users/pradeepreddy/Desktop/mental_health_application/mobile/index.js: react-native could not be found within the project or in these directories:
+  node_modules
+  18 | require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
+  19 |
+> 20 | const { AppRegistry } = require("react-native");
+     |                                  ^
+  21 | const App = require("./App").default;
+  22 |
+  23 | AppRegistry.registerComponent("MindPattern", () => App);
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:184:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 0)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[33m[7m[1m WARN [22m[27m[39m Attempted to import the module "/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/react-native/src/private/featureflags/ReactNativeFeatureFlags" which is not listed in the "exports" of "/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/react-native" under the requested subpath "./src/private/featureflags/ReactNativeFeatureFlags". Falling back to file-based resolution. Consider updating the call site or asking the package maintainer(s) to expose this API.
+[31m[7m[1m ERROR [22m[27m[39m Error: Unable to resolve module ./LogBoxImages/close.png from /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/react-native/Libraries/LogBox/UI/LogBoxNotificationDismissButton.js: 
+
+None of these files exist:
+  * close.png
+  * node_modules/react-native/Libraries/LogBox/UI/LogBoxImages/close.png
+  37 |         style={styles.press}>
+  38 |         <Image
+> 39 |           source={require('./LogBoxImages/close.png')}
+     |                            ^
+  40 |           style={styles.image}
+  41 |         />
+  42 |       </LogBoxButton>
+    at ModuleResolver.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph/ModuleResolution.js:145:15)
+    at DependencyGraph.resolveDependency (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/node-haste/DependencyGraph.js:203:43)
+    at /Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/lib/transformHelpers.js:165:21
+    at resolveDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:43:25)
+    at visit (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:81:30)
+    at async Promise.all (index 327)
+    at async buildSubgraph (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/buildSubgraph.js:105:3)
+    at async Graph._buildDelta (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:163:22)
+    at async Graph.traverseDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/Graph.js:50:19)
+    at async DeltaCalculator._getChangedDependencies (/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/metro/src/DeltaBundler/DeltaCalculator.js:201:42)
+[33m[7m[1m WARN [22m[27m[39m Attempted to import the module "/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/react-native/src/private/featureflags/ReactNativeFeatureFlags" which is not listed in the "exports" of "/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/react-native" under the requested subpath "./src/private/featureflags/ReactNativeFeatureFlags". Falling back to file-based resolution. Consider updating the call site or asking the package maintainer(s) to expose this API.
+[33m[7m[1m WARN [22m[27m[39m Attempted to import the module "/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/react-native/src/private/featureflags/ReactNativeFeatureFlags" which is not listed in the "exports" of "/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/react-native" under the requested subpath "./src/private/featureflags/ReactNativeFeatureFlags". Falling back to file-based resolution. Consider updating the call site or asking the package maintainer(s) to expose this API.
+[33m[7m[1m WARN [22m[27m[39m Attempted to import the module "/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/react-native/src/private/featureflags/ReactNativeFeatureFlags" which is not listed in the "exports" of "/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/react-native" under the requested subpath "./src/private/featureflags/ReactNativeFeatureFlags". Falling back to file-based resolution. Consider updating the call site or asking the package maintainer(s) to expose this API.
+[33m[7m[1m WARN [22m[27m[39m Attempted to import the module "/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/react-native/src/private/featureflags/ReactNativeFeatureFlags" which is not listed in the "exports" of "/Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/react-native" under the requested subpath "./src/private/featureflags/ReactNativeFeatureFlags". Falling back to file-based resolution. Consider updating the call site or asking the package maintainer(s) to expose this API.

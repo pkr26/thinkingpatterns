@@ -435,6 +435,7 @@ async def recover_login(
             recovery_key = base64.b64decode(body.verifier, validate=True)
         except _b64_decode_error:
             recovery_key = b""
+        expected_epoch = user.token_epoch if user is not None else None
         verifier_hash = user.recovery_verifier if user is not None else None
         recovery_salt = user.recovery_salt if user is not None else None
         sealed_key = user.recovery_wrapped_data_key if user is not None else None
@@ -493,16 +494,33 @@ async def recover_login(
             n=settings.scrypt_n,
         )
         if not hmac.compare_digest(candidate, bytes(verifier_hash)):
-            record_keyed_failure(
-                request, recovery_fail_key, settings.auth_rate_window
-            )
+            record_keyed_failure(request, recovery_fail_key, settings.auth_rate_window)
             raise ApiError(
                 status_code=401, detail="invalid credentials", code="invalid_credentials"
             )
-        # The recovery event invalidates every existing bearer.
-        user.token_epoch += 1
-        session.add(user)
-        await session.commit()
+        # A kit withdrawal/replacement or another recovery while hashing retires
+        # this proof. Re-read every enrolled field under the lifecycle fence.
+        async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
+            fresh = await session.scalar(
+                select(User).where(User.id == user.id).execution_options(populate_existing=True)
+            )
+            if (
+                fresh is None
+                or not fresh.is_active
+                or fresh.role != "user"
+                or fresh.token_epoch != expected_epoch
+                or fresh.recovery_verifier != verifier_hash
+                or fresh.recovery_salt != recovery_salt
+                or fresh.recovery_wrapped_data_key != sealed_key
+                or (2 if (fresh.recovery_scheme or 1) == 2 else 1) != stored_scheme
+            ):
+                raise ApiError(
+                    status_code=401, detail="invalid credentials", code="invalid_credentials"
+                )
+            fresh.token_epoch += 1
+            await session.commit()
+            request.app.state.key_store.destroy_all_for_owner(fresh.id)
+            user = fresh
         token = issue_token(
             user.id,
             settings.auth_token_secret,
@@ -515,6 +533,7 @@ async def recover_login(
         # the sealed copy is non-None on this branch (the guard above
         # rejected accounts without a kit).
         response = RecoveryLoginResponse(
+            username=user.username,
             token=token,
             user_id=user.id,
             expires_in=settings.token_ttl_seconds,

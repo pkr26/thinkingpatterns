@@ -1,0 +1,11 @@
+npm notice run mindpattern-mobile@1.0.0 npx
+npm notice run 'vitest' run tests/screens/settingsScreen.test.tsx tests/screens/settingsScreen.pins.test.tsx tests/envelopeUpgrade.test.ts tests/screens/safetyPlanScreen.test.tsx tests/store.test.tsx tests/healthkit.test.ts tests/screens/entryScreen.test.tsx tests/screens/journalDraftScreen.test.tsx tests/screens/insightsProgressCustody.test.tsx --maxWorkers=2
+
+ RUN  v4.1.11 /Users/pradeepreddy/Desktop/mental_health_application/mobile
+
+
+ Test Files  9 passed (9)
+      Tests  362 passed (362)
+   Start at  11:56:01
+   Duration  3.69s (transform 671ms, setup 212ms, import 987ms, tests 5.56s, environment 0ms)
+

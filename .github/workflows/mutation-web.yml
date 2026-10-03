@@ -60,31 +60,7 @@ jobs:
         run: npx stryker run
       - name: Enforce the provisional floor (65.0 — portal-inherited pending web's first measured run; see header)
         working-directory: web
-        run: |
-          SCORE=$(node -e "
-            try {
-              const r = JSON.parse(require('fs').readFileSync('reports/mutation/mutation.json', 'utf8'));
-              let s = typeof r.score === 'number' ? r.score : (r.totals?.score ?? null);
-              if (s === null && r.files) {
-                let killed = 0, covered = 0;
-                for (const mutants of Object.values(r.files)) {
-                  for (const m of mutants.mutants) {
-                    if (m.status === 'Killed' || m.status === 'Timeout') { killed++; covered++; }
-                    else if (m.status === 'Survived' || m.status === 'NoCoverage') covered++;
-                  }
-                }
-                if (!covered) { console.error('empty report'); process.exit(2); }
-                s = (killed / covered) * 100;
-              }
-              if (s === null) { console.error('no score in report'); process.exit(2); }
-              console.log(s);
-            } catch (e) { console.error(e.message); process.exit(2); }
-          ")
-          echo "mutation score: $SCORE"
-          awk -v s="$SCORE" 'BEGIN { exit !(s < 65.0) }' && {
-            echo "::error::web mutation score $SCORE is below the 65.0 provisional floor (portal-inherited; web's own baseline is not yet measured — see WEB_PLAN 9.9)"
-            exit 1
-          }
+        run: node ../tools/check-mutation-score.mjs reports/mutation/mutation.json 65
       - name: Upload the report artifact
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

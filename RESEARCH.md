@@ -190,14 +190,14 @@ behavior, not intent:
   the lag-1 link card may say "the day after" only when gap-1 exposures
   are ≥70% of the measured exposed outcomes AND the strict mode; the
   label otherwise reports the modal exposed gap it actually measured.
-- **Replication gates split by claim flavor** (EVIDENCE_DATE vs
-  WINDOW_STAT kinds; `REPLICATION_MIN_SPREAD_DAYS = 2`): statistical
-  kinds need ≥2 qualification days that constitute an independent
-  second observation — a NEW evidence day for evidence-date kinds, and
-  qualification days ≥2 calendar days apart for window-stat kinds
-  (consecutive recomputes share ~179 of 180 window days). This closes
-  the measured ~17% false-card rate of the plain "qualified twice" rule
-  on daily-cadence pure noise.
+- **Repeated-qualification gates split by claim flavor** (EVIDENCE_DATE
+  vs WINDOW_STAT kinds): evidence-date claims require at least two new
+  evidence days after their first qualification. Window claims use the
+  current `WINDOW_STAT_REPLICATION_MIN_SPREAD_DAYS = 7` interval. The
+  historical internal name is "replication", but overlapping windows are
+  not independent held-out replication. These gates reduce repeated
+  surfacing in tested noise scenarios; they do not establish user-level
+  false-discovery control over repeated recomputes.
 - **Cadence effective-sample honesty**: the cadence detector's gap
   comparisons deflate their sample sizes by the gap series' lag-1
   autocorrelation (`statsig.effective_sample_size`) — the same
@@ -323,7 +323,9 @@ emotion granularity** once licensing is confirmed.
 ### 4.2 The privacy paradox to manage
 
 Our marketing is "client-side encryption, server blind to content" — with a documented
-deliberate exception (single-use processing session) and an opt-in LLM exception. The
+deliberate exception (single-use processing session). Narration-only LLM
+dispatch is disabled as of October3; separately opted-in speech/translation
+processing remains a distinct provider disclosure obligation. The
 BetterHelp precedent says the enforcement risk is *the gap between marketing and
 practice*, not the practice itself. Our consent flow must make the exception loud.
 Longer term, on-device analysis (the README already names it as the path) is both the

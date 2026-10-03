@@ -1,9 +1,7 @@
 /**
  * NEW-3 / F.4 (2026-09-22): the portal-side surface for the backend's
- * verifier-gated rotation routes — PUT /therapist/wrap-key and
- * PUT /account/credential. Pins:
- *   - the password-change ORDERING (wrap-key re-wrap strictly before the
- *     credential PUT, the backend's both-passwords-derivable window),
+ * verifier-gated atomic password/custody and sharing-key routes. Pins:
+ *   - credential/private-wrap/note custody committed in one request,
  *   - the payload shapes (verifier/salt/verifier base64, 16-byte fresh
  *     salt, re-sealed blob under the NEW wrap KEK),
  *   - the credential PUT's bounded retry on network/5xx and its absence
@@ -73,6 +71,8 @@ vi.mock("../src/api", async (importOriginal) => {
       patientMeasures: vi.fn(async () => ({ measures: [], nextOffset: null })),
       accessLog: vi.fn(async () => []),
       rotateCredential: vi.fn(async () => null),
+      changePasswordAtomic: vi.fn(async () => null),
+      installNotesCustody: vi.fn(async () => null),
       rotateWrapKey: vi.fn(async () => null),
     },
   };
@@ -89,6 +89,7 @@ vi.mock("../src/crypto", async (importOriginal) => {
     );
   return {
     ...actual,
+    sealNotesKeyring: vi.fn(async () => "SEALED-NOTES-CUSTODY"),
     // Tagged derivation: master 1 = the current password, 2 = the
     // intended-new password. Subkeys inherit distinguishable tags so the
     // KEK a seal/open used is visible in the recorded arguments.
@@ -124,7 +125,7 @@ vi.mock("../src/crypto", async (importOriginal) => {
     }),
     decryptNote: decryptNoteImpl,
     decryptNoteAny: vi.fn(async (...args: unknown[]) =>
-      decryptNoteImpl(...(args.slice(1) as Parameters<typeof decryptNoteImpl>)),
+      decryptNoteImpl(...(args.slice(1,6) as Parameters<typeof decryptNoteImpl>)),
     ),
   };
 });
@@ -174,6 +175,7 @@ const openSecurityPanel = async (
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockedApi.changePasswordAtomic.mockReset().mockResolvedValue(null);
   h.derivedKeySets.length = 0;
   h.kekTags.open.length = 0;
   h.kekTags.seal.length = 0;
@@ -235,11 +237,11 @@ describe("NEW-3/F.4: change password", () => {
     await typeInto(root, "New password", "intended-new-2!Strong");
     await typeInto(root, "Repeat new password", "intended-new-2!Strong");
     await press(root, "Change password");
-    await flush(14);
+    await vi.waitFor(async () => { await flush(); expect(onSessionsEnded).toHaveBeenCalledTimes(1); });
     return { root, onSessionsEnded, onSignOut };
   };
 
-  it("re-wraps the SAME key under the NEW KEK, then rotates the credential — in that order", async () => {
+  it("commits the same sharing identity, new credential and independent notes custody in one request", async () => {
     const { root, onSessionsEnded, onSignOut } = await runHappyChange();
 
     // The stored blob is opened with the CURRENT wrap KEK (tag 10)…
@@ -253,26 +255,18 @@ describe("NEW-3/F.4: change password", () => {
     // unchanged: a password change re-wraps custody, it does not rekey.
     expect(mockedCrypto.sealPrivateKeyForUpload).toHaveBeenCalledTimes(1);
     expect(h.kekTags.seal[0]).toBe(20);
-    expect(mockedApi.rotateWrapKey).toHaveBeenCalledTimes(1);
-    expect(mockedApi.rotateWrapKey.mock.calls[0]).toEqual([
-      expect.any(String), // verifier = b64(current auth key), pinned below
-      "P".repeat(124), // me().wrap_pub_key, unchanged
-      "RESEALED-kek20-pk99-drportal", // the DER re-sealed under the NEW KEK
-    ]);
-    // Ordering contract (backend rotate_wrap_key docstring): the wrap-key
-    // PUT strictly precedes the credential PUT.
-    expect(mockedApi.rotateWrapKey.mock.invocationCallOrder[0])
-      .toBeLessThan(mockedApi.rotateCredential.mock.invocationCallOrder[0]!);
-    expect(mockedApi.rotateCredential).toHaveBeenCalledTimes(1);
-    const [verifierB64, newSaltB64, newVerifierB64] = mockedApi.rotateCredential.mock.calls[0]!;
-    // Base64 shapes: current verifier 32 bytes (tag 11 = current auth key)…
-    expect(decoded(verifierB64)).toEqual({ tag: 11, length: 32 });
-    expect(decoded(mockedApi.rotateWrapKey.mock.calls[0]![0])).toEqual({ tag: 11, length: 32 });
-    // …fresh 16-byte salt that is NOT the account's standing salt…
-    expect(decoded(newSaltB64).length).toBe(16);
-    expect(newSaltB64).not.toBe("QUJDREVGR0hJSktMTU5P");
-    // …and the NEW password's 32-byte auth key as the new verifier.
-    expect(decoded(newVerifierB64)).toEqual({ tag: 22, length: 32 });
+    expect(mockedApi.rotateWrapKey).not.toHaveBeenCalled();
+    expect(mockedApi.changePasswordAtomic).toHaveBeenCalledTimes(1);
+    const payload = mockedApi.changePasswordAtomic.mock.calls[0]![0];
+    expect(payload.wrap_pub_key).toBe("P".repeat(124));
+    expect(payload.wrap_key_blob).toBe("RESEALED-kek20-pk99-drportal");
+    expect(payload.notes_keyring_blob).toBe("SEALED-NOTES-CUSTODY");
+    expect(payload.expected_custody_version).toBe(0);
+    expect(payload.custody_version).toBe(1);
+    expect(payload.operation_id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(decoded(payload.verifier)).toEqual({tag:11,length:32});
+    expect(decoded(payload.new_salt).length).toBe(16);
+    expect(decoded(payload.new_verifier)).toEqual({tag:22,length:32});
     // Success signs the user out through the sessions-ended path.
     expect(onSessionsEnded).toHaveBeenCalledTimes(1);
     expect(onSignOut).not.toHaveBeenCalled();
@@ -292,7 +286,7 @@ describe("NEW-3/F.4: change password", () => {
   });
 
   it("retries the final credential PUT on 5xx and completes the change", async () => {
-    mockedApi.rotateCredential
+    mockedApi.changePasswordAtomic
       .mockRejectedValueOnce(new ApiError(500, "request failed (500)"))
       .mockRejectedValueOnce(new ApiError(500, "request failed (500)"));
     const onSessionsEnded = vi.fn();
@@ -311,15 +305,15 @@ describe("NEW-3/F.4: change password", () => {
     await typeInto(root, "New password", "intended-new-2!Strong");
     await typeInto(root, "Repeat new password", "intended-new-2!Strong");
     await press(root, "Change password");
-    await flush(18);
-    // Two 500s then success: three credential PUTs, ONE wrap-key PUT.
-    expect(mockedApi.rotateCredential).toHaveBeenCalledTimes(3);
-    expect(mockedApi.rotateWrapKey).toHaveBeenCalledTimes(1);
+    await vi.waitFor(async () => { await flush(); expect(onSessionsEnded).toHaveBeenCalledTimes(1); });
+    // Two 500s then success: three identical atomic password requests.
+    expect(mockedApi.changePasswordAtomic).toHaveBeenCalledTimes(3);
+    expect(mockedApi.rotateWrapKey).not.toHaveBeenCalled();
     expect(onSessionsEnded).toHaveBeenCalledTimes(1);
   });
 
   it("retries network failures up to three times, then surfaces the interrupted-change window", async () => {
-    mockedApi.rotateCredential.mockRejectedValue(new ApiError(0, "server unreachable"));
+    mockedApi.changePasswordAtomic.mockRejectedValue(new ApiError(0, "server unreachable"));
     const onSessionsEnded = vi.fn();
     const root = await render(
       <PatientsView
@@ -336,18 +330,18 @@ describe("NEW-3/F.4: change password", () => {
     await typeInto(root, "New password", "intended-new-2!Strong");
     await typeInto(root, "Repeat new password", "intended-new-2!Strong");
     await press(root, "Change password");
-    await flush(20);
+    await vi.waitFor(async () => { await flush(); expect(textOf(root)).toContain("server unreachable"); expect(buttonByLabel(root,"Change password")).toBe(true); });
     // One initial attempt plus the three permitted retries.
-    expect(mockedApi.rotateCredential).toHaveBeenCalledTimes(4);
-    expect(mockedApi.rotateWrapKey).toHaveBeenCalledTimes(1);
+    expect(mockedApi.changePasswordAtomic).toHaveBeenCalledTimes(4);
+    expect(mockedApi.rotateWrapKey).not.toHaveBeenCalled();
     expect(onSessionsEnded).not.toHaveBeenCalled();
     const text = textOf(root);
-    expect(text).toContain("Recover it with");
-    expect(text).toContain("BEFORE leaving this page");
+    expect(text).toContain("server unreachable");
+    expect(mockedApi.changePasswordAtomic.mock.calls.every(call => call[0] === mockedApi.changePasswordAtomic.mock.calls[0]![0])).toBe(true);
   });
 
   it("a wrong-current-password 403 stops at the wrap-key PUT: no credential PUT, no sign-out, no retries", async () => {
-    mockedApi.rotateWrapKey.mockRejectedValueOnce(new ApiError(403, "invalid credentials"));
+    mockedApi.changePasswordAtomic.mockRejectedValueOnce(new ApiError(403, "invalid credentials"));
     const onSessionsEnded = vi.fn();
     const root = await render(
       <PatientsView
@@ -364,9 +358,8 @@ describe("NEW-3/F.4: change password", () => {
     await typeInto(root, "New password", "intended-new-2!Strong");
     await typeInto(root, "Repeat new password", "intended-new-2!Strong");
     await press(root, "Change password");
-    await flush(14);
-    expect(mockedApi.rotateCredential).not.toHaveBeenCalled();
-    expect(mockedApi.rotateCredential.mock.calls).toHaveLength(0);
+    await vi.waitFor(async () => { await flush(); expect(textOf(root)).toContain("invalid credentials"); expect(buttonByLabel(root,"Change password")).toBe(true); });
+    expect(mockedApi.changePasswordAtomic).toHaveBeenCalledTimes(1);
     expect(onSessionsEnded).not.toHaveBeenCalled();
     expect(textOf(root)).toContain("invalid credentials");
     // The failure was BEFORE the re-wrap, so no interrupted-change state:
@@ -397,8 +390,8 @@ describe("NEW-3/F.4: change password", () => {
     await press(root, "Change password");
     await flush(14);
     expect(mockedApi.rotateWrapKey).not.toHaveBeenCalled();
-    expect(mockedApi.rotateCredential).not.toHaveBeenCalled();
-    expect(textOf(root)).toContain("did not unlock your stored sharing key");
+    expect(mockedApi.changePasswordAtomic).not.toHaveBeenCalled();
+    expect(textOf(root)).toContain("did not unlock your sharing identity");
   });
 
   it("enforces the registration password policy before deriving anything", async () => {
@@ -436,19 +429,9 @@ describe("NEW-3/F.4: recover sharing key (interrupted-change window)", () => {
   /** Drive a change whose credential PUT always fails, leaving the
    *  interrupted salt retained, then run the recovery form. */
   const runInterruptedThenRecover = async () => {
-    mockedApi.rotateCredential.mockRejectedValue(new ApiError(0, "server unreachable"));
-    const root = await render(
-      <PatientsView displayName="Dr. Portal" session={session} onOpen={vi.fn()} onSignOut={vi.fn()} />,
-    );
-    await flush();
-    await openSecurityPanel(root);
-    await typeInto(root, "Current password", "current-pass-1!Strong");
-    await typeInto(root, "New password", "intended-new-2!Strong");
-    await typeInto(root, "Repeat new password", "intended-new-2!Strong");
-    await press(root, "Change password");
-    await flush(20);
-    // The window is armed: the wrap-key PUT landed, the credential did not.
-    expect(mockedApi.rotateWrapKey).toHaveBeenCalledTimes(1);
+    window.sessionStorage.setItem("mindpattern.interruptedRotateSalt.therapist-1", "BwcHBwcHBwcHBwcHBwcHBw==");
+    const root = await render(<PatientsView displayName="Dr. Portal" session={session} onOpen={vi.fn()} onSignOut={vi.fn()} />);
+    await flush(); await openSecurityPanel(root);
     // The stored blob is now the one sealed under the intended-new KEK.
     mockedApi.me.mockResolvedValueOnce({
       username: "drportal",
@@ -456,10 +439,11 @@ describe("NEW-3/F.4: recover sharing key (interrupted-change window)", () => {
       wrap_pub_key: "P".repeat(124),
       wrap_key_blob: "BLOB-SEALED-NEW",
     });
+    mockedApi.me.mockResolvedValueOnce({username:"drportal",display_name:"Dr. Portal",wrap_pub_key:"P".repeat(124),wrap_key_blob:"BLOB-SEALED-NEW",notes_keyring_blob:"SEALED-NOTES-CUSTODY",custody_version:1});
     await typeInto(root, "the one you sign in with", "current-pass-1!Strong");
     await typeInto(root, "The password you were changing to", "intended-new-2!Strong");
     await press(root, "Recover sharing key");
-    await flush(14);
+    await vi.waitFor(async () => { await flush(); expect(textOf(root)).toContain("sealed under your current sign-in password again"); });
     return root;
   };
 
@@ -473,13 +457,14 @@ describe("NEW-3/F.4: recover sharing key (interrupted-change window)", () => {
     expect(h.kekTags.seal[h.kekTags.seal.length - 1]).toBe(10);
     // …and the recovery PUT carried the CURRENT verifier (tag 11) with the
     // unchanged public half.
-    expect(mockedApi.rotateWrapKey).toHaveBeenCalledTimes(2);
-    expect(mockedApi.rotateWrapKey.mock.calls[1]).toEqual([
+    expect(mockedApi.rotateWrapKey).toHaveBeenCalledTimes(1);
+    expect(mockedApi.rotateWrapKey.mock.calls[0]).toEqual([
       expect.any(String),
       "P".repeat(124),
       "RESEALED-kek10-pk99-drportal",
+      1,
     ]);
-    expect(decoded(mockedApi.rotateWrapKey.mock.calls[1]![0])).toEqual({ tag: 11, length: 32 });
+    expect(decoded(mockedApi.rotateWrapKey.mock.calls[0]![0])).toEqual({ tag: 11, length: 32 });
     expect(textOf(root)).toContain("sealed under your current sign-in password again");
   });
 });
@@ -494,15 +479,17 @@ describe("NEW-3/F.4: rotate sharing key (compromise)", () => {
     await typeInto(root, "to authorize rotation", "current-pass-1!Strong");
     const rotateButton = root.root.findAllByType("button").find((n) => n.children.join("") === "Rotate sharing key")!;
     // The copy states the trade-off before the checkbox exists to agree to.
-    expect(textOf(root)).toContain("grants that never re-wrap are intentionally lost");
+    expect(textOf(root)).toContain("Existing grants are revoked");
     // Unconfirmed: the rotation stays inert.
     expect(rotateButton.props.disabled).toBe(true);
     const checkbox = root.root.findAllByType("input").find((n) => n.props.type === "checkbox")!;
     await act(async () => { checkbox.props.onChange({ target: { checked: true } }); });
     await flush();
 
+    mockedApi.me.mockResolvedValueOnce({username:"drportal",display_name:"Dr. Portal",wrap_pub_key:"P".repeat(124),wrap_key_blob:"BLOB-SEALED-CURRENT",custody_version:0});
+    mockedApi.me.mockResolvedValueOnce({username:"drportal",display_name:"Dr. Portal",wrap_pub_key:"P".repeat(124),wrap_key_blob:"BLOB-SEALED-CURRENT",notes_keyring_blob:"SEALED-NOTES-CUSTODY",custody_version:1});
     await press(root, "Rotate sharing key");
-    await flush(12);
+    await vi.waitFor(async () => { await flush(); expect(textOf(root)).toContain("Sharing identity rotated"); });
     // A fresh pair under the CURRENT wrap KEK (tag 10) — nothing from the
     // possibly-compromised old key is reused — published verbatim.
     expect(mockedCrypto.generateTherapistKeyPair).toHaveBeenCalledTimes(1);
@@ -513,11 +500,12 @@ describe("NEW-3/F.4: rotate sharing key (compromise)", () => {
       expect.any(String),
       "FRESHPUB" + "P".repeat(116),
       "FRESH-SEALED-BLOB",
+      1,
     ]);
     expect(decoded(mockedApi.rotateWrapKey.mock.calls[0]![0])).toEqual({ tag: 11, length: 32 });
     // The credential is untouched by a compromise rotation.
-    expect(mockedApi.rotateCredential).not.toHaveBeenCalled();
-    expect(textOf(root)).toContain("Sharing key rotated");
+    expect(mockedApi.changePasswordAtomic).not.toHaveBeenCalled();
+    expect(textOf(root)).toContain("Sharing identity rotated");
     // The compromise flow zeroizes its single derived key set too.
     for (const set of h.derivedKeySets) {
       expectWiped(set.wrapKek);
@@ -567,7 +555,7 @@ describe("P3 (2026-09-21): note edit history in the interactive card + printed s
     expect(mockedApi.noteRevisions).toHaveBeenCalledWith("note-9");
     // …each prior blob is decrypted with the SAME note AAD context as the
     // live note (the mock decrypts per blob)…
-    const blobs = mockedCrypto.decryptNote.mock.calls.map((c) => c[c.length - 1]);
+    const blobs = mockedCrypto.decryptNote.mock.calls.map((c) => c[4]);
     expect(blobs).toContain("REV1");
     expect(blobs).toContain("REV2");
     // …the interactive card renders them in order…

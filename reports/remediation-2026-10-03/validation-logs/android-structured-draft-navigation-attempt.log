@@ -1,0 +1,9 @@
+PASS native typed text and four optional details reach encrypted persistence
+PASS real process restart/unlock restores text, mood, energy, sleep, tag and 11/30 progress
+Traceback (most recent call last):
+  File "/Users/pradeepreddy/Desktop/mental_health_application/reports/remediation-2026-10-03/android-draft-structured.py", line 123, in <module>
+    find(DRAFT)
+    ~~~~^^^^^^^
+  File "/Users/pradeepreddy/Desktop/mental_health_application/reports/remediation-2026-10-03/android-draft-structured.py", line 47, in find
+    raise AssertionError(f"Missing accessible control: {label}")
+AssertionError: Missing accessible control: Synthetic final native structured draft restart retention.

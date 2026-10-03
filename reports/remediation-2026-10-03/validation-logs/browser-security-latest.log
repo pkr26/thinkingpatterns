@@ -1,0 +1,2 @@
+{"area": "web", "full_v1_atomic_password_and_key_rotation": true, "fresh_login_readable_journal": true, "local_draft_preserved": true, "safety_plan_preserved": true, "page_errors": []}
+{"area": "portal", "atomic_password_change": true, "fresh_login_current_and_revision_readable": true, "notes_only_after_previous_grant_revocation": true, "sharing_identity_rotation_notes_preserved": true, "page_errors": []}

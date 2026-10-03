@@ -12,6 +12,9 @@ import { jsonResponse, resetTestState, stubFetch } from "./helpers/api";
 import { applyLanguagePref } from "../src/strings";
 import { flush, press, render, textOf } from "./helpers/rtr";
 
+// Preload modules in this state-machine suite; production still lazy-loads them.
+await import("../src/views/Entry");
+
 // The real LoginView is covered by tests/login.test.tsx with REAL crypto;
 // here it is replaced by a deterministic stand-in so the state machine (and
 // the fake-timer idle/bfcache paths) never wait on the PBKDF2 threadpool.
@@ -73,6 +76,8 @@ describe("App", () => {
     await press(root, "Next");
     await press(root, "Start journaling");
     await flush();
+    await act(async () => { await import("../src/views/Entry"); });
+    await flush();
     expect(textOf(root)).toContain("Today's entry");
     expect(hasSession()).toBe(true);
   });
@@ -86,6 +91,8 @@ describe("App", () => {
     await press(root, "Next");
     await press(root, "Next");
     await press(root, "Start journaling");
+    await flush();
+    await act(async () => { await import("../src/views/Entry"); });
     await flush();
     expect(textOf(root)).toContain("Today's entry");
 
@@ -109,6 +116,8 @@ describe("App", () => {
     await press(root, "Next");
     await press(root, "Start journaling");
     await flush();
+    await act(async () => { await import("../src/views/Entry"); });
+    await flush();
     expect(textOf(root)).toContain("Today's entry");
 
     // A session-expiry funnel is NOT a sign-out: the flags survive, so
@@ -128,6 +137,8 @@ describe("App", () => {
     }));
     await signIn(root);
     await flush();
+    await act(async () => { await import("../src/views/Entry"); });
+    await flush();
     expect(textOf(root)).toContain("Today's entry");
     expect(textOf(root)).not.toContain("Step 1 of 3");
   });
@@ -141,6 +152,8 @@ describe("App", () => {
     await press(root, "Next");
     await press(root, "Next");
     await press(root, "Start journaling");
+    await flush();
+    await act(async () => { await import("../src/views/Entry"); });
     await flush();
     expect(textOf(root)).toContain("Today's entry");
 
@@ -306,6 +319,8 @@ describe("App", () => {
     await press(root, "Privacy");
     expect(textOf(root)).toContain("Privacy, honestly");
     await press(root, "Back");
+    await act(async () => { await import("../src/views/Entry"); });
+    await flush();
     expect(textOf(root)).toContain("Today's entry");
   });
 
@@ -338,6 +353,8 @@ describe("App", () => {
     await press(root, "Next");
     await press(root, "Start journaling");
     await flush();
+    await act(async () => { await import("../src/views/Entry"); });
+    await flush();
     expect(textOf(root)).toContain("Today's entry");
     // The Settings seam flipped the catalog; the shell (this test mounts the
     // REAL App, not a stand-in) must follow without a reload.
@@ -345,6 +362,8 @@ describe("App", () => {
     await flush();
     expect(textOf(root)).toContain("La entrada de hoy");
     applyLanguagePref("auto");
+    await flush();
+    await act(async () => { await import("../src/views/Entry"); });
     await flush();
     expect(textOf(root)).toContain("Today's entry");
   });
@@ -386,6 +405,14 @@ describe("App", () => {
   });
 
   it("M-4 (2026-09-28): a rotation broadcast from another tab locks this tab down", async () => {
+    const channels = new Set<TestChannel>();
+    class TestChannel {
+      onmessage: ((event: {data:unknown}) => void) | null = null;
+      constructor(_name: string) { channels.add(this); }
+      postMessage(data: unknown): void { for (const channel of channels) if (channel !== this) channel.onmessage?.({data}); }
+      close(): void { channels.delete(this); }
+    }
+    vi.stubGlobal("BroadcastChannel",TestChannel);
     authStubs();
     const root = await render(<App />);
     await vi.advanceTimersByTimeAsync(50);
@@ -397,13 +424,39 @@ describe("App", () => {
     await flush();
     expect(vault.isUnlocked()).toBe(true);
     // Another tab started a password rotation and broadcast the lockdown.
-    const { broadcastTabLockdown } = await import("../src/tabLockdown");
     await act(async () => {
-      broadcastTabLockdown("rotation");
+      const otherPage = new TestChannel("mindpattern-session-lockdown");
+      otherPage.postMessage({reason:"rotation",source_id:"another-page"});
+      otherPage.close();
     });
     await flush(6);
     expect(vault.isUnlocked()).toBe(false);
     expect(hasSession()).toBe(false);
     expect(textOf(root)).toContain("Sign in");
   });
+});
+
+it("a late authenticated startup cannot resurrect a session after expiry", async () => {
+  let release!:()=>void;const pending=new Promise<void>(resolve=>{release=resolve;});
+  const strings=await import('../src/strings');const delayed=vi.spyOn(strings,'loadFullCatalogs').mockImplementation(()=>pending);
+  authStubs();const root=await render(<App/>);await vi.advanceTimersByTimeAsync(50);await signIn(root);
+  vi.stubGlobal('fetch',vi.fn(()=>jsonResponse({detail:'expired',code:'unauthorized'},{status:401})));
+  await act(async()=>{await expect(api.meta()).rejects.toThrow();});
+  await act(async()=>{release();await pending;});await flush(8);
+  expect(vault.isUnlocked()).toBe(false);expect(textOf(root)).toContain('Sign in');expect(textOf(root)).not.toContain('A journal that is yours alone');delayed.mockRestore();
+});
+
+it("a confirmed erasure failure stays visible and retries without touching another account", async () => {
+  const {setKvBackendForTests}=await import('../src/kvstore');let fail=true;
+  const records=new Map([['mindpattern.safetyPlan.erased','encrypted plan'],['mindpattern.safetyPlan.other','other plan'],['mindpattern.erase.erased',JSON.stringify({v:1,owner:'erased',remoteConfirmed:true,keys:['mindpattern.safetyPlan.erased']})]]);
+  setKvBackendForTests({getItem:async key=>records.get(key)??null,setItem:async(key,value)=>{records.set(key,value);},removeItem:async key=>{if(fail&&key==='mindpattern.safetyPlan.erased')throw new Error('storage denied');records.delete(key);},compareAndSet:async(key,before,after)=>{if((records.get(key)??null)!==before)return false;records.set(key,after);return true;},keys:async()=>[...records.keys()]});
+  const root=await render(<App/>);await flush(10);expect(textOf(root)).toContain('Unfinished local deletion');expect(records.get('mindpattern.safetyPlan.erased')).toBe('encrypted plan');
+  fail=false;await press(root,'Retry local cleanup');await flush(10);expect(records.has('mindpattern.safetyPlan.erased')).toBe(false);expect(records.get('mindpattern.safetyPlan.other')).toBe('other plan');expect(textOf(root)).not.toContain('Unfinished local deletion');
+});
+
+it("an unconfirmed deletion never erases data until an explicit local-erasure action", async () => {
+  const {setKvBackendForTests}=await import('../src/kvstore');const records=new Map([['mindpattern.safetyPlan.pending','retained plan'],['mindpattern.erase.pending',JSON.stringify({v:1,owner:'pending',remoteConfirmed:false,keys:['mindpattern.safetyPlan.pending']})]]);
+  setKvBackendForTests({getItem:async key=>records.get(key)??null,setItem:async(key,value)=>{records.set(key,value);},removeItem:async key=>{records.delete(key);},compareAndSet:async(key,before,after)=>{if((records.get(key)??null)!==before)return false;records.set(key,after);return true;},keys:async()=>[...records.keys()]});
+  const root=await render(<App/>);await flush(10);expect(records.get('mindpattern.safetyPlan.pending')).toBe('retained plan');
+  await press(root,'I confirmed deletion — remove its local records');await flush(10);expect(records.has('mindpattern.safetyPlan.pending')).toBe(false);expect(textOf(root)).not.toContain('Unfinished local deletion');
 });

@@ -20,7 +20,7 @@
  * API facts pinned against Apple's doc JSON (developer.apple.com
  * /tutorials/data/documentation/healthkit/hkstateofmind.json):
  *   - HKStateOfMind is an ObjC class (HKSample subclass), built with the
- *     class factory +stateOfMindWithDate:kind:valence:labels:associations:
+ *     class factory +stateOfMindWithDate:kind:valence:labels:associations:metadata:
  *   - kind is HKStateOfMindKind (HKStateOfMindKindMomentaryEmotion /
  *     HKStateOfMindKindDailyMood); MindPattern mirrors the daily mood
  *     check-in, so every write is a DailyMood with a discrete valence.
@@ -45,7 +45,8 @@
 // The class lives in the react-native-health pod; a forward declaration
 // is all the app target needs to attach a category to it (the pod's own
 // headers are not on the app target's search path, and do not need to be).
-@class RCTAppleHealthKit;
+#import "RCTAppleHealthKit.h"
+#import <math.h>
 
 @interface RCTAppleHealthKit (MindPatternStateOfMind)
 @end
@@ -145,7 +146,7 @@ RCT_EXPORT_METHOD(getAuthorizationStatus
 
 /**
  * Persist ONE mood check-in as an HKStateOfMind daily-mood sample:
- * { kind, valence, date } where valence is HealthKit's discrete -2..2
+ * { kind, valence, date } where valence is HealthKit's continuous -1..1
  * classification and date is an ISO-8601 local calendar day ("yyyy-MM-dd",
  * interpreted in the device's local calendar). Out-of-range valences and
  * unknown kind labels are rejected — a hostile caller must not be able to
@@ -171,8 +172,8 @@ RCT_EXPORT_METHOD(saveStateOfMind
     return;
   }
   const double valence = valenceNumber.doubleValue;
-  if (valence < -2.0 || valence > 2.0) {
-    reject(@"E_ARGUMENT", @"saveStateOfMind: valence must be within [-2, 2]", nil);
+  if (!isfinite(valence) || valence < -1.0 || valence > 1.0) {
+    reject(@"E_ARGUMENT", @"saveStateOfMind: valence must be within [-1, 1]", nil);
     return;
   }
   NSString *dateISO = sample[@"date"];
@@ -183,10 +184,11 @@ RCT_EXPORT_METHOD(saveStateOfMind
   NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
   formatter.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
   formatter.dateFormat = @"yyyy-MM-dd";
+  formatter.lenient = NO;
   // No timeZone set: the seam's contract is the LOCAL calendar day, which
   // is what a nil (device-default) zone parses.
   NSDate *date = [formatter dateFromString:dateISO];
-  if (date == nil) {
+  if (date == nil || ![[formatter stringFromDate:date] isEqualToString:dateISO]) {
     reject(@"E_ARGUMENT", @"saveStateOfMind: date must be yyyy-MM-dd", nil);
     return;
   }
@@ -209,7 +211,8 @@ RCT_EXPORT_METHOD(saveStateOfMind
                                                                 kind:HKStateOfMindKindDailyMood
                                                              valence:valence
                                                               labels:nil
-                                                        associations:nil];
+                                                        associations:nil
+                                           metadata:nil];
     [store saveObject:stateOfMind
         withCompletion:^(__unused BOOL success, NSError *_Nullable error) {
           if (error != nil) {

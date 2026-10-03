@@ -1,8 +1,8 @@
 # Fathom Mobile (React Native)
 
-The client half of the zero-knowledge contract:
+The client encryption and explicit processing contract:
 
-- **Keys are derived on-device** (`src/crypto/kdf.ts`): `master = PBKDF2-HMAC-SHA256(password, salt, 600k)`, then HKDF splits it into `auth_key` (only thing ever sent) and `data_key` (encrypts everything).
+- **Keys are derived on-device** (`src/crypto/kdf.ts`): authentication uses the fixed600k PBKDF2/HKDF contract. Legacy v1 data keys are derived; v2 accounts wrap an independent random data key using their supported envelope KDF. Requested server-side analysis temporarily receives the data key in a single-use, memory-only processing session; this is an explicit exception to encrypted-at-rest custody.
 - **Entries are encrypted before they leave the phone** (`src/crypto/envelope.ts`): AES-256-GCM, `nonce(12) ‖ ct ‖ tag(16)`, with AAD binding `(context, userId, itemId)` so the server cannot relocate blobs undetected.
 - **The vault** (`src/vault.ts`) keeps the unlocked data key in memory only; it is zeroized on sign-out.
 - **Offline-first**: entries that fail to sync are queued locally (still encrypted) and flushed on next launch (`EntryScreen.flushQueue`).
@@ -19,16 +19,14 @@ npm run verify:native-release          # native-project hardening preflight (ios
 npx stryker run                        # scheduled mutation gate
 ```
 
-The API base URL default is build-selected (`src/api/client.ts`): dev
-builds default to the device-local `http://localhost:8000`; release
-builds default to `PRODUCTION_BASE_URL` — a deliberately loud
-`https://api.mindpattern.example` placeholder that operators MUST
-replace at release-config time (a release build that cannot reach it
-fails loudly; it must never silently fall back to a dev URL). The URL is
-configurable in Settings either way, and the login screen always shows
-the resolved server. The client prepends `/api/v1` to every endpoint
-(`src/api/client.ts`); the server still answers the deprecated
-unversioned `/api` alias.
+The API base URL is build-selected (`src/api/client.ts`): debug defaults
+to device-local `http://localhost:8000`; release requires an actual HTTPS
+`MINDPATTERN_API_ORIGIN` captured by the Babel/native build configuration.
+Missing/example/insecure production addresses fail closed. The login screen
+shows the selected server and permits changing it before authentication;
+credentials and data keys are never sent to non-loopback cleartext hosts.
+Requests use `/api/v1`; the server also retains its legacy `/api` mount.
+Signing keys remain private operator inputs, not committed project assets.
 
 ## Cross-platform crypto verification
 

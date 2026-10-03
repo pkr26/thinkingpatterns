@@ -1,0 +1,11 @@
+npm notice run mindpattern-portal@1.0.0 npx
+npm notice run 'vitest' run tests/views.test.tsx tests/rotation_2026_09_22.test.tsx tests/custodyRegressions.test.tsx
+
+ RUN  v5.0.1 /Users/pradeepreddy/Desktop/mental_health_application/portal
+
+
+ Test Files  3 passed (3)
+      Tests  116 passed (116)
+   Start at  10:29:37
+   Duration  958ms (tests 66%, transform 25%, import 5%, setup 4%)
+

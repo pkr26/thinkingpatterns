@@ -1,0 +1,22 @@
+[
+  {
+    "id": "C1.server-boot",
+    "status": "BLOCKED",
+    "summary": "second-worker startup refusal signature=True; first worker remains healthy=True. A healthy surviving first worker does not establish that both workers serve."
+  },
+  {
+    "id": "C1.rate-limit-fragmentation",
+    "status": "BLOCKED",
+    "summary": "12 concurrent exports (separate connections) against the 5/min export bucket: 2 allowed, statuses=[200, 429, 503] \u2014 each worker keeps its own counter"
+  },
+  {
+    "id": "C1.quota-race",
+    "status": "BLOCKED",
+    "summary": "12 concurrent creates against a 5-entry quota: 5 created (statuses [201, 413]); second-worker refusal=True. This observes the current guarded SQLite deployment, not an unsupported unguarded PostgreSQL topology."
+  },
+  {
+    "id": "C1.keystore-fragmentation",
+    "status": "BLOCKED",
+    "summary": "one session token fed to 6 recomputes across connections: 1 key-required insight recomputes succeeded (statuses [200, 403], second-worker refusal=True). Baseline successes were not evidence of key use; this checks actual single-use consumption and does not claim cross-process memory inspection."
+  }
+]

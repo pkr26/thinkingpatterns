@@ -1,0 +1,47 @@
+[
+  {
+    "id": "G-VOICE.V-1-flag-off",
+    "status": "BLOCKED",
+    "summary": "anonymous=401 anon-toggle=401 patient=404 share-toggle=404 role-wall=403 (want 401/401/404/404/403 \u2014 auth and role run before the flag; the flag hides the feature; the M1 remediation covers the therapist route + toggle)"
+  },
+  {
+    "id": "G-VOICE.V-2-consent",
+    "status": "BLOCKED",
+    "summary": "no-consent=403/voice_consent_required consented=200 stale-fingerprint=403 (want 403/voice_consent_required, 200, 403)"
+  },
+  {
+    "id": "G-VOICE.V-4-caps",
+    "status": "BLOCKED",
+    "summary": "over-cap=413/payload_too_large duration-over-bound=422 (want 413 with a too-large code, 422 \u2014 the edge middleware fires first by construction: edge and decoded caps share one knob, the route's decoded check is the backstop if they are ever decoupled)"
+  },
+  {
+    "id": "G-VOICE.V-5-rate",
+    "status": "BLOCKED",
+    "summary": "status sequence=[200, 200, 200, 429, 429, 429] (want 429s once past the 3/h bucket \u2014 the third-party spend valve)"
+  },
+  {
+    "id": "G-VOICE.V-7-idor",
+    "status": "BLOCKED",
+    "summary": "stranger-get=404 stranger-delete=404 owner-still-reads=200 (want 404/404/200 \u2014 flat 404, no oracle)"
+  },
+  {
+    "id": "G-VOICE.V-8-therapist-gate",
+    "status": "BLOCKED",
+    "summary": "no-grant=403/consent_voice_share_required audit-before-grant=0 granted-fetch=200 audit-rows=1 (want 403/consent_voice_share_required, 0, 200, 1)"
+  },
+  {
+    "id": "G-VOICE.V-11-translation-consent",
+    "status": "BLOCKED",
+    "summary": "no-llm-consent english_text=None dispatches=0 after-grant=translated (want null/0/'translated' \u2014 a configured LLM must not receive journal text through the voice path without its own current consent)"
+  },
+  {
+    "id": "G-VOICE.V-12-retry",
+    "status": "BLOCKED",
+    "summary": "429: calls=2 result='after retry'; 400: calls=1 raised=True (want 2/'after retry' and 1/True \u2014 one bounded retry, never for client errors)"
+  },
+  {
+    "id": "G-VOICE.V-9-lazy-expiry",
+    "status": "BLOCKED",
+    "summary": "expired-fetch=410 rows-left=0 object-gone=True (want 410/0/True \u2014 a missed sweep cycle cannot extend retention)"
+  }
+]

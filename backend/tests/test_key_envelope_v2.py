@@ -418,7 +418,7 @@ async def test_credential_rotation_endpoint_refuses_v2_accounts(client: AsyncCli
     old_key, old_auth_b64 = v1.data_key, v1.auth_key_b64
     v1.derive_new_generation("pw-v1-cred-next")
     await v1.rekey(client, old_key, v1.data_key, verifier=old_auth_b64)
-    assert (await v1.rotate_credential(client, old_auth_b64, v1.salt, v1.auth_key_b64)) == 204
+    assert (await v1.rotate_credential(client, old_auth_b64, v1.salt, v1.auth_key_b64)) == 409
     await v1.login(client)
     got = await v1.get_entry(client, "v1-c1")
     assert v1.decrypt_entry(got["blob"], "v1-c1", 1)["text"] == "before rotation"
@@ -740,8 +740,8 @@ async def test_logout_kills_only_the_revoked_token(client: AsyncClient, app):
     emu2 = ClientEmulator("jtitest", "pw-jti")
     emu2.__dict__.update(emu.__dict__)
     emu2.derive_new_generation("pw-jti-next", new_salt)
-    status = await emu2.rotate_credential(client, emu.auth_key_b64, new_salt, emu2.auth_key_b64)
-    assert status == 204
+    rotated = await emu2.rekey(client, emu.data_key, emu2.data_key, verifier=emu.auth_key_b64)
+    assert rotated["credential_rotated"] is True
     after_rotate = await client.get("/api/entries", headers={"Authorization": f"Bearer {last}"})
     assert after_rotate.status_code == 401
 

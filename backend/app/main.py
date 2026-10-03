@@ -87,6 +87,47 @@ async def _release_cross_host_guard(conn: AsyncConnection | None) -> None:
         await conn.close()
 
 
+async def _guard_is_healthy(app: FastAPI) -> bool:
+    if not app.state.guard_healthy:
+        return False
+    conn = app.state.guard_connection
+    if conn is None:
+        return True
+    async with app.state.guard_check_lock:
+        if not app.state.guard_healthy:
+            return False
+        try:
+
+            async def probe():
+                result = await conn.exec_driver_sql(
+                    f"SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype='advisory' AND pid=pg_backend_pid() AND classid=0 AND objid={CROSS_HOST_ADVISORY_LOCK_ID} AND objsubid=1 AND granted)"
+                )
+                owned = result.scalar()
+                await conn.commit()
+                return owned is True
+
+            healthy = await asyncio.wait_for(probe(), timeout=2)
+        except Exception:
+            healthy = False
+        if not healthy:
+            # Ownership never gets automatically reacquired: another host may
+            # now own the database. Cancel local work and require a restart.
+            app.state.guard_healthy = False
+            app.state.key_store.destroy_all()
+            current = asyncio.current_task()
+            for task in tuple(app.state.request_tasks):
+                if task is not current:
+                    task.cancel()
+            logger.error("cross-host ownership lost; admission is closed until restart")
+        return healthy
+
+
+async def _guard_monitor(app: FastAPI) -> None:
+    while app.state.guard_healthy:
+        await asyncio.sleep(1)
+        await _guard_is_healthy(app)
+
+
 logger = logging.getLogger("mindpattern")
 
 # Kept as an alias: older code/tests reference APP_VERSION on this module.
@@ -170,9 +211,7 @@ async def _prune_access_log_once(app: FastAPI) -> None:
     # are blocking I/O — off the event loop like every other long pole in
     # the sweep (the journal is bounded only by retention, 730d default).
     journal_heads = (
-        await anyio.to_thread.run_sync(read_journal_heads, journal_path)
-        if journal_path
-        else None
+        await anyio.to_thread.run_sync(read_journal_heads, journal_path) if journal_path else None
     )
     async with app.state.sessionmaker() as session:
         user_ids = (
@@ -262,17 +301,20 @@ async def _audio_retention_sweep(app: FastAPI) -> None:
     retention even while the sweeper is behind). No-ops cheaply when the
     feature or store is unconfigured.
     """
-    from .services.audio_store import get_audio_store_cached, sweep_expired_audio
+    from .services.audio_store import (
+        get_audio_store_cached,
+        sweep_expired_audio,
+        drain_audio_deletions,
+    )
 
     while True:
         settings = app.state.settings
         await asyncio.sleep(settings.audio_sweep_interval_seconds)
         try:
-            if not getattr(settings, "audio_enabled", False):
-                continue
             store = get_audio_store_cached(settings)
             async with app.state.sessionmaker() as session:
-                swept = await sweep_expired_audio(session, store)
+                swept = await sweep_expired_audio(session, store, settings)
+                await drain_audio_deletions(session, settings)
             if swept:
                 logger.info("audio retention sweep removed %d expired attachment(s)", swept)
         except asyncio.CancelledError:
@@ -379,6 +421,11 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
             # Cross-host guard (2026-09-17): the flock above is per-host;
             # on Postgres a session advisory lock closes the multi-HOST hole.
             boot_guard_conn = await _acquire_cross_host_guard(app.state.engine)
+            app.state.guard_connection = boot_guard_conn
+            app.state.guard_healthy = True
+            guard_task = (
+                asyncio.create_task(_guard_monitor(app)) if boot_guard_conn is not None else None
+            )
             sweep_task: asyncio.Task | None = None
             key_sweep_task: asyncio.Task | None = None
             audio_sweep_task: asyncio.Task | None = None
@@ -429,6 +476,9 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
                 app.state.audio_sweep_task = audio_sweep_task
                 yield
             finally:
+                if guard_task is not None:
+                    guard_task.cancel()
+                    await asyncio.gather(guard_task, return_exceptions=True)
                 if sweep_task is not None:
                     sweep_task.cancel()
                     await asyncio.gather(sweep_task, return_exceptions=True)
@@ -458,6 +508,10 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
         redoc_url="/redoc" if is_development else None,
         openapi_url="/openapi.json" if is_development else None,
     )
+    app.state.guard_healthy = True
+    app.state.guard_connection = None
+    app.state.guard_check_lock = asyncio.Lock()
+    app.state.request_tasks = set()
     app.state.settings = settings
     app.state.engine = build_engine(
         settings.database_url,
@@ -658,6 +712,10 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
         ],
     )
     async def readyz(request: Request):
+        if not await _guard_is_healthy(app):
+            return JSONResponse(
+                status_code=503, content=_error_envelope(503, "instance ownership unavailable")
+            )
         try:
             async with request.app.state.sessionmaker() as session:
                 await session.execute(text("SELECT 1"))
@@ -694,6 +752,9 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
     app.add_middleware(
         HardeningMiddleware,
         max_body_bytes=settings.max_body_bytes,
+        body_buffer_concurrency=settings.body_buffer_concurrency,
+        guard_check=lambda: _guard_is_healthy(app),
+        request_tasks=app.state.request_tasks,
         body_read_timeout_seconds=settings.body_read_timeout_seconds,
         trust_proxy_headers=settings.trust_proxy_headers,
         trusted_proxy_ips=settings.trusted_proxy_ips,

@@ -30,6 +30,9 @@ export function passwordPolicyError(password: string): string {
   if (password.length < 16 && classes < 3) {
     return "Use a 16-character passphrase, or 12+ characters from at least three character types.";
   }
+  if (/^(.)\1+$/u.test(password) || /^(?:password|123456|qwerty|letmein|welcome|mindpattern|fathom|journal|admin|changeme)/i.test(password) || /password/i.test(password)) {
+    return "Choose a less common password; avoid repeated characters and common password words.";
+  }
   return "";
 }
 

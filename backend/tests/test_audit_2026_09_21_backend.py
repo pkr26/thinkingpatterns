@@ -240,6 +240,7 @@ async def test_rekey_blob_updates_are_batched_not_per_row(client, app):
                 "X-New-Processing-Token": new_token,
                 "X-Account-Verifier": emu.auth_key_b64,
             },
+            json=emu.rekey_payload(),
         )
     finally:
         app.state.sessionmaker = real_sessionmaker

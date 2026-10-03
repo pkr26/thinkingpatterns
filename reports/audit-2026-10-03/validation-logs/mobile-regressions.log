@@ -1,0 +1,11 @@
+npm notice run mindpattern-mobile@1.0.0 npx
+npm notice run 'vitest' run --config /tmp/mobile-audit.vitest.config.mjs
+
+ RUN  v4.1.11 /Users/pradeepreddy/Desktop/mental_health_application/mobile
+
+
+ Test Files  1 passed (1)
+      Tests  5 passed (5)
+   Start at  06:28:47
+   Duration  384ms (transform 223ms, setup 50ms, import 23ms, tests 252ms, environment 0ms)
+

@@ -1,7 +1,8 @@
 /**
  * Crypto backend seam.
  *
- * The app runs on react-native-quick-crypto. Tools and tests run under
+ * Metro selects engine.native.ts, which statically imports the linked
+ * react-native-quick-crypto backend and never falls back. Tools run under
  * Node, where quick-crypto cannot resolve — there the identical API surface
  * of node:crypto backs the same modules. This is what lets the vector
  * verifier and vitest suite execute the REAL shipping crypto code instead

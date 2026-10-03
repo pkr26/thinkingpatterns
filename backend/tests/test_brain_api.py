@@ -253,7 +253,7 @@ async def test_malformed_entry_during_amnesia_retry_is_a_400(client):
     assert response.json()["code"] == "entry_payload_malformed"
 
 
-async def test_llm_enrichment_narrates_findings_and_drops_minted_ones(
+async def test_unvalidated_provider_narration_is_not_dispatched_or_stored(
     client, settings, monkeypatch
 ):
     # 2026-09-17 inversion: the model receives the brain's findings and may
@@ -307,20 +307,17 @@ async def test_llm_enrichment_narrates_findings_and_drops_minted_ones(
     # only on the second observation, so the model's SECOND call receives
     # non-empty findings to narrate. The FIRST pass surfaces no
     first = await emu.recompute(client)
-    assert first["analyzer"] == "llm"
+    assert first["analyzer"] == "brain"
     await seed_extra_day(client, emu)
     body = await emu.recompute(client)
-    assert body["analyzer"] == "llm"
-    assert posted, "the consented LLM path must actually run"
+    assert body["analyzer"] == "brain"
+    assert posted == [], "journal plaintext must not leave for unvalidated narration"
 
     insights = await emu.decrypt_insights(client)
     patterns = insights["stats"]["patterns"]
     labels = [p["label"] for p in patterns]
     assert "never wrote this at all" not in labels
-    assert any(
-        p.get("detail", {}).get("narrative") == "One steady shape in your weeks, in your own words."
-        for p in patterns
-    ), labels
+    assert all("narrative" not in p.get("detail", {}) for p in patterns)
 
 
 async def seed_extra_day(client, emu):

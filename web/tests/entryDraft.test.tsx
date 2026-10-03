@@ -112,21 +112,21 @@ describe("entryDraft custody (module)", () => {
     expect(await loadActiveDraft(DATA_KEY, USER)).toBeNull();
   });
 
-  it("a wrong key (rotation / account switch) or tampered bytes read as absent — never an error", async () => {
+  it("a wrong key or tampered bytes produce an explicit unreadable record without deleting ciphertext", async () => {
     await saveActiveDraft(DATA_KEY, USER, DRAFT);
-    expect(await loadActiveDraft(OTHER_KEY, USER)).toBeNull();
+    await expect(loadActiveDraft(OTHER_KEY, USER)).rejects.toThrow("could not be authenticated");
     await kv.setItem(`mindpattern.draft.active.${USER}`, "!!!not-ciphertext!!!");
-    expect(await loadActiveDraft(DATA_KEY, USER)).toBeNull();
+    await expect(loadActiveDraft(DATA_KEY, USER)).rejects.toThrow("could not be authenticated");
   });
 
   it("validation rejects hostile half-written records", async () => {
     const key = `mindpattern.draft.active.${USER}`;
     await kv.setItem(key, '{"text": 42}');
-    expect(await loadActiveDraft(DATA_KEY, USER)).toBeNull();
+    await expect(loadActiveDraft(DATA_KEY, USER)).rejects.toThrow("could not be authenticated");
     await kv.setItem(key, JSON.stringify({ text: "ok", mood: "happy", energy: null, sleep: null, tags: [] }));
-    expect(await loadActiveDraft(DATA_KEY, USER)).toBeNull();
+    await expect(loadActiveDraft(DATA_KEY, USER)).rejects.toThrow("could not be authenticated");
     await kv.setItem(key, JSON.stringify({ text: "ok", mood: null, energy: null, sleep: null, tags: [7] }));
-    expect(await loadActiveDraft(DATA_KEY, USER)).toBeNull();
+    await expect(loadActiveDraft(DATA_KEY, USER)).rejects.toThrow("could not be authenticated");
   });
 
   it("rewrap re-seals under a rotation's new key (B-7 family)", async () => {

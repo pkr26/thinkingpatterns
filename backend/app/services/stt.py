@@ -370,7 +370,9 @@ async def translate_to_english(
     from .llm import LLMAnalyzer
 
     analyzer = LLMAnalyzer(settings.llm_url, settings.llm_api_key, settings.llm_model)
-    bounded = text[:MAX_TRANSLATION_INPUT_CHARS]
+    if len(text) > MAX_TRANSLATION_INPUT_CHARS:
+        return None
+    bounded = text
     payload = {
         "model": settings.llm_model,
         "max_tokens": min(4096, max(512, len(bounded) // 2 + 256)),
@@ -385,14 +387,23 @@ async def translate_to_english(
     }
     try:
         body = await asyncio.to_thread(analyzer._post, payload)
-        content = body["choices"][0]["message"]["content"]
+        choice = body["choices"][0]
+        if choice.get("finish_reason") != "stop":
+            logger.warning("transcript translation was incomplete; returning untranslated")
+            return None
+        content = choice["message"]["content"]
     except Exception as exc:  # noqa: BLE001 — translation is a degraded-mode extra
         logger.warning(
             "transcript translation failed (%s); returning untranslated",
             type(exc).__name__,
         )
         return None
-    return _clean_transcript(content)[:MAX_TRANSLATION_OUTPUT_CHARS] or None
+    if isinstance(content, str) and len(content) > MAX_TRANSLATION_OUTPUT_CHARS:
+        return None
+    cleaned = _clean_transcript(content)
+    if len(cleaned) > MAX_TRANSLATION_OUTPUT_CHARS:
+        return None
+    return cleaned or None
 
 
 def get_stt(settings: Settings) -> SpeechToText | None:

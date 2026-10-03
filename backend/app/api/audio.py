@@ -24,16 +24,16 @@ from __future__ import annotations
 import base64
 import binascii
 import logging
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, Request, Response
-from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..cache import make_rate_limiter
-from ..deps import ApiError, get_session, require_regular_user
+from ..deps import ensure_no_rekey, ApiError, get_session, require_regular_user
 from ..locks import UserLocks, lifecycle_locks
-from ..models import AudioAttachment, Entry, User, utcnow
+from ..models import AudioAttachment, AudioDeletion, Entry, User, new_id, utcnow
 from ..schemas import (
     AudioAttachmentCreate,
     AudioAttachmentCreated,
@@ -302,16 +302,12 @@ async def _owner_attachment(
     if row is None or row.user_id != user_id:
         raise ApiError(status_code=404, detail="attachment not found", code="not_found")
     if row.expires_at <= utcnow():
-        try:
-            await store.delete(row.storage_key)
-        except AudioStoreError:
-            logger.warning("lazy expiry could not delete object for %s; row kept", row.id)
-            raise ApiError(
-                status_code=410, detail="recording expired", code="audio_expired"
-            ) from None
+        audio_store_service.enqueue_audio_delete(session, row, store=store)
         await session.delete(row)
+        await audio_store_service.advance_audio_revision(session, user_id)
         await session.commit()
         raise ApiError(status_code=410, detail="recording expired", code="audio_expired")
+
     return row
 
 
@@ -378,6 +374,8 @@ async def upload_attachment(
             fresh = await session.get(User, user.id, populate_existing=True)
             if fresh is None or not fresh.is_active or fresh.token_epoch != expected_epoch:
                 raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+            await ensure_no_rekey(session, user.id)
+            _require_voice_consent(fresh, settings)
             entry_exists = await session.execute(
                 select(Entry.id).where(
                     Entry.user_id == fresh.id, Entry.client_entry_id == body.client_entry_id
@@ -412,7 +410,9 @@ async def upload_attachment(
                     )
                 ).scalar_one()
             )
-            replaced_bytes = existing.size_bytes if existing is not None else 0
+            replaced_bytes = (
+                existing.size_bytes if existing is not None and existing.expires_at > now else 0
+            )
             if live_total - replaced_bytes + len(blob) > settings.audio_max_user_bytes:
                 raise ApiError(
                     status_code=413,
@@ -420,6 +420,18 @@ async def upload_attachment(
                     code="audio_quota_exceeded",
                 )
             key = audio_store_service.new_storage_key(fresh.id)
+            locator = audio_store_service.storage_locator(store)
+            pending = AudioDeletion(
+                id=new_id(),
+                backend=store.backend,
+                storage_key=key,
+                storage_locator=locator,
+                not_before=now + timedelta(hours=1),
+            )
+            session.add(pending)
+            # A crash after object put now leaves durable cleanup evidence.
+            await session.commit()
+            tombstones = []
             try:
                 await store.put(key, blob)
             except AudioStoreError:
@@ -430,19 +442,13 @@ async def upload_attachment(
                     code="audio_storage_failed",
                 ) from None
             if existing is not None:
-                # Replace semantics: the OLD object dies before the row is
-                # repointed (an orphaned new object is the lifecycle
-                # backstop's problem; a row without its object must never
-                # happen).
-                try:
-                    await store.delete(existing.storage_key)
-                except AudioStoreError:
-                    logger.warning(
-                        "orphaned old audio object %s (replace path)", existing.storage_key
-                    )
+                tombstones.append(
+                    audio_store_service.enqueue_audio_delete(session, existing, store=store)
+                )
                 row = existing
                 row.backend = store.backend
                 row.storage_key = key
+                row.storage_locator = locator
                 row.size_bytes = len(blob)
                 row.mime_type = mime
                 row.duration_seconds = body.duration_seconds
@@ -455,6 +461,7 @@ async def upload_attachment(
                     client_entry_id=body.client_entry_id,
                     backend=store.backend,
                     storage_key=key,
+                    storage_locator=locator,
                     size_bytes=len(blob),
                     mime_type=mime,
                     duration_seconds=body.duration_seconds,
@@ -463,7 +470,12 @@ async def upload_attachment(
                     expires_at=audio_store_service.attachment_expiry(settings),
                 )
                 session.add(row)
+            await session.delete(pending)
+            await audio_store_service.advance_audio_revision(session, fresh.id)
             await session.commit()
+            await audio_store_service.drain_audio_deletions(
+                session, settings, identifiers=tombstones
+            )
     return AudioAttachmentCreated(
         attachment_id=row.id, expires_at=row.expires_at, size_bytes=row.size_bytes
     )
@@ -490,15 +502,24 @@ async def fetch_attachment(
             detail="audio storage is not configured on this server",
             code="audio_storage_unconfigured",
         )
-    row = await _owner_attachment(session, store, user.id, attachment_id)
-    try:
-        blob = await store.get(row.storage_key, max_bytes=settings.audio_max_body_bytes)
-    except AudioStoreError:
-        logger.warning("audio get failed for attachment %s", row.id)
-        raise ApiError(
-            status_code=502, detail="audio storage failed", code="audio_storage_failed"
-        ) from None
-    return _attachment_out(row, blob)
+    expected_epoch = user.token_epoch
+    async with (
+        lifecycle_locks.hold(f"llm-lifecycle:{user.id}"),
+        _audio_locks.hold(f"audio:{user.id}"),
+    ):
+        fresh = await session.get(User, user.id, populate_existing=True)
+        if fresh is None or not fresh.is_active or fresh.token_epoch != expected_epoch:
+            raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+        row = await _owner_attachment(session, store, user.id, attachment_id)
+        try:
+            store = audio_store_service.store_for_object(settings, row)
+            blob = await store.get(row.storage_key, max_bytes=settings.audio_max_body_bytes)
+        except AudioStoreError:
+            logger.warning("audio get failed for attachment %s", row.id)
+            raise ApiError(
+                status_code=502, detail="audio storage failed", code="audio_storage_failed"
+            ) from None
+        return _attachment_out(row, blob)
 
 
 @router.delete(
@@ -526,16 +547,21 @@ async def delete_attachment(
             detail="audio storage is not configured on this server",
             code="audio_storage_unconfigured",
         )
-    row = await session.get(AudioAttachment, attachment_id)
-    if row is None or row.user_id != user.id:
-        raise ApiError(status_code=404, detail="attachment not found", code="not_found")
-    try:
-        await store.delete(row.storage_key)
-    except AudioStoreError:
-        logger.warning("audio delete failed for attachment %s", row.id)
-        raise ApiError(
-            status_code=502, detail="audio storage failed", code="audio_storage_failed"
-        ) from None
-    await session.execute(sa_delete(AudioAttachment).where(AudioAttachment.id == row.id))
-    await session.commit()
+    expected_epoch = user.token_epoch
+    async with (
+        lifecycle_locks.hold(f"llm-lifecycle:{user.id}"),
+        _audio_locks.hold(f"audio:{user.id}"),
+    ):
+        fresh = await session.get(User, user.id, populate_existing=True)
+        if fresh is None or not fresh.is_active or fresh.token_epoch != expected_epoch:
+            raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+        await ensure_no_rekey(session, user.id)
+        row = await session.get(AudioAttachment, attachment_id, populate_existing=True)
+        if row is None or row.user_id != user.id:
+            raise ApiError(status_code=404, detail="attachment not found", code="not_found")
+        identifier = audio_store_service.enqueue_audio_delete(session, row, store=store)
+        await session.delete(row)
+        await audio_store_service.advance_audio_revision(session, fresh.id)
+        await session.commit()
+        await audio_store_service.drain_audio_deletions(session, settings, identifiers=[identifier])
     return Response(status_code=204)

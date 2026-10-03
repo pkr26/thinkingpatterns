@@ -22,6 +22,7 @@
  * fresh id per attempt would record the same answers twice. The record
  * clears on the first 201 or 409.
  */
+import { captureLocalWritePermit, captureOpaqueLocalWritePermit, commitLocalWrite, type LocalWritePermit } from "./localRekey";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { buildAad, decrypt, encrypt } from "./crypto/envelope";
 import { INSTRUMENTS, type MeasureId } from "./measures";
@@ -71,36 +72,36 @@ function parseRecord(raw: string | null): PendingMeasure | null {
  *  storage failure — the caller treats persistence as best-effort relative
  *  to the send, never as a reason to drop the answers. */
 export async function savePendingMeasure(dataKey: Buffer, userId: string, record: PendingMeasure): Promise<void> {
-  // Snapshot the key at call time, the moodLog idiom: the vault may lock
-  // (zeroizing the shared buffer) between this call and the serialized
-  // write below.
-  const keyCopy = Buffer.from(dataKey);
-  const blob = encrypt(
-    keyCopy,
-    Buffer.from(JSON.stringify(record), "utf8"),
-    buildAad("pending-measure", userId),
-  );
-  await AsyncStorage.setItem(key(userId), blob.toString("base64"));
+  const permit = captureLocalWritePermit(userId, dataKey);
+  const keyCopy = Buffer.from(dataKey), plain = Buffer.from(JSON.stringify(record), "utf8");
+  try {
+    const blob = encrypt(keyCopy, plain, buildAad("pending-measure", userId));
+    await commitLocalWrite(permit, () => AsyncStorage.setItem(key(userId), blob.toString("base64")));
+  } finally { keyCopy.fill(0); plain.fill(0); }
 }
 
 /** The pending record for this account, or null when absent, corrupt, or
  *  under the wrong key (account switch / rotation): disposable metadata
  *  around one questionnaire, never worth an error surface. Never throws. */
 export async function loadPendingMeasure(dataKey: Buffer, userId: string): Promise<PendingMeasure | null> {
+  const keyCopy = Buffer.from(dataKey); let plain: Buffer | null = null;
   try {
-    const keyCopy = Buffer.from(dataKey);
     const raw = await AsyncStorage.getItem(key(userId));
     if (!raw) return null;
-    const plain = decrypt(keyCopy, Buffer.from(raw, "base64"), buildAad("pending-measure", userId));
+    plain = decrypt(keyCopy, Buffer.from(raw, "base64"), buildAad("pending-measure", userId));
     return parseRecord(plain.toString("utf8"));
-  } catch {
-    return null;
-  }
+  } catch { return null; }
+  finally { keyCopy.fill(0); plain?.fill(0); }
 }
 
 /** The send landed (201) or was already recorded (409): the record must
  *  not outlive its questionnaire. Throws on storage failure — the caller
  *  catches; a surviving record only costs one idempotent retry next mount. */
-export async function clearPendingMeasure(userId: string): Promise<void> {
+export async function clearPendingMeasure(userId: string, source?: LocalWritePermit): Promise<void> {
+  const permit = captureOpaqueLocalWritePermit(userId, source);
+  await commitLocalWrite(permit, () => AsyncStorage.removeItem(key(userId)));
+}
+/** Explicit authorized account-erasure cleanup; the lifecycle is retired first. */
+export async function erasePendingMeasure(userId: string): Promise<void> {
   await AsyncStorage.removeItem(key(userId));
 }

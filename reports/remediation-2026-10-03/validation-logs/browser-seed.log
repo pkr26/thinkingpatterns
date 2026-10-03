@@ -1,0 +1,23 @@
+api http://127.0.0.1:8918: 200
+  audit-doc: registered (9c150b9d2d764851a24c5f3b6f64da0a)
+  audit-carol: 70 journal days seeded
+  audit-carol → audit-doc: consent granted
+  audit-carol: recompute → 6 patterns
+  audit-carol: 3 notes (1 anchored, 1 with revision history)
+  audit-dave: 70 journal days seeded
+  audit-dave → audit-doc: consent granted
+  audit-dave: recompute → 6 patterns
+  audit-eve: 10 journal days seeded
+  audit-eve → audit-doc: consent granted
+  audit-eve: baseline patient (no recompute)
+  audit-frank: 70 journal days seeded
+  audit-frank → audit-doc: consent granted
+  audit-frank: recompute → 1 patterns
+  audit-frank: consent revoked
+
+credentials:
+  therapist audit-doc / Audit-Doc-2026!x
+  patient audit-carol / audit-carol-2026 (insight, flagged PHQ-9, notes)
+  patient audit-dave / audit-dave-2026 (insight)
+  patient audit-eve / audit-eve-2026 (baseline)
+  patient audit-frank / audit-frank-2026 (revoked, notes remain)

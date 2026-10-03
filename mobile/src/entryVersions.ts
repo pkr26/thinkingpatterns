@@ -21,6 +21,7 @@
  * idiom). Deleting an entry forgets its mark so a later recreate of the
  * same id (legitimately version 1 again) does not false-alarm.
  */
+import { captureLocalWritePermit, assertLocalWritePermit, commitLocalWrite, type LocalWritePermit } from "./localRekey";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { buildAad } from "./crypto/aad";
 import { decrypt, encrypt } from "./crypto/envelope";
@@ -64,11 +65,11 @@ async function loadV2Bound(userId: string, dataKey: Buffer): Promise<Set<string>
   return bound;
 }
 
-async function persistV2Bound(userId: string, dataKey: Buffer, bound: Set<string>): Promise<void> {
+async function persistV2Bound(userId: string, dataKey: Buffer, bound: Set<string>, permit: LocalWritePermit): Promise<void> {
   const payload = Buffer.from(JSON.stringify([...bound]), "utf8");
   try {
     const blob = encrypt(dataKey, payload, buildAad("entry-v2-bound", userId));
-    await AsyncStorage.setItem(v2BoundKey(userId), blob.toString("base64"));
+    await commitLocalWrite(permit, () => AsyncStorage.setItem(v2BoundKey(userId), blob.toString("base64")));
   } finally {
     payload.fill(0);
   }
@@ -77,10 +78,14 @@ async function persistV2Bound(userId: string, dataKey: Buffer, bound: Set<string
 /** Record that this id authenticated under the v2 binding — the legacy
  *  fallback is refused for the id from now on. */
 export async function noteV2Bound(userId: string, dataKey: Buffer, clientEntryId: string): Promise<void> {
-  const bound = await loadV2Bound(userId, dataKey);
-  if (bound.has(clientEntryId)) return;
-  bound.add(clientEntryId);
-  await persistV2Bound(userId, dataKey, bound);
+  const permit = captureLocalWritePermit(userId, dataKey), copy = Buffer.from(dataKey);
+  try {
+    const bound = await loadV2Bound(userId, copy);
+    assertLocalWritePermit(permit);
+    if (bound.has(clientEntryId)) return;
+    bound.add(clientEntryId);
+    await persistV2Bound(userId, copy, bound, permit);
+  } finally { copy.fill(0); }
 }
 
 /** Whether this id has EVER authenticated under the v2 binding. */
@@ -131,10 +136,10 @@ async function loadStored(userId: string, dataKey: Buffer): Promise<Map<string, 
   return mirror;
 }
 
-async function persist(userId: string, dataKey: Buffer, mirror: Map<string, number>): Promise<void> {
+async function persist(userId: string, dataKey: Buffer, mirror: Map<string, number>, permit: LocalWritePermit): Promise<void> {
   if (mirror.size === 0) {
     try {
-      await AsyncStorage.removeItem(storageKey(userId));
+      await commitLocalWrite(permit, () => AsyncStorage.removeItem(storageKey(userId)));
     } catch {
       /* best effort */
     }
@@ -144,7 +149,7 @@ async function persist(userId: string, dataKey: Buffer, mirror: Map<string, numb
   for (const [id, version] of mirror) record[id] = version;
   const blob = encrypt(dataKey, Buffer.from(JSON.stringify(record), "utf8"), buildAad("entry-versions", userId));
   try {
-    await AsyncStorage.setItem(storageKey(userId), blob.toString("base64"));
+    await commitLocalWrite(permit, () => AsyncStorage.setItem(storageKey(userId), blob.toString("base64")));
   } catch {
     // best effort: the mirror holds for this session; next change retries.
   }
@@ -164,7 +169,10 @@ export async function observeEntryVersions(
   dataKey: Buffer,
   rows: ReadonlyArray<{ clientEntryId: string; contentVersion: number }>,
 ): Promise<VersionObservation> {
-  const mirror = await loadStored(userId, dataKey);
+  const permit = captureLocalWritePermit(userId, dataKey), copy = Buffer.from(dataKey);
+  try {
+  const mirror = await loadStored(userId, copy);
+  assertLocalWritePermit(permit);
   const rolledBack: string[] = [];
   let advanced = false;
   for (const row of rows) {
@@ -179,8 +187,9 @@ export async function observeEntryVersions(
       advanced = true;
     }
   }
-  if (advanced) await persist(userId, dataKey, mirror);
+  if (advanced) await persist(userId, copy, mirror, permit);
   return { rolledBack, advanced };
+  } finally { copy.fill(0); }
 }
 
 /** The highest version remembered for one entry (null when never seen). */
@@ -197,11 +206,16 @@ export async function knownEntryVersion(
 /** Forget one entry's mark (its row was deleted; a later recreate of the
  * same id legitimately restarts at version 1). */
 export async function forgetEntryVersion(userId: string, dataKey: Buffer, clientEntryId: string): Promise<void> {
-  const mirror = await loadStored(userId, dataKey);
-  if (mirror.delete(clientEntryId)) await persist(userId, dataKey, mirror);
+  const permit = captureLocalWritePermit(userId, dataKey), copy = Buffer.from(dataKey);
+  try {
+  const mirror = await loadStored(userId, copy);
+  assertLocalWritePermit(permit);
+  if (mirror.delete(clientEntryId)) await persist(userId, copy, mirror, permit);
   // 2026-10-01 audit M1: the mark dies with the row.
-  const bound = await loadV2Bound(userId, dataKey);
-  if (bound.delete(clientEntryId)) await persistV2Bound(userId, dataKey, bound);
+  const bound = await loadV2Bound(userId, copy);
+  assertLocalWritePermit(permit);
+  if (bound.delete(clientEntryId)) await persistV2Bound(userId, copy, bound, permit);
+  } finally { copy.fill(0); }
 }
 
 /** Forget everything for a user (sign-out / account deletion / origin
@@ -223,9 +237,13 @@ export async function forgetAllEntryVersions(userId: string): Promise<void> {
  *  re-learns from the next history load; strictness degrades, never
  *  correctness). */
 export async function rebindEntryVersions(userId: string, oldDataKey: Buffer, newDataKey: Buffer): Promise<void> {
+  const permit = captureLocalWritePermit(userId, newDataKey);
   const mirror = await loadStored(userId, oldDataKey);
+  assertLocalWritePermit(permit);
   memoryMirror.set(userId, mirror);
-  await persist(userId, newDataKey, mirror);
+  await persist(userId, newDataKey, mirror, permit);
+  const bound = await loadV2Bound(userId, oldDataKey);
+  await persistV2Bound(userId, newDataKey, bound, permit);
 }
 
 /** Test helper: drop every in-memory mirror (storage untouched). */

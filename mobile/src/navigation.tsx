@@ -18,7 +18,7 @@ import { PrivacyScreen } from "./screens/PrivacyScreen";
 import { CrisisScreen } from "./screens/CrisisScreen";
 import { SafetyPlanScreen } from "./screens/SafetyPlanScreen";
 import { takePendingOnboarding, hasSeenOnboarding, onboardingSeenCached } from "./onboarding";
-import { takePendingNotificationRoute } from "./notificationRoute";
+import { takePendingNotificationRoute, subscribeNotificationRoutes } from "./notificationRoute";
 import { api } from "./api/client";
 import { t as tr } from "./strings";
 import { MainShell, NavDestination } from "./components/BottomNav";
@@ -61,6 +61,11 @@ export type RootStackParamList = {
   SafetyPlan: undefined;
 };
 
+export const navigationRef = {
+  current: null as any,
+  isReady: (): boolean => navigationRef.current?.isReady?.() === true,
+  navigate: (screen: string): void => { navigationRef.current?.navigate(screen); },
+};
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 // Wrapped ONCE at module scope: a fresh component identity per render would
@@ -113,6 +118,8 @@ export function AppNavigator(): React.JSX.Element {
   // queued "Measures", the Measures screen is declared FIRST in the main
   // branch so it is the INITIAL screen (deep links land on their target);
   // a normal cold start queues nothing and Entry leads, as always.
+  const [routeVersion, setRouteVersion] = useState(0);
+  React.useEffect(() => subscribeNotificationRoutes(() => setRouteVersion(v => v + 1)), []);
   const [notificationScreen, setNotificationScreen] = useState<string | null>(null);
   const measuresLeads = notificationScreen === "Measures";
   const measuresScreen = (
@@ -173,6 +180,16 @@ export function AppNavigator(): React.JSX.Element {
     };
   }, [authStatus]);
 
+  React.useEffect(() => {
+    if (!inMain || showOnboarding || !onboardingResolved) return;
+    if (!navigationRef.isReady()) return;
+    const screen = takePendingNotificationRoute();
+    if (screen) {
+      setNotificationScreen(screen);
+      // Navigator itself is already mounted for a foreground/late-cold tap.
+      navigationRef.navigate(screen);
+    }
+  }, [routeVersion, inMain, showOnboarding, onboardingResolved]);
   return (
     <Stack.Navigator>
       {authStatus === "loading" ? (

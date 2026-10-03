@@ -14,7 +14,7 @@ export default defineConfig({
     setupFiles: ["tests/helpers/i18nSetup.ts"],
     coverage: {
       provider: "v8",
-      include: ["src/**"],
+      include: ["src/**/*.{ts,tsx}"],
       // A global gate keeps the suite honest without pretending every
       // platform-conditional/native seam is executable in node. The prior
       // 98%-per-file gate made `npm test` permanently red despite 1,100+
@@ -70,6 +70,10 @@ export default defineConfig({
       {
         find: /^expo-audio$/,
         replacement: fileURLToPath(new URL("./tests/helpers/expoAudioMock.ts", import.meta.url)),
+      },
+      {
+        find: /^expo-sharing$/,
+        replacement: fileURLToPath(new URL("./tests/helpers/expoSharingMock.ts", import.meta.url)),
       },
       {
         find: /^expo-file-system(\/legacy)?$/,

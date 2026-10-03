@@ -53,6 +53,7 @@ ignore_missing_imports = true
 warn_unused_configs = true
 warn_redundant_casts = true
 warn_unused_ignores = true
+check_untyped_defs = true
 strict_equality = true
 # Hard CI gate: mypy 2.3.1 checks all application modules cleanly. Keep
 # tightening annotations rather than adding broad ignores if new code trips

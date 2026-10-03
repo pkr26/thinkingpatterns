@@ -658,25 +658,25 @@ async def test_wrap_key_rotation_refuses_deactivated_accounts(client, app):
         user = await session.get(User, emu.user_id)
         assert user is not None and not user.is_active
 
-    request = Request(
-        {
-            "type": "http",
-            "headers": [],
-            "method": "PUT",
-            "path": "/api/therapist/wrap-key",
-            "app": app,
-        }
-    )
-    with pytest.raises(HTTPException) as excinfo:
-        await rotate_wrap_key(
-            body=WrapKeyRotateRequest(
-                wrap_pub_key=successor.wrap_pub_key,
-                wrap_key_blob=successor.wrap_key_blob_b64(),
-            ),
-            request=request,
-            user=user,
-            session=session,
-            x_account_verifier=emu.auth_key_b64,
+        request = Request(
+            {
+                "type": "http",
+                "headers": [],
+                "method": "PUT",
+                "path": "/api/therapist/wrap-key",
+                "app": app,
+            }
         )
+        with pytest.raises(HTTPException) as excinfo:
+            await rotate_wrap_key(
+                body=WrapKeyRotateRequest(
+                    wrap_pub_key=successor.wrap_pub_key,
+                    wrap_key_blob=successor.wrap_key_blob_b64(),
+                ),
+                request=request,
+                user=user,
+                session=session,
+                x_account_verifier=emu.auth_key_b64,
+            )
     assert excinfo.value.status_code == 404
     assert excinfo.value.detail == "account not found"

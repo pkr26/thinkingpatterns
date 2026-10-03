@@ -5,16 +5,39 @@
  * observable metadata: never a username, never plaintext content
  * (WEB_PLAN D-4/R-7).
  *
- * Degradation: where IndexedDB is unavailable or hostile (private modes,
- * node test runtime), the seam falls back to a per-process in-memory map —
- * journaling still works online; the offline queue simply does not survive
- * a reload, which is disclosed rather than crashed on.
+ * Durable writes are acknowledged only after IndexedDB commits. Unavailable
+ * storage or failed transactions throw; no volatile fallback can claim saved.
  */
+import { hkdfSha256, toBase64, zeroize, type Bytes } from "./crypto/core";
+
+export interface WritePermit { owner: string; generation: string | null; keyBound: boolean }
+export const writeGenerationKey = (owner: string): string => `mindpattern.writeGeneration.${owner}`;
+interface WriteGeneration { v: 1; nonce: string; deleted: boolean; keyTag?: string }
+function generationRecord(raw: string): WriteGeneration {
+  const row = JSON.parse(raw) as WriteGeneration;
+  if (row.v !== 1 || !/^[a-f0-9]{32}$/.test(row.nonce) || typeof row.deleted !== "boolean" || (!row.deleted && (typeof row.keyTag !== "string" || !/^[A-Za-z0-9+/]{43}=$/.test(row.keyTag)))) throw new Error("The local writing generation is unreadable; records were retained.");
+  return row;
+}
+async function keyTag(owner: string, dataKey: Bytes): Promise<string> {
+  const copy = new Uint8Array(dataKey); let tag: Bytes | null = null;
+  try { tag = await hkdfSha256(copy, new Uint8Array(32), new TextEncoder().encode(`mindpattern/local-write-generation/v1/${owner}`), 32); return toBase64(tag); }
+  finally { zeroize(copy, tag); }
+}
+function nonce(): string { return [...crypto.getRandomValues(new Uint8Array(16))].map(byte => byte.toString(16).padStart(2,"0")).join(""); }
+export async function newWriteGeneration(owner: string, dataKey: Bytes): Promise<string> {
+  return JSON.stringify({ v: 1, nonce: nonce(), deleted: false, keyTag: await keyTag(owner,dataKey) });
+}
+function permitAllowed(owner: string, raw: string | null, permit?: WritePermit): boolean {
+  if (permit && (permit.owner !== owner || permit.generation !== raw)) return false;
+  return raw === null || (!!permit && !generationRecord(raw).deleted);
+}
 
 export interface KvBackend {
   getItem(key: string): Promise<string | null>;
-  setItem(key: string, value: string): Promise<void>;
-  removeItem(key: string): Promise<void>;
+  setItem(key: string, value: string, permit?: WritePermit): Promise<void>;
+  removeItem(key: string, permit?: WritePermit): Promise<void>;
+  /** Must compare and commit in one transaction; never emulate with get/set. */
+  compareAndSet?(key: string, expected: string | null, value: string, permit?: WritePermit,stillCurrent?:()=>boolean): Promise<boolean>;
   /** 2026-09-26 audit LOW d: enumerate the backend's keys. Optional so
    *  injected test backends stay two-method compatible; a backend without
    *  it enumerates as empty. The VALUES stay behind getItem — enumeration
@@ -25,6 +48,45 @@ export interface KvBackend {
 
 const DB_NAME = "mindpattern";
 const STORE = "kv";
+const ENCRYPTED_OWNER_PREFIXES = ["mindpattern.draft.active.","mindpattern.safetyPlan.","mindpattern.moodlog.","mindpattern.feedback.","mindpattern.pendingMeasure.","mindpattern.patternMutes.v1.","mindpattern.entryVersions.","mindpattern.entryV2Bound."];
+function encryptedOwner(key:string):string|null {
+  const prefix=ENCRYPTED_OWNER_PREFIXES.find(candidate=>key.startsWith(candidate));
+  if(prefix)return key.slice(prefix.length)||null;
+  const match=/^mindpattern\/queue\.v1\.(?:items|rejected|quarantine)\.([A-Za-z0-9_-]+)$/.exec(key);
+  if(!match)return null;
+  try {const binary=atob(match[1]!.replace(/-/g,"+").replace(/_/g,"/"));const scope=new TextDecoder().decode(Uint8Array.from(binary,char=>char.charCodeAt(0)));return scope.includes("\0")?scope.slice(scope.indexOf("\0")+1)||null:null;}
+  catch{return null;}
+}
+
+function mutate(db:IDBDatabase,key:string,value:string|null,expected?:string|null,permit?:WritePermit,stillCurrent?:()=>boolean):Promise<boolean> {
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction(STORE,"readwrite"),store=tx.objectStore(STORE);let changed=false;let failure:unknown;
+    tx.oncomplete=()=>resolve(changed);tx.onerror=()=>reject(failure??tx.error);tx.onabort=()=>reject(failure??tx.error);
+    const apply=()=>{try {if(stillCurrent&&!stillCurrent())throw new Error("The authenticated unlock changed before storage committed.");if(value===null)store.delete(key);else store.put(value,key);changed=true;}catch(error){failure=error;tx.abort();}};
+    const compare=()=>{
+      if(expected===undefined){apply();return;}
+      const request=store.get(key);request.onsuccess=()=>{if((request.result===undefined?null:request.result)===expected)apply();};request.onerror=()=>{failure=request.error;};
+    };
+    const owner=encryptedOwner(key);if(!owner){compare();return;}
+    const refuse=(reason:string)=>{
+      if(value!==null){failure=new Error(reason);tx.abort();return;}
+      const erasure=store.get(`mindpattern.erase.${owner}`);erasure.onerror=()=>{failure=erasure.error;};erasure.onsuccess=()=>{
+        try {const row=JSON.parse(erasure.result);if(row.v===1&&row.owner===owner&&row.remoteConfirmed===true){apply();return;}}catch{/* retain records */}
+        failure=new Error(reason);tx.abort();
+      };
+    };
+    const generation=store.get(writeGenerationKey(owner));generation.onerror=()=>{failure=generation.error;};
+    generation.onsuccess=()=>{
+      try {if(!permitAllowed(owner,generation.result===undefined?null:generation.result,permit)){refuse("This writing belongs to an earlier account-key generation; the current record was retained.");return;}}
+      catch(error){failure=error;tx.abort();return;}
+      if(expected!==undefined){compare();return;} // migration CAS still proves its generation
+      const checkpoint=store.get(`mindpattern.localRotation.${owner}`);checkpoint.onerror=()=>{failure=checkpoint.error;};checkpoint.onsuccess=()=>{
+        if(checkpoint.result===undefined){compare();return;}
+        refuse("A key migration is pending; keep this writing open and finish recovery before saving.");
+      };
+    };
+  });
+}
 
 let dbPromise: Promise<IDBDatabase | null> | null = null;
 
@@ -53,27 +115,10 @@ function openDb(): Promise<IDBDatabase | null> {
   // the seam forever: allow one re-open.
   void dbPromise.then((db) => {
     if (db) db.onclose = () => { dbPromise = null; };
+    else dbPromise = null; // a Retry must reopen after a transient failure
   });
   return dbPromise;
 }
-
-const memoryBackend: KvBackend = (() => {
-  const map = new Map<string, string>();
-  return {
-    async getItem(key) {
-      return map.get(key) ?? null;
-    },
-    async setItem(key, value) {
-      map.set(key, value);
-    },
-    async removeItem(key) {
-      map.delete(key);
-    },
-    async keys() {
-      return [...map.keys()];
-    },
-  };
-})();
 
 let overrideBackend: KvBackend | null = null;
 
@@ -91,7 +136,7 @@ export function resetKvConnectionForTests(): void {
 async function backend(): Promise<KvBackend> {
   if (overrideBackend) return overrideBackend;
   const db = await openDb();
-  if (!db) return memoryBackend;
+  if (!db) throw new StorageCommitError("Durable storage is unavailable — keep this writing open and retry when storage is available.");
   return {
     async getItem(key) {
       return new Promise((resolve, reject) => {
@@ -101,24 +146,13 @@ async function backend(): Promise<KvBackend> {
         request.onerror = () => reject(request.error);
       });
     },
-    async setItem(key, value) {
-      return new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE, "readwrite");
-        tx.objectStore(STORE).put(value, key);
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-        tx.onabort = () => reject(tx.error);
-      });
+    async setItem(key, value, permit) {
+      await mutate(db,key,value,undefined,permit);
     },
-    async removeItem(key) {
-      return new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE, "readwrite");
-        tx.objectStore(STORE).delete(key);
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-        tx.onabort = () => reject(tx.error);
-      });
+    async removeItem(key, permit) {
+      await mutate(db,key,null,undefined,permit);
     },
+    compareAndSet:(key,expected,value,permit,stillCurrent)=>mutate(db,key,value,expected,permit,stillCurrent),
     async keys() {
       return new Promise((resolve, reject) => {
         const tx = db.transaction(STORE, "readonly");
@@ -130,39 +164,87 @@ async function backend(): Promise<KvBackend> {
   };
 }
 
+export class StorageCommitError extends Error {
+  constructor(message: string, options?: ErrorOptions) { super(message, options); this.name = "StorageCommitError"; }
+}
+
+export class StorageReadError extends Error {
+  constructor(message: string, options?: ErrorOptions) { super(message,options); this.name = "StorageReadError"; }
+}
 export const kv = {
+  /** Key-bound producers capture this before crypto/network awaits. Queue
+   * metadata movers may omit the key but retain the same durable token. */
+  async captureWritePermit(owner:string,dataKey?:Bytes):Promise<WritePermit> {
+    const tag=dataKey ? await keyTag(owner,dataKey) : null;
+    const generation=await kv.getItem(writeGenerationKey(owner));
+    if(generation!==null){const row=generationRecord(generation);if(row.deleted || (tag!==null&&row.keyTag!==tag))throw new StorageCommitError("This old account key cannot save writing after migration or deletion; current records were retained.");}
+    return {owner,generation,keyBound:dataKey!==undefined};
+  },
+  /** Called only after an authenticated fresh unlock. A rotation on another
+   * device may change the valid key; adopt its generation without touching
+   * any existing ciphertext or guessing whether an unreadable draft is empty. */
+  async adoptVerifiedWriteGeneration(owner:string,dataKey:Bytes,stillCurrent:()=>boolean=()=>true):Promise<void> {
+    let tag:string|null=null;
+    for(let attempt=0;attempt<5;attempt++){
+      if(!stillCurrent())return;
+      const before=await kv.getItem(writeGenerationKey(owner));
+      if(before===null)return; // legacy devices acquire their first marker at rotation
+      tag ??= await keyTag(owner,dataKey);
+      const row=generationRecord(before);
+      if(row.deleted)throw new StorageCommitError("This account's local records were erased; old callbacks remain disabled.");
+      if(row.keyTag===tag)return;
+      const after=JSON.stringify({v:1,nonce:nonce(),deleted:false,keyTag:tag});
+      if(await kv.compareAndSetForMigration(writeGenerationKey(owner),before,after,undefined,stillCurrent))return;
+    }
+    throw new StorageCommitError("The account writing generation changed during unlock; keep local records and retry.");
+  },
   async getItem(key: string): Promise<string | null> {
     try {
       return await (await backend()).getItem(key);
-    } catch {
-      return null;
+    } catch (cause) {
+      throw new StorageReadError("Local encrypted records could not be read. Keep this view open and retry before changing stored data.",{cause});
     }
   },
-  async setItem(key: string, value: string): Promise<void> {
+  async setItem(key: string, value: string, permit?:WritePermit): Promise<void> {
     try {
-      await (await backend()).setItem(key, value);
-    } catch {
-      // Private mode / quota: fail closed, never crash the journal flow.
+      await (await backend()).setItem(key, value, permit);
+    } catch (cause) {
+      throw new StorageCommitError("Writing was not saved on this device — storage is full or unavailable. Keep it open and retry.", { cause });
     }
   },
-  async removeItem(key: string): Promise<void> {
+  async removeItem(key: string, permit?:WritePermit): Promise<void> {
     try {
-      await (await backend()).removeItem(key);
-    } catch {
-      // Removal is idempotent from the caller's perspective.
+      await (await backend()).removeItem(key, permit);
+    } catch (cause) {
+      throw new StorageCommitError("Local deletion did not finish — retry before leaving this device.", { cause });
     }
+  },
+  async compareAndSetForMigration(key:string,expected:string|null,value:string,permit?:WritePermit,stillCurrent?:()=>boolean):Promise<boolean> {
+    try {
+      const active=await backend();
+      if(!active.compareAndSet)throw new Error("Atomic storage comparison is unavailable; the migration checkpoint was retained.");
+      return await active.compareAndSet(key,expected,value,permit,stillCurrent);
+    }catch(cause){throw new StorageCommitError("Migration was not saved atomically — keep the encrypted checkpoint and retry.",{cause});}
+  },
+  async markOwnerErased(owner:string):Promise<void> {
+    for(let attempt=0;attempt<5;attempt++){
+      const before=await kv.getItem(writeGenerationKey(owner));
+      if(before!==null && generationRecord(before).deleted)return;
+      const after=JSON.stringify({v:1,nonce:nonce(),deleted:true});
+      if(await kv.compareAndSetForMigration(writeGenerationKey(owner),before,after))return;
+    }
+    throw new StorageCommitError("Account deletion could not fence pending writing; retry cleanup.");
   },
   async multiRemove(keys: string[]): Promise<void> {
     for (const key of keys) await kv.removeItem(key);
   },
-  /** Enumerate every key in the active backend ([] when the backend cannot
-   *  or does not support it — see KvBackend.keys). */
+  /** Enumeration errors must not look like an empty device. */
   async keys(): Promise<string[]> {
     try {
       const active = await backend();
       return active.keys ? await active.keys() : [];
-    } catch {
-      return [];
+    } catch (cause) {
+      throw new StorageReadError("Local encrypted records could not be enumerated. Retry before replacing or deleting stored records.", { cause });
     }
   },
 };

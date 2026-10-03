@@ -1,3 +1,4 @@
+import {localWriteScopeEpoch} from "../../src/localWriteGuard";
 /**
  * RecoveryScreen (wave 3, 2026-09-30; reworked 2026-10-01): the recovery-
  * key flow's UI contract — validation never leaves the device, the vault
@@ -60,6 +61,34 @@ async function pressRecover(root: ReactTestRenderer): Promise<void> {
 }
 
 describe("RecoveryScreen", () => {
+  it("zeroizes an abandoned returned key without adopting or navigating after unmount", async () => {
+    let release!:(value:Awaited<ReturnType<typeof recoverAccountWithKey>>)=>void;
+    const owned = Buffer.alloc(32,7);
+    vi.mocked(recoverAccountWithKey).mockImplementation(()=>new Promise(resolve=>{release=resolve;}));
+    const root=await screen();
+    await fill(root,"Username","pat"); await fill(root,"Recovery key","a2V5");
+    await fill(root,"New password (12+ characters)",STRONG); await fill(root,"Confirm new password",STRONG);
+    await pressRecover(root);
+    const proof=vi.mocked(recoverAccountWithKey).mock.calls[0]![4]!.stillCurrent!;
+    expect(proof()).toBe(true);
+    await act(async()=>root.unmount());expect(proof()).toBe(false);
+    await act(async()=>release({userId:"u-77",username:"pat",dataKey:owned,ownershipEpoch:localWriteScopeEpoch()}));
+    expect(owned.every(byte=>byte===0)).toBe(true);expect(vault.unlock).not.toHaveBeenCalled();expect(markLoggedIn).not.toHaveBeenCalled();expect(nav.navigate).not.toHaveBeenCalled();
+  });
+
+  it("retains a replacement session when a returned recovery outcome belongs to an old epoch", async () => {
+    let release!:(value:Awaited<ReturnType<typeof recoverAccountWithKey>>)=>void;
+    const owned=Buffer.alloc(32,7),epoch=localWriteScopeEpoch();
+    vi.mocked(recoverAccountWithKey).mockImplementation(()=>new Promise(resolve=>{release=resolve;}));
+    const root=await screen();
+    await fill(root,"Username","pat"); await fill(root,"Recovery key","a2V5");
+    await fill(root,"New password (12+ characters)",STRONG); await fill(root,"Confirm new password",STRONG);
+    await pressRecover(root);
+    const {changeLocalSessionOwner}=await import("../../src/localWriteGuard");changeLocalSessionOwner("other-user");
+    await act(async()=>release({userId:"u-77",username:"pat",dataKey:owned,ownershipEpoch:epoch}));
+    expect(owned.every(byte=>byte===0)).toBe(true);expect(vault.unlock).not.toHaveBeenCalled();expect(markLoggedIn).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     // Strip per-test implementations/queues, not just call records.
@@ -113,7 +142,7 @@ describe("RecoveryScreen", () => {
     vi.mocked(recoverAccountWithKey).mockResolvedValue({
       userId: "u-77",
       username: "pat",
-      dataKey: DATA_KEY,
+      dataKey: DATA_KEY, ownershipEpoch: localWriteScopeEpoch(),
     });
     const root = await screen();
     await fill(root, "Username", "pat");
@@ -125,7 +154,7 @@ describe("RecoveryScreen", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
-    expect(recoverAccountWithKey).toHaveBeenCalledWith("pat", "a2V5", STRONG);
+    expect(recoverAccountWithKey).toHaveBeenCalledWith("pat", "a2V5", STRONG, "v2", { stillCurrent: expect.any(Function) });
     expect(vault.unlock).toHaveBeenCalledTimes(1);
     const call = vi.mocked(vault.unlock).mock.calls[0]!;
     expect(call[1]).toBe("u-77");

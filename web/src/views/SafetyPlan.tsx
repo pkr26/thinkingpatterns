@@ -16,7 +16,7 @@
  * in this view opens the same static dialog.
  */
 import { useEffect, useRef, useState } from "react";
-import { EMPTY_SAFETY_PLAN, loadSafetyPlan, saveSafetyPlan, type SafetyPlan } from "../safetyPlan";
+import { EMPTY_SAFETY_PLAN, FIELD_MAX, loadSafetyPlan, saveSafetyPlan, type SafetyPlan } from "../safetyPlan";
 import { t } from "../strings";
 import { vault } from "../vault";
 import { registerSafetyPlanSource } from "../safetyPlan";
@@ -45,26 +45,34 @@ export function SafetyPlanView(props: { onCrisis: () => void }): React.JSX.Eleme
   const planRef = useRef<SafetyPlan>(plan);
   planRef.current = plan;
   const dirtyRef = useRef(false);
+  const dirtyFields = useRef(new Set<keyof SafetyPlan>());
+  const hydratedRef = useRef(false);
   useEffect(
     () =>
-      registerSafetyPlanSource(() => (dirtyRef.current ? planRef.current : null)),
+      registerSafetyPlanSource(() => (dirtyRef.current && hydratedRef.current ? planRef.current : null)),
     [],
   );
 
-  useEffect(() => {
-    const run = generation.current + 1;
-    generation.current = run;
-    void (async () => {
-      const owner = vault.ownerUserId();
-      if (!owner || !vault.isUnlocked()) return;
-      const stored = await loadSafetyPlan(vault.get().dataKey, owner);
-      if (generation.current === run && stored !== null) setPlan(stored);
-    })().catch(() => {
-      // Locked vault / dead storage: the blank editor is the honest state.
-    });
-  }, []);
+  const [hydrated,setHydrated] = useState(false);
+  const restore = async (): Promise<void> => {
+    const run = ++generation.current; const owner = vault.ownerUserId();
+    if (!owner || !vault.isUnlocked()) return;
+    setError("");
+    try {
+      const stored = await loadSafetyPlan(vault.get().dataKey,owner);
+      if (generation.current !== run) return;
+      if (stored !== null) setPlan(current => {
+        const restored = {...stored};
+        for (const field of dirtyFields.current) restored[field] = current[field];
+        return restored;
+      });
+      hydratedRef.current = true; setHydrated(true);
+    } catch (err) { if (generation.current === run) setError(err instanceof Error ? err.message : t("plan.saveFailed")); }
+  };
+  useEffect(() => { void restore(); return () => { generation.current += 1; }; },[]);
 
   const save = async (): Promise<void> => {
+    if (!hydrated) { setError(t("plan.restoreFirst")); return; }
     const owner = vault.ownerUserId();
     if (!owner || !vault.isUnlocked()) {
       setError(t("common.sessionLocked"));
@@ -73,9 +81,13 @@ export function SafetyPlanView(props: { onCrisis: () => void }): React.JSX.Eleme
     setBusy(true);
     setError("");
     try {
-      await saveSafetyPlan(vault.get().dataKey, owner, plan);
-      dirtyRef.current = false;
-      setSavedNote(t("plan.savedNote"));
+      const submitted = planRef.current;
+      await saveSafetyPlan(vault.get().dataKey, owner, submitted);
+      if (planRef.current === submitted) {
+        dirtyRef.current = false;
+        dirtyFields.current.clear();
+        setSavedNote(t("plan.savedNote"));
+      }
     } catch (err) {
       setSavedNote(null);
       setError(err instanceof Error ? err.message : t("plan.saveFailed"));
@@ -87,6 +99,7 @@ export function SafetyPlanView(props: { onCrisis: () => void }): React.JSX.Eleme
   return (
     <Card title={t("plan.title")} tone="sensitive">
       <Note tone="muted">{t("plan.intro")}</Note>
+      {!hydrated && <Button label={t("plan.retryRestore")} onPress={() => void restore()} small />}
       {FIELDS.map(({ field, labelKey, placeholderKey }) => (
         <TextArea
           key={field}
@@ -95,10 +108,12 @@ export function SafetyPlanView(props: { onCrisis: () => void }): React.JSX.Eleme
           onChange={(value) => {
             setSavedNote(null);
             dirtyRef.current = true;
+            dirtyFields.current.add(field);
             setPlan((current) => ({ ...current, [field]: value }));
           }}
           placeholder={placeholderKey ? t(placeholderKey) : undefined}
           rows={3}
+          maxLength={FIELD_MAX}
         />
       ))}
       <ErrorBanner message={error} />

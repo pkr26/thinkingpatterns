@@ -47,6 +47,9 @@ vi.mock("../../src/reauth", async (importOriginal) => {
 });
 
 vi.mock("../../src/offlineQueue", () => ({
+  prepareQueueRekey: vi.fn(async () => []),
+  pendingEntryIds: vi.fn(async () => []),
+  abortInFlightFlush: vi.fn(),
   flushQueue: vi.fn(async () => 0),
   clearQueue: vi.fn(async () => {}),
   rejectedEntryCount: vi.fn(async () => 0),
@@ -87,7 +90,8 @@ const authKey = Buffer.alloc(32, 2);
 const keys = { masterKey: Buffer.alloc(32), authKey, dataKey: Buffer.alloc(32, 3) };
 const nav = { popToTop: vi.fn(), navigate: vi.fn() };
 
-beforeEach(() => {
+beforeEach(async () => {
+  (await import("../../src/localRekey")).__resetLocalKeyLifecycleForTests();
   resetApi(api as never);
   storage.__reset();
   vi.mocked(clearQueue).mockClear();
@@ -112,7 +116,7 @@ beforeEach(() => {
   vi.mocked(Share.share).mockReset();
   vi.mocked(Share.share).mockImplementation(async () => ({}));
   vault.lock();
-  vault.unlock({ ...keys });
+  vault.unlock({ ...keys }, "user-1");
   verifyPasswordForVault.mockClear();
   verifyPasswordForVault.mockImplementation(async () => ({ ok: true as const, verifierB64: authKeyB64() }));
 });

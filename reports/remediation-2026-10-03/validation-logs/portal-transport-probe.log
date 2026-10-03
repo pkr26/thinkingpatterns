@@ -1,0 +1,44 @@
+error The Content Security Policy directive 'frame-ancestors' is ignored when delivered via a <meta> element.
+error Failed to load resource: the server responded with a status of 404 (Not Found)
+log PROBE_RESPONSE https://127.0.0.1:5196/api/v1/auth/salt 200 false
+log PROBE_RESPONSE https://127.0.0.1:5196/api/v1/auth/login 200 false
+log PROBE_RESPONSE https://127.0.0.1:5196/api/v1/therapist/me 200 false
+log PROBE_RESPONSE https://127.0.0.1:5196/api/v1/therapist/patients 200 false
+log PROBE_RESPONSE https://127.0.0.1:5196/api/v1/therapist/me 200 false
+verbose [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq)
+verbose [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq)
+verbose [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq)
+verbose [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o
+verbose [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o
+verbose [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o
+verbose [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o
+log PROBE_RESPONSE https://127.0.0.1:5196/api/v1/auth/salt 200 false
+log PROBE_RESPONSE https://127.0.0.1:5196/api/v1/therapist/me 200 false
+log PROBE_RESPONSE https://127.0.0.1:5196/api/v1/therapist/patients 200 false
+log PROBE_RESPONSE https://127.0.0.1:5196/api/v1/therapist/patients/81d4fe17dfa5477986ff8991b6b34e4a/notes?limit=100&page_bytes=2097152 200 false
+log PROBE_RESPONSE https://127.0.0.1:5196/api/v1/therapist/notes/822810e007064ef9862d8e7dc803ee12/revisions 200 false
+log PROBE_RESPONSE https://127.0.0.1:5196/api/v1/therapist/notes/11469135b6de40ada0ca66f81d7afedc/revisions 200 false
+log PROBE_RESPONSE https://127.0.0.1:5196/api/v1/therapist/patients/abeb5fd319ee4f21bbf87d6128dc7064/notes?limit=100&page_bytes=2097152 200 false
+log PROBE_RESPONSE https://127.0.0.1:5196/api/v1/therapist/patients/79da134383d243a1b1587d6e49ba0071/notes?limit=100&page_bytes=2097152 200 false
+log PROBE_RESPONSE https://127.0.0.1:5196/api/v1/therapist/notes/a2b325323dbf479fa8e1d86428945697/revisions 200 false
+log PROBE_RESPONSE https://127.0.0.1:5196/api/v1/therapist/patients/5b524262b15a43ac8f9b9118d31735fc/notes?limit=100&page_bytes=2097152 200 false
+log PROBE_RESPONSE https://127.0.0.1:5196/api/v1/therapist/notes/4f1180957e9b440a92ca77098ffa10bd/revisions 200 false
+log PROBE_RESPONSE https://127.0.0.1:5196/api/v1/therapist/notes/4fd976921d3e429eba5929cd5cc5d433/revisions 200 false
+log PROBE_RESPONSE https://127.0.0.1:5196/api/v1/therapist/notes/44fface1a33b4550894789119b2d2159/revisions 200 false
+log PROBE_RESPONSE https://127.0.0.1:5196/api/v1/therapist/notes/b86d19f73c93402a98136e3bee52eac5/revisions 200 false
+log PROBE_RESPONSE https://127.0.0.1:5196/api/v1/therapist/password 204 false
+FAILED https://127.0.0.1:5196/api/v1/therapist/password net::ERR_ABORTED
+error Failed to load resource: the server responded with a status of 401 (Unauthorized)
+log PROBE_RESPONSE https://127.0.0.1:5196/api/v1/auth/logout 401 false
+Password changed. Every session — including this one — has ended; sign in with your new password.
+Fathom · Therapist portal
+Sign in
+Username
+Password
+Show password
+
+Server: this portal's own secure origin. It cannot be changed from the sign-in screen.
+
+Sign in
+Create a therapist account instead
+How your password is protected

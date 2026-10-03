@@ -3,7 +3,7 @@
  * server meta, vault-observer wiring, active-day refresh, and the
  * sign-out wipe ordering.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
 import { AppState, Text } from "react-native";
 
@@ -16,6 +16,9 @@ vi.mock("../src/api/client", async () => {
 // is CALL the coordination/sync entry points (their internals carry their
 // own suite in offlineQueue.test.ts / reconnectFlush.test.ts).
 vi.mock("../src/offlineQueue", () => ({
+  prepareQueueRekey: vi.fn(async () => []),
+  pendingEntryIds: vi.fn(async () => []),
+  abortInFlightFlush: vi.fn(),
   abortInFlightFlush: vi.fn(),
   flushQueueOnReconnect: vi.fn(async () => {}),
 }));
@@ -47,12 +50,16 @@ vi.mock("../src/nativeFeatures", () => ({
   // non-dependency) — dropped from this mock with it.
 }));
 
-const { api, setUnauthorizedHandler } = await import("../src/api/client");
+const { api, setUnauthorizedHandler, setOriginChangeHandler } = await import("../src/api/client");
+const { changeLocalOrigin, __resetLocalKeyLifecycleForTests } = await import("../src/localWriteGuard");
 const { abortInFlightFlush, flushQueueOnReconnect } = await import("../src/offlineQueue");
 const { resetApi } = await import("./helpers/apiMock");
-const { SessionProvider, useSession, stashDraft, takeStashedDraft, hasDraft, peekDraft } = await import("../src/store");
+const { SessionProvider, useSession, stashDraft, takeStashedDraft, hasDraft, peekDraft, peekStashedJournalDraft, clearStashedJournalDraft } = await import("../src/store");
 const { vault } = await import("../src/vault");
-const { render, flush, textOf, act } = await import("./helpers/rtr");
+const { render: renderRaw, flush, textOf, act } = await import("./helpers/rtr");
+const roots: Awaited<ReturnType<typeof renderRaw>>[] = [];
+const render = async (element: React.ReactElement) => { const root = await renderRaw(element); roots.push(root); return root; };
+afterEach(async () => { await act(async () => { for (const root of roots.splice(0)) root.unmount(); }); });
 
 type Session = ReturnType<typeof useSession>;
 let session: Session;
@@ -65,6 +72,7 @@ function Probe() {
 }
 
 beforeEach(() => {
+  __resetLocalKeyLifecycleForTests();
   // Fresh default implementations per test so per-test overrides cannot leak.
   resetApi(api as never);
   vi.mocked(setUnauthorizedHandler).mockClear();
@@ -79,6 +87,48 @@ beforeEach(() => {
 });
 
 describe("SessionProvider", () => {
+  it("a late boot credential read cannot turn a newer verified login back into loggedOut", async () => {
+    let resolveBoot!: (value: boolean) => void;
+    vi.mocked(api.isLoggedIn).mockImplementationOnce(() => new Promise(resolve => { resolveBoot = resolve; }));
+    await render(<SessionProvider><Probe /></SessionProvider>); await flush();
+    await act(async () => {
+      session.markLoggedIn();
+      vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, 7) }, "user-1");
+      resolveBoot(false);
+    }); await flush();
+    expect(session.authStatus).toBe("loggedIn"); expect(session.unlocked).toBe(true);
+  });
+  it("a late saved-session boot result cannot resurrect authentication after switching the server", async () => {
+    let resolveBoot!: (value: boolean) => void;
+    vi.mocked(api.isLoggedIn).mockImplementationOnce(() => new Promise(resolve => { resolveBoot = resolve; }));
+    await render(<SessionProvider><Probe /></SessionProvider>); await flush();
+    changeLocalOrigin();
+    await act(async () => { vi.mocked(setOriginChangeHandler).mock.calls.at(-1)?.[0]?.(); resolveBoot(true); }); await flush();
+    expect(session.authStatus).toBe("loggedOut"); expect(session.unlocked).toBe(false);
+  });
+  it("locks immediately and cannot wipe a replacement login when an old logout settles after an origin switch", async () => {
+    await render(<SessionProvider><Probe /></SessionProvider>); await flush();
+    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, 7) }, "user-1");
+    stashDraft("user-1", "old private draft");
+    let release!: () => void;
+    vi.mocked(api.logout).mockImplementationOnce(async () => { await new Promise<void>(resolve => { release = resolve; }); return {} as never; });
+    let pending!: Promise<void>;
+    await act(async () => { pending = session.signOut(); }); await flush();
+    expect(release).toBeTypeOf("function"); expect(vault.isUnlocked()).toBe(false); expect(hasDraft("user-1")).toBe(false);
+    changeLocalOrigin();
+    await act(async () => { vi.mocked(setOriginChangeHandler).mock.calls.at(-1)?.[0]?.(); });
+    vi.mocked(api.getUserId).mockResolvedValue("user-2"); vi.mocked(api.getUsername).mockResolvedValue("replacement");
+    await act(async () => {
+      session.markLoggedIn();
+      vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 2), dataKey: Buffer.alloc(32, 8) }, "user-2");
+    });
+    stashDraft("user-2", "replacement private draft");
+    await act(async () => { release(); await pending; }); await flush();
+    expect(api.clearSession).not.toHaveBeenCalled(); expect(api.clearCachedSalt).not.toHaveBeenCalled();
+    expect(api.clearCachedKeyEnvelope).not.toHaveBeenCalled(); expect(disableBiometricUnlock).not.toHaveBeenCalled();
+    expect(vault.ownerUserId()).toBe("user-2"); expect(session.authStatus).toBe("loggedIn");
+    expect(peekDraft("user-2")).toBe("replacement private draft");
+  });
   it("resolves a saved session to loggedIn and a missing one to loggedOut", async () => {
     vi.mocked(api.isLoggedIn).mockResolvedValue(true);
     const first = await render(
@@ -238,6 +288,28 @@ describe("SessionProvider", () => {
       await session.refreshActiveDays();
     });
     expect(textOf(root)).toBe("loggedOut|false|12|30");
+  });
+
+  it("ignores late progress responses after a newer refresh, adopted count or sign-out", async () => {
+    const root = await render(<SessionProvider><Probe /></SessionProvider>);
+    await flush();
+    let finishOld!: (value: unknown) => void;
+    vi.mocked(api.insights).mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve; }));
+    let old!: Promise<void>;
+    await act(async () => { old = session.refreshActiveDays(); });
+    vi.mocked(api.insights).mockResolvedValueOnce({ active_days: 11 } as never);
+    await act(async () => { await session.refreshActiveDays(); finishOld({ active_days: 2 }); await old; });
+    expect(textOf(root)).toBe("loggedOut|false|11|30");
+
+    vi.mocked(api.insights).mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve; }));
+    await act(async () => { old = session.refreshActiveDays(); });
+    await act(async () => { const read = await session.beginProgressRead(); session.applyActiveDays(12, read!); finishOld({ active_days: 3 }); await old; });
+    expect(textOf(root)).toBe("loggedOut|false|12|30");
+
+    vi.mocked(api.insights).mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve; }));
+    await act(async () => { old = session.refreshActiveDays(); });
+    await act(async () => { await session.signOut(); finishOld({ active_days: 99 }); await old; });
+    expect(textOf(root)).toBe("loggedOut|false|0|30");
   });
 
   it("setUnlockDays updates the published threshold", async () => {
@@ -753,7 +825,75 @@ describe("foreground activeDays refresh (E-10, audit round 2, 2026-09-21, F-11)"
   });
 });
 
+describe("authoritative progress on boot and verified unlock", () => {
+  it("hydrates a saved bearer and refreshes again on a verified vault unlock, with no fetch on lock", async () => {
+    vi.mocked(api.isLoggedIn).mockResolvedValue(true);
+    let finish!: (value: unknown) => void;
+    vi.mocked(api.insights).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const root = await render(<SessionProvider><Probe /></SessionProvider>); await flush();
+    expect(session.activeDaysKnown).toBe(false); expect(session.activeDaysLoading).toBe(true);
+    await act(async () => { finish({ active_days: 11 }); }); await flush();
+    expect(session.activeDaysKnown).toBe(true); expect(session.activeDaysLoading).toBe(false);
+    expect(textOf(root)).toBe("loggedIn|false|11|30");
+    vi.mocked(api.insights).mockResolvedValue({ active_days: 12 } as never);
+    await act(async () => vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32), dataKey: Buffer.alloc(32) }, "user-1")); await flush();
+    expect(textOf(root)).toBe("loggedIn|true|12|30"); expect(api.insights).toHaveBeenCalledTimes(2);
+    await act(async () => vault.lock()); await flush();
+    expect(api.insights).toHaveBeenCalledTimes(2); expect(session.activeDays).toBe(12);
+  });
+  it("an offline first fetch is unknown, a valid server zero is known, and subsequent failures retain it", async () => {
+    vi.mocked(api.isLoggedIn).mockResolvedValue(true); vi.mocked(api.insights).mockRejectedValue(new Error("offline"));
+    await render(<SessionProvider><Probe /></SessionProvider>); await flush();
+    expect(session.activeDaysKnown).toBe(false); expect(session.activeDaysLoading).toBe(false);
+    vi.mocked(api.insights).mockResolvedValue({ active_days: 0 } as never);
+    await act(async () => { await session.refreshActiveDays(); });
+    expect(session.activeDays).toBe(0); expect(session.activeDaysKnown).toBe(true);
+    vi.mocked(api.insights).mockRejectedValue(new Error("offline again"));
+    await act(async () => { await session.refreshActiveDays(); }); expect(session.activeDaysKnown).toBe(true);
+  });
+  it("a new owner cannot inherit the prior owner's known count when its fetch fails", async () => {
+    vi.mocked(api.isLoggedIn).mockResolvedValue(true); vi.mocked(api.insights).mockResolvedValue({ active_days: 11 } as never);
+    await render(<SessionProvider><Probe /></SessionProvider>); await flush(); expect(session.activeDaysKnown).toBe(true);
+    vi.mocked(api.getUserId).mockResolvedValue("user-2"); vi.mocked(api.insights).mockRejectedValue(new Error("offline new owner"));
+    await act(async () => { await session.refreshActiveDays(); });
+    expect(session.activeDays).toBe(0); expect(session.activeDaysKnown).toBe(false);
+    await act(async () => { await session.signOut(); }); expect(session.activeDaysKnown).toBe(false);
+  });
+  it("an old owner read cannot reset a newer owner's successful count", async () => {
+    await render(<SessionProvider><Probe /></SessionProvider>); await flush();
+    vi.mocked(api.insights).mockResolvedValue({ active_days: 11 } as never);
+    await act(async () => { await session.refreshActiveDays(); });
+    let release!: (owner: string) => void;
+    vi.mocked(api.getUserId).mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+    let old!: Promise<void>; await act(async () => { old = session.refreshActiveDays(); });
+    vi.mocked(api.getUserId).mockResolvedValue("user-2"); vi.mocked(api.insights).mockResolvedValue({ active_days: 12 } as never);
+    await act(async () => { await session.refreshActiveDays(); release("user-1"); await old; });
+    expect(session.activeDays).toBe(12); expect(session.activeDaysKnown).toBe(true);
+  });
+  it("malformed initial metadata remains unknown and a missing owner clears a known count", async () => {
+    vi.mocked(api.isLoggedIn).mockResolvedValue(true); vi.mocked(api.insights).mockResolvedValue({ active_days: "0" } as never);
+    await render(<SessionProvider><Probe /></SessionProvider>); await flush(); expect(session.activeDaysKnown).toBe(false);
+    await act(async () => { const read = await session.beginProgressRead(); session.applyActiveDays(11, read!); }); expect(session.activeDaysKnown).toBe(true);
+    vi.mocked(api.getUserId).mockResolvedValue(null);
+    await act(async () => { await session.refreshActiveDays(); }); expect(session.activeDaysKnown).toBe(false);
+  });
+});
+
 describe("draft stash survival", () => {
+  it("preserves complete origin-bound RAM fields, clones tags, and clears only an acknowledged matching revision", () => {
+    const origin = "https://journal.example", user = "ram-fields-owner";
+    const journal = { v: 1 as const, editorId: "a".repeat(32), revision: 4, text: "unfinished", mood: 1, energy: -1, sleep: 5, tags: ["rest"] };
+    stashDraft(user, journal.text, journal, origin);
+    expect(peekStashedJournalDraft(user, "https://other.example")).toBeNull();
+    expect(takeStashedDraft(user, "https://other.example")).toBeNull();
+    const copy = peekStashedJournalDraft(user, origin)!; copy.tags.push("work");
+    expect(peekStashedJournalDraft(user, origin)?.tags).toEqual(["rest"]);
+    clearStashedJournalDraft(user, origin, journal.editorId, 3); expect(peekDraft(user)).toBe("unfinished");
+    clearStashedJournalDraft(user, origin, "b".repeat(32), 4); expect(peekDraft(user)).toBe("unfinished");
+    clearStashedJournalDraft(user, origin, journal.editorId, 4); expect(peekDraft(user)).toBeNull();
+    stashDraft(user, "question bridge"); expect(peekStashedJournalDraft(user, origin)).toBeNull();
+    expect(takeStashedDraft(user, origin)).toBe("question bridge");
+  });
   // The draft stash must survive vault.lock() — a background transition
   // unmounts the editor, and the unsent text waits for re-unlock.
   it("a stashed draft survives vault.lock() within the session", () => {

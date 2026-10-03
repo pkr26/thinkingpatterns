@@ -33,10 +33,13 @@ const {
   mirrorMoodCheckIn,
 } = await import("../src/healthkit");
 const storage = (await import("./helpers/storageMock")).default;
+const { captureLocalWritePermit, assertLocalWritePermit, changeLocalSessionOwner, __resetLocalKeyLifecycleForTests } = await import("../src/localWriteGuard");
+const { vault } = await import("../src/vault");
 
 const PREF_KEY = (userId: string) => `@mindpattern/mirror_mood_to_health_${userId}`;
 
 beforeEach(() => {
+  __resetLocalKeyLifecycleForTests();
   storage.__reset();
   requestAuthorization.mockReset();
   requestAuthorization.mockResolvedValue(true);
@@ -102,12 +105,12 @@ describe("stateOfMindKind (valence → discrete level, PURE)", () => {
 });
 
 describe("writeStateOfMind (module linked via the dynamic-import seam)", () => {
-  it("quantizes and writes the sample with HealthKit's discrete valence", async () => {
+  it("preserves continuous valence in the HealthKit sample", async () => {
     expect(await writeStateOfMind(-0.5, "2026-09-19")).toBe(true);
     expect(saveStateOfMind).toHaveBeenCalledTimes(1);
     expect(saveStateOfMind).toHaveBeenCalledWith({
       kind: "unpleasant",
-      valence: -1,
+      valence: -0.5,
       date: "2026-09-19",
     });
     // The ONLY scope ever passed asks for State of Mind WRITE — never read.
@@ -116,8 +119,8 @@ describe("writeStateOfMind (module linked via the dynamic-import seam)", () => {
 
   it("each of the five picks maps to its own discrete sample", async () => {
     const cases: Array<[number, string, number]> = [
-      [-1, "very_unpleasant", -2],
-      [1, "very_pleasant", 2],
+      [-1, "very_unpleasant", -1],
+      [1, "very_pleasant", 1],
       [0, "neutral", 0],
     ];
     for (const [valence, kind, level] of cases) {
@@ -253,6 +256,26 @@ describe("the mirrorMoodToHealth preference (reminders.ts idiom)", () => {
 });
 
 describe("mirrorMoodCheckIn (the entry save path's one call)", () => {
+  it("refuses a native save when account replacement lands during the permission await", async () => {
+    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, 7) }, "user-1");
+    const permit = captureLocalWritePermit("user-1", vault.get().dataKey);
+    const guard = () => { try { assertLocalWritePermit(permit); return vault.ownerUserId() === "user-1" && vault.isUnlocked(); } catch { return false; } };
+    await setMoodMirrorPref("user-1", true); let release!: () => void;
+    requestAuthorization.mockImplementationOnce(async () => { await new Promise<void>(resolve => { release = resolve; }); return true; });
+    const pending = mirrorMoodCheckIn("user-1", 1, "2026-09-19", guard);
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    changeLocalSessionOwner("user-2");
+    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 2), dataKey: Buffer.alloc(32, 8) }, "user-2");
+    release(); expect(await pending).toBe(false); expect(saveStateOfMind).not.toHaveBeenCalled();
+  });
+  it("rechecks the opt-in after permission and refuses a previously enabled preference that was revoked", async () => {
+    await setMoodMirrorPref("user-1", true); let release!: () => void;
+    requestAuthorization.mockImplementationOnce(async () => { await new Promise<void>(resolve => { release = resolve; }); return true; });
+    const pending = mirrorMoodCheckIn("user-1", 1, "2026-09-19");
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    await setMoodMirrorPref("user-1", false); release();
+    expect(await pending).toBe(false); expect(saveStateOfMind).not.toHaveBeenCalled();
+  });
   it("pref OFF: a quiet false, and the native write path is never touched", async () => {
     expect(await mirrorMoodCheckIn("user-1", 0.5, "2026-09-19")).toBe(false);
     expect(requestAuthorization).not.toHaveBeenCalled();
@@ -264,7 +287,7 @@ describe("mirrorMoodCheckIn (the entry save path's one call)", () => {
     expect(await mirrorMoodCheckIn("user-1", -1, "2026-09-19")).toBe(true);
     expect(saveStateOfMind).toHaveBeenCalledWith({
       kind: "very_unpleasant",
-      valence: -2,
+      valence: -1,
       date: "2026-09-19",
     });
   });

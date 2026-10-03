@@ -561,17 +561,10 @@ async def test_mb1_rotated_verifier_fails_the_fresh_row_comparison(client, app):
 
     # Rotate the credential through the real endpoint while the current
     # bearer + verifier are both valid: new salt, new verifier, epoch bump.
+    old_data_key = patient.data_key
     patient.derive_new_generation("rotated-deep-password")
-    rotated = await client.put(
-        "/api/account/credential",
-        headers=patient.headers,
-        json={
-            "verifier": old_verifier,
-            "new_salt": patient.salt_b64,
-            "new_verifier": patient.auth_key_b64,
-        },
-    )
-    assert rotated.status_code == 204, rotated.text
+    rotated = await patient.rekey(client, old_data_key, patient.data_key, verifier=old_verifier)
+    assert rotated["credential_rotated"] is True
 
     fresh_login = await client.post(
         "/api/auth/login",

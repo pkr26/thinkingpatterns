@@ -1,0 +1,57 @@
+[
+  {
+    "id": "E1.ts-dialog-bypass",
+    "status": "BLOCKED",
+    "summary": "0/120 crisis samples miss the on-device dialog tier (the pre-encryption safety net): "
+  },
+  {
+    "id": "E1.ts-suppress-bypass",
+    "status": "BLOCKED",
+    "summary": "0/120 crisis samples also miss the client-side suppress re-check used by InsightsScreen before rendering quotes"
+  },
+  {
+    "id": "E1.ts-false-positives",
+    "status": "BLOCKED",
+    "summary": "benign controls correctly silent"
+  },
+  {
+    "id": "E1.ts-python-parity",
+    "status": "BLOCKED",
+    "summary": "current client and server dialog/suppress engines agree on all 142 tested corpus samples; untested language/phrasing remains outside this finite check"
+  },
+  {
+    "id": "A2.offline-oracle",
+    "status": "FINDING",
+    "summary": "a deliberately selected weak fixture password was recovered through the local password oracle in 4 guesses (43 ms/guess at 600000 iters on ONE cpu core). This assumes code executing with access to the application's local ciphertext/proof; it is not a random-password or hardware-keystore bypass. UI backoff cannot throttle an external offline script. Password-protected envelopes and authenticated v1 ciphertext inherently allow candidate verification if the required stored metadata is disclosed; device sealing adds a separate access boundary. Strong passwords and the pinned KDF remain necessary. 'absent' also discloses local proof presence."
+  },
+  {
+    "id": "A3.device-key-colocation",
+    "status": "BLOCKED",
+    "summary": "could not recover token from store dump"
+  },
+  {
+    "id": "A4.ts-kdf-no-floor",
+    "status": "BLOCKED",
+    "summary": "deriveMasterKey now throws below MIN_ITERATIONS (100k) — the client library pins the runtime floor; only a hand-rolled bypass (library deleted) can downgrade"
+  },
+  {
+    "id": "A6.cross-platform-parity",
+    "status": "BLOCKED",
+    "summary": "16 edge-case vectors (lone surrogates, DEL, CJK, RTL, combining, quotes) byte-identical between Python and TS — the AAD contract holds under fuzz"
+  },
+  {
+    "id": "F1.draft-survives-lock",
+    "status": "INFO",
+    "summary": "The in-process editor/navigation fallback remains plaintext in the JS heap across vault locks and is wiped on sign-out. Active typed drafts now have encrypted account/server-bound persistent backups; tested storage contains no draft plaintext. Native projects now include the iOS switcher/capture shield and Android FLAG_SECURE. Neither protects a compromised application process from inspecting its JS heap."
+  },
+  {
+    "id": "F2.detail-sanitizer",
+    "status": "BLOCKED",
+    "summary": "scheme-less domains, phone digit runs and bidi/zero-width tricks are now stripped (2026-09-16 fix); spelled-out contacts (\"five five five\") remain a documented low-risk residual — they cannot resolve to a dialable destination"
+  },
+  {
+    "id": "F2.http-key-shipment",
+    "status": "BLOCKED",
+    "summary": "remote plain HTTP is refused by both URL policy and the sensitive-request guard, including obsolete consent and a tampered persisted URL; no fetch occurs. Loopback development traffic is a separate permitted boundary."
+  }
+]

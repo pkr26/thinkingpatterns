@@ -1,0 +1,29 @@
+
+=== V-1: flag-off hides every voice surface (patient, therapist, toggle) ==
+AUDIT|G-VOICE.V-1-flag-off|BLOCKED|anonymous=401 anon-toggle=401 patient=404 share-toggle=404 role-wall=403 (want 401/401/404/404/403 — auth and role run before the flag; the flag hides the feature; the M1 remediation covers the therapist route + toggle)
+
+=== V-2: consent wall (none / stale fingerprint) ==========================
+AUDIT|G-VOICE.V-2-consent|BLOCKED|no-consent=403/voice_consent_required consented=200 stale-fingerprint=403 (want 403/voice_consent_required, 200, 403)
+
+=== V-4: route-scoped caps refuse oversized decoded audio / duration ======
+AUDIT|G-VOICE.V-4-caps|BLOCKED|over-cap=413/payload_too_large duration-over-bound=422 (want 413 with a too-large code, 422 — the edge middleware fires first by construction: edge and decoded caps share one knob, the route's decoded check is the backstop if they are ever decoupled)
+
+=== V-5: transcription rate bucket (limit 3, dedicated fresh app) =========
+AUDIT|G-VOICE.V-5-rate|BLOCKED|status sequence=[200, 200, 200, 429, 429, 429] (want 429s once past the 3/h bucket — the third-party spend valve)
+
+=== V-7: cross-user attachment access =====================================
+AUDIT|G-VOICE.V-7-idor|BLOCKED|stranger-get=404 stranger-delete=404 owner-still-reads=200 (want 404/404/200 — flat 404, no oracle)
+
+=== V-8: therapist voice gate (share_voice + per-fetch audit) =============
+AUDIT|G-VOICE.V-8-therapist-gate|BLOCKED|no-grant=403/consent_voice_share_required audit-before-grant=0 granted-fetch=200 audit-rows=1 (want 403/consent_voice_share_required, 0, 200, 1)
+
+=== V-11: translation dispatch requires the CURRENT llm consent (H4) ======
+AUDIT|G-VOICE.V-11-translation-consent|BLOCKED|no-llm-consent english_text=None dispatches=0 after-grant=translated (want null/0/'translated' — a configured LLM must not receive journal text through the voice path without its own current consent)
+
+=== V-12: upstream retry — exactly once on 429, never on 400 ==============
+AUDIT|G-VOICE.V-12-retry|BLOCKED|429: calls=2 result='after retry'; 400: calls=1 raised=True (want 2/'after retry' and 1/True — one bounded retry, never for client errors)
+
+=== V-9 spot: lazy expiry enforces retention on the fetch path ============
+AUDIT|G-VOICE.V-9-lazy-expiry|BLOCKED|expired-fetch=410 rows-left=0 object-gone=True (want 410/0/True — a missed sweep cycle cannot extend retention)
+
+[g_voice] 9 verdicts, 0 harness errors

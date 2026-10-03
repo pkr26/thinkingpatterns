@@ -1,0 +1,26 @@
+PASS native typed text and four optional details reach encrypted persistence
+PASS real process restart/unlock restores text, mood, energy, sleep, tag and 11/30 progress
+Traceback (most recent call last):
+  File "/Users/pradeepreddy/Desktop/mental_health_application/reports/remediation-2026-10-03/android-draft-structured.py", line 130, in <module>
+    snapshot("android-structured-draft-ack-ui.xml")
+    ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/pradeepreddy/Desktop/mental_health_application/reports/remediation-2026-10-03/android-draft-structured.py", line 84, in snapshot
+    nodes()
+    ~~~~~^^
+  File "/Users/pradeepreddy/Desktop/mental_health_application/reports/remediation-2026-10-03/android-draft-structured.py", line 25, in nodes
+    adb("shell", "uiautomator", "dump", "/sdcard/remediation-ui.xml")
+    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/pradeepreddy/Desktop/mental_health_application/reports/remediation-2026-10-03/android-draft-structured.py", line 21, in adb
+    return subprocess.check_output([str(ADB), "-s", DEVICE, *args], text=True)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/pradeepreddy/.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/subprocess.py", line 473, in check_output
+    return run(*popenargs, stdout=PIPE, timeout=timeout, check=True,
+           ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+               **kwargs).stdout
+               ^^^^^^^^^
+  File "/Users/pradeepreddy/.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/subprocess.py", line 557, in run
+    stdout, stderr = process.communicate(input, timeout=timeout)
+                     ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/pradeepreddy/.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/subprocess.py", line 1208, in communicate
+    stdout = self.stdout.read()
+KeyboardInterrupt

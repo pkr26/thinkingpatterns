@@ -17,7 +17,9 @@
  *
  * Errors never leak raw server text: ApiError maps to calm copy by status.
  */
-import React, { useState } from "react";
+import { localWriteScopeEpoch } from "../localWriteGuard";
+import { resumeLocalRekey, pendingLocalRekey } from "../localRekey";
+import React, { useRef, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -30,7 +32,7 @@ import {
   View,
 } from "react-native";
 import qcrypto from "react-native-quick-crypto"; // registers the Buffer global used below
-import { api, ApiError, getBaseUrl } from "../api/client";
+import { api, ApiError, getBaseUrl, parseServerUrl, setBaseUrl } from "../api/client";
 import { deriveKeysAsync } from "../crypto/MindPatternCrypto";
 import type { Keys } from "../crypto/MindPatternCrypto";
 import { engine } from "../crypto/engine";
@@ -117,6 +119,8 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
   // birth, no attestation record — the gate is the checkbox, once, here).
   const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
+  const mounted = useRef(true), attempt = useRef(0), submitting = useRef(false);
+  React.useEffect(() => { mounted.current = true; return () => { mounted.current = false; attempt.current++; }; }, []);
   // M-3 (2026-09-20): the first origin this device ever authenticated
   // against is pinned; a DIFFERENT selected server renders a prominent
   // warning BEFORE the password is typed — the login credential is the
@@ -124,6 +128,8 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
   // "support server" must be a visibly deliberate act.
   const [serverChanged, setServerChanged] = useState(false);
   const [serverUrl, setServerUrl] = useState("");
+  const [editingServer, setEditingServer] = useState(false);
+  const [serverDraft, setServerDraft] = useState("");
 
   React.useEffect(() => {
     void api.originPinChanged().then(setServerChanged).catch(() => setServerChanged(false));
@@ -132,7 +138,7 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
 
   const submit = async () => {
     const name = username.trim();
-    if (!name || !password || busy) return;
+    if (!name || !password || busy || submitting.current) return;
     if (mode === "register") {
       // The age gate precedes every other check: no policy alerts, no
       // network, nothing — until the 18+ declaration is made.
@@ -150,6 +156,21 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
         return;
       }
     }
+    submitting.current = true;
+    const id = ++attempt.current;
+    let epoch = localWriteScopeEpoch();
+    const ownsAttempt = () => mounted.current && attempt.current === id;
+    const current = () => ownsAttempt() && epoch === localWriteScopeEpoch();
+    const assertCurrent = () => { if (!current()) throw new ApiError(0, "This sign-in attempt ended when the account or server changed. Try again.", "stale_operation"); };
+    const wait = async <T,>(work: () => Promise<T>, discard?: (value: T) => void): Promise<T> => {
+      assertCurrent(); const value = await work();
+      if (!current()) { discard?.(value); assertCurrent(); }
+      return value;
+    };
+    const adoptSession = async (token: string, userId: string, name: string) => {
+      assertCurrent(); const pending = api.setSession(token,userId,name,{ stillCurrent: ownsAttempt });
+      epoch = localWriteScopeEpoch(); await pending; assertCurrent();
+    };
     setBusy(true);
     let derived: Keys | null = null;
     /** v2 sessions: the data key that actually overrides derived.dataKey —
@@ -165,6 +186,7 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
     // now 409 "username taken". The failure copy says the honest next
     // step: switch to sign-in with the credentials that just worked.
     let accountCreated = false;
+    let credentialsVerified = false;
     try {
       // Stryker disable next-line StringLiteral: dead initializer — both branches assign body.user_id before the only read at vault.unlock
     let verifiedUserId = "";
@@ -177,49 +199,51 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
         // call, so the vitest suite executes the real shipping path.
         const salt = Buffer.from(engine.randomBytes(16));
         // Async derivation: no 100–400ms JS-thread freeze mid-flow.
-        derived = await deriveKeysAsync(password, salt);
+        derived = await wait(() => deriveKeysAsync(password, salt), key => zeroize(key.masterKey,key.authKey,key.dataKey));
         // v2 KEY ENVELOPE (2026-09-26) — the default for every NEW account:
         // a fresh RANDOM data key, wrapped under a KEK derived from the
         // same PBKDF2 master key that produced the login verifier. A later
         // password change rewraps this envelope in O(1) instead of
         // re-encrypting the whole journal, and the password never again
         // directly derives the storage key.
-        const envelope = await buildRegistrationEnvelope(password, salt, name);
+        const envelope = await wait(() => buildRegistrationEnvelope(password, salt, name), value => zeroize(value.dataKey));
         sessionDataKey = envelope.dataKey;
-        const body = await api.register(
+        const body = await wait(() => api.register(
           name,
           salt.toString("base64"),
-          derived.authKey.toString("base64"),
+          derived!.authKey.toString("base64"),
           envelope.kdfParams,
           envelope.wrappedB64,
-        );
+        ));
         accountCreated = true;
-        await api.setSession(body.token, body.user_id, name);
+        await adoptSession(body.token, body.user_id, name);
+        credentialsVerified = true;
         // The account was created on THIS device: seal the offline-unlock
         // proof under the RANDOM data key right away.
-        await storeUnlockProof(envelope.dataKey, body.user_id);
-        await api.cacheSalt(name, salt.toString("base64"));
-        await cacheEnvelope(name, {
+        await wait(() => storeUnlockProof(envelope.dataKey, body.user_id));
+        await wait(() => api.cacheSalt(name, salt.toString("base64")));
+        await wait(() => cacheEnvelope(name, {
           scheme: "v2",
           saltB64: salt.toString("base64"),
           kdfParams: envelope.kdfParams,
           wrappedB64: envelope.wrappedB64,
-        }).catch(() => {});
+        }).catch(() => {}));
         verifiedUserId = body.user_id;
       } else {
-        const { salt: saltB64 } = await api.saltFor(name);
+        const { salt: saltB64 } = await wait(() => api.saltFor(name));
         // Cache the (public, origin-bound) salt so a later cold-restart
         // unlock can derive keys even when the network is unreachable.
-        await api.cacheSalt(name, saltB64);
-        derived = await deriveKeysAsync(password, Buffer.from(saltB64, "base64"));
-        const body = await api.login(name, derived.authKey.toString("base64"));
-        await api.setSession(body.token, body.user_id, name);
+        await wait(() => api.cacheSalt(name, saltB64));
+        derived = await wait(() => deriveKeysAsync(password, Buffer.from(saltB64, "base64")), key => zeroize(key.masterKey,key.authKey,key.dataKey));
+        const body = await wait(() => api.login(name, derived!.authKey.toString("base64")));
+        await adoptSession(body.token, body.user_id, name);
+        credentialsVerified = true;
         // KEY SCHEME (2026-09-26): v2 accounts fetch the envelope and
         // unwrap LOCALLY (the username-bound AAD means this blob opens only
         // under this account's password); v1 accounts keep the derived
         // data key, byte-for-byte as before. The sealed proof below is
         // stored under whichever key won.
-        const fetched = await fetchEnvelope();
+        const fetched = await wait(() => fetchEnvelope());
         // Re-audit 2026-09-27 (M): when the account is v2 but the envelope
         // can be NEITHER fetched ("invalid" — the server answered with a
         // shape this client refuses; "unreachable" — the endpoint failed)
@@ -240,18 +264,18 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
         // wraps the SAME data key and a silent wrong-key write under any
         // future scheme rotation. Fail closed with honest retry copy.
         const envelope: EnvelopeInfo | null =
-          fetched.status === "ok" ? fetched.envelope : await cachedEnvelope(name);
+          fetched.status === "ok" ? fetched.envelope : await wait(() => cachedEnvelope(name));
         if (fetched.status !== "ok" && fetched.status !== "legacy"
           && (envelope === null || envelope.scheme !== "v2")) {
           throw new Error(tr(fetched.status === "invalid" ? "login.envelopeUnrecognized" : "unlock.schemeUnconfirmed"));
         }
         if (envelope !== null && envelope.scheme === "v2") {
-          const unwrapped = await unwrapSessionDataKey({
+          const unwrapped = await wait(() => unwrapSessionDataKey({
             password,
             username: name,
             envelope,
-            derivedMaster: { key: derived.masterKey, saltB64, iterations: KDF_ITERATIONS },
-          });
+            derivedMaster: { key: derived!.masterKey, saltB64, iterations: KDF_ITERATIONS },
+          }), value => { if (value.ok) zeroize(value.dataKey); });
           if (!unwrapped.ok) {
             // The password was just accepted ONLINE, so a tamper failure is
             // not "wrong password" — the envelope does not belong to this
@@ -260,18 +284,18 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
             throw new Error(tr("login.envelopeFailed"));
           }
           sessionDataKey = unwrapped.dataKey;
-          await storeUnlockProof(unwrapped.dataKey, body.user_id);
-          await cacheEnvelope(name, envelope).catch(() => {});
+          await wait(() => storeUnlockProof(unwrapped.dataKey, body.user_id));
+          await wait(() => cacheEnvelope(name, envelope).catch(() => {}));
         } else {
           // Login SUCCEEDED and the scheme answer is definitive (fetched
           // v1, or a legacy 404 server): seal the proof that offline
           // unlocks will be checked against (see UnlockScreen).
-          await storeUnlockProof(derived.dataKey, body.user_id);
+          await wait(() => storeUnlockProof(derived!.dataKey, body.user_id));
           // A fetched v1 envelope is cached so the next OFFLINE unlock
           // knows the sealed-proof path is the right one without another
           // round-trip. (This branch is unreachable with a mere cached v1
           // marker after a failed fetch — the refusal above already threw.)
-          if (envelope !== null) await cacheEnvelope(name, envelope).catch(() => {});
+          if (envelope !== null) await wait(() => cacheEnvelope(name, envelope).catch(() => {}));
         }
         verifiedUserId = body.user_id;
       }
@@ -279,6 +303,10 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
       // operations (processing sessions) verify that binding. For v2 the
       // data key is the envelope's RANDOM key; the (now unused) v1 data
       // label is zeroized immediately.
+      const localOwner = await wait(() => api.getUserId());
+      if (localOwner !== verifiedUserId) throw new Error("The signed-in account changed before key adoption.");
+      await wait(() => resumeLocalRekey(verifiedUserId, sessionDataKey ?? derived!.dataKey, { credentialConfirmed: true }));
+      assertCurrent();
       if (sessionDataKey !== null && derived !== null) {
         vault.unlock(
           { masterKey: derived.masterKey, authKey: derived.authKey, dataKey: sessionDataKey },
@@ -292,7 +320,7 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
       derived = null;
       setPassword(""); // minimize the password's lifetime in memory
       setConfirm("");
-      await refreshActiveDays();
+      await wait(() => refreshActiveDays());
       // A brand-new account routes through first-run onboarding (once — see
       // src/onboarding.ts); a plain login never does.
       if (mode === "register") queueOnboarding();
@@ -300,7 +328,18 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
     } catch (err) {
       if (sessionDataKey) zeroize(sessionDataKey);
       if (derived) zeroize(derived.masterKey, derived.authKey, derived.dataKey);
+      if (!current()) return;
       vault.lock();
+      const pendingOwner = credentialsVerified ? await api.getUserId().catch(() => null) : null;
+      if (!current()) return;
+      const pending = pendingOwner ? await pendingLocalRekey(pendingOwner).catch(() => false) : false;
+      if (!current()) return;
+      if (pending) {
+        setPassword(""); setConfirm("");
+        markLoggedIn(); // authenticated, still locked; Unlock owns continuation
+        Alert.alert(tr("settings.rotateFailedTitle"), tr("unlock.rotationPending"));
+        return;
+      }
       Alert.alert(
         mode === "register" && accountCreated
           ? tr("login.registerPartialTitle")
@@ -310,7 +349,8 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
         mode === "register" && accountCreated ? tr("login.registerPartialBody") : signInFailureCopy(err),
       );
     } finally {
-      setBusy(false);
+      if (attempt.current === id) submitting.current = false;
+      if (ownsAttempt()) setBusy(false);
     }
   };
 
@@ -338,6 +378,22 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
           {tr("login.serverLabel", { server: serverUrl })}
         </Text>
       )}
+      <GhostButton label={tr("login.changeServer")} disabled={busy} onPress={() => { setServerDraft(serverUrl); setEditingServer(!editingServer); }} />
+      {editingServer && <>
+        <TextInput value={serverDraft} onChangeText={setServerDraft} autoCorrect={false} spellCheck={false} autoCapitalize="none" accessibilityLabel={tr("login.serverA11y")} style={inputTheme(t)} />
+        <GhostButton label={tr("login.saveServer")} disabled={busy} onPress={() => {
+          void (async () => {
+            try {
+              const parsed = parseServerUrl(serverDraft);
+              if (!parsed) throw new Error(tr("settings.serverInvalid"));
+              const error = await setBaseUrl(parsed.url);
+              if (error) throw new Error(error);
+              setServerUrl(await getBaseUrl()); setServerChanged(await api.originPinChanged()); setEditingServer(false);
+              setPassword(""); setConfirm("");
+            } catch { Alert.alert(tr("settings.serverInvalidTitle"), tr("settings.serverInvalid")); }
+          })();
+        }} />
+      </>}
       {serverChanged && (
         // Audit fix 20 (2026-09-21): t.colors.error, not a hardcoded hex —
         // the literal measured 2.89:1 on the dark bg (WCAG AA failure on a

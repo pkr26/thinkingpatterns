@@ -13,6 +13,7 @@
     "test:mutation": "stryker run"
   },
   "dependencies": {
+    "qrcode": "^1.5.4",
     "react": "19.1.0",
     "react-dom": "19.1.0"
   },
@@ -20,11 +21,13 @@
     "@stryker-mutator/core": "^10.0.0",
     "@stryker-mutator/vitest-runner": "^10.0.0",
     "@types/node": "^22.20.3",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/react-test-renderer": "^19.1.0",
     "@vitejs/plugin-react": "^4.3.0",
     "@vitest/coverage-v8": "^5.0.1",
+    "fake-indexeddb": "^6.2.5",
     "jest-axe": "^11.0.0",
     "jsdom": "^30.1.1",
     "react-test-renderer": "19.1.0",

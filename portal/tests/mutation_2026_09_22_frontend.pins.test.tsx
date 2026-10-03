@@ -45,6 +45,8 @@ vi.mock("../src/api", async (importOriginal) => {
       newPairingCode: vi.fn(async () => ({ code: "7X2KQM4N", expires_in: 900 })),
       patientMeasures: vi.fn(async () => ({ measures: [], nextOffset: null })),
       rotateCredential: vi.fn(async () => null),
+      changePasswordAtomic: vi.fn(async () => null),
+      installNotesCustody: vi.fn(async () => null),
       rotateWrapKey: vi.fn(async () => null),
       totpSetup: vi.fn(async () => ({ secret_base32: "SECRET", otpauth_uri: "otpauth://x" })),
       totpEnable: vi.fn(async () => null),
@@ -85,9 +87,10 @@ vi.mock("../src/crypto", async (importOriginal) => {
     encryptNote: vi.fn(async () => ({ clientNoteId: "c", blobB64: "SEALEDNOTE==" })),
     decryptNote: decryptNoteMock,
     decryptNoteAny: vi.fn(async (...args: unknown[]) =>
-      decryptNoteMock(...(args.slice(1) as Parameters<typeof decryptNoteMock>)),
+      decryptNoteMock(...(args.slice(1,6) as Parameters<typeof decryptNoteMock>)),
     ),
     keyFingerprint: vi.fn(async () => "AABB CCDD"),
+    sealNotesKeyring: vi.fn(async () => "SEALED-NOTES-CUSTODY"),
     openSealedPrivateKey: vi.fn(async () => new Uint8Array(138)),
     sealPrivateKeyForUpload: vi.fn(async () => "SEALED=="),
   };
@@ -162,7 +165,7 @@ beforeEach(() => {
   mockedApi.deleteNote.mockReset().mockResolvedValue(null);
   mockedApi.newPairingCode.mockReset().mockResolvedValue({ code: "7X2KQM4N", expires_in: 900 });
   mockedApi.patientMeasures.mockReset().mockResolvedValue({ measures: [], nextOffset: null });
-  mockedApi.rotateCredential.mockReset().mockResolvedValue(null);
+  mockedApi.changePasswordAtomic.mockReset().mockResolvedValue(null);
   mockedApi.rotateWrapKey.mockReset().mockResolvedValue(null);
   mockedApi.totpSetup.mockReset().mockResolvedValue({ secret_base32: "SECRET", otpauth_uri: "otpauth://x" });
   mockedApi.totpEnable.mockReset().mockResolvedValue({ backup_codes: ["A2B3C4D5E6", "F7G8H9J2K3", "M4N5P6Q7R8", "S2T3U4V5W6", "X7Y8Z9A2B3", "C4D5E6F7G8", "H9J2K3M4N5", "P6Q7R8S2T3"] });
@@ -628,14 +631,14 @@ describe("mutation pins 2026-09-22: LoginView", () => {
     expect(passwordPolicyError("Aaaaaaaaaaaaaaa")).toBe("Use a 16-character passphrase, or 12+ characters from at least three character types."); // 15, 2 classes
     expect(passwordPolicyError("abcdefghijklmnop")).toBe(""); // exactly 16, passphrase lane
     expect(passwordPolicyError("aaaaaaaaaaaa")).toContain("three character types"); // one class only
-    expect(passwordPolicyError("aaaaaaaaaaaaaaaa")).toBe(""); // 16, still one class — passphrase lane
+    expect(passwordPolicyError("aaaaaaaaaaaaaaaa")).toContain("less common"); // 16, still one class — passphrase lane
   });
 
   it("the second-factor input accepts BOTH forms: 6-digit code or 10-char recovery code, trimmed, capped at ten (S-3, pentest 2026-09-26)", async () => {
     mockedAuth.login.mockRejectedValueOnce(Object.assign(new ApiError(401, "totp"), { code: "totp_required" }));
     const root = await render(<LoginView onReady={vi.fn()} />);
     await typeInto(root, "Username", "drportal");
-    await typeInto(root, "Password", "password-value-123");
+    await typeInto(root, "Password", "orchard-copper-value-123");
     await press(root, "Sign in");
     await flush();
     const { act } = await import("react");
@@ -664,7 +667,7 @@ describe("mutation pins 2026-09-22: LoginView", () => {
     await flush();
     const create = root.root.findAllByType("button").find((n) => (n.children as unknown[]).join("") === "Create account")!;
     expect(create.props.disabled).toBe(true); // no repeat-password yet
-    await typeInto(root, "Password", "password-value-123");
+    await typeInto(root, "Password", "orchard-copper-value-123");
     expect(create.props.disabled).toBe(true);
   });
 
@@ -677,7 +680,7 @@ describe("mutation pins 2026-09-22: LoginView", () => {
     });
     const root = await render(<LoginView onReady={vi.fn()} />);
     await typeInto(root, "Username", "drportal");
-    await typeInto(root, "Password", "password-value-123");
+    await typeInto(root, "Password", "orchard-copper-value-123");
     await press(root, "Sign in");
     await flush();
     await typeInto(root, "Authenticator code", "123456");
@@ -696,7 +699,7 @@ describe("mutation pins 2026-09-22: LoginView", () => {
     mockedAuth.login.mockRejectedValue(new ApiError(401, "nope"));
     const root = await render(<LoginView onReady={vi.fn()} />);
     await typeInto(root, "Username", "drportal");
-    await typeInto(root, "Password", "password-value-123");
+    await typeInto(root, "Password", "orchard-copper-value-123");
     await press(root, "Sign in");
     await flush();
     expect(keys.authKey.every((b) => b === 0)).toBe(true);
@@ -712,8 +715,8 @@ describe("mutation pins 2026-09-22: LoginView", () => {
     await flush();
     await typeInto(root, "Your name", "Dr. Pin");
     await typeInto(root, "Username", "drpin");
-    await typeInto(root, "Password", "password-value-123");
-    await typeInto(root, "Repeat password", "password-value-123");
+    await typeInto(root, "Password", "orchard-copper-value-123");
+    await typeInto(root, "Repeat password", "orchard-copper-value-123");
     await press(root, "Create account");
     await flush();
     expect(onReady).toHaveBeenCalledTimes(1);
@@ -797,7 +800,7 @@ describe("mutation pins 2026-09-22: PatientView", () => {
     expect(text).toContain("last seen");
     expect(text).toContain("mentions");
     expect(text).toContain("9");
-    expect(text).toContain("window entries");
+    expect(text).toContain("legacy sample size (unit unverified)");
     expect(text).toContain("21");
     expect(text).toContain("p (corrected)");
     expect(text).toContain("0.03");
@@ -1107,15 +1110,15 @@ describe("mutation pins 2026-09-22: PatientView", () => {
 describe("mutation pins 2026-09-22: PatientsView account security", () => {
   it("the final credential PUT retries exactly up to four attempts on persistent 5xx", async () => {
     mockedApi.rotateWrapKey.mockResolvedValue(null);
-    mockedApi.rotateCredential.mockRejectedValue(new ApiError(503, "busy"));
+    mockedApi.changePasswordAtomic.mockRejectedValue(new ApiError(503, "busy"));
     const root = await render(<PatientsView displayName="Dr." session={session} onOpen={vi.fn()} onSignOut={vi.fn()} />);
     await press(root, "Show account security");
     await typeInto(root, "Current password", "current-password-1");
-    await typeInto(root, "New password", "new-password-value-1");
-    await typeInto(root, "Repeat new password", "new-password-value-1");
+    await typeInto(root, "New password", "fresh-copper-willow-1!");
+    await typeInto(root, "Repeat new password", "fresh-copper-willow-1!");
     await press(root, "Change password");
-    await vi.waitFor(() => expect(mockedApi.rotateCredential.mock.calls.length).toBe(4), { timeout: 4000 });
-    expect(textOf(root)).toContain("did not complete");
+    await vi.waitFor(() => expect(mockedApi.changePasswordAtomic.mock.calls.length).toBe(4), { timeout: 4000 });
+    expect(textOf(root)).toContain("busy");
   });
 
   it("every flow wipes its derived key sets and the pkcs8 buffer on the way out", async () => {
@@ -1129,16 +1132,16 @@ describe("mutation pins 2026-09-22: PatientsView account security", () => {
       .mockResolvedValueOnce(changeKeys)
       .mockResolvedValueOnce(rotateKeys)
       .mockResolvedValueOnce(totpKeys);
-    mockedCrypto.openSealedPrivateKey.mockResolvedValueOnce(der).mockResolvedValue(null);
+    mockedCrypto.openSealedPrivateKey.mockResolvedValueOnce(der).mockResolvedValue(new Uint8Array(138));
     mockedApi.rotateWrapKey.mockResolvedValue(null);
-    mockedApi.rotateCredential.mockResolvedValue(null);
+    mockedApi.changePasswordAtomic.mockResolvedValue(null);
     const root = await render(<PatientsView displayName="Dr." session={session} onOpen={vi.fn()} onSignOut={vi.fn()} onSessionsEnded={vi.fn()} />);
     await press(root, "Show account security");
     await typeInto(root, "Current password", "current-password-1");
-    await typeInto(root, "New password", "new-password-value-1");
-    await typeInto(root, "Repeat new password", "new-password-value-1");
+    await typeInto(root, "New password", "fresh-copper-willow-1!");
+    await typeInto(root, "Repeat new password", "fresh-copper-willow-1!");
     await press(root, "Change password");
-    await vi.waitFor(() => expect(mockedApi.rotateCredential).toHaveBeenCalledTimes(1), { timeout: 4000 });
+    await vi.waitFor(() => expect(mockedApi.changePasswordAtomic).toHaveBeenCalledTimes(1), { timeout: 4000 });
     expect(changeKeys.authKey.every((b) => b === 0)).toBe(true);
     expect(changeKeys.wrapKek.every((b) => b === 0)).toBe(true);
     expect(der.every((b) => b === 0)).toBe(true);
@@ -1147,7 +1150,7 @@ describe("mutation pins 2026-09-22: PatientsView account security", () => {
     const checkbox = () => root.root.findAllByType("input").find((n) => n.props.type === "checkbox")!;
     await act(async () => { checkbox()!.props.onChange({ target: { checked: true } }); });
     await press(root, "Rotate sharing key");
-    await vi.waitFor(() => expect(mockedApi.rotateWrapKey.mock.calls.length).toBe(2), { timeout: 4000 });
+    await vi.waitFor(() => expect(textOf(root)).toContain("Notes custody was not confirmed"), { timeout: 4000 });
     expect(rotateKeys.authKey.every((b) => b === 0)).toBe(true);
     await typeInto(root, "Current password (to authorize setup)", "current-password-1");
     await press(root, "Set up authenticator");
@@ -1159,29 +1162,21 @@ describe("mutation pins 2026-09-22: PatientsView account security", () => {
     const onSessionsEnded = vi.fn();
     const onSignOut = vi.fn();
     mockedApi.rotateWrapKey.mockResolvedValue(null);
-    mockedApi.rotateCredential.mockResolvedValue(null);
+    mockedApi.changePasswordAtomic.mockResolvedValue(null);
     const root = await render(<PatientsView displayName="Dr." session={session} onOpen={vi.fn()} onSignOut={onSignOut} onSessionsEnded={onSessionsEnded} />);
     await press(root, "Show account security");
     await typeInto(root, "Current password", "current-password-1");
-    await typeInto(root, "New password", "new-password-value-1");
-    await typeInto(root, "Repeat new password", "new-password-value-1");
+    await typeInto(root, "New password", "fresh-copper-willow-1!");
+    await typeInto(root, "Repeat new password", "fresh-copper-willow-1!");
     await press(root, "Change password");
     await vi.waitFor(() => expect(onSessionsEnded).toHaveBeenCalledTimes(1), { timeout: 4000 });
     expect(onSignOut).not.toHaveBeenCalled();
   });
 
   it("recovery with the wrong intended password changes nothing and says so", async () => {
+    window.sessionStorage.setItem("mindpattern.interruptedRotateSalt.therapist-1", "BwcHBwcHBwcHBwcHBwcHBw==");
     const root = await render(<PatientsView displayName="Dr." session={session} onOpen={vi.fn()} onSignOut={vi.fn()} />);
-    await press(root, "Show account security");
-    mockedApi.rotateWrapKey.mockResolvedValue(null);
-    mockedApi.rotateCredential.mockRejectedValue(new ApiError(403, "verifier rejected"));
-    await typeInto(root, "Current password", "current-password-1");
-    await typeInto(root, "New password", "new-password-value-1");
-    await typeInto(root, "Repeat new password", "new-password-value-1");
-    await press(root, "Change password");
-    await vi.waitFor(() => expect(textOf(root)).toContain("the password change did not complete"), { timeout: 4000 });
-    expect(mockedApi.rotateWrapKey.mock.calls.length).toBe(1); // the change's re-wrap happened
-    mockedApi.rotateWrapKey.mockClear();
+    await press(root,"Show account security");
     mockedCrypto.openSealedPrivateKey.mockResolvedValue(null);
     await typeInto(root, "Current password (the one you sign in with)", "current-password-1");
     await typeInto(root, "The password you were changing to", "wrong-intended-pass");
@@ -1244,8 +1239,8 @@ describe("mutation pins 2026-09-22: PatientsView account security", () => {
       const root = await render(<PatientsView displayName="Dr." session={session} onOpen={vi.fn()} onSignOut={vi.fn()} />);
       await press(root, "Show account security");
       await typeInto(root, "Current password", "current-password-1");
-      await typeInto(root, "New password", "new-password-value-1");
-      await typeInto(root, "Repeat new password", "new-password-value-1");
+      await typeInto(root, "New password", "fresh-copper-willow-1!");
+      await typeInto(root, "Repeat new password", "fresh-copper-willow-1!");
       await press(root, "Change password");
       await vi.waitFor(() => expect(textOf(root)).toContain("configured secure origin"), { timeout: 4000 });
       expect(mockedApi.rotateWrapKey).not.toHaveBeenCalled();

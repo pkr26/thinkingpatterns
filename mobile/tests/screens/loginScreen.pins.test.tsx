@@ -22,9 +22,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
 import { Alert, Text, TextInput } from "react-native";
 
-vi.mock("../../src/api/client", async () => {
+vi.mock("../../src/api/client", async (importOriginal) => {
+  const actualApi = await importOriginal<typeof import("../../src/api/client")>();
   const { makeApiMock, ApiError } = await import("../helpers/apiMock");
-  return { ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
+  return { ...actualApi, ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
 });
 
 vi.mock("../../src/crypto/MindPatternCrypto", async (importOriginal) => {
@@ -243,7 +244,7 @@ describe("LoginScreen pins: node-exact style overlays", () => {
   it("the no-reset warning carries the body overlay on its own node", async () => {
     const root = await render(<LoginScreen />);
     await pressLabel(root, "New here? Create an account");
-    const node = textNode(root, (s) => s.includes("There is no password reset."));
+    const node = textNode(root, (s) => s.includes("An enrolled recovery kit"));
     expect(node.props.style).toEqual({ color: "#cfc7ba", fontSize: 13, lineHeight: 19 });
   });
 });

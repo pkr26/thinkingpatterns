@@ -54,6 +54,10 @@ export interface VoiceFields {
   transcriptLang?: string;
   englishText: string | null;
 }
+const KNOWN_ENTRY_FIELDS = new Set([
+  "v", "text", "sentiment", "created_at", "energy", "sleep", "tags", "tod",
+  "input_mode", "transcript_lang", "english_text",
+]);
 
 export async function encryptEntry(
   dataKey: Bytes,
@@ -71,6 +75,9 @@ export async function encryptEntry(
   contentVersion?: number,
   /** Voice channels: presence upgrades the payload to v3. */
   voice?: VoiceFields,
+  /** Authenticated original from decryptEntry: carry additive metadata
+   * through edits while every known field comes from the new payload. */
+  originalPayload?: Readonly<EntryPayload>,
 ): Promise<{ blobB64: string }> {
   // Payload v2: optional structured channels ride alongside the text. A
   // caller passing none emits the v1 shape byte-for-byte, so older
@@ -101,7 +108,10 @@ export async function encryptEntry(
         english_text: voice.englishText,
       }
     : base;
-  const plaintext = new TextEncoder().encode(JSON.stringify(payload));
+  const extras = originalPayload
+    ? Object.fromEntries(Object.entries(originalPayload).filter(([key]) => !KNOWN_ENTRY_FIELDS.has(key)))
+    : {};
+  const plaintext = new TextEncoder().encode(JSON.stringify({ ...extras, ...payload }));
   try {
     const aad =
       contentVersion !== undefined && Number.isSafeInteger(contentVersion) && contentVersion >= 1
@@ -157,13 +167,8 @@ export async function decryptEntry(
     } else {
       plaintext = await decrypt(dataKey, blob, buildAad("entry", userId, clientEntryId));
     }
-    const payload = JSON.parse(new TextDecoder().decode(plaintext)) as { v?: unknown };
-    // The AEAD bound the bytes to this account/entry, but nothing else
-    // vouches for the version field.
-    if (!ENTRY_PAYLOAD_VERSIONS.includes(payload.v as number)) {
-      throw new Error(`unsupported entry payload version: ${String(payload.v)}`);
-    }
-    return payload as EntryPayload;
+    const payload = validateEntry(JSON.parse(new TextDecoder().decode(plaintext)));
+    return payload as unknown as EntryPayload;
   } finally {
     zeroize(blob, plaintext);
   }
@@ -191,11 +196,8 @@ export async function decryptInsights(dataKey: Bytes, userId: string, blobB64: s
   let plaintext: Bytes | null = null;
   try {
     plaintext = await decrypt(dataKey, blob, buildAad("insights", userId, "patterns"));
-    const payload = JSON.parse(new TextDecoder().decode(plaintext)) as { v?: unknown };
-    if (payload.v !== INSIGHTS_PAYLOAD_VERSION) {
-      throw new Error(`unsupported insights payload version: ${String(payload.v)}`);
-    }
-    return payload as InsightsPayload;
+    const payload = validateInsights(JSON.parse(new TextDecoder().decode(plaintext)));
+    return payload as unknown as InsightsPayload;
   } finally {
     zeroize(blob, plaintext);
   }
@@ -265,4 +267,50 @@ export async function decryptAudio(
     zeroize(blob);
     throw err;
   }
+}
+
+
+function payloadRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Encrypted payload must be an object.");
+  return value as Record<string, unknown>;
+}
+function finiteField(row: Record<string, unknown>, key: string, min: number, max: number): void {
+  const value = row[key];
+  if (value !== undefined && value !== null && (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max)) throw new Error(`Invalid encrypted ${key}.`);
+}
+function validateEntry(value: unknown): Record<string, unknown> {
+  const row = payloadRecord(value);
+  if (![1,2,3].includes(row.v as number)) throw new Error(`unsupported entry payload version: ${String(row.v)}`);
+  if (typeof row.text !== "string" || row.text.length > 100_000) throw new Error("entry payload malformed");
+  if (row.created_at !== undefined && (typeof row.created_at !== "string" || !Number.isFinite(Date.parse(row.created_at)))) throw new Error("Invalid encrypted entry date.");
+  finiteField(row,"sentiment",-1,1); finiteField(row,"energy",-1,5); finiteField(row,"sleep",1,5);
+  if (row.tags !== undefined && (!Array.isArray(row.tags) || row.tags.length > 200 || row.tags.some(tag => typeof tag !== "string" || tag.length > 200))) throw new Error("Invalid encrypted tags.");
+  if (row.english_text !== undefined && row.english_text !== null && (typeof row.english_text !== "string" || row.english_text.length > 100_000)) throw new Error("Invalid encrypted translation.");
+  if (row.input_mode !== undefined && row.input_mode !== "typed" && row.input_mode !== "voice") throw new Error("Invalid encrypted input mode.");
+  if (row.transcript_lang !== undefined && (typeof row.transcript_lang !== "string" || !/^[a-z]{2,3}(?:-[A-Za-z]{2,8})?$/.test(row.transcript_lang))) throw new Error("Invalid encrypted transcript language.");
+  if (row.tod !== undefined && !["morning","afternoon","evening","night"].includes(row.tod as string)) throw new Error("Invalid encrypted time bucket.");
+  return row;
+}
+function validateInsights(value: unknown): Record<string, unknown> {
+  const row = payloadRecord(value);
+  if (row.v !== 2) throw new Error(`unsupported insights payload version: ${String(row.v)}`);
+  if (row.state_seq !== undefined && (!Number.isSafeInteger(row.state_seq) || (row.state_seq as number) < 0)) throw new Error("Invalid encrypted analysis generation.");
+  if (row.stats === undefined) return row;
+  const stats = payloadRecord(row.stats);
+  finiteField(stats,"avg_sentiment",-1,1); finiteField(stats,"total_entries",0,10_000_000); finiteField(stats,"active_days",0,10_000_000);
+  if (stats.patterns !== undefined) {
+    if (!Array.isArray(stats.patterns) || stats.patterns.length > 1_000) throw new Error("Invalid encrypted patterns.");
+    for (const raw of stats.patterns) {
+      const pattern = payloadRecord(raw);
+      if (typeof pattern.label !== "string" || pattern.label.length > 1_000 || typeof pattern.kind !== "string" || pattern.kind.length > 100) throw new Error("Invalid encrypted pattern label.");
+      finiteField(pattern,"confidence",0,1); finiteField(pattern,"occurrences",0,10_000_000);
+      if (pattern.detail !== undefined) {
+        const detail = payloadRecord(pattern.detail);
+        if (detail.evidence_dates !== undefined && (!Array.isArray(detail.evidence_dates) || detail.evidence_dates.length > 10_000 || detail.evidence_dates.some(date => typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)))) throw new Error("Invalid encrypted evidence dates.");
+        for (const key of ["pattern_pid","pattern_state","first_seen","last_seen"]) if (detail[key] !== undefined && typeof detail[key] !== "string") throw new Error("Invalid encrypted pattern detail.");
+        for (const key of ["sensitive","is_new"]) if (detail[key] !== undefined && typeof detail[key] !== "boolean") throw new Error("Invalid encrypted pattern flags.");
+      }
+    }
+  }
+  return row;
 }

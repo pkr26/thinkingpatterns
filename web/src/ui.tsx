@@ -209,6 +209,8 @@ export function TextArea(props: {
   onChange: (value: string) => void;
   placeholder?: string;
   rows?: number;
+  maxLength?: number;
+  disabled?: boolean;
 }): React.JSX.Element {
   return (
     <label className="field">
@@ -217,6 +219,8 @@ export function TextArea(props: {
         value={props.value}
         placeholder={props.placeholder}
         rows={props.rows ?? 8}
+        maxLength={props.maxLength}
+        disabled={props.disabled}
         onChange={(e) => props.onChange(e.target.value)}
         className="textarea"
       />
@@ -662,12 +666,12 @@ function faceBrows(position: number): string[] {
   return ["M7.2 8.8 L10.1 7.5", "M16.8 8.8 L13.9 7.5"];
 }
 
-export function MoodScale(props: { options: readonly ScaleOption[]; value: number | null; onChange: (value: number | null) => void }): React.JSX.Element {
+export function MoodScale(props: { groupLabel?: string; options: readonly ScaleOption[]; value: number | null; onChange: (value: number | null) => void }): React.JSX.Element {
   // Re-resolve face colors when the theme flips (auto mode included).
   usePaletteVersion();
   const last = props.options.length - 1;
   return (
-    <div className="mood-scale" role="group">
+    <div className="mood-scale" role="group" aria-label={props.groupLabel ?? t("entry.moodQuestion")}>
       {props.options.map((option, index) => {
         const level = last <= 0 ? 2 : Math.round((index * 4) / last);
         const colors = moodFaceColors(level);
@@ -706,9 +710,9 @@ export function MoodScale(props: { options: readonly ScaleOption[]; value: numbe
 /** The 1–5 sleep scale (and any short numeric pick): labeled round dots.
  *  The accessible name is "{n} — {label}" (not the concatenated spans,
  *  which read as "1Rough" — audit 2026-09-26 fix). */
-export function DotScale(props: { options: readonly ScaleOption[]; value: number | null; onChange: (value: number | null) => void }): React.JSX.Element {
+export function DotScale(props: { groupLabel?: string; options: readonly ScaleOption[]; value: number | null; onChange: (value: number | null) => void }): React.JSX.Element {
   return (
-    <div className="dot-scale" role="group">
+    <div className="dot-scale" role="group" aria-label={props.groupLabel ?? t("entry.sleepQuestion")}>
       {props.options.map((option, index) => {
         const pressed = props.value === option.value;
         return (

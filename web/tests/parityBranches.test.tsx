@@ -260,7 +260,7 @@ describe("SettingsView branches", () => {
     await press(root, "Change password");
     await settle(60, 4);
     expect(onLockdown).toHaveBeenCalledTimes(1);
-    expect(onLockdown.mock.calls[0]![0]).toContain("already re-encrypted under a different new password");
+    expect(onLockdown.mock.calls[0]![0]).toContain("could not be authenticated");
     expect(onLockdown.mock.calls[0]![0]).not.toContain("NOTHING was changed");
   });
 });
@@ -283,7 +283,9 @@ describe("SettingsView rotation with an active grant (the rewrap loop)", () => {
       }
       if (url.endsWith("/processing/rekey")) {
         order.push("rekey");
-        return new Response(null, { status: 204 });
+        const body=JSON.parse(String(init.body));
+        expect(Array.isArray(body.consent_wraps)).toBe(true);
+        return jsonResponse({credential_rotated:true,operation_id:body.operation_id});
       }
       if (url.endsWith("/consents") && init.method === "GET") {
         return jsonResponse([{ id: "c".repeat(32), therapist_id: "t-4", display_name: "Dr. Ridge", username: "ridge", status: "active", granted_at: "2026-09-01T00:00:00Z", revoked_at: null, therapist_wrap_pub_key: spkiB64 }]);
@@ -305,7 +307,7 @@ describe("SettingsView rotation with an active grant (the rewrap loop)", () => {
     await typeInto(root, "Confirm new password", "rotation-with-rewrap-9x");
     await press(root, "Change password");
     await settle(60, 5);
-    expect(order).toEqual(["session", "session", "rekey", "rewrap", "credential"]);
+    expect(order).toEqual(["session", "session", "rekey"]);
     expect(onLockdown).toHaveBeenCalledTimes(1);
   });
 

@@ -82,9 +82,10 @@ describe("M-5: single-entry fetch", () => {
 });
 
 describe("H-1: rotation endpoint request shapes", () => {
-  it("rekey sends two tokens plus the verifier as headers, no body", async () => {
+  it("rekey sends both tokens, verifier and exact atomic credential payload", async () => {
     const fetchMock = vi.mocked(fetch);
-    await api.rekeyStoredData("old-tok", "new-tok", "verif");
+    const body = { operation_id: "00000000-0000-4000-8000-000000000001", new_salt: "c2FsdA==", new_verifier: "dmVyaWZpZXI=", consent_wraps: [] };
+    await api.rekeyStoredData("old-tok", "new-tok", "verif", body);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url.endsWith("/api/v1/processing/rekey")).toBe(true);
     expect(init.method).toBe("POST");
@@ -92,6 +93,7 @@ describe("H-1: rotation endpoint request shapes", () => {
     expect(headers["X-Processing-Token"]).toBe("old-tok");
     expect(headers["X-New-Processing-Token"]).toBe("new-tok");
     expect(headers["X-Account-Verifier"]).toBe("verif");
+    expect(JSON.parse(String(init.body))).toEqual(body);
   });
 
   it("rotateCredential PUTs the new salt and verifier in the body", async () => {

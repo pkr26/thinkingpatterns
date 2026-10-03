@@ -135,12 +135,12 @@ describe("syncMeasureReminderSchedule (2026-09-27: opt-in AND cadence)", () => {
     expect(cancelMeasureReminder).not.toHaveBeenCalled();
   });
 
-  it("a FRESH completion retires any scheduled nudge (cancel, not reschedule)", async () => {
+  it("a fresh completion schedules the next cadence even if the app stays closed", async () => {
     await setMeasureReminderEnabled("user-1", true);
     await recordMeasureCompleted("user-1", "2026-09-26");
     await expect(syncMeasureReminderSchedule("user-1")).resolves.toBe(true);
-    expect(cancelMeasureReminder).toHaveBeenCalledTimes(1);
-    expect(scheduleMeasureReminder).not.toHaveBeenCalled();
+    expect(cancelMeasureReminder).not.toHaveBeenCalled();
+    expect(scheduleMeasureReminder).toHaveBeenCalledWith(new Date(2026, 9, 24, 20, 0, 0, 0));
   });
 
   it("the interval choice moves the due boundary (2 weeks due, 4 not yet)", async () => {
@@ -157,8 +157,8 @@ describe("syncMeasureReminderSchedule (2026-09-27: opt-in AND cadence)", () => {
     await clearMeasureReminderPrefs("user-1");
     await setMeasureReminderEnabled("user-1", true); // back to the 4-week default
     await expect(syncMeasureReminderSchedule("user-1")).resolves.toBe(true);
-    expect(scheduleMeasureReminder).not.toHaveBeenCalled();
-    expect(cancelMeasureReminder).toHaveBeenCalledTimes(1);
+    expect(scheduleMeasureReminder).toHaveBeenCalledWith(new Date(2026, 9, 11, 20, 0, 0, 0));
+    expect(cancelMeasureReminder).not.toHaveBeenCalled();
   });
 
   it("a corrupt preference fails toward the disabled default — cancel, never a guess", async () => {

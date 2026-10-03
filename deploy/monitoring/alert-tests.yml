@@ -1,0 +1,199 @@
+# Synthetic fault scenarios. Run: promtool test rules alert-tests.yml
+rule_files:
+- alerts.yml
+evaluation_interval: 1m
+tests:
+- name: MindPatternAPIDown respects its pending period and fires on sustained failure
+  interval: 1m
+  input_series:
+  - series: up{job="mindpattern-api",instance="synthetic"}
+    values: '0x20'
+  alert_rule_test:
+  - eval_time: 1m
+    alertname: MindPatternAPIDown
+    exp_alerts: []
+  - eval_time: 3m
+    alertname: MindPatternAPIDown
+    exp_alerts:
+    - exp_labels:
+        job: mindpattern-api
+        instance: synthetic
+        severity: S2
+      exp_annotations:
+        summary: API metrics target down (scrape failing for 2m)
+        runbook: "docs/INCIDENT_RUNBOOK.md \u2014 S2: API down (first confirm the\
+          \ token is not the cause; a 401 on /metrics is an S3, a dead process is\
+          \ an S2)"
+- name: MindPatternHigh5xxRatio respects its pending period and fires on sustained
+    failure
+  interval: 1m
+  input_series:
+  - series: mindpattern_requests_total{status="5xx"}
+    values: 0+10x30
+  - series: mindpattern_requests_total{status="2xx"}
+    values: 0+90x30
+  alert_rule_test:
+  - eval_time: 9m
+    alertname: MindPatternHigh5xxRatio
+    exp_alerts: []
+  - eval_time: 15m
+    alertname: MindPatternHigh5xxRatio
+    exp_alerts:
+    - exp_labels:
+        severity: S2
+      exp_annotations:
+        summary: More than 5% of API responses are 5xx for 10m
+        runbook: "docs/INCIDENT_RUNBOOK.md \u2014 S2 (container logs for tracebacks;\
+          \ a 5xx storm from recomputes is the listed S2 example)"
+- name: MindPatternRecomputeP95Slow respects its pending period and fires on sustained
+    failure
+  interval: 1m
+  input_series:
+  - series: mindpattern_recompute_seconds_bucket{le="5.0"}
+    values: 0+90x30
+  - series: mindpattern_recompute_seconds_bucket{le="15.0"}
+    values: 0+100x30
+  - series: mindpattern_recompute_seconds_bucket{le="+Inf"}
+    values: 0+100x30
+  alert_rule_test:
+  - eval_time: 9m
+    alertname: MindPatternRecomputeP95Slow
+    exp_alerts: []
+  - eval_time: 15m
+    alertname: MindPatternRecomputeP95Slow
+    exp_alerts:
+    - exp_labels:
+        severity: S3
+      exp_annotations:
+        summary: "Recompute p95 above 5s for 10m \u2014 analyze slots saturating"
+        runbook: "docs/INCIDENT_RUNBOOK.md \u2014 S3 (shed load via MINDPATTERN_PROCESSING_RATE_LIMIT;\
+          \ do NOT scale to a second instance)"
+- name: MindPatternKeystoreSessionsStuck respects its pending period and fires on
+    sustained failure
+  interval: 1m
+  input_series:
+  - series: mindpattern_keystore_sessions
+    values: 17x25
+  alert_rule_test:
+  - eval_time: 14m
+    alertname: MindPatternKeystoreSessionsStuck
+    exp_alerts: []
+  - eval_time: 16m
+    alertname: MindPatternKeystoreSessionsStuck
+    exp_alerts:
+    - exp_labels:
+        severity: S2
+      exp_annotations:
+        summary: Processing sessions not being consumed (>16 for 15m)
+        runbook: "docs/INCIDENT_RUNBOOK.md \u2014 S1 checklist step 2 (this metric,\
+          \ sustained high); escalate to S1 only if the checklist confirms exposure"
+- name: MindPatternLLMFailureRatioHigh respects its pending period and fires on sustained
+    failure
+  interval: 1m
+  input_series:
+  - series: mindpattern_llm_calls_total{outcome="failure"}
+    values: 0+60x30
+  - series: mindpattern_llm_calls_total{outcome="success"}
+    values: 0+40x30
+  alert_rule_test:
+  - eval_time: 14m
+    alertname: MindPatternLLMFailureRatioHigh
+    exp_alerts: []
+  - eval_time: 20m
+    alertname: MindPatternLLMFailureRatioHigh
+    exp_alerts:
+    - exp_labels:
+        severity: S3
+      exp_annotations:
+        summary: More than 25% of LLM calls failing for 15m
+        runbook: "docs/INCIDENT_RUNBOOK.md \u2014 S3 (provider degraded); the S1 LLM\
+          \ path is about exposure, not failure ratio"
+- name: MindPatternAuditChainFailures respects its pending period and fires on sustained
+    failure
+  interval: 1m
+  input_series:
+  - series: mindpattern_audit_chain_failures
+    values: 0 0 1 1 1 1
+  alert_rule_test:
+  - eval_time: 1m
+    alertname: MindPatternAuditChainFailures
+    exp_alerts: []
+  - eval_time: 3m
+    alertname: MindPatternAuditChainFailures
+    exp_alerts:
+    - exp_labels:
+        severity: S2
+      exp_annotations:
+        summary: Audit-chain verification failed for at least one patient trail in
+          the last hour
+        runbook: "docs/INCIDENT_RUNBOOK.md \u2014 S2; the breach-assessment section\
+          \ names the chain verification as evidence \u2014 preserve the verification\
+          \ output and treat the tampered window as potentially-accessed until reconciled"
+- name: MindPatternReadyzProbeFailing respects its pending period and fires on sustained
+    failure
+  interval: 1m
+  input_series:
+  - series: probe_success{job="mindpattern-blackbox",instance="synthetic"}
+    values: '0x20'
+  alert_rule_test:
+  - eval_time: 4m
+    alertname: MindPatternReadyzProbeFailing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: MindPatternReadyzProbeFailing
+    exp_alerts:
+    - exp_labels:
+        job: mindpattern-blackbox
+        instance: synthetic
+        severity: S2
+      exp_annotations:
+        summary: Blackbox probe of /readyz failing for 5m (DB path broken)
+        runbook: "docs/INCIDENT_RUNBOOK.md \u2014 S2: API down, step 1 (/readyz 503\
+          \ -> database)"
+- name: Healthy traffic and exact keystore threshold do not alert
+  interval: 1m
+  input_series:
+  - series: up{job="mindpattern-api"}
+    values: 1x30
+  - series: probe_success{job="mindpattern-blackbox"}
+    values: 1x30
+  - series: mindpattern_keystore_sessions
+    values: 16x30
+  - series: mindpattern_audit_chain_failures
+    values: '0x30'
+  - series: mindpattern_requests_total{status="5xx"}
+    values: '0x30'
+  - series: mindpattern_requests_total{status="2xx"}
+    values: 0+100x30
+  - series: mindpattern_llm_calls_total{outcome="failure"}
+    values: '0x30'
+  - series: mindpattern_llm_calls_total{outcome="success"}
+    values: 0+100x30
+  - series: mindpattern_recompute_seconds_bucket{le="5.0"}
+    values: 0+99x30
+  - series: mindpattern_recompute_seconds_bucket{le="15.0"}
+    values: 0+100x30
+  - series: mindpattern_recompute_seconds_bucket{le="+Inf"}
+    values: 0+100x30
+  alert_rule_test:
+  - eval_time: 25m
+    alertname: MindPatternAPIDown
+    exp_alerts: []
+  - eval_time: 25m
+    alertname: MindPatternHigh5xxRatio
+    exp_alerts: []
+  - eval_time: 25m
+    alertname: MindPatternRecomputeP95Slow
+    exp_alerts: []
+  - eval_time: 25m
+    alertname: MindPatternKeystoreSessionsStuck
+    exp_alerts: []
+  - eval_time: 25m
+    alertname: MindPatternLLMFailureRatioHigh
+    exp_alerts: []
+  - eval_time: 25m
+    alertname: MindPatternAuditChainFailures
+    exp_alerts: []
+  - eval_time: 25m
+    alertname: MindPatternReadyzProbeFailing
+    exp_alerts: []

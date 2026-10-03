@@ -1,0 +1,23 @@
+
+=== G1: backup vs deletion + dump contents ================================
+AUDIT|G1.backup-profile-config|BLOCKED|compose backup profile: pg_dump=True, 35-day retention=yes, AES-256-CBC/PBKDF2-600k dump encryption with the key REQUIRED via the mounted secret file (env-fallback line=True, BACKUP_KEY_FILE mount=True, secrets: entry=True, shared helper=True, -iter pin=True) — a stolen backup volume is ciphertext at rest and a missing key refuses the dump outright. Residual by design: dumps taken before a deletion still hold the user's rows until retention expires; the README states this as the deletion-and-retention scope
+AUDIT|G1.dump-contents|INFO|what a dump carries (same columns): 0 usernames, 0 entries, 0 distinct dates, blob sizes (None, None, None) — with the 2026-09-16 fix this metadata is only readable by a BACKUP_KEY holder (AES-256-CBC at rest); the residual is the retention-vs-deletion window, not plaintext-on-disk
+
+=== G2: supply chain ======================================================
+AUDIT|G2.pip-audit|BLOCKED|pip-audit on requirements.lock.txt: rc=0, vulnerability lines=0 []
+AUDIT|G2.npm-audit|FINDING|npm audit (mobile): {'info': 0, 'low': 0, 'moderate': 0, 'high': 28, 'critical': 0, 'total': 28}; registry findings remain visible. The pinned postinstall patches and verify_dependency_patches.mjs exercise the two remaining unpublished advisory mitigations; registry metadata does not certify those source patches.
+AUDIT|G2.lockfile-hashes|BLOCKED|requirements.lock.txt: 990/1029 requirement lines carry --hash pins; Docker installs with --no-deps
+AUDIT|G2.actions-pinning|BLOCKED|GitHub Actions refs: 31 uses, unpinned/floating: []
+AUDIT|G2.mutation-gate|INFO|mutation workflow: survivors do not fail the run (True) — quality signal only, documented
+
+=== G3: fail-closed config + repo hygiene =================================
+AUDIT|G3.prod-default-secret|BLOCKED|env=production refused boot (fail-closed RuntimeError), expected=refusal
+AUDIT|G3.prod-short-secret|BLOCKED|env=production refused boot (fail-closed RuntimeError), expected=refusal
+AUDIT|G3.prod-sqlite|BLOCKED|env=production refused boot (fail-closed RuntimeError), expected=refusal
+AUDIT|G3.prod-http-llm-url|BLOCKED|env=production refused boot (fail-closed RuntimeError), expected=refusal
+AUDIT|G3.typo-env-fails-closed|BLOCKED|env=staging  refused boot (fail-closed RuntimeError), expected=refusal
+AUDIT|G3.staging-valid-boots-under-prod-gates|BLOCKED|env=staging booted, expected=boot
+AUDIT|G3.tracked-secrets|BLOCKED|git-tracked secret/db/keystore files: none (+ 1 reviewed RN template shim) (781 files tracked)
+AUDIT|G3.dockerignore-db|BLOCKED|backend/.dockerignore excludes dev DBs: True (mindpattern.db exists on disk in backend/ and must never enter the image)
+
+[g_infra] 15 verdicts, 0 harness errors

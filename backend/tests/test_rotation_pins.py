@@ -237,6 +237,7 @@ async def test_full_rotation_flow_recovers_every_collection():
         emu, old_key, old_auth_b64, therapist, consent = await _seed_rotation_fixture(http)
 
         # --- rekey: old generation -> new generation ---------------------
+        original_headers = dict(emu.headers)
         emu.derive_new_generation("pw-new-rotating-1")
         # Rekey/rewrap are proven with the OLD password: the credential itself is
         # rotated only after every key-bearing step has completed.
@@ -287,7 +288,7 @@ async def test_full_rotation_flow_recovers_every_collection():
             listed[0]["id"],
             therapist.wrap_pub_key,
             therapist.user_id,
-            verifier=old_auth_b64,
+            verifier=emu.auth_key_b64,
         )
         assert rewrap["status"] == 200, rewrap["body"]
 
@@ -308,7 +309,7 @@ async def test_full_rotation_flow_recovers_every_collection():
 
         # --- rotate the login credential ---------------------------------
         status = await emu.rotate_credential(http, old_auth_b64, emu.salt, emu.auth_key_b64)
-        assert status == 204
+        assert status == 409  # credential was already committed atomically
 
         # The phished OLD verifier no longer logs in; the NEW one does, the
         # server hands out the NEW salt, and every old bearer is dead.
@@ -318,7 +319,7 @@ async def test_full_rotation_flow_recovers_every_collection():
         )
         assert stale_login.status_code == 401
 
-        stale_bearer = await http.get("/api/entries", headers=emu.headers)
+        stale_bearer = await http.get("/api/entries", headers=original_headers)
         assert stale_bearer.status_code == 401
 
         salt_response = await http.post("/api/auth/salt", json={"username": emu.username})
@@ -351,6 +352,7 @@ async def test_rekey_with_wrong_old_key_changes_nothing():
                 "X-New-Processing-Token": new_token,
                 "X-Account-Verifier": emu.auth_key_b64,
             },
+            json=emu.rekey_payload(),
         )
         assert response.status_code == 400
         assert response.json()["code"] == "rekey_key_mismatch"
@@ -382,6 +384,7 @@ async def test_rekey_requires_password_proof_and_single_use_tokens():
                 "X-Processing-Token": old_token,
                 "X-New-Processing-Token": new_token,
             },
+            json=emu.rekey_payload(),
         )
         assert response.status_code == 422
 
@@ -394,6 +397,7 @@ async def test_rekey_requires_password_proof_and_single_use_tokens():
                 "X-New-Processing-Token": new_token,
                 "X-Account-Verifier": base64.b64encode(crypto.generate_key()).decode(),
             },
+            json=emu.rekey_payload(),
         )
         assert response.status_code == 403
 
@@ -407,6 +411,7 @@ async def test_rekey_requires_password_proof_and_single_use_tokens():
                 "X-New-Processing-Token": new_token,
                 "X-Account-Verifier": base64.b64encode(thief.auth_key).decode(),
             },
+            json=emu.rekey_payload(),
         )
         assert response.status_code == 403
 
@@ -421,6 +426,7 @@ async def test_rekey_requires_password_proof_and_single_use_tokens():
                 "X-New-Processing-Token": new_token,
                 "X-Account-Verifier": base64.b64encode(crypto.generate_key()).decode(),
             },
+            json=emu.rekey_payload(),
         )
         assert response.status_code == 403
     finally:
@@ -438,7 +444,7 @@ async def test_credential_rotation_requires_the_current_verifier(client: AsyncCl
         new_salt,
         base64.b64encode(new_auth).decode(),
     )
-    assert wrong == 403
+    assert wrong == 409  # legacy standalone credential replacement is disabled
 
     # Credential unchanged: the original verifier still logs in.
     relogin = await client.post(
@@ -455,7 +461,7 @@ async def test_credential_rotation_requires_the_current_verifier(client: AsyncCl
             "new_verifier": base64.b64encode(new_auth).decode(),
         },
     )
-    assert malformed.status_code == 422
+    assert malformed.status_code == 409
 
 
 async def test_rewrap_scoping_and_revoked_consents():

@@ -229,3 +229,12 @@ describe("mood helpers", () => {
     expect(localSentiment("the and of")).toBe(0);
   });
 });
+
+it("startup catalogs stay aligned with the complete catalogs and contain every sign-in and crisis message", async () => {
+  const startup = await import("../src/locales/preauth");
+  for (const [locale,catalog] of Object.entries(startup)) {
+    const complete = locale === "en" ? enCatalog : esCatalog;
+    for (const [key,value] of Object.entries(catalog)) expect(value).toBe(complete[key]);
+    for (const key of Object.keys(complete).filter(key=>key.startsWith("login.") || key.startsWith("crisis."))) expect(catalog[key]).toBe(complete[key]);
+  }
+});

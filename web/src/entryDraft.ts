@@ -4,8 +4,7 @@
  * locks unmount the editor while the draft lives only in component state,
  * destroying a half-written entry outright. This module seals whatever the
  * editor holds AT LOCK TIME under the account's data key — exactly the
- * entryVersions/moodLog idiom (AES-GCM, AAD binds the user; a wrong key or
- * tampered record reads as absent) — into ONE dedicated kvstore slot, and
+ * entryVersions/moodLog idiom (AES-GCM, AAD binds the user; unreadable records throw typed errors) — into ONE dedicated kvstore slot, and
  * the editor restores it on its next mount.
  *
  * Custody: the draft is ciphertext at rest, never plaintext; the slot
@@ -17,7 +16,7 @@
  */
 import { buildAad } from "./crypto/aad";
 import { decrypt, encrypt, fromBase64, toBase64, zeroize, type Bytes } from "./crypto/core";
-import { kv } from "./kvstore";
+import { kv, StorageReadError, type WritePermit } from "./kvstore";
 import { vault } from "./vault";
 
 /** The editor's whole in-progress state, modeled exactly as EntryView
@@ -90,34 +89,33 @@ function parseDraft(raw: string | null): EntryDraft | null {
 /** Seal the draft under the data key. An empty draft clears the slot (the
  *  caller never wants a stale draft resurrected over an emptied editor). */
 export async function saveActiveDraft(dataKey: Bytes, userId: string, draft: EntryDraft): Promise<void> {
-  if (draftIsEmpty(draft)) {
-    await clearActiveDraft(userId);
-    return;
-  }
+  const keyCopy=new Uint8Array(dataKey);
   const payload = new TextEncoder().encode(JSON.stringify(draft));
   try {
+    const permit=await kv.captureWritePermit(userId,keyCopy);
+    if(draftIsEmpty(draft)){await clearActiveDraft(userId,permit);return;}
     await chained(userId, async () => {
-      const blob = await encrypt(dataKey, payload, buildAad("draft", userId));
-      await kv.setItem(key(userId), toBase64(blob));
+      const blob = await encrypt(keyCopy, payload, buildAad("draft", userId));
+      await kv.setItem(key(userId), toBase64(blob),permit);
     });
   } finally {
-    zeroize(payload);
+    zeroize(payload,keyCopy);
   }
 }
 
-/** The sealed draft for this account, or null when absent, corrupt, or
- *  under the wrong key (account switch / rotation): one in-progress entry
- *  is disposable metadata around the journal, never an error surface.
- *  Never throws. */
+/** Return null only for an absent record. Unreadable ciphertext is retained
+ *  and raises StorageReadError so hydration cannot replace it as empty. */
 export async function loadActiveDraft(dataKey: Bytes, userId: string): Promise<EntryDraft | null> {
   const raw = await kv.getItem(key(userId));
   if (!raw) return null;
   let plaintext: Bytes | null = null;
   try {
     plaintext = await decrypt(dataKey, fromBase64(raw), buildAad("draft", userId));
-    return parseDraft(new TextDecoder().decode(plaintext));
-  } catch {
-    return null;
+    const draft = parseDraft(new TextDecoder().decode(plaintext));
+    if (!draft) throw new Error("Stored draft shape is invalid.");
+    return draft;
+  } catch (cause) {
+    throw new StorageReadError("A saved draft could not be authenticated or restored. Retry with the correct account key before changing stored writing.", { cause });
   } finally {
     zeroize(plaintext);
   }
@@ -128,13 +126,13 @@ export async function loadActiveDraft(dataKey: Bytes, userId: string): Promise<E
  *  the stored record AND any seal still in flight — it runs after that
  *  seal's write lands, so a lock racing a save can never leave a sealed
  *  slot behind to resurrect an already-saved entry. */
-export async function clearActiveDraft(userId: string): Promise<void> {
-  await chained(userId, () => kv.removeItem(key(userId)));
+export async function clearActiveDraft(userId: string,permit?:WritePermit): Promise<void> {
+  await chained(userId, () => kv.removeItem(key(userId),permit));
 }
 
 /** Rotation parity with the B-7 rewrap family: re-seal an existing draft
  *  under the incoming key so an in-progress entry survives a password
- *  change. A failure propagates so the rotation falls back to clearing. */
+ *  change. A failure propagates without clearing the recoverable original. */
 export async function rewrapActiveDraft(oldKey: Bytes, newKey: Bytes, userId: string): Promise<void> {
   const draft = await loadActiveDraft(oldKey, userId);
   if (draft === null) return;
@@ -167,7 +165,7 @@ export function preserveActiveDraft(): Promise<void> {
   const draft = draftSource?.() ?? null;
   const owner = vault.ownerUserId();
   if (!draft || !owner || !vault.isUnlocked()) return Promise.resolve();
-  if (draftIsEmpty(draft)) return clearActiveDraft(owner).catch(() => undefined);
+  // Empty clears carry the same old-key proof as non-empty lock-time seals.
   const current = vault.get();
   const keyCopy = new Uint8Array(new ArrayBuffer(current.dataKey.length));
   keyCopy.set(current.dataKey);

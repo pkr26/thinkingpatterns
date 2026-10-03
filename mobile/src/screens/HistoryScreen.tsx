@@ -35,13 +35,15 @@ import {
   View,
 } from "react-native";
 import { api, ApiError, ENTRY_PAGE_BYTES } from "../api/client";
-import { decryptEntry, encryptEntry } from "../crypto/MindPatternCrypto";
+import { decryptEntry, encryptEntry, type EntryPayload } from "../crypto/MindPatternCrypto";
 import { playVoiceAttachment, type PlayingVoice } from "../audio/playback";
 import { createAudioPlayer } from "expo-audio";
 import {forgetEntryVersion, observeEntryVersions , isV2Bound, noteV2Bound} from "../entryVersions";
 import { MoodCalendar } from "../components/MoodCalendar";
 import { filterEntries, monthLabel } from "../historyFind";
 import { vault } from "../vault";
+import { assertLocalWritePermit, captureLocalWritePermit } from "../localRekey";
+import { localWriteScopeEpoch } from "../localWriteGuard";
 import { useSession } from "../store";
 import { recordMood, recentMoods, removeMoodDay, localDateISO } from "../moodLog";
 import { localSentiment, moodLabel } from "../mood";
@@ -68,6 +70,8 @@ const SHOW_COUNT_ABOVE = 90_000;
 const STATUS_MS = 2_600;
 
 interface HistoryEntry {
+  /** Opaque additive fields must survive an edit to the user's words. */
+  originalPayload?: EntryPayload;
   clientEntryId: string;
   entryDate: string;
   receivedAt: string;
@@ -77,6 +81,8 @@ interface HistoryEntry {
    *  servers that do not send content_version. */
   contentVersion: number | null;
   text: string;
+  createdAt?: string;
+  tod?: string;
   /** The day's explicit check-in pick, when one was made (else null). */
   sentiment: number | null;
   /** The v2 structured channels, preserved through an edit (else default). */
@@ -134,11 +140,14 @@ async function decryptRowsWithVersions(
         },
       );
       decrypted.push({
+        originalPayload: payload,
         clientEntryId: row.client_entry_id,
         entryDate: typeof row.entry_date === "string" ? row.entry_date : "",
         receivedAt: typeof row.received_at === "string" ? row.received_at : "",
         audio: row.audio ?? null,
         contentVersion: typeof row.content_version === "number" ? row.content_version : null,
+        createdAt: typeof payload.created_at === "string" ? payload.created_at : typeof row.entry_date === "string" ? row.entry_date : "",
+        tod: typeof payload.tod === "string" ? payload.tod : undefined,
         text: typeof payload.text === "string" ? payload.text : "",
         sentiment: sanitizeSentiment(payload.sentiment),
         energy: sanitizeEnergy(payload.energy),
@@ -212,7 +221,9 @@ function sanitizeSentiment(value: unknown): number | null {
  *  must degrade to "absent", never to a payload the server would reject. */
 function sanitizeEnergy(value: unknown): number | null {
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
-  return Math.max(-1, Math.min(1, value));
+  // Historical clients used the 1..5 energy scale; newer clients use
+  // [-1,1]. Editing words must preserve a valid historical value.
+  return Math.max(-1, Math.min(5, value));
 }
 
 function sanitizeSleep(value: unknown): number | null {
@@ -273,9 +284,16 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
   // memory → cache file → expo-audio player; the file dies on stop/unmount.
   const [playingId, setPlayingId] = useState<string | null>(null);
   const playingVoiceRef = useRef<PlayingVoice | null>(null);
+  const conflictDecision = useRef<((choice: "mine" | "theirs" | "cancel") => void) | null>(null);
+  useEffect(() => () => { conflictDecision.current?.("cancel"); }, []);
+  const playbackEpoch = useRef(0);
+  const preparingPlayback = useRef(false);
+  const playbackMounted = useRef(true);
   const audioPlayerRef = useRef<ReturnType<typeof createAudioPlayer> | null>(null);
 
   const stopPlayback = useCallback(async (): Promise<void> => {
+    playbackEpoch.current++;
+    preparingPlayback.current = false;
     try {
       audioPlayerRef.current?.release?.();
     } catch {
@@ -284,12 +302,16 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
     audioPlayerRef.current = null;
     const playing = playingVoiceRef.current;
     playingVoiceRef.current = null;
-    setPlayingId(null);
+    if (playbackMounted.current) setPlayingId(null);
     if (playing) await playing.release();
   }, []);
 
   useEffect(() => {
+    playbackMounted.current = true;
+    const unsubscribe = vault.subscribe(() => { if (!vault.isUnlocked()) void stopPlayback(); });
     return () => {
+      playbackMounted.current = false;
+      unsubscribe();
       void stopPlayback();
     };
   }, [stopPlayback]);
@@ -297,13 +319,16 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
   const playRecording = useCallback(
     async (entry: HistoryEntry): Promise<void> => {
       if (!entry.audio) return;
-      if (playingId) {
+      if (playingId || preparingPlayback.current) {
         await stopPlayback();
         return;
       }
       if (!vault.isUnlocked()) return;
+      preparingPlayback.current = true;
+      const operation = ++playbackEpoch.current;
+      const cancelled = () => !playbackMounted.current || operation !== playbackEpoch.current || !vault.isUnlocked();
+      const keys = { dataKey: Buffer.from(vault.get().dataKey) };
       try {
-        const keys = vault.get();
         const userId = await api.getUserId();
         if (!userId) return;
         const attachmentId = entry.audio.attachment_id;
@@ -312,13 +337,16 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
           keys,
           userId,
           clientEntryId: entry.clientEntryId,
+          cancelled,
         });
+        if (cancelled()) { await playing.release(); return; }
         playingVoiceRef.current = playing;
         setPlayingId(attachmentId);
         const player = createAudioPlayer({ uri: playing.uri });
         audioPlayerRef.current = player;
         player.play();
       } catch {
+        if (operation !== playbackEpoch.current || !playbackMounted.current) return;
         // Audit M1: a failure after the scratch file exists must clear the
         // ref AND release it — a stale ref would make the NEXT attempt
         // overwrite it and orphan the decrypted cache file forever.
@@ -332,6 +360,9 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
         playingVoiceRef.current = null;
         setPlayingId(null);
         if (orphaned) await orphaned.release().catch(() => {});
+      } finally {
+        keys.dataKey.fill(0);
+        if (operation === playbackEpoch.current) preparingPlayback.current = false;
       }
     },
     [playingId, stopPlayback],
@@ -871,12 +902,17 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
     }
     busyRef.current = true;
     setBusy(true);
+    const submitEpoch = localWriteScopeEpoch();
     try {
       const userId = await api.getUserId();
+      if (submitEpoch !== localWriteScopeEpoch()) throw new Error(tr("common.sessionDamagedTitle"));
       if (!userId) {
         Alert.alert(tr("common.sessionDamagedTitle"), tr("history.sessionDamagedBody"));
         return;
       }
+      const keys = vault.get();
+      if (vault.ownerUserId() !== userId) throw new Error(tr("common.sessionDamagedTitle"));
+      const writePermit = captureLocalWritePermit(userId, keys.dataKey);
       // The same id is deliberately retained: it is part of the ciphertext
       // AAD, and the backend replaces this one record atomically. The v2
       // structured channels (energy/sleep/tags) ride along unchanged — an
@@ -899,15 +935,16 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
           englishForSave = null;
         }
       }
-      const encryptFor = (version: number): string =>
-        encryptEntry(
+      const encryptFor = (version: number): string => {
+        assertLocalWritePermit(writePermit);
+        return encryptEntry(
           vault.get(),
           userId,
           entry.clientEntryId,
           trimmed,
-          entry.entryDate,
+          entry.createdAt ?? entry.entryDate,
           entry.sentiment,
-          { energy: entry.energy, sleep: entry.sleep, tags: entry.tags },
+          { energy: entry.energy, sleep: entry.sleep, tags: entry.tags, tod: entry.tod },
           version,
           entry.inputMode === "voice"
             ? {
@@ -916,7 +953,9 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
                 englishText: englishForSave,
               }
             : undefined,
+          entry.originalPayload,
         ).blobB64;
+      };
       let nextVersion = (entry.contentVersion ?? 0) + 1;
       // The first encryption stays OUTSIDE the network try: a local vault
       // failure keeps its own honest message (the pre-M-2 contract).
@@ -970,7 +1009,8 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
         }
       };
       const applyEdit = async (): Promise<void> => {
-        await api.updateEntry(entry.clientEntryId, blobB64, entry.entryDate, nextVersion);
+        assertLocalWritePermit(writePermit);
+        await api.updateEntry(entry.clientEntryId, blobB64, entry.entryDate, nextVersion, writePermit);
       };
       try {
         try {
@@ -984,63 +1024,44 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
             // success message.
             const current = await api.getEntry(entry.clientEntryId);
             const serverVersion = typeof current.content_version === "number" ? current.content_version : 0;
-            let theirText: string | null = null;
-            try {
-              theirText = decryptEntry(
-                vault.get(),
-                userId,
-                current.client_entry_id,
-                current.blob,
-                typeof current.content_version === "number" ? current.content_version : undefined,
-              ).text;
-            } catch {
-              theirText = null; // undecryptable: cannot compare — fall through to the retry
+            // Fail closed when the saved version cannot authenticate: an
+            // unreadable competing edit cannot authorize overwriting it.
+            const theirsPayload = decryptEntry(vault.get(), userId, current.client_entry_id, current.blob,
+              typeof current.content_version === "number" ? current.content_version : undefined,
+              { forbidLegacyAad: await isV2Bound(userId, vault.get().dataKey, current.client_entry_id) });
+            const theirText = theirsPayload.text;
+            if (typeof theirText !== "string") throw new Error(tr("history.unreadableConflict"));
+            let decision: "mine" | "theirs" | "cancel" = "mine";
+            if (theirText !== trimmed) {
+              decision = await new Promise<"mine" | "theirs" | "cancel">((resolve) => {
+                const finish = (choice: "mine" | "theirs" | "cancel") => { conflictDecision.current = null; resolve(choice); };
+                conflictDecision.current = finish;
+                Alert.alert(tr("history.conflictTitle"),
+                  tr("history.conflictBody", { theirs: conflictSnippet(theirText), yours: conflictSnippet(trimmed) }), [
+                    { text: tr("history.conflictKeepTheirs"), style: "cancel", onPress: () => finish("theirs") },
+                    { text: tr("history.conflictOverwrite"), style: "destructive", onPress: () => finish("mine") },
+                  ], { cancelable: true, onDismiss: () => finish("cancel") });
+              });
             }
-            const retry = (): void => {
-              nextVersion = serverVersion + 1;
-              blobB64 = encryptFor(nextVersion);
-              void applyEdit()
-                .then(() => finishEdit(trimmed, nextVersion))
-                .catch((retryErr: unknown) => {
-                  Alert.alert(
-                    tr("history.couldNotUpdateTitle"),
-                    tr("history.updateFailedBody", { reason: requestFailureCopy(retryErr) }),
-                  );
-                });
-            };
-            if (theirText !== null && theirText !== trimmed) {
-              // M-M3 (2026-09-26): each side is snippeted (see
-              // conflictSnippet) — the full texts stay on the device, only
-              // the bounded preview enters the dialog.
-              const theirs = conflictSnippet(theirText);
-              Alert.alert(
-                tr("history.conflictTitle"),
-                tr("history.conflictBody", { theirs, yours: conflictSnippet(trimmed) }),
-                [
-                  {
-                    text: tr("history.conflictKeepTheirs"),
-                    style: "cancel",
-                    // Keeping theirs must still leave the local list
-                    // truthful (audit 2026-09-25): apply the server's text
-                    // and version instead of leaving a stale row that
-                    // re-enters the conflict funnel on the next save.
-                    onPress: (): void => {
-                      entry.contentVersion = serverVersion;
-                      void observeEntryVersions(userId, vault.get().dataKey, [
-                        { clientEntryId: entry.clientEntryId, contentVersion: serverVersion },
-                      ]).catch(() => {});
-                      const updated: HistoryEntry = { ...entry, text: theirText };
-                      setEntries((prev) => prev.map((e) => (e.clientEntryId === entry.clientEntryId ? updated : e)));
-                      setMode({ kind: "detail", entry: updated });
-                    },
-                  },
-                  { text: tr("history.conflictOverwrite"), style: "destructive", onPress: retry },
-                ],
-                { cancelable: true },
-              );
-              return; // the user decides; nothing was overwritten
+            if (decision === "cancel" || !vault.isUnlocked()) return;
+            if (decision === "theirs") {
+              await observeEntryVersions(userId, vault.get().dataKey, [{ clientEntryId: entry.clientEntryId, contentVersion: serverVersion }]);
+              const updated: HistoryEntry = {
+                ...entry, text: theirText, contentVersion: serverVersion,
+                originalPayload: theirsPayload,
+                createdAt: theirsPayload.created_at, tod: theirsPayload.tod,
+                sentiment: sanitizeSentiment(theirsPayload.sentiment), energy: sanitizeEnergy(theirsPayload.energy),
+                sleep: sanitizeSleep(theirsPayload.sleep), tags: sanitizeTags(theirsPayload.tags),
+                inputMode: theirsPayload.input_mode === "voice" ? "voice" : undefined,
+                transcriptLang: theirsPayload.transcript_lang, englishText: theirsPayload.english_text ?? null,
+              };
+              setEntries(previous => previous.map(item => item.clientEntryId === entry.clientEntryId ? updated : item));
+              setMode({ kind: "detail", entry: updated });
+              return;
             }
-            retry();
+            nextVersion = serverVersion + 1;
+            blobB64 = encryptFor(nextVersion);
+            await applyEdit();
           } else if (err instanceof ApiError && err.status === 404) {
             // WEB_PLAN S-4: deleted on another device — the edit is not
             // saved and the user learns why.

@@ -17,13 +17,14 @@
  *    returns the key itself (visible in review, never a crash).
  *  - "{name}"-style placeholders interpolate from the optional vars bag;
  *    an unknown placeholder stays literal so gaps surface in review.
- *  - Locale selection is device-driven ("es-*" → es, else en). There is
- *    deliberately NO in-app language override this wave — a manual
- *    Language setting is a residual, not an omission.
+ *  - Locale selection starts with the device default ("es-*" → es, else
+ *    en), then applies the saved Language setting. Subscribers refresh
+ *    open screens without unmounting their drafts.
  *  - Dates and numbers format through `dateLocaleTag()` so Intl calls
  *    ("es-ES" / "en-US") follow the same selection.
  */
 
+import { useSyncExternalStore } from "react";
 import { en } from "./locales/en";
 import { es } from "./locales/es";
 
@@ -34,8 +35,7 @@ export function dateLocaleTag(): string {
   return currentLocale === "es" ? "es-ES" : "en-US";
 }
 
-/** Resolved ONCE from the device locale — the app has no language switch,
- *  so re-reading it per call would only invite inconsistency. */
+/** Detect the device default; the persisted preference is applied at startup. */
 function detectLocale(): Locale {
   try {
     const locale = Intl.DateTimeFormat().resolvedOptions().locale;
@@ -46,15 +46,21 @@ function detectLocale(): Locale {
 }
 
 let currentLocale: Locale = detectLocale();
+const localeListeners = new Set<() => void>();
+export function useLocale(): Locale {
+  return useSyncExternalStore((listener) => { localeListeners.add(listener); return () => { localeListeners.delete(listener); }; }, getLocale, getLocale);
+}
 
 export function setLocale(locale: Locale): void {
+  if (currentLocale === locale) return;
   currentLocale = locale;
+  for (const listener of localeListeners) listener();
 }
 
 /** 2026-09-29 deep audit (P2): the in-app language override's "Device"
  * option returns to the startup detection. */
 export function resetToDeviceLocale(): void {
-  currentLocale = detectLocale();
+  setLocale(detectLocale());
 }
 
 export function getLocale(): Locale {

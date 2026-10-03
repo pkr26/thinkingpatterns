@@ -428,6 +428,7 @@
        "pattern_state": "emerging",
        "phrase_anchor": "felt calm and grateful today",
        "sample_days": 30,
+       "sample_entries": 30,
        "span_days": 29,
        "strength": 1.0,
        "variants": [
@@ -554,6 +555,7 @@
        "pattern_state": "emerging",
        "phrase_anchor": "felt calm and grateful today",
        "sample_days": 42,
+       "sample_entries": 42,
        "span_days": 40,
        "strength": 1.0,
        "variants": [
@@ -710,6 +712,7 @@
        "pattern_state": "emerging",
        "phrase_anchor": "me senti tranquilo y agradecido",
        "sample_days": 70,
+       "sample_entries": 70,
        "span_days": 68,
        "strength": 1.0,
        "variants": [
@@ -748,6 +751,7 @@
        "pattern_state": "emerging",
        "phrase_anchor": "muy ansioso por el trabajo otra vez",
        "sample_days": 70,
+       "sample_entries": 70,
        "span_days": 63,
        "strength": 0.724,
        "variants": [

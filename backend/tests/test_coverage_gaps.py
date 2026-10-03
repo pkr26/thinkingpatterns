@@ -620,16 +620,16 @@ async def test_delete_account_for_deactivated_account_is_404(client, app):
         user = await session.get(User, emu.user_id)
         assert user is not None and not user.is_active
 
-    request = Request(
-        {"type": "http", "headers": [], "method": "DELETE", "path": "/api/account", "app": app}
-    )
-    with pytest.raises(HTTPException) as excinfo:
-        await delete_account(
-            body=AccountDeleteRequest(verifier=emu.auth_key_b64),
-            request=request,
-            user=user,
-            session=session,
+        request = Request(
+            {"type": "http", "headers": [], "method": "DELETE", "path": "/api/account", "app": app}
         )
+        with pytest.raises(HTTPException) as excinfo:
+            await delete_account(
+                body=AccountDeleteRequest(verifier=emu.auth_key_b64),
+                request=request,
+                user=user,
+                session=session,
+            )
     assert excinfo.value.status_code == 404
     assert excinfo.value.detail == "account not found"
 

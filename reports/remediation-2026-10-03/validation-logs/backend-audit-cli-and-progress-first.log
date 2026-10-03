@@ -1,0 +1,17 @@
+.F                                                                       [100%]
+=================================== FAILURES ===================================
+____ test_live_journal_day_progress_survives_entry_write_replace_and_delete ____
+
+client = <httpx.AsyncClient object at 0x10b3b3380>
+
+    async def test_live_journal_day_progress_survives_entry_write_replace_and_delete(client):
+        patient = ClientEmulator("live-progress", "password")
+        await patient.register(client)
+>       await patient.age_account(client, 20)
+              ^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'ClientEmulator' object has no attribute 'age_account'
+
+tests/test_remediation_2026_10_03.py:693: AttributeError
+=========================== short test summary info ============================
+FAILED tests/test_remediation_2026_10_03.py::test_live_journal_day_progress_survives_entry_write_replace_and_delete
+1 failed, 1 passed, 23 deselected in 1.83s

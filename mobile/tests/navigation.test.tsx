@@ -14,6 +14,9 @@ vi.mock("../src/api/client", async (importOriginal) => {
 });
 
 vi.mock("../src/offlineQueue", () => ({
+  prepareQueueRekey: vi.fn(async () => []),
+  pendingEntryIds: vi.fn(async () => []),
+  abortInFlightFlush: vi.fn(),
   enqueue: vi.fn(async () => {}),
   flushQueue: vi.fn(async () => 0),
   QueueFullError: class QueueFullError extends Error {},
@@ -56,6 +59,28 @@ beforeEach(async () => {
 });
 
 describe("AppNavigator", () => {
+  it("routes foreground and late cold notification taps once when navigation is ready", async () => {
+    const { queueNotificationRoute, notifyNavigationReady, takePendingNotificationRoute } = await import("../src/notificationRoute");
+    const { navigationRef } = await import("../src/navigation");
+    const { act } = await import("./helpers/rtr");
+    takePendingNotificationRoute();
+    await recordOnboardingSeen("user-1");
+    sessionState = { authStatus: "loggedIn", unlocked: true, activeDays: 30, unlockDays: 30 };
+    const navigate = vi.fn(); let ready = true;
+    navigationRef.current = { isReady: () => ready, navigate };
+    const root = await render(<AppNavigator />); await flush();
+    await act(async () => queueNotificationRoute("mindpattern-measure-reminder")); await flush();
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("Measures");
+    await act(async () => notifyNavigationReady()); await flush();
+    expect(navigate).toHaveBeenCalledTimes(1);
+    ready = false;
+    await act(async () => queueNotificationRoute("mindpattern-measure-reminder")); await flush();
+    expect(navigate).toHaveBeenCalledTimes(1);
+    ready = true;
+    await act(async () => notifyNavigationReady()); await flush();
+    expect(navigate).toHaveBeenCalledTimes(2);
+    await act(async () => root.unmount()); navigationRef.current = null;
+  });
   it("shows the boot splash while the saved session resolves", async () => {
     const root = await render(<AppNavigator />);
     await flush();

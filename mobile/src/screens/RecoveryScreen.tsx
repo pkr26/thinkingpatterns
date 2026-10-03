@@ -8,7 +8,7 @@
  * server-side, the local caches follow, and the vault unlocks — every
  * word intact. Calm copy throughout: this screen is used on a bad day.
  */
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
@@ -27,6 +27,7 @@ import { vault } from "../vault";
 import { useSession } from "../store";
 import { recoverAccountWithKey } from "../recoveryFlow";
 import { passwordPolicyError } from "./LoginScreen";
+import { localWriteScopeEpoch } from "../localWriteGuard";
 
 export function RecoveryScreen({ navigation }: { navigation: any }): React.JSX.Element {
   const t = useTheme();
@@ -35,10 +36,17 @@ export function RecoveryScreen({ navigation }: { navigation: any }): React.JSX.E
   const [recoveryKey, setRecoveryKey] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [legacyKit, setLegacyKit] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [statusTone, setStatusTone] = useState<InlineStatusTone>("neutral");
   const [done, setDone] = useState(false);
+  const mounted = useRef(true), attempt = useRef(0), submitting = useRef(false);
+  const navigationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => { mounted.current = true; return () => {
+    mounted.current = false; attempt.current++;
+    if (navigationTimer.current) clearTimeout(navigationTimer.current);
+  }; }, []);
 
   const showStatus = (message: string, tone: InlineStatusTone) => {
     setStatusTone(tone);
@@ -46,7 +54,7 @@ export function RecoveryScreen({ navigation }: { navigation: any }): React.JSX.E
   };
 
   const run = async () => {
-    if (busy || done) return;
+    if (busy || done || submitting.current) return;
     if (!username.trim() || !recoveryKey.trim()) {
       showStatus(tr("recovery.missingFields"), "neutral");
       return;
@@ -65,8 +73,14 @@ export function RecoveryScreen({ navigation }: { navigation: any }): React.JSX.E
     }
     setBusy(true);
     setStatus(null);
+    submitting.current = true; const id = ++attempt.current;
+    const ownsAttempt = () => mounted.current && attempt.current === id;
+    let ownedKey: Buffer | null = null;
     try {
-      const outcome = await recoverAccountWithKey(username, recoveryKey, newPassword);
+      const outcome = await recoverAccountWithKey(username, recoveryKey, newPassword, legacyKit ? "v1" : "v2", { stillCurrent: ownsAttempt });
+      ownedKey = outcome.dataKey;
+      if (!ownsAttempt() || outcome.ownershipEpoch !== localWriteScopeEpoch()) return;
+      const epoch = localWriteScopeEpoch();
       vault.unlock(
         {
           masterKey: Buffer.alloc(32), // placeholder — zeroized by unlock
@@ -81,17 +95,22 @@ export function RecoveryScreen({ navigation }: { navigation: any }): React.JSX.E
         // and password rotation until a full sign-out/in).
         { authKeyKnown: false },
       );
+      ownedKey = null;
       markLoggedIn(); // the vault subscription flips `unlocked` on unlock
       setDone(true);
-      showStatus(tr("recovery.doneBody"), "ok");
-      setTimeout(() => navigation.navigate("Entry"), 900);
+      setRecoveryKey(""); setNewPassword(""); setConfirm("");
+      showStatus(tr("recovery.doneBody") + (outcome.localCacheReady === false ? "\n" + tr("recovery.onlineUnlockRequired") : ""), "ok");
+      navigationTimer.current = setTimeout(() => { if (ownsAttempt() && epoch === localWriteScopeEpoch()) navigation.navigate("Entry"); }, 900);
     } catch (err) {
+      if (!ownsAttempt()) return;
       showStatus(
         err instanceof Error && err.message ? err.message : tr("recovery.failedBody"),
         "neutral",
       );
     } finally {
-      setBusy(false);
+      ownedKey?.fill(0);
+      if (attempt.current === id) submitting.current = false;
+      if (ownsAttempt()) setBusy(false);
     }
   };
 
@@ -146,6 +165,7 @@ export function RecoveryScreen({ navigation }: { navigation: any }): React.JSX.E
           <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize }}>
             {tr("recovery.keyHint")}
           </Text>
+          <GhostButton label={tr(legacyKit ? "recovery.legacySelected" : "recovery.useLegacy")} onPress={() => setLegacyKit(!legacyKit)} disabled={busy} />
         </View>
         <View style={{ gap: 4 }}>
           <Text style={{ color: t.colors.muted, fontSize: t.type.meta.fontSize }}>

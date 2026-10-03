@@ -1,0 +1,12 @@
+Stopped owned loopback process 55929
+Stopped owned loopback process 59632
+Stopped owned loopback process 69182
+Stopped owned loopback process 69187
+Stopped owned loopback process 73925
+Stopped owned loopback process 79696
+Stopped owned read-only/no-snapshot-save emulator-5562
+Removed owned synthetic PostgreSQL container; no other containers modified
+Removed owned temporary remediation-backup files
+Removed owned temporary remediation-localtls files
+Removed owned synthetic remediation-browser-release.db
+PASS owned servers are stopped; source/evidence, installed toolchains and user containers retained

@@ -554,7 +554,7 @@ class LLMAnalyzer:
     def _recent_payload(self, entries: list[JournalEntry]) -> list[dict]:
         user_payload = []
         budget = self.MAX_TOTAL_CHARS
-        for entry in entries[-self.MAX_ENTRIES :]:
+        for entry in reversed(entries[-self.MAX_ENTRIES :]):
             if budget <= 0:
                 break
             text = entry.text[:budget]
@@ -562,7 +562,7 @@ class LLMAnalyzer:
             user_payload.append(
                 {"date": entry.entry_date.isoformat(), "sentiment": entry.sentiment, "text": text}
             )
-        return user_payload
+        return list(reversed(user_payload))
 
     def _fetch_patterns(
         self, entries: list[JournalEntry], findings: list[Pattern] | None = None

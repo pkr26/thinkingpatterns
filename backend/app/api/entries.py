@@ -30,7 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..cache import make_rate_limiter
 from ..db import rowcount as db_rowcount
-from ..deps import ApiError, get_session, require_regular_user
+from ..deps import ensure_no_rekey, ApiError, get_session, require_regular_user
 from ..locks import UserLocks, lifecycle_locks
 from ..models import AudioAttachment, Entry, User, utcnow
 from ..schemas import (
@@ -132,10 +132,9 @@ async def delete_attachment_for_entry(
     session: AsyncSession, settings, user_id: str, client_entry_id: str
 ) -> None:
     """Cascade half of entry deletion (VOICE_PLAN): the entry's kept
-    recording dies with it — object first, then row. A store failure must
-    NOT abort the entry deletion (the recording's retention clock is
-    already running); it logs and leaves the orphan to the S3-lifecycle
-    backstop / dev scratch dir."""
+    recording pointer and a durable object-deletion tombstone are committed
+    with the entry deletion. Provider failure leaves a retryable tombstone
+    rather than advertising the recording or losing cleanup work."""
     from ..services.audio_store import get_audio_store_cached
 
     row = (
@@ -152,16 +151,9 @@ async def delete_attachment_for_entry(
     )
     if row is None:
         return
-    store = get_audio_store_cached(settings)
-    if store is not None:
-        try:
-            await store.delete(row.storage_key)
-        except Exception:  # noqa: BLE001 — entry deletion stands regardless
-            import logging
+    from ..services.audio_store import enqueue_audio_delete
 
-            logging.getLogger(__name__).warning(
-                "entry delete: audio object %s could not be removed", row.storage_key
-            )
+    enqueue_audio_delete(session, row, store=get_audio_store_cached(settings))
     await session.delete(row)
 
 
@@ -305,6 +297,7 @@ async def _fresh_active_entry_user(
     fresh = await session.get(User, user_id, populate_existing=True)
     if fresh is None or not fresh.is_active or fresh.token_epoch != expected_epoch:
         raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+    await ensure_no_rekey(session, user_id)
     return fresh
 
 

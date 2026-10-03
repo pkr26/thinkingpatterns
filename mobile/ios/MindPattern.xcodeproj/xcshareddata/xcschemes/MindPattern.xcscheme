@@ -27,18 +27,8 @@
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES">
-      <Testables>
-         <TestableReference
-            skipped = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "00E356ED1AD99517003FC87E"
-               BuildableName = "MindPatternTests.xctest"
-               BlueprintName = "MindPatternTests"
-               ReferencedContainer = "container:MindPattern.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
-      </Testables>
+      <Testables/>
+      <!-- Device acceptance uses the app target; no nonexistent test target. -->
    </TestAction>
    <LaunchAction
       buildConfiguration = "Debug"

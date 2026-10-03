@@ -61,7 +61,7 @@ export function touchableByLabel(root: ReactTestRenderer, label: string): ReactT
 export async function pressLabel(root: ReactTestRenderer, label: string): Promise<void> {
   const button = touchableByLabel(root, label);
   await act(async () => {
-    await (button.props as { onPress?: () => unknown }).onPress?.();
+    await (button.props as { onPress?: (event: unknown) => unknown }).onPress?.({ nativeEvent: { timestamp: Date.now() }, currentTarget: 1, target: 1 });
   });
 }
 
@@ -70,7 +70,7 @@ export async function pressLabel(root: ReactTestRenderer, label: string): Promis
 export async function firePress(root: ReactTestRenderer, label: string): Promise<void> {
   const button = touchableByLabel(root, label);
   await act(async () => {
-    void (button.props as { onPress?: () => unknown }).onPress?.();
+    void (button.props as { onPress?: (event: unknown) => unknown }).onPress?.({ nativeEvent: { timestamp: Date.now() }, currentTarget: 1, target: 1 });
   });
 }
 

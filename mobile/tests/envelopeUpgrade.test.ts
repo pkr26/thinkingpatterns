@@ -76,6 +76,7 @@ vi.mock("../src/reauth", () => ({
 import { api, ApiError } from "../src/api/client";
 import { upgradeKeyProtection } from "../src/envelopeUpgrade";
 import { vault } from "../src/vault";
+import { changeLocalSessionOwner, __resetLocalKeyLifecycleForTests } from "../src/localWriteGuard";
 import { deriveKeys } from "../src/crypto/MindPatternCrypto";
 import { deriveMasterKey } from "../src/crypto/kdf";
 import { defaultKdfParams, envelopeKek, unwrapDataKey } from "../src/crypto/keyEnvelope";
@@ -86,6 +87,7 @@ const DATA_KEY = deriveKeys(PASSWORD, SALT).dataKey;
 const PARAMS = defaultKdfParams();
 
 beforeEach(() => {
+  __resetLocalKeyLifecycleForTests();
   store.clear();
   upgradeState.keyEnvelope = { key_scheme: "v1", salt: SALT.toString("base64"), kdf_params: null, wrapped_data_key: null };
   upgradeState.failUpgrade = null;
@@ -97,6 +99,19 @@ beforeEach(() => {
 });
 
 describe("upgradeKeyProtection (v1 → v2)", () => {
+  it("does not ship a retained old-account key or wrap after password derivation resumes in a replacement session", async () => {
+    const kdf = await import("../src/crypto/kdf"); const original = kdf.deriveMasterKeyAsync; let release!: () => void;
+    const gate = vi.spyOn(kdf, "deriveMasterKeyAsync").mockImplementationOnce(async (...args) => {
+      const key = await original(...args); await new Promise<void>(resolve => { release = resolve; }); return key;
+    });
+    const pending = upgradeKeyProtection({ username: "alice", userId: USER, password: PASSWORD, verifierB64: VERIFIER_B64 });
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    changeLocalSessionOwner(OTHER_USER); vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 4), dataKey: Buffer.alloc(32, 8) }, OTHER_USER);
+    release(); const outcome = await pending; gate.mockRestore();
+    expect(outcome.ok).toBe(false); expect(api.openProcessingSession).not.toHaveBeenCalled();
+    expect(api.upgradeKeyEnvelope).not.toHaveBeenCalled(); expect(api.cacheKeyEnvelope).not.toHaveBeenCalled();
+    expect(vault.ownerUserId()).toBe(OTHER_USER);
+  });
   it("wraps the CURRENT data key, proves possession, and uploads with both proofs", async () => {
     const outcome = await upgradeKeyProtection({ username: "alice", userId: USER, password: PASSWORD });
     expect(outcome).toEqual({ ok: true, already: false });

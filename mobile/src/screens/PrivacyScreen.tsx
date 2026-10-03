@@ -14,7 +14,7 @@ import { t as tr } from "../strings";
 // the policy cannot switch languages mid-session.
 // 2026-09-26 audit (i18n guard): startup-fixed locale — this module-load
 // tr() table MUST be revisited if runtime language switching ever ships.
-const SECTIONS: readonly { title: string; body: string }[] = [
+const sections = (): readonly { title: string; body: string }[] => [
   {
     title: tr("privacy.s1Title"),
     body: tr("privacy.s1Body"),
@@ -45,7 +45,7 @@ export function PrivacyScreen({ navigation }: { navigation: any }): React.JSX.El
       contentContainerStyle={{ padding: t.spacing.xl, gap: 14 }}
     >
       <Text style={[styles.headline, { color: t.colors.text }]}>{tr("privacy.headline")}</Text>
-      {SECTIONS.map((section) => (
+      {sections().map((section) => (
         <View key={section.title} style={{ gap: 6 }}>
           <Text style={[styles.sectionTitle, { color: t.colors.accent }]}>{section.title}</Text>
           <Text style={[styles.body, { color: t.colors.body }]}>{section.body}</Text>

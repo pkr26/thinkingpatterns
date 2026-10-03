@@ -72,6 +72,9 @@ class _PageSession:
     async def __aexit__(self, exc_type, exc, traceback):
         return False
 
+    async def get(self, model, identifier, **kwargs):
+        return self.fresh
+
     async def execute(self, statement):
         assert self._results, "unexpected export query"
         return self._results.pop(0)
@@ -99,6 +102,9 @@ class _FreshExportSession:
         self._snapshot_ids = list(snapshot_ids)
         self._served_user = False
         self.commits = 0
+
+    async def scalar(self, statement):
+        return None
 
     async def execute(self, statement):
         if not self._served_user:
@@ -134,6 +140,8 @@ class _EntryPagingRaceSession:
         return self.user
 
     async def scalar(self, statement):
+        if "rekey_journal" in str(statement):
+            return None
         # Snapshot revision reads are intentionally separate from the
         # metadata/blob race this double models.
         return self.user.entries_revision
@@ -316,9 +324,18 @@ async def test_export_releases_admission_slot_when_account_disappears_before_sna
 async def _collect_export(
     account_api, *, fresh: User, pages: list[_PageSession], snapshot_ids=()
 ) -> dict:
+    pages = [*pages, _PageSession([])]  # final revocation/revision check
+    for page in pages:
+        page.fresh = fresh
     request = SimpleNamespace(
         app=SimpleNamespace(
-            state=SimpleNamespace(export_limiter=None, sessionmaker=_PageFactory(pages))
+            state=SimpleNamespace(
+                settings=SimpleNamespace(
+                    audio_bucket="", audio_local_dir="", environment="production"
+                ),
+                export_limiter=None,
+                sessionmaker=_PageFactory(pages),
+            )
         )
     )
     response = await account_api.export_account(
@@ -328,53 +345,53 @@ async def _collect_export(
     return json.loads("".join(chunks))
 
 
-async def test_export_skips_disappeared_entry_metadata_and_keeps_scanning():
+async def test_export_refuses_disappeared_entry_metadata():
     """Metadata/blob races advance the cursor instead of truncating exports."""
     from app.api import account as account_api
 
     fresh = _race_user("export-entry-disappeared")
     now = datetime.now(timezone.utc)
     metadata = [("gone-entry", date.today(), now, 32)]
-    bundle = await _collect_export(
-        account_api,
-        fresh=fresh,
-        pages=[
-            _PageSession([_Result(rows=metadata), _Result(scalar_rows=[])]),
-            _PageSession([_Result(rows=[])]),  # later entry page
-            # Empty insight snapshot (head served no ids): no insight page.
-            # Empty share snapshot (A-6, 2026-09-21): no share page either —
-            # the shares walk the frozen head id list, so no shares means no
-            # page session consumed.
-            _PageSession([_Result(rows=[])]),  # measures
-        ],
-    )
-    assert bundle["entries"] == []
-    assert bundle["insights"] == []
-    assert bundle["measures"] == []
+    with pytest.raises(ApiError) as raised:
+        await _collect_export(
+            account_api,
+            fresh=fresh,
+            pages=[
+                _PageSession([_Result(rows=metadata), _Result(scalar_rows=[])]),
+                _PageSession([_Result(rows=[])]),  # later entry page
+                # Empty insight snapshot (head served no ids): no insight page.
+                # Empty share snapshot (A-6, 2026-09-21): no share page either —
+                # the shares walk the frozen head id list, so no shares means no
+                # page session consumed.
+                _PageSession([_Result(rows=[])]),  # measures
+            ],
+        )
+    assert raised.value.status_code == 409
+    assert raised.value.code == "collection_changed"
 
 
-async def test_export_skips_disappeared_insight_metadata_and_keeps_scanning():
+async def test_export_refuses_disappeared_insight_metadata():
     """A row deleted after the snapshot is skipped, never a crash/truncation."""
     from app.api import account as account_api
 
     fresh = _race_user("export-insight-disappeared")
-    bundle = await _collect_export(
-        account_api,
-        fresh=fresh,
-        snapshot_ids=["gone-insight"],
-        pages=[
-            # No shares (empty share snapshot): no share page consumed.
-            _PageSession([_Result(rows=[])]),  # entries
-            # Insight page: sizes for the snapshot id, then the blob fetch
-            # finds the row deleted since the snapshot — consumed as
-            # "nothing to export", the walk continues past it.
-            _PageSession([_Result(rows=[("gone-insight", 32)]), _Result(scalar_rows=[])]),
-            _PageSession([_Result(rows=[])]),  # measures
-        ],
-    )
-    assert bundle["entries"] == []
-    assert bundle["insights"] == []
-    assert bundle["measures"] == []
+    with pytest.raises(ApiError) as raised:
+        await _collect_export(
+            account_api,
+            fresh=fresh,
+            snapshot_ids=["gone-insight"],
+            pages=[
+                # No shares (empty share snapshot): no share page consumed.
+                _PageSession([_Result(rows=[])]),  # entries
+                # Insight page: sizes for the snapshot id, then the blob fetch
+                # finds the row deleted since the snapshot — consumed as
+                # "nothing to export", the walk continues past it.
+                _PageSession([_Result(rows=[("gone-insight", 32)]), _Result(scalar_rows=[])]),
+                _PageSession([_Result(rows=[])]),  # measures
+            ],
+        )
+    assert raised.value.status_code == 409
+    assert raised.value.code == "collection_changed"
 
 
 async def test_export_repages_entries_when_blob_grew_after_metadata(monkeypatch):
@@ -710,6 +727,8 @@ async def test_entry_nonunique_commit_error_is_not_mislabeled_as_a_conflict(sett
             return self.user
 
         async def scalar(self, statement):
+            if "rekey_journal" in str(statement):
+                return None
             return self.user.entries_revision
 
         async def execute(self, statement):

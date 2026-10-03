@@ -1,0 +1,4 @@
+npm notice run mindpattern-mobile@1.0.0 verify:vectors
+npm notice run node tools/verify_vectors.mjs
+verifying 4 vectors with: REAL MODULES
+all 4 vectors + 6 encrypt vectors + 3 wrap vectors + 17 AAD edge cases + 4 envelope vectors verified

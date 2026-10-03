@@ -162,6 +162,7 @@ describe("rotatePassword v2 branch (O(1) rewrap)", () => {
     expect(outcome).toEqual({
       ok: true,
       scheme: "v2",
+      sessionScope: expect.any(Number),
       counts: { entries: 0, insights: 0, measures: 0 },
       rewrapped: 0,
       rewrapFailures: [],
@@ -440,8 +441,8 @@ describe("rotatePassword v2 branch (O(1) rewrap)", () => {
   });
 });
 
-describe("the 409 key_scheme_conflict bridge (v1 ladder, upgraded elsewhere)", () => {
-  it("a key_scheme_conflict from the OLD credential endpoint surfaces honest copy", async () => {
+describe("the atomic v1 protocol (upgraded elsewhere)", () => {
+  it("an old server response cannot authorize the atomic v1 rotation", async () => {
     apiState.keyEnvelope = { key_scheme: "v1", salt: SALT.toString("base64"), kdf_params: null, wrapped_data_key: null };
     const outcome = await rotatePassword({
       username: "alice",
@@ -453,10 +454,10 @@ describe("the 409 key_scheme_conflict bridge (v1 ladder, upgraded elsewhere)", (
     // dies at the retired credential endpoint with the scheme conflict.
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) {
-      expect(outcome.stage).toBe("credential");
-      expect(outcome.reason).toBe("server");
-      expect(outcome.detail).toMatch(/newer key protection/i);
+      expect(outcome.stage).toBe("rekey");
+      expect(outcome.reason).toBe("offline");
+      expect(outcome.detail).toMatch(/atomic password rotation/i);
     }
-    expect(api.rotateCredential).toHaveBeenCalledTimes(1);
+    expect(api.rotateCredential).not.toHaveBeenCalled();
   });
 });

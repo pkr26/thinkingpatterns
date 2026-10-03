@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "/Users/pradeepreddy/Desktop/mental_health_application/reports/remediation-2026-10-03/android-draft-structured.py", line 101, in <module>
+    tap(label)
+    ~~~^^^^^^^
+  File "/Users/pradeepreddy/Desktop/mental_health_application/reports/remediation-2026-10-03/android-draft-structured.py", line 51, in tap
+    left, top, right, bottom = map(int, re.findall(r"\d+", find(label).get("bounds")))
+                                                           ~~~~^^^^^^^
+  File "/Users/pradeepreddy/Desktop/mental_health_application/reports/remediation-2026-10-03/android-draft-structured.py", line 47, in find
+    raise AssertionError(f"Missing accessible control: {label}")
+AssertionError: Missing accessible control: Tag: rest

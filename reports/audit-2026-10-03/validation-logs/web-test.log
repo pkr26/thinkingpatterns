@@ -1,0 +1,45 @@
+npm notice run mindpattern-web@0.1.0 test
+npm notice run vitest run --coverage
+
+ RUN  v5.0.2 /Users/pradeepreddy/Desktop/mental_health_application/web
+      Coverage enabled with v8
+
+ ❯ tests/securityConfig.test.ts (3 tests | 1 failed) 7ms
+   ❯ static-host security policy (2)
+     × the built shell carries subresource integrity for every local subresource 2ms
+ ❯ tests/login.test.tsx (30 tests | 1 failed) 7461ms
+   ❯ password policy (4)
+     × L-6 shape rules (mobile parity, W-3): blocklisted words are rejected even with passing variety 3ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/login.test.tsx > password policy > L-6 shape rules (mobile parity, W-3): blocklisted words are rejected even with passing variety
+AssertionError: the given combination of arguments (null and string) is invalid for this assertion. You can use an array, a map, an object, a set, a string, or a weakset instead of a string
+ ❯ tests/login.test.tsx:72:59
+     70|     expect(passwordPolicyError("passwordpassword1!")).toContain("too c…
+     71|     expect(passwordPolicyError("MyJournal2026!x")).toContain("too comm…
+     72|     expect(passwordPolicyError("correct-horse-Fathom-7")).toContain("t…
+       |                                                           ^
+     73|     expect(passwordPolicyError("welcome-to-the-Jungle99")).toContain("…
+     74|     expect(passwordPolicyError("qwerty123456!X")).toContain("too commo…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  tests/securityConfig.test.ts > static-host security policy > the built shell carries subresource integrity for every local subresource
+AssertionError: <script src="/theme-init.js"> must carry an SRI hash: expected undefined to be defined
+ ❯ tests/securityConfig.test.ts:139:60
+    137|         const tag = match[0];
+    138|         const integrity = tag.match(/\bintegrity="(sha384-[^"]+)"/)?.[…
+    139|         expect(integrity, `${tag} must carry an SRI hash`).toBeDefined…
+       |                                                            ^
+    140|         const publicPath = tag.match(/\b(?:src|href)="(\/[^"]+)"/)?.[1…
+    141|         const digest = createHash("sha384")
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed | 47 passed | 3 skipped (52)
+      Tests  2 failed | 744 passed | 5 skipped (751)
+   Start at  06:22:12
+   Duration  23.93s (tests 85%, transform 10%, import 2%, environment 1%, worker 1%)
+

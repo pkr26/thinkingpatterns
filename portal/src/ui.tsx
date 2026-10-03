@@ -12,7 +12,7 @@
  * the label; Note preserves line breaks; ErrorBanner announces with
  * role=alert.
  */
-import { useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 
 /** Mirrors the CSS custom properties in public/portal.css (guarded by
  *  tests/designTokens.test.ts). 2026-10-02 palette wave: the portal
@@ -102,10 +102,12 @@ export function Field(props: {
   reveal?: boolean;
 }): React.JSX.Element {
   const [shown, setShown] = useState(false);
+  const inputId = useId();
   const isPassword = (props.type ?? "text") === "password";
   const type = isPassword && shown ? "text" : props.type ?? "text";
   const input = (
     <input
+      id={inputId}
       type={type}
       value={props.value}
       placeholder={props.placeholder}
@@ -115,8 +117,8 @@ export function Field(props: {
     />
   );
   return (
-    <label className="field">
-      <span className="field__label">{props.label}</span>
+    <div className="field">
+      <label className="field__label" htmlFor={inputId}>{props.label}</label>
       {props.reveal && isPassword ? (
         <span className="field__row">
           {input}
@@ -130,7 +132,7 @@ export function Field(props: {
       ) : (
         input
       )}
-    </label>
+    </div>
   );
 }
 

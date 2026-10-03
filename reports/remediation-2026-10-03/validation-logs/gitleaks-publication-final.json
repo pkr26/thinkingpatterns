@@ -1,0 +1,61 @@
+{
+  "checkedAtUtc": "2026-10-03T21:07:44.585067+00:00",
+  "gitleaksVersion": "8.30.1",
+  "platform": "darwin_arm64",
+  "officialRelease": "https://github.com/gitleaks/gitleaks/releases/tag/v8.30.1",
+  "archiveSha256": "b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5",
+  "officialChecksumVerified": true,
+  "policySha256": "d12a7d523723dce94c57e7f78fda45ab73a646bef5843e761b8555094105adea",
+  "rootHead": "9c1ba47508f474afc5f70588dd2771d80c2eece7",
+  "scannedStagedFileCount": 1122,
+  "scope": "Actual staged pass, actual existing full git history, exact index export with no-git scanning, and isolated synthetic scratch commit with full-history scanning; negative control changes the published audio fixture only in scratch. Final added evidence files are redacted scan outputs and metadata. Actual workspace source, index, HEAD and remote were not changed by this verifier.",
+  "negativeControl": "Replacing the exact published fixture literal with a different synthetic 32-byte high-entropy key remains a generic-api-key finding in the same file, demonstrating condition=and exact value restriction. No allowlist changes were made by the verifier.",
+  "pinnedEngineLimit": "As documented in repository policy, v8.30.1 staged/no-git path skipping does not enforce AND for test-path allowlists; scratch full-history scanning applies the authoritative path-and-value rule to staged content.",
+  "checks": [
+    {
+      "mode": "staged-final",
+      "expectedExitCode": 0,
+      "findingCount": 0,
+      "result": "PASS",
+      "log": "gitleaks-staged-final.log",
+      "report": "gitleaks-staged-final.json",
+      "exitCode": 0
+    },
+    {
+      "mode": "existing-history-final",
+      "expectedExitCode": 0,
+      "findingCount": 0,
+      "result": "PASS",
+      "log": "gitleaks-existing-history-final.log",
+      "report": "gitleaks-existing-history-final.json",
+      "exitCode": 0
+    },
+    {
+      "mode": "staged-tree-final",
+      "expectedExitCode": 0,
+      "findingCount": 0,
+      "result": "PASS",
+      "log": "gitleaks-staged-tree-final.log",
+      "report": "gitleaks-staged-tree-final.json",
+      "exitCode": 0
+    },
+    {
+      "mode": "staged-scratch-history-final",
+      "expectedExitCode": 0,
+      "findingCount": 0,
+      "result": "PASS",
+      "log": "gitleaks-staged-scratch-history-final.log",
+      "report": "gitleaks-staged-scratch-history-final.json",
+      "exitCode": 0
+    },
+    {
+      "mode": "negative-control-history",
+      "expectedExitCode": 1,
+      "findingCount": 1,
+      "result": "PASS",
+      "log": "gitleaks-negative-control-history.log",
+      "report": "gitleaks-negative-control-history.json",
+      "exitCode": 1
+    }
+  ]
+}

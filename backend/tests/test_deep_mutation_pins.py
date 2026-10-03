@@ -377,6 +377,10 @@ async def test_entry_integrity_error_path_returns_409_contract(monkeypatch, sett
         def __init__(self):
             self.executions = 0
 
+        async def scalar(self, statement):
+            assert "rekey_journal" in str(statement)
+            return None
+
         async def get(self, model, user_id, *, populate_existing=False):
             return user
 
@@ -940,6 +944,9 @@ async def test_require_user_commit_failure_recovers_user(monkeypatch):
     class FlakySession:
         def __init__(self):
             self._gets = [user, None]  # the re-fetch after rollback misses
+
+        async def execute(self, statement):
+            return SimpleNamespace(first=lambda: None)
 
         async def get(self, model, pk):
             return self._gets.pop(0)

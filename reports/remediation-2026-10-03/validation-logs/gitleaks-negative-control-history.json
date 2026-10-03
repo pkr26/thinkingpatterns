@@ -1,0 +1,22 @@
+[
+ {
+  "RuleID": "generic-api-key",
+  "Description": "Detected a Generic API Key, potentially exposing access to various services and sensitive operations.",
+  "StartLine": 20,
+  "EndLine": 20,
+  "StartColumn": 4,
+  "EndColumn": 64,
+  "Match": "data_key_b64\": \"REDACTED\"",
+  "Secret": "REDACTED",
+  "File": "shared/audio_vectors.json",
+  "SymlinkFile": "",
+  "Commit": "d767b2c2bca5c4a97893afe5c1fc58645a819e47",
+  "Entropy": 4.970573,
+  "Author": "Synthetic publication check",
+  "Email": "publication-check@example.invalid",
+  "Date": "2026-10-03T21:07:08Z",
+  "Message": "Synthetic exact-fixture allowlist negative control",
+  "Tags": [],
+  "Fingerprint": "d767b2c2bca5c4a97893afe5c1fc58645a819e47:shared/audio_vectors.json:generic-api-key:20"
+ }
+]

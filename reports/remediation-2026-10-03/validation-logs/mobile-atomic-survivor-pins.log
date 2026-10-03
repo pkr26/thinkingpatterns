@@ -1,0 +1,9 @@
+
+ RUN  v4.1.11 /Users/pradeepreddy/Desktop/mental_health_application/mobile
+
+
+ Test Files  1 passed (1)
+      Tests  32 passed (32)
+   Start at  09:11:38
+   Duration  314ms (transform 134ms, setup 65ms, import 119ms, tests 75ms, environment 0ms)
+

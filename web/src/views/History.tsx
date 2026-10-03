@@ -27,7 +27,7 @@ import { decryptEntry, encryptEntry, type EntryPayload, type VoiceFields } from 
 import { playAttachment, type PlayingAudio } from "../audio/player";
 import { detectCrisisLanguage } from "../crisisDetect";
 import { crisisDialogShownOn, recordCrisisDialogShown } from "../crisisDialog";
-import { forgetEntryVersion, isV2Bound, noteV2Bound, observeEntryVersions } from "../entryVersions";
+import { entryV2Bindings, noteV2BoundBatch, forgetEntryVersion, isV2Bound, noteV2Bound, observeEntryVersions } from "../entryVersions";
 import { filterEntries, monthGrid, monthLabel, stepMonth } from "../historyFind";
 import { recentMoods, removeMoodDay } from "../moodLog";
 import { localDateISO } from "../dates";
@@ -56,7 +56,7 @@ interface DecodedEntry {
 
 /** Locale-aware weekday initials (Mon..Sun order, matching monthGrid). */
 function weekdayLabels(): string[] {
-  const formatter = new Intl.DateTimeFormat(dateLocaleTag(), { weekday: "short" });
+  const formatter = new Intl.DateTimeFormat(dateLocaleTag(), { weekday: "short", timeZone: "UTC" });
   // 2023-01-02 was a Monday — walk one full week from it.
   const monday = new Date(Date.UTC(2023, 0, 2));
   return Array.from({ length: 7 }, (_, index) => {
@@ -136,10 +136,13 @@ export function HistoryView(): React.JSX.Element {
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [audioBusyId, setAudioBusyId] = useState<string | null>(null);
 
-  useEffect(() => () => playing?.release(), [playing]);
+  const playbackGeneration = useRef(0);
+  const playingRef = useRef<PlayingAudio | null>(null);
+  useEffect(() => () => { playbackGeneration.current += 1; playingRef.current?.release(); playingRef.current = null; }, []);
 
   const stopPlayback = (): void => {
-    playing?.release();
+    playbackGeneration.current += 1;
+    playingRef.current?.release(); playingRef.current = null;
     setPlaying(null);
     setPlayingId(null);
   };
@@ -155,6 +158,7 @@ export function HistoryView(): React.JSX.Element {
     // Pressing play on B while A plays stops A FIRST (H2): exactly one
     // element may ever be mounted, so the switch is stop-then-start.
     stopPlayback();
+    const operation = playbackGeneration.current;
     setAudioBusyId(attachmentId);
     try {
       const keys = vault.get();
@@ -166,12 +170,14 @@ export function HistoryView(): React.JSX.Element {
         userId: owner,
         clientEntryId: entry.clientEntryId,
       });
+      if (operation !== playbackGeneration.current) { current.release(); return; }
+      playingRef.current = current;
       setPlaying(current);
       setPlayingId(attachmentId);
     } catch (err) {
-      setError(playbackErrorText(err));
+      if (operation === playbackGeneration.current) setError(playbackErrorText(err));
     } finally {
-      setAudioBusyId(null);
+      if (operation === playbackGeneration.current) setAudioBusyId(null);
     }
   };
 
@@ -224,6 +230,8 @@ export function HistoryView(): React.JSX.Element {
       const keys = vault.get();
       const listed = await listEntriesWalk();
       if (generation.current !== run) return;
+      const bindings = await entryV2Bindings(owner, keys.dataKey);
+      const newlyBound = new Set<string>();
       const decoded: DecodedEntry[] = [];
       const tampered: string[] = [];
       for (const row of listed) {
@@ -253,8 +261,8 @@ export function HistoryView(): React.JSX.Element {
               // 2026-10-01 audit M1: once an id has EVER authenticated under
               // the v2 binding, a blob that fails it is a stale replay — the
               // legacy fallback is refused for that id forever after.
-              forbidLegacyAad: await isV2Bound(owner, keys.dataKey, row.client_entry_id),
-              onV2Bound: () => void noteV2Bound(owner, keys.dataKey, row.client_entry_id),
+              forbidLegacyAad: bindings.has(row.client_entry_id),
+              onV2Bound: () => { newlyBound.add(row.client_entry_id); },
             },
           );
           decoded.push({
@@ -270,6 +278,7 @@ export function HistoryView(): React.JSX.Element {
           tampered.push(row.client_entry_id);
         }
       }
+      await noteV2BoundBatch(owner,keys.dataKey,newlyBound);
       const observation = await observeEntryVersions(
         owner,
         keys.dataKey,
@@ -420,7 +429,7 @@ export function HistoryView(): React.JSX.Element {
         owner,
         target.clientEntryId,
         editText,
-        new Date().toISOString(),
+        target.payload.created_at ?? new Date().toISOString(),
         editText.trim() ? (target.payload.sentiment ?? null) : null,
         {
           ...(target.payload.energy != null ? { energy: target.payload.energy } : {}),
@@ -430,6 +439,7 @@ export function HistoryView(): React.JSX.Element {
         },
         nextVersion,
         voiceFields,
+        target.payload,
       );
       await api.updateEntry(target.clientEntryId, blobB64, target.entryDate, nextVersion);
       setEditing(null);
@@ -654,6 +664,7 @@ export function HistoryView(): React.JSX.Element {
               </span>
             </div>
             <Note>{entry.payload.text.length > 240 ? `${entry.payload.text.slice(0, 240)}…` : entry.payload.text}</Note>
+            {entry.payload.text.length > 240 && <details className="disclosure"><summary>{t("history.readFullEntry")}</summary><Note>{entry.payload.text}</Note></details>}
             {entry.payload.input_mode === "voice" && (
               <span className="row" style={{ gap: 6 }}>
                 <Icon name="mic" size={12} />

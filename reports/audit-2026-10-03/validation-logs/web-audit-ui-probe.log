@@ -1,0 +1,11 @@
+npm notice run mindpattern-web@0.1.0 npx
+npm notice run 'vitest' run tests/_temporary_independent_audit_ui.test.tsx --no-coverage
+
+ RUN  v5.0.2 /Users/pradeepreddy/Desktop/mental_health_application/web
+
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  06:32:52
+   Duration  624ms (tests 48%, transform 43%, import 9%)
+

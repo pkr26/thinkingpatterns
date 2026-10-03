@@ -17,9 +17,10 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 
 from fastapi import Depends, Header, HTTPException, Request
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import ROLE_THERAPIST, ROLE_USER, User
+from .models import ROLE_THERAPIST, ROLE_USER, RekeyJournal, User
 from .security import tokens
 
 # Codes assigned when the raised exception carries no explicit one.
@@ -82,6 +83,7 @@ async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
         committed = False
         rolled_back = False
         staged_at_commit = 0
+        committed_audio: list[str] = []
 
         def _pending_count() -> int:
             info = getattr(session, "info", None)
@@ -89,9 +91,10 @@ async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
             return len(pending) if pending else 0
 
         def _mark_commit(_session=None) -> None:
-            nonlocal committed, staged_at_commit
+            nonlocal committed, staged_at_commit, committed_audio
             committed = True
             staged_at_commit = _pending_count()
+            committed_audio = list(session.info.get("mindpattern_audio_deletions_pending", []))
 
         def _mark_rollback(_session=None) -> None:
             nonlocal rolled_back
@@ -101,7 +104,23 @@ async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
         event.listen(session.sync_session, "after_rollback", _mark_rollback)
         try:
             yield session
+        except BaseException:
+            await session.rollback()
+            raise
         finally:
+            if committed_audio:
+                from .services.audio_store import drain_audio_deletions
+
+                try:
+                    # A separate session cannot commit failed request writes.
+                    async with request.app.state.sessionmaker() as cleanup_session:
+                        await drain_audio_deletions(
+                            cleanup_session, request.app.state.settings, identifiers=committed_audio
+                        )
+                except Exception:
+                    import logging
+
+                    logging.getLogger(__name__).exception("post-commit audio cleanup deferred")
             if committed and not rolled_back:
                 info = getattr(session, "info", None)
                 pending = (info or {}).get("mindpattern_audit_journal_pending") if info else None
@@ -122,10 +141,12 @@ async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
                     )
 
 
-async def require_user(
+async def _authenticate_user(
     request: Request,
-    authorization: str | None = Header(default=None),
-    session: AsyncSession = Depends(get_session),
+    authorization: str | None,
+    session: AsyncSession,
+    *,
+    allow_previous_epoch: bool = False,
 ) -> User:
     # Every failure is the same flat 401: distinguishing expired / bad
     # signature / unknown user / revoked-token only helps token-lifecycle
@@ -175,7 +196,11 @@ async def require_user(
             raise failure
     # Epoch check: logout bumped the account's epoch, retiring every token
     # issued before it — stateless tokens still get a server-side kill switch.
-    if payload.get("ep", 1) != user.token_epoch:
+    token_epoch = payload.get("ep", 1)
+    valid_epochs = (
+        (user.token_epoch, user.token_epoch - 1) if allow_previous_epoch else (user.token_epoch,)
+    )
+    if token_epoch not in valid_epochs:
         raise failure
     # Expose the authenticated jti for in-fence re-checks (the processing-
     # session mint re-verifies revocation inside the lifecycle fence, the
@@ -185,6 +210,38 @@ async def require_user(
     request_state = getattr(request, "state", None)
     if request_state is not None:
         request_state.mindpattern_token_jti = jti if isinstance(jti, str) else None
+        request_state.mindpattern_token_epoch = token_epoch
+    # A crashed batch rotation is a durable write fence. No other writer
+    # may publish ciphertext or replace a credential between resume attempts.
+    # Key delivery is allowed so the exact operation can resume; deletion is
+    # the explicit escape hatch for an abandoned account.
+    if getattr(request, "method", "GET") not in ("GET", "HEAD", "OPTIONS"):
+        path = str(getattr(getattr(request, "url", None), "path", ""))
+        if path.startswith("/api/v1/"):
+            path = "/api/" + path[len("/api/v1/") :]
+        allowed = {
+            "/api/processing/rekey",
+            "/api/processing/sessions",
+            "/api/account",
+            "/api/auth/logout",
+        }
+        allowed.update({"/api/account/llm-consent", "/api/account/voice-consent"})
+        if path.startswith("/api/consents/") and (
+            request.method == "DELETE" or path.endswith("/share-voice")
+        ):
+            allowed.add(path)
+        if (
+            path not in allowed
+            and await session.scalar(
+                select(RekeyJournal.id).where(RekeyJournal.user_id == user.id).limit(1)
+            )
+            is not None
+        ):
+            raise ApiError(
+                status_code=409,
+                detail="complete the pending key rotation before writing",
+                code="rekey_in_progress",
+            )
     # End the auth read transaction immediately: the session stays usable
     # (the next query auto-begins), but the pooled connection is NOT pinned
     # open for the rest of the request — a recompute holds no transaction
@@ -198,6 +255,45 @@ async def require_user(
     except Exception:
         await session.rollback()
         user = await session.get(User, payload["uid"]) or user
+    return user
+
+
+async def ensure_no_rekey(session: AsyncSession, user_id: str) -> None:
+    """Call inside a writer's fence as well as at request admission."""
+    if (
+        await session.scalar(
+            select(RekeyJournal.id).where(RekeyJournal.user_id == user_id).limit(1)
+        )
+        is not None
+    ):
+        raise ApiError(
+            status_code=409,
+            detail="complete the pending key rotation before writing",
+            code="rekey_in_progress",
+        )
+
+
+async def require_user(
+    request: Request,
+    authorization: str | None = Header(default=None),
+    session: AsyncSession = Depends(get_session),
+) -> User:
+    return await _authenticate_user(request, authorization, session)
+
+
+async def require_rekey_retry_user(
+    request: Request,
+    authorization: str | None = Header(default=None),
+    session: AsyncSession = Depends(get_session),
+) -> User:
+    """Previous epoch is admitted only for the endpoint's exact cached retry."""
+    user = await _authenticate_user(request, authorization, session, allow_previous_epoch=True)
+    if user.role != ROLE_USER:
+        raise ApiError(
+            status_code=403,
+            detail="therapist accounts cannot access journal endpoints",
+            code="forbidden",
+        )
     return user
 
 

@@ -162,8 +162,15 @@ class HardeningMiddleware:
         cors_origins: list[str] | tuple[str, ...] = (),
         cors_expose_headers: list[str] | tuple[str, ...] = (),
         status_observer: Callable[[int], None] | None = None,
+        guard_check=None,
+        request_tasks: set | None = None,
+        body_buffer_concurrency: int = 100,
     ) -> None:
         self.app = app
+        self._body_admitted = 0
+        self._body_capacity = body_buffer_concurrency
+        self._guard_check = guard_check
+        self._request_tasks = request_tasks
         self.max_body_bytes = max_body_bytes
         if body_read_timeout_seconds <= 0:
             raise ValueError("body_read_timeout_seconds must be positive")
@@ -328,6 +335,50 @@ class HardeningMiddleware:
         )
 
     async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        path = scope.get("path", "")
+        if (
+            path not in {"/healthz", "/readyz"}
+            and self._guard_check is not None
+            and not await self._guard_check()
+        ):
+            await self._send_simple(
+                send,
+                503,
+                b'{"detail":"instance ownership unavailable","code":"service_unavailable"}',
+                raw_headers=scope.get("headers", []),
+                legacy=_is_legacy_api_path(path),
+            )
+            return
+        live = self._live_settings()
+        capacity = live.body_buffer_concurrency if live is not None else self._body_capacity
+        # The check and increment contain no await: saturation refuses before
+        # receive(), and cancellation/streaming errors always release the slot.
+        if self._body_admitted >= capacity:
+            await self._send_simple(
+                send,
+                503,
+                b'{"detail":"request capacity reached","code":"service_unavailable"}',
+                raw_headers=scope.get("headers", []),
+                extra_headers=[(b"retry-after", b"1")],
+                legacy=_is_legacy_api_path(path),
+            )
+            return
+        self._body_admitted += 1
+        task = asyncio.current_task()
+        tracked = self._request_tasks is not None and path not in {"/healthz", "/readyz"}
+        if tracked and self._request_tasks is not None:
+            self._request_tasks.add(task)
+        try:
+            await self._call_admitted(scope, receive, send)
+        finally:
+            self._body_admitted -= 1
+            if tracked and self._request_tasks is not None:
+                self._request_tasks.discard(task)
+
+    async def _call_admitted(self, scope, receive, send):
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return

@@ -19,7 +19,13 @@
  */
 import { buildAad } from "./crypto/aad";
 import { decrypt, encrypt, fromBase64, toBase64, zeroize, type Bytes } from "./crypto/core";
-import { kv } from "./kvstore";
+import { kv,type WritePermit } from "./kvstore";
+
+async function keyMutation<T>(userId:string,dataKey:Bytes,run:(copy:Bytes,permit:WritePermit)=>Promise<T>):Promise<T>{
+  const copy=new Uint8Array(dataKey);
+  try{return await run(copy,await kv.captureWritePermit(userId,copy));}
+  finally{zeroize(copy);}
+}
 
 const STORAGE_PREFIX = "mindpattern.entryVersions.";
 
@@ -65,11 +71,11 @@ async function loadV2Bound(userId: string, dataKey: Bytes): Promise<Set<string>>
   return bound;
 }
 
-async function persistV2Bound(userId: string, dataKey: Bytes, bound: Set<string>): Promise<void> {
+async function persistV2Bound(userId: string, dataKey: Bytes, bound: Set<string>,permit:WritePermit): Promise<void> {
   const payload = new TextEncoder().encode(JSON.stringify([...bound]));
   try {
     const blob = await encrypt(dataKey, payload, buildAad("entry-v2-bound", userId));
-    await kv.setItem(v2BoundKey(userId), toBase64(blob));
+    await kv.setItem(v2BoundKey(userId), toBase64(blob),permit);
   } finally {
     zeroize(payload);
   }
@@ -78,10 +84,12 @@ async function persistV2Bound(userId: string, dataKey: Bytes, bound: Set<string>
 /** Record that this id's blob authenticated under the v2 (version-bound)
  *  AAD — after this, the legacy fallback is refused for the id. */
 export async function noteV2Bound(userId: string, dataKey: Bytes, clientEntryId: string): Promise<void> {
+  return keyMutation(userId,dataKey,async(dataKey,permit)=>{
   const bound = await loadV2Bound(userId, dataKey);
   if (bound.has(clientEntryId)) return;
   bound.add(clientEntryId);
-  await persistV2Bound(userId, dataKey, bound);
+  await persistV2Bound(userId, dataKey, bound,permit);
+  });
 }
 
 /** Whether this id has EVER authenticated under the v2 AAD (absent
@@ -128,9 +136,9 @@ async function loadStored(userId: string, dataKey: Bytes): Promise<Map<string, n
   return mirror;
 }
 
-async function persist(userId: string, dataKey: Bytes, mirror: Map<string, number>): Promise<void> {
+async function persist(userId: string, dataKey: Bytes, mirror: Map<string, number>,permit:WritePermit): Promise<void> {
   if (mirror.size === 0) {
-    await kv.removeItem(storageKey(userId));
+    await kv.removeItem(storageKey(userId),permit);
     return;
   }
   const record: Record<string, number> = {};
@@ -138,7 +146,7 @@ async function persist(userId: string, dataKey: Bytes, mirror: Map<string, numbe
   const payload = new TextEncoder().encode(JSON.stringify(record));
   try {
     const blob = await encrypt(dataKey, payload, buildAad("entry-versions", userId));
-    await kv.setItem(storageKey(userId), toBase64(blob));
+    await kv.setItem(storageKey(userId), toBase64(blob),permit);
   } finally {
     zeroize(payload);
   }
@@ -158,6 +166,7 @@ export async function observeEntryVersions(
   dataKey: Bytes,
   rows: ReadonlyArray<{ clientEntryId: string; contentVersion: number }>,
 ): Promise<VersionObservation> {
+  return keyMutation(userId,dataKey,async(dataKey,permit)=>{
   const mirror = await loadStored(userId, dataKey);
   const rolledBack: string[] = [];
   let advanced = false;
@@ -173,8 +182,9 @@ export async function observeEntryVersions(
       advanced = true;
     }
   }
-  if (advanced) await persist(userId, dataKey, mirror);
+  if (advanced) await persist(userId, dataKey, mirror,permit);
   return { rolledBack, advanced };
+  });
 }
 
 /** The highest version remembered for one entry (null when never seen). */
@@ -191,12 +201,14 @@ export async function knownEntryVersion(
 /** Forget one entry's mark (its row was deleted; a later recreate of the
  * same id legitimately restarts at version 1). */
 export async function forgetEntryVersion(userId: string, dataKey: Bytes, clientEntryId: string): Promise<void> {
+  return keyMutation(userId,dataKey,async(dataKey,permit)=>{
   const mirror = await loadStored(userId, dataKey);
-  if (mirror.delete(clientEntryId)) await persist(userId, dataKey, mirror);
+  if (mirror.delete(clientEntryId)) await persist(userId, dataKey, mirror,permit);
   // 2026-10-01 audit M1: the v2-bound mark dies with the row (a recreated
   // id legitimately starts on the legacy ladder again).
   const bound = await loadV2Bound(userId, dataKey);
-  if (bound.delete(clientEntryId)) await persistV2Bound(userId, dataKey, bound);
+  if (bound.delete(clientEntryId)) await persistV2Bound(userId, dataKey, bound,permit);
+  });
 }
 
 /** Forget everything for a user (sign-out / account deletion; a data-key
@@ -213,13 +225,26 @@ export async function forgetAllEntryVersions(userId: string): Promise<void> {
  *  rather than left as undecryptable bytes (a fresh map re-learns from the
  *  next history load; strictness degrades, never correctness). */
 export async function rebindEntryVersions(userId: string, oldDataKey: Bytes, newDataKey: Bytes): Promise<void> {
+  return keyMutation(userId,newDataKey,async(newDataKey,permit)=>{
   const mirror = await loadStored(userId, oldDataKey);
   memoryMirror.set(userId, mirror);
-  await persist(userId, newDataKey, mirror);
+  await persist(userId, newDataKey, mirror,permit);
+  });
 }
 
 /** Test helper: drop every in-memory mirror (storage untouched). */
 export function resetEntryVersionMirrors(): void {
   memoryMirror.clear();
   v2BoundMirror.clear();
+}
+
+export async function entryV2Bindings(userId: string, dataKey: Bytes): Promise<Set<string>> {
+  return new Set(await loadV2Bound(userId, dataKey));
+}
+export async function noteV2BoundBatch(userId: string, dataKey: Bytes, ids: ReadonlySet<string>): Promise<void> {
+  return keyMutation(userId,dataKey,async(dataKey,permit)=>{
+  const bound = await loadV2Bound(userId, dataKey); let changed = false;
+  for (const id of ids) if (!bound.has(id)) { bound.add(id); changed = true; }
+  if (changed) await persistV2Bound(userId,dataKey,bound,permit);
+  });
 }

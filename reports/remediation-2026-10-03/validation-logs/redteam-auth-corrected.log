@@ -1,0 +1,25 @@
+
+=== B1: auth_key replay, verifier replay, token forgery ===================
+AUDIT|B1.verifier-replay|FINDING|old bearer after logout=401 (epoch revocation works), but the captured verifier logs straight back in (200): logout revokes issued bearer sessions, not the underlying password-equivalent auth_key. Atomic password/security reset rotates that credential; until rotation, an intercepted verifier remains a reusable login credential.
+AUDIT|B1.verifier-enables-llm-egress|BLOCKED|captured verifier enables consent (200), but independently unlocked recompute=200, narrative-provider requests=0 (expected successful deterministic brain and zero requests). Translation egress requires its separate consent-bound audio operation; consent alone does not disclose the journal or give an attacker the data key.
+AUDIT|B1.wrong-verifier-rejected|BLOCKED|a WRONG verifier on destructive ops -> {'llm-consent': 403, 'account-delete': 403} (must be flat 403; anything else means re-authentication stopped comparing the proof)
+AUDIT|B1.hostile-tokens|BLOCKED|10 hostile token shapes -> [401] (no crash, flat denials)
+AUDIT|B1.token-type-confusion|BLOCKED|verify_token outcomes with a leaked secret: {'string': 'TokenError', 'negative': 'TokenError', 'huge': 'TokenError', 'nan-str': 'TokenError'} — all rejected as TokenError
+AUDIT|B1.epoch-both-mounts|BLOCKED|pre-logout token on legacy mount /api: 401
+
+=== B2: rate-limit evasion ================================================
+AUDIT|B2.ipv6-aggregation|BLOCKED|50 rotated IPv6 addresses inside one /64 collapse to 1 bucket(s)
+MINDPATTERN_TRUST_PROXY_HEADERS is on: rate-limit identity comes only from X-Forwarded-For received over a direct peer in MINDPATTERN_TRUSTED_PROXY_IPS=. Keep the API unreachable except through that proxy, which must append its observation; do not enable uvicorn --proxy-headers because this middleware needs the raw peer to verify the boundary.
+X-Forwarded-For ignored: MINDPATTERN_TRUST_PROXY_HEADERS is off or the direct peer is outside MINDPATTERN_TRUSTED_PROXY_IPS; rate limiting keys on the direct peer
+AUDIT|B2.xff-direct-origin|BLOCKED|with TRUST_PROXY_HEADERS=1 and direct origin access, 5/20 requests passed a 5/min limit using one spoofed XFF entry per request (deployment-conditional: safe only behind a proxy that always appends its observation)
+AUDIT|B2.eviction-flood|PARTIAL|after 121k attacker hits across 11k keys, victim bucket count=11 (reset=no): eviction is possible but costs ~121k requests to reset ONE near-limit bucket — smallest-count/oldest bias makes flooding strictly worse for the attacker than waiting out the window
+AUDIT|B2.fixed-window-boundary|BLOCKED|window=1s, limit=10: 10 hits at t=100.90 (count 10), 10 more just 0.15s later at t=101.05 resume at count 11 — the count did NOT reset at the old bucket boundary (a fixed window would show 1 here, doubling the limit inside 0.15s): hits age out only when a full window old, so no window-aligned span can exceed the limit
+AUDIT|B2.victim-lockout|BLOCKED|after 30 failed sprays the real user still logs in: 200 (check-then-count-on-failure holds)
+
+=== B3: enumeration, decoys, timing, recycling ============================
+AUDIT|B3.registration-oracle|INFO|re-registering a taken name -> 409 (documented, unavoidable availability oracle; per-username conflict bucket throttles mass harvesting)
+AUDIT|B3.salt-decoys|BLOCKED|real salt stable=True, decoy stable=True, distinct=True — existence not leaked through /auth/salt
+AUDIT|B3.login-timing|BLOCKED|median login latency known=163ms vs unknown=164ms (ratio 1.01, samples 4v4) — equal-CPU scrypt burn keeps them indistinguishable within noise
+AUDIT|B3.username-recycling|BLOCKED|deleted name re-registered; new account sees 0 old entries (no data bleed across account generations)
+
+[b_auth] 15 verdicts, 0 harness errors

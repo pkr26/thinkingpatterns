@@ -56,7 +56,7 @@ describe("HealthKit State-of-Mind native bridge (NEW-2)", () => {
     const src = read(BRIDGE_REL);
     // API facts pinned against Apple's documentation JSON (see the file
     // header): class factory, daily-mood kind, share type, existing save.
-    expect(src).toContain("stateOfMindWithDate:kind:valence:labels:associations:");
+    expect(src).toContain("stateOfMindWithDate:kind:valence:labels:associations:metadata:");
     expect(src).toContain("HKStateOfMindKindDailyMood");
     expect(src).toContain("[HKObjectType stateOfMindType]");
     expect(src).toContain("saveObject:withCompletion:");
@@ -71,8 +71,11 @@ describe("HealthKit State-of-Mind native bridge (NEW-2)", () => {
   it("validates the sample (kind label, valence bounds, calendar-day date)", () => {
     const src = read(BRIDGE_REL);
     expect(src).toContain("very_unpleasant");
-    expect(src).toMatch(/valence < -2\.0 \|\| valence > 2\.0/);
+    expect(src).toMatch(/!isfinite\(valence\) \|\| valence < -1\.0 \|\| valence > 1\.0/);
     expect(src).toContain("en_US_POSIX");
+    expect(src).toContain('#import "RCTAppleHealthKit.h"');
+    expect(src).toContain("metadata:nil");
+    expect(src).toContain("formatter.lenient = NO");
     expect(src).toContain('dateFormat = @"yyyy-MM-dd"');
   });
 

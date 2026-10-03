@@ -65,35 +65,7 @@ jobs:
         run: npx stryker run
       - name: Enforce the floor (84.0 — full-tree fresh baseline ~84.8 on 2026-09-22 after the campaign's two pin rounds; see triage note at the top)
         working-directory: mobile
-        run: |
-          # Stryker's JSON schema carries the score under .score (0..100) in
-          # recent majors; guard both shapes.
-          SCORE=$(node -e "
-            try {
-              const r = JSON.parse(require('fs').readFileSync('reports/mutation/mutation.json', 'utf8'));
-              // Newer schemas carry no aggregate field: derive it exactly
-              // as Stryker does — (killed+timeout)/(covered), errors excluded.
-              let s = typeof r.score === 'number' ? r.score : (r.totals?.score ?? null);
-              if (s === null && r.files) {
-                let killed = 0, covered = 0;
-                for (const mutants of Object.values(r.files)) {
-                  for (const m of mutants.mutants) {
-                    if (m.status === 'Killed' || m.status === 'Timeout') { killed++; covered++; }
-                    else if (m.status === 'Survived' || m.status === 'NoCoverage') covered++;
-                  }
-                }
-                if (!covered) { console.error('empty report'); process.exit(2); }
-                s = (killed / covered) * 100;
-              }
-              if (s === null) { console.error('no score in report'); process.exit(2); }
-              console.log(s);
-            } catch (e) { console.error(e.message); process.exit(2); }
-          ")
-          echo "mutation score: $SCORE"
-          awk -v s="$SCORE" 'BEGIN { exit !(s < 84.0) }' && {
-            echo "::error::mobile mutation score $SCORE is below the 84.0 floor (full-tree fresh level ~84.8 on 2026-09-22) — triage survivors and pin them (see the re-baseline triage note at the top of this workflow for the discipline)"
-            exit 1
-          }
+        run: node ../tools/check-mutation-score.mjs reports/mutation/mutation.json 84
       - name: Upload the report artifact
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

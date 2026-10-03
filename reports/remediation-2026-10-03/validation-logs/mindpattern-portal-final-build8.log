@@ -1,0 +1,15 @@
+npm notice run mindpattern-portal@1.0.0 build
+npm notice run tsc --noEmit && vite build && node tools/add-sri.mjs
+vite v6.4.3 building for production...
+transforming...
+✓ 91 modules transformed.
+rendering chunks...
+[plugin vite:reporter] 
+(!) /Users/pradeepreddy/Desktop/mental_health_application/portal/src/aad.ts is dynamically imported by /Users/pradeepreddy/Desktop/mental_health_application/portal/src/crypto.ts, /Users/pradeepreddy/Desktop/mental_health_application/portal/src/crypto.ts, /Users/pradeepreddy/Desktop/mental_health_application/portal/src/crypto.ts, /Users/pradeepreddy/Desktop/mental_health_application/portal/src/crypto.ts, /Users/pradeepreddy/Desktop/mental_health_application/portal/src/crypto.ts, /Users/pradeepreddy/Desktop/mental_health_application/portal/src/crypto.ts, /Users/pradeepreddy/Desktop/mental_health_application/portal/src/crypto.ts, /Users/pradeepreddy/Desktop/mental_health_application/portal/src/crypto.ts, /Users/pradeepreddy/Desktop/mental_health_application/portal/src/crypto.ts, /Users/pradeepreddy/Desktop/mental_health_application/portal/src/crypto.ts, /Users/pradeepreddy/Desktop/mental_health_application/portal/src/crypto.ts, /Users/pradeepreddy/Desktop/mental_health_application/portal/src/crypto.ts, /Users/pradeepreddy/Desktop/mental_health_application/portal/src/crypto.ts but also statically imported by /Users/pradeepreddy/Desktop/mental_health_application/portal/src/noteDrafts.ts, dynamic import will not move module into another chunk.
+
+computing gzip size...
+dist/index.html                   1.36 kB │ gzip:  0.71 kB
+dist/assets/TotpQr-LWFRpJ8B.js   26.02 kB │ gzip: 10.27 kB
+dist/assets/index-BHhvrmPh.js   296.35 kB │ gzip: 91.77 kB
+✓ built in 396ms
+add-sri: stamped 3 subresource integrity attribute(s) into dist/index.html

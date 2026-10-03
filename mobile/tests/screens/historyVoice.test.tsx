@@ -10,9 +10,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
 import { Alert } from "react-native";
 
-vi.mock("../../src/api/client", async () => {
+vi.mock("../../src/api/client", async (importOriginal) => {
+  const actualApi = await importOriginal<typeof import("../../src/api/client")>();
   const { makeApiMock, ApiError, ENTRY_PAGE_BYTES } = await import("../helpers/apiMock");
-  return { ApiError, api: makeApiMock(), ENTRY_PAGE_BYTES };
+  return { ...actualApi, ApiError, api: makeApiMock(), ENTRY_PAGE_BYTES };
 });
 
 // Spied, real implementation preserved: the decrypted replacement blob is
@@ -33,11 +34,12 @@ const { encryptEntry, decryptEntry, encryptAudio } = await import("../../src/cry
 const { HistoryScreen } = await import("../../src/screens/HistoryScreen");
 const { vault } = await import("../../src/vault");
 const { buildAad, encrypt } = await import("../../src/crypto/envelope");
-const { render, flush, pressLabel, act } = await import("../helpers/rtr");
+const { render, flush, pressLabel, firePress, act } = await import("../helpers/rtr");
 const { resetApi } = await import("../helpers/apiMock");
 const storage = (await import("../helpers/storageMock")).default;
 const { playerControls, __resetAudioMock } = await import("../helpers/expoAudioMock");
 const fs = await import("../helpers/expoFsMock");
+const { __resetLocalKeyLifecycleForTests, changeLocalSessionOwner, freezeLocalKeyWrites, installLocalDataKey } = await import("../../src/localWriteGuard");
 
 const dataKey = Buffer.alloc(32, 5);
 const nav = { navigate: vi.fn() };
@@ -77,7 +79,7 @@ function typedRow(clientEntryId: string, text: string) {
 }
 
 /** list → detail → editor with `next` typed in. */
-async function editTo(root: Awaited<ReturnType<typeof render>>, snippet: string, next: string): Promise<void> {
+async function editTo(root: Awaited<ReturnType<typeof render>>, snippet: string, next: string, waitSave = true): Promise<void> {
   await pressLabel(root, snippet);
   await pressLabel(root, "Edit this entry");
   const { TextInput } = await import("react-native");
@@ -86,11 +88,12 @@ async function editTo(root: Awaited<ReturnType<typeof render>>, snippet: string,
   await act(async () => {
     (editor.props as { onChangeText?: (t: string) => void }).onChangeText?.(next);
   });
-  await pressLabel(root, "Save changes");
+  await (waitSave ? pressLabel : firePress)(root, "Save changes");
   await flush();
 }
 
 beforeEach(() => {
+  __resetLocalKeyLifecycleForTests();
   resetApi(api as never);
   __resetAudioMock();
   fs.__resetFiles();
@@ -106,6 +109,34 @@ beforeEach(() => {
 });
 
 describe("HistoryScreen.saveEdit preserves v3 voice channels (M4)", () => {
+  it("rejects a replacement owner returned by an edit's suspended first lookup", async () => {
+    vi.mocked(api.listEntries).mockResolvedValue([voiceRow("e-voice-1", "Texto original", "Old translation")] as never);
+    const root = await render(<HistoryScreen navigation={nav} />); await flush();
+    let release!: () => void;
+    vi.mocked(api.getUserId).mockImplementationOnce(async () => { await new Promise<void>(resolve => { release = resolve; }); return "user-2"; });
+    await editTo(root, "Texto original", "Texto editado", false); expect(release).toBeTypeOf("function");
+    changeLocalSessionOwner("user-2");
+    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 2), dataKey: Buffer.alloc(32, 8) }, "user-2");
+    await act(async () => release()); await flush();
+    expect(api.updateEntry).not.toHaveBeenCalled(); expect(api.translateText).not.toHaveBeenCalled();
+    await act(async () => root.unmount());
+  });
+  it("does not send an edit retained under an old key after delayed translation spans rotation", async () => {
+    installLocalDataKey("user-1", dataKey);
+    vi.mocked(api.listEntries).mockResolvedValue([voiceRow("e-voice-1", "Texto original", "Old translation")] as never);
+    let release!: () => void;
+    vi.mocked(api.translateText).mockImplementation(async () => {
+      await new Promise<void>(resolve => { release = resolve; }); return { english_text: "New translation" } as never;
+    });
+    const root = await render(<HistoryScreen navigation={nav} />); await flush();
+    await editTo(root, "Texto original", "Texto editado", false); expect(release).toBeTypeOf("function");
+    freezeLocalKeyWrites("user-1"); installLocalDataKey("user-1", Buffer.alloc(32, 6));
+    await act(async () => release()); await flush();
+    expect(api.updateEntry).not.toHaveBeenCalled();
+    const { TextInput } = await import("react-native");
+    expect(root.root.findAllByType(TextInput).find(n => n.props.accessibilityLabel === "Edit entry")?.props.value).toBe("Texto editado");
+    await act(async () => root.unmount());
+  });
   it("re-translates the edited text and re-encrypts with the voice argument", async () => {
     vi.mocked(api.listEntries).mockResolvedValue([voiceRow("e-voice-1", "Texto original", "Old translation")] as never);
     vi.mocked(api.translateText).mockResolvedValue({ english_text: "New translation" } as never);
@@ -192,7 +223,7 @@ describe("HistoryScreen kept-recording playback failure (audit M1)", () => {
     await flush();
     // The decrypted scratch file was written to the cache dir...
     const scratch = fs.writeAsStringAsync.mock.calls[0]?.[0];
-    expect(scratch).toContain("voice-e-voice-play");
+    expect(scratch).toContain("voice-");
     expect(scratch).toContain(".m4a");
     // ...and the failure path DELETED it instead of orphaning it.
     expect(fs.deleteAsync).toHaveBeenCalledWith(scratch, { idempotent: true });

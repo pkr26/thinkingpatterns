@@ -13,9 +13,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
 import { Alert, Text } from "react-native";
 
-vi.mock("../../src/api/client", async () => {
+vi.mock("../../src/api/client", async (importOriginal) => {
+  const actualApi = await importOriginal<typeof import("../../src/api/client")>();
   const { makeApiMock, ApiError } = await import("../helpers/apiMock");
-  return { ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
+  return { ...actualApi, ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
 });
 
 vi.mock("../../src/unlockProof", () => ({
@@ -93,7 +94,7 @@ describe("UnlockScreen pins", () => {
     await flush();
     const node = root.root
       .findAllByType(Text)
-      .find((n) => flat(n.props.children).includes("Your journal is encrypted with keys only you hold"));
+      .find((n) => flat(n.props.children).includes("Your writing syncs encrypted"));
     expect(node).toBeDefined();
     expect(node.props.style).toEqual(
       [{ textAlign: "center", marginBottom: 24, lineHeight: 20 }, { color: "#a29a8c", fontSize: 14 }],

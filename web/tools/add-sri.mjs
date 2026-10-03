@@ -43,12 +43,6 @@ if (!existsSync(indexPath)) {
 // contact/URL — a placeholder contact is worse than none because it looks
 // like a channel nobody reads. The check itself is unit-pinned
 // (tests/securityTxt.test.ts).
-try {
-  assertNoSecurityTxtPlaceholders(readFileSync(join(import.meta.dirname, "..", "public", ".well-known", "security.txt"), "utf8"));
-} catch (err) {
-  console.error(`add-sri: ${(err instanceof Error ? err.message : String(err))}`);
-  process.exit(1);
-}
 
 let html = readFileSync(indexPath, "utf8");
 
@@ -111,3 +105,10 @@ if (stamped === 0) {
 
 writeFileSync(indexPath, html);
 console.log(`add-sri: stamped ${stamped} subresource integrity attribute(s) into dist/index.html`);
+
+try {
+  assertNoSecurityTxtPlaceholders(readFileSync(join(import.meta.dirname, "..", "public", ".well-known", "security.txt"), "utf8"));
+} catch (err) {
+  console.error(`add-sri: ${(err instanceof Error ? err.message : String(err))}`);
+  process.exit(1);
+}

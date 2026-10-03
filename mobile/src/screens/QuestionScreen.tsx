@@ -40,6 +40,8 @@ import { decryptQuestion } from "../crypto/MindPatternCrypto";
 import { buildFeedbackBlob, clearFeedback, recordFeedbackTap } from "../questionFeedback";
 import { lightHaptic } from "../haptics";
 import { vault } from "../vault";
+import { assertLocalWritePermit, captureLocalWritePermit } from "../localRekey";
+import { localWriteScopeEpoch } from "../localWriteGuard";
 import { useSession, stashDraft } from "../store";
 import { genericQuestionForDate } from "../genericQuestions";
 import { localDateISO } from "../moodLog";
@@ -132,12 +134,21 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
     setError(null);
     // Stryker disable next-line CallExpression: redundant reset — both callers run inside load(), which cleared the notice first with no setter in between
     setNotice(null);
+    let keyCopy: Buffer | null = null;
+    const submitEpoch = localWriteScopeEpoch();
     try {
-      const session = await api.openProcessingSession(vault.get().dataKey.toString("base64"));
+      const userId = await api.getUserId();
+      if (submitEpoch !== localWriteScopeEpoch()) throw new Error(tr("common.sessionDamagedTitle"));
+      if (!userId) throw new Error(tr("common.sessionDamagedTitle"));
+      if (vault.ownerUserId() !== userId) throw new Error(tr("common.sessionDamagedTitle"));
+      keyCopy = Buffer.from(vault.get().dataKey);
+      const writePermit = captureLocalWritePermit(userId, keyCopy);
+      const session = await api.openProcessingSession(keyCopy.toString("base64"));
       // Pending question-feedback taps ride along, encrypted like every
       // other payload (2026-09-17); cleared once the server consumed them.
-      const userId = await api.getUserId();
-      const feedbackBlob = userId ? await buildFeedbackBlob(vault.get().dataKey, userId) : null;
+      assertLocalWritePermit(writePermit);
+      const feedbackBlob = await buildFeedbackBlob(keyCopy, userId);
+      assertLocalWritePermit(writePermit);
       let result: Awaited<ReturnType<typeof api.recompute>>;
       try {
         result = await api.recompute(session.session_token, feedbackBlob ?? undefined);
@@ -146,7 +157,7 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
         // quarantine it (drop the queue) and finish the recompute without
         // it, instead of failing every question load from now on.
         if (err instanceof ApiError && err.code === "feedback_blob_invalid" && userId) {
-          await clearFeedback(userId).catch(() => {});
+          await clearFeedback(userId, writePermit).catch(() => {});
           // M-12: the failed feedback pre-flight already CONSUMED the
           // single-use processing token server-side (the key is popped
           // before the pre-flight raises) — replaying it is a guaranteed
@@ -154,24 +165,29 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
           // below was dead code. Open a FRESH session — the data key ships
           // once more under the same consent already given for this flow —
           // so the retry can actually run.
-          const fresh = await api.openProcessingSession(vault.get().dataKey.toString("base64"));
+          assertLocalWritePermit(writePermit);
+          const fresh = await api.openProcessingSession(keyCopy.toString("base64"));
+          assertLocalWritePermit(writePermit);
           result = await api.recompute(fresh.session_token);
         } else {
           throw err;
         }
       }
-      if (feedbackBlob && userId) await clearFeedback(userId).catch(() => {});
+      if (feedbackBlob) await clearFeedback(userId, writePermit).catch(() => {});
+      assertLocalWritePermit(writePermit);
       if (!result.question_stored) {
         setNotice(tr("question.noEvidenceYet"));
         return;
       }
       const payload = await decryptToday();
+      assertLocalWritePermit(writePermit);
       setQuestion(payload.question);
       setPatternPid(typeof payload.pattern_pid === "string" ? payload.pattern_pid : null);
       setFeedbackGiven(false);
     } catch (err) {
       reportFailure(err);
     } finally {
+      keyCopy?.fill(0);
       setBusy(false);
     }
   };

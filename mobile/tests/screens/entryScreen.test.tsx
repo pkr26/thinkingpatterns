@@ -2,13 +2,14 @@
  * EntryScreen: threshold progress copy, the save pipeline (encrypt →
  * upload, with per-failure-class fallbacks), offline queueing, and nav.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
 import { Alert } from "react-native";
 
-vi.mock("../../src/api/client", async () => {
+vi.mock("../../src/api/client", async (importOriginal) => {
+  const actualApi = await importOriginal<typeof import("../../src/api/client")>();
   const { makeApiMock, ApiError } = await import("../helpers/apiMock");
-  return { ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
+  return { ...actualApi, ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
 });
 
 vi.mock("../../src/crypto/MindPatternCrypto", async (importOriginal) => {
@@ -54,6 +55,9 @@ vi.mock("../../src/audioQueue", () => ({
 }));
 
 vi.mock("../../src/offlineQueue", () => ({
+  prepareQueueRekey: vi.fn(async () => []),
+  pendingEntryIds: vi.fn(async () => []),
+  abortInFlightFlush: vi.fn(),
   QueueFullError,
   QueueAbandonedError,
   enqueue: vi.fn(async () => {}),
@@ -80,7 +84,16 @@ const { recordCrisisDialogShown } = await import("../../src/crisisDialog");
 const { takeStashedDraft, stashDraft } = await import("../../src/store");
 const { EntryScreen } = await import("../../src/screens/EntryScreen");
 const { vault } = await import("../../src/vault");
-const { render, flush, textOf, pressLabel, firePress, typeInto, touchableByLabel, allText, act, inputByPlaceholder, pressAlertButton } = await import("../helpers/rtr");
+const { changeLocalSessionOwner, __resetLocalKeyLifecycleForTests } = await import("../../src/localWriteGuard");
+const { render: renderRaw, flush, textOf, pressLabel, firePress, typeInto, touchableByLabel, allText, act, inputByPlaceholder, pressAlertButton } = await import("../helpers/rtr");
+const { waitJournalDraftWrites, __resetJournalDraftRuntimeForTests } = await import("../../src/journalDraft");
+const roots: Awaited<ReturnType<typeof renderRaw>>[] = [];
+const render = async (element: React.ReactElement) => { const root = await renderRaw(element); roots.push(root); return root; };
+afterEach(async () => {
+  await act(async () => { for (const root of roots.splice(0)) root.unmount(); });
+  await waitJournalDraftWrites();
+  __resetJournalDraftRuntimeForTests();
+});
 const { resetApi } = await import("../helpers/apiMock");
 const storage = (await import("../helpers/storageMock")).default;
 
@@ -89,6 +102,7 @@ const nav = { navigate: vi.fn() };
 const touchActivity = vi.fn();
 
 beforeEach(() => {
+  __resetLocalKeyLifecycleForTests();
   resetApi(api as never);
   vi.mocked(enqueue).mockReset();
   vi.mocked(enqueue).mockImplementation(async () => {});
@@ -106,7 +120,7 @@ beforeEach(() => {
   nav.navigate.mockClear();
   touchActivity.mockClear();
   vault.lock();
-  vault.unlock({ ...keys, masterKey: Buffer.alloc(32) });
+  vault.unlock({ ...keys, masterKey: Buffer.alloc(32) }, "user-1");
   sessionState = { activeDays: 0, unlockDays: 30, touchActivity };
   // The crisis-dialog throttle stamp lives in AsyncStorage
   // (@mindpattern/crisis_dialog_<userId>) and localDateISO feeds its day:
@@ -130,6 +144,51 @@ async function openDetails(root: Awaited<ReturnType<typeof render>>): Promise<vo
 }
 
 describe("EntryScreen progress display", () => {
+  it("shows loading/unavailable without a fabricated zero or progress bar, and offers an authoritative retry", async () => {
+    const refresh = vi.fn(async () => {});
+    sessionState = { ...sessionState, activeDaysKnown: false, activeDaysLoading: true, refreshActiveDays: refresh };
+    const loading = await render(<EntryScreen navigation={nav} />);
+    expect(textOf(loading)).toContain("Checking your writing days"); expect(textOf(loading)).not.toContain("0/30");
+    expect(loading.root.findAll(node => node.props.accessibilityRole === "progressbar")).toHaveLength(0);
+    sessionState = { ...sessionState, activeDaysLoading: false };
+    const unavailable = await render(<EntryScreen navigation={nav} />);
+    expect(textOf(unavailable)).toContain("writing-day count is unavailable"); expect(textOf(unavailable)).not.toContain("0/30");
+    await pressLabel(unavailable, "Refresh writing days"); expect(refresh).toHaveBeenCalledOnce();
+    sessionState = { ...sessionState, activeDaysKnown: true };
+    const knownZero = await render(<EntryScreen navigation={nav} />);
+    expect(textOf(knownZero)).toContain("0/30 days");
+  });
+  it("refreshes authoritative progress after an acknowledged save, and keeps offline queueing independent", async () => {
+    const refreshActiveDays = vi.fn(async () => {});
+    sessionState = { ...sessionState, refreshActiveDays };
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    await writeEntry(root, "An acknowledged entry");
+    await pressLabel(root, "Save entry");
+    await flush();
+    expect(refreshActiveDays).toHaveBeenCalledOnce();
+    vi.mocked(api.createEntry).mockRejectedValueOnce(new Error("offline"));
+    await writeEntry(root, "A safely queued entry");
+    await pressLabel(root, "Save entry");
+    await flush();
+    expect(enqueue).toHaveBeenCalled();
+    expect(refreshActiveDays).toHaveBeenCalledOnce();
+  });
+  it("refreshes blank-page starters on a live language change and preserves the typed draft", async () => {
+    const { setLocale, t } = await import("../../src/strings");
+    const { PROMPT_CHIPS, PROMPT_CHIPS_ES } = await import("../../src/promptChips");
+    const root = await render(<EntryScreen navigation={nav} />);
+    await flush();
+    expect(PROMPT_CHIPS.some(chip => textOf(root).includes(chip))).toBe(true);
+    try {
+      await act(async () => { setLocale("es"); });
+      expect(PROMPT_CHIPS_ES.some(chip => textOf(root).includes(chip))).toBe(true);
+      expect(PROMPT_CHIPS.some(chip => textOf(root).includes(chip))).toBe(false);
+      await typeInto(root, t("entry.placeholder"), "My private English draft stays mine");
+      await act(async () => { setLocale("en"); });
+      expect(inputByPlaceholder(root, "What's going on today?").props.value).toBe("My private English draft stays mine");
+    } finally { await act(async () => { setLocale("en"); }); }
+  });
   it("shows the countdown before the threshold and the unlocked state after", async () => {
     const before = await render(<EntryScreen navigation={nav} />);
     await flush();
@@ -337,6 +396,7 @@ describe("EntryScreen save pipeline", () => {
       expect.any(String),
       expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
       1,
+      expect.objectContaining({ userId: "user-1", keyId: expect.any(String) }),
     );
     expect(Alert.alert).not.toHaveBeenCalled();
     // Editor cleared and disabled again; success is a quiet inline line,
@@ -413,7 +473,7 @@ describe("EntryScreen save pipeline", () => {
     first.unmount();
 
     // Same account re-unlocks: the draft is back in the editor.
-    vault.unlock({ ...keys, masterKey: Buffer.alloc(32) });
+    vault.unlock({ ...keys, masterKey: Buffer.alloc(32) }, "user-1");
     const second = await render(<EntryScreen navigation={nav} />);
     await flush();
     expect(
@@ -428,7 +488,7 @@ describe("EntryScreen save pipeline", () => {
     await flush();
     third.unmount();
     vi.mocked(api.getUserId).mockResolvedValue("user-2");
-    vault.unlock({ ...keys, masterKey: Buffer.alloc(32) });
+    vault.unlock({ ...keys, masterKey: Buffer.alloc(32) }, "user-1");
     const fourth = await render(<EntryScreen navigation={nav} />);
     await flush();
     expect(
@@ -596,7 +656,7 @@ describe("EntryScreen save pipeline", () => {
     expect(api.createEntry).toHaveBeenCalledTimes(1);
   });
 
-  it("the editor stays editable while idle and locks while a save is in flight", async () => {
+  it("the editor stays editable while a prior revision is saving", async () => {
     let resolveCreate: ((v: unknown) => void) | undefined;
     vi.mocked(api.createEntry).mockImplementation(
       () => new Promise((resolve) => (resolveCreate = resolve)),
@@ -606,14 +666,14 @@ describe("EntryScreen save pipeline", () => {
     await writeEntry(root, "slow save");
     const { firePress, act } = await import("../helpers/rtr");
     await firePress(root, "Save entry");
-    // Mid-save the field is non-editable so the clear on success cannot
-    // wipe text typed over an in-flight request.
-    expect(inputByPlaceholder(root, "What's going on today?").props.editable).toBe(false);
+    expect(inputByPlaceholder(root, "What's going on today?").props.editable).toBe(true);
+    await writeEntry(root, "newer words while saving");
     await act(async () => {
       resolveCreate?.({});
     });
     await flush();
     expect(inputByPlaceholder(root, "What's going on today?").props.editable).toBe(true);
+    expect(inputByPlaceholder(root, "What's going on today?").props.value).toBe("newer words while saving");
   });
 
   // 2026-09-26 audit LOW: the keystroke window between the save tap and
@@ -650,7 +710,7 @@ describe("EntryScreen save pipeline", () => {
     await act(async () => {
       root.unmount();
     });
-    expect(stashDraft).toHaveBeenCalledWith("user-1", "first words and more");
+    expect(stashDraft).toHaveBeenCalledWith("user-1", "first words and more", expect.objectContaining({ text: "first words and more" }), "http://127.0.0.1:8000");
   });
 
   it("the clear still fires when nothing was typed mid-save (the unchanged case)", async () => {
@@ -1007,7 +1067,7 @@ describe("EntryScreen crisis-dialog throttle (once per calendar day per account)
     root.unmount(); // the save is still in flight
     await new Promise((r) => { setTimeout(r, 140); }); // the upload dies after the unmount
     await flush();
-    expect(stashDraft).toHaveBeenCalledWith("user-1", "words that must survive");
+    expect(stashDraft).toHaveBeenCalledWith("user-1", "words that must survive", expect.objectContaining({ text: "words that must survive" }), "http://127.0.0.1:8000");
     const again = await render(<EntryScreen navigation={nav} />);
     await flush();
     expect((inputByPlaceholder(again, "What's going on today?").props as { value: string }).value).toBe("words that must survive");
@@ -1058,7 +1118,7 @@ describe("EntryScreen draft-stash hygiene", () => {
     await pressLabel(root, "Save entry");
     await flush();
     root.unmount();
-    vault.unlock({ ...keys, masterKey: Buffer.alloc(32) });
+    vault.unlock({ ...keys, masterKey: Buffer.alloc(32) }, "user-1");
   };
 
   it("a late getUserId() resolution does not clobber in-progress typing", async () => {
@@ -1511,6 +1571,21 @@ describe("EntryScreen mood check-in (explicit beats the text guess)", () => {
 
 describe("EntryScreen HealthKit mirror (fire-and-forget, after the save)", () => {
   const PREF = "@mindpattern/mirror_mood_to_health_user-1";
+  it("does not clear the editor, show success or mirror an old account when replacement arrives during draft ACK cleanup", async () => {
+    const root = await render(<EntryScreen navigation={nav} />); await flush();
+    await openDetails(root); await pressLabel(root, "Light"); await writeEntry(root, "old account acknowledged words");
+    const original = storage.removeItem; let release!: () => void;
+    const gate = vi.spyOn(storage, "removeItem").mockImplementation(async slot => {
+      if (slot.startsWith("@mindpattern/journal-draft.v1.")) await new Promise<void>(resolve => { release = resolve; });
+      return original(slot);
+    });
+    await firePress(root, "Save entry"); await flush(); expect(api.createEntry).toHaveBeenCalledOnce();
+    expect(release).toBeTypeOf("function"); changeLocalSessionOwner("user-2");
+    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 3), dataKey: Buffer.alloc(32, 8) }, "user-2");
+    await act(async () => release()); await flush(); gate.mockRestore();
+    expect(inputByPlaceholder(root, "What's going on today?").props.value).toBe("old account acknowledged words");
+    expect(textOf(root)).not.toContain("Saved ✓"); expect(mirrorMoodCheckIn).not.toHaveBeenCalled();
+  });
 
   /** Render, pick an explicit mood and save — the mirror's firing conditions. */
   async function pickAndSave(mood: string, text: string): Promise<void> {
@@ -1527,7 +1602,7 @@ describe("EntryScreen HealthKit mirror (fire-and-forget, after the save)", () =>
     await storage.setItem(PREF, JSON.stringify({ enabled: true }));
     await pickAndSave("Light", "a light day");
     expect(mirrorMoodCheckIn).toHaveBeenCalledTimes(1);
-    expect(mirrorMoodCheckIn).toHaveBeenCalledWith("user-1", 1, "2026-09-04");
+    expect(mirrorMoodCheckIn).toHaveBeenCalledWith("user-1", 1, "2026-09-04", expect.any(Function));
     // The mirror never disturbs the save itself.
     expect(Alert.alert).not.toHaveBeenCalled();
   });
@@ -1539,7 +1614,7 @@ describe("EntryScreen HealthKit mirror (fire-and-forget, after the save)", () =>
     // decision across two layers.
     await pickAndSave("Heavy", "a heavy day");
     expect(mirrorMoodCheckIn).toHaveBeenCalledTimes(1);
-    expect(mirrorMoodCheckIn).toHaveBeenCalledWith("user-1", -1, "2026-09-04");
+    expect(mirrorMoodCheckIn).toHaveBeenCalledWith("user-1", -1, "2026-09-04", expect.any(Function));
   });
 
   it("a vault that locked mid-save skips the mirror silently (belt-and-braces guard)", async () => {
@@ -1724,7 +1799,7 @@ describe("save key custody (2026-09-29 audit CRITICAL: mid-save zeroization race
     // Refill AFTER the lock wiped it, then unlock onto the refilled buffer.
     vault.lock();
     keys.dataKey.fill(7);
-    vault.unlock({ ...keys, masterKey: Buffer.alloc(32) });
+    vault.unlock({ ...keys, masterKey: Buffer.alloc(32) }, "user-1");
     let releaseCreate: () => void = () => {};
     vi.mocked(api.createEntry).mockImplementation(
       () =>
@@ -1761,7 +1836,7 @@ describe("save key custody (2026-09-29 audit CRITICAL: mid-save zeroization race
   it("a typed save still completes after a mid-save lock (no spurious failure alert)", async () => {
     vault.lock();
     keys.dataKey.fill(9);
-    vault.unlock({ ...keys, masterKey: Buffer.alloc(32) });
+    vault.unlock({ ...keys, masterKey: Buffer.alloc(32) }, "user-1");
     let releaseCreate: () => void = () => {};
     vi.mocked(api.createEntry).mockImplementation(
       () =>

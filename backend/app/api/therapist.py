@@ -31,6 +31,7 @@ import binascii
 import hmac
 import os
 from datetime import date as date_type, timedelta
+from contextlib import AsyncExitStack, asynccontextmanager
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from fastapi.responses import JSONResponse
@@ -40,9 +41,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..cache import check_keyed_limit_without_count, make_rate_limiter, record_keyed_failure
 from ..db import rowcount as db_rowcount
-from ..deps import ApiError, get_session, require_sharing_enabled, require_therapist
+from ..deps import (
+    ensure_no_rekey,
+    ApiError,
+    get_session,
+    require_sharing_enabled,
+    require_therapist,
+)
 from ..locks import (
     UserLocks,
+    lifecycle_locks,
     sharing_locks,
     sharing_patient_lock_key,
     sharing_therapist_lock_key,
@@ -53,6 +61,7 @@ from ..models import (
     Entry,
     Measure,
     PairingCode,
+    RekeyJournal,
     TherapistNote,
     TherapistNoteRevision,
     User,
@@ -176,6 +185,34 @@ MAX_PAIRING_CODE_ATTEMPTS = 5
 THERAPIST_ENTRY_PAGE_SIZE = 25
 THERAPIST_ENTRY_RESPONSE_BLOB_BYTES = 2 * 1024 * 1024
 NOTES_REVISION_HEADER = "X-Notes-Revision"
+
+
+def _assert_custody_write(user: User, version: int | None) -> None:
+    if user.notes_keyring_blob is None:
+        return
+    if version is None:
+        raise ApiError(
+            status_code=409,
+            detail="upgrade the client before writing notes",
+            code="upgrade_required",
+        )
+    if version != user.custody_version:
+        raise ApiError(
+            status_code=409, detail="notes custody changed; reload account", code="version_conflict"
+        )
+
+
+@asynccontextmanager
+async def _notes_guard(session: AsyncSession, user: User):
+    expected_epoch = user.token_epoch
+    async with (
+        lifecycle_locks.hold(f"llm-lifecycle:{user.id}"),
+        _note_locks.hold(f"notes:{user.id}"),
+    ):
+        fresh = await session.get(User, user.id, populate_existing=True)
+        if fresh is None or not fresh.is_active or fresh.token_epoch != expected_epoch:
+            raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+        yield
 
 
 async def _current_notes_revision(session: AsyncSession, therapist_id: str) -> int:
@@ -435,6 +472,11 @@ async def therapist_me(
     """Everything the portal needs to unlock its wrap key locally (the
     blob is decryptable only with the therapist's password-derived KEK)."""
     return TherapistMeResponse(
+        user_id=user.id,
+        notes_keyring_blob=base64.b64encode(bytes(user.notes_keyring_blob)).decode("ascii")
+        if user.notes_keyring_blob is not None
+        else None,
+        custody_version=user.custody_version,
         username=user.username,
         display_name=user.display_name or user.username,
         wrap_pub_key=user.wrap_pub_key or "",
@@ -464,20 +506,15 @@ async def rotate_wrap_key(
 
     Verifier-gated like every key-material swap: a stolen bearer must not
     be able to publish its OWN public half and receive every future
-    patient re-wrap. The new blob is typically the same private key
-    re-wrapped under a NEW password-derived KEK (password-change
-    ordering: this FIRST, then PUT /account/credential), or a genuinely
-    fresh keypair after wrap-key compromise.
+    patient re-wrap. Installed notes custody and its current version are
+    required. Same-public-key private-wrap repair preserves active grants;
+    password changes use the atomic /therapist/password transaction.
 
-    Compromise-rotation trade-off, stated plainly: existing grants hold
-    data keys wrapped to the OLD public half. Patients see the new
-    therapist_wrap_pub_key in ConsentOut and re-wrap via the existing
-    PUT /consents/{id}/rewrap — no re-pairing needed. Until a patient
-    re-wraps, their grant is openable only with the OLD private key, so
-    the client keeps the previous key material locally until every
-    active grant has rotated (grants that never re-wrap after a
-    compromise rotation are intentionally lost to the therapist — that
-    is the point of retiring the compromised key).
+    A different public key replaces the sharing identity and atomically
+    revokes every old active grant. Patients must verify and pair with the
+    replacement identity again. Notes custody remains intact. Replacement
+    waits until each active patient's pending corpus rotation is finished,
+    so an exact resumable operation cannot lose its public-key CAS target.
     """
     verifier = x_account_verifier if isinstance(x_account_verifier, str) else None
     if verifier is None:
@@ -505,7 +542,11 @@ async def rotate_wrap_key(
         )
     # Grants and content reads take this lock first, so no patient flow
     # can read the old public half mid-swap.
-    async with sharing_locks.hold(sharing_therapist_lock_key(user.id)):
+    async with (
+        lifecycle_locks.hold(f"llm-lifecycle:{user.id}"),
+        sharing_locks.hold(sharing_therapist_lock_key(user.id)),
+        AsyncExitStack() as grant_guards,
+    ):
         fresh = (
             (
                 await session.execute(
@@ -523,6 +564,66 @@ async def rotate_wrap_key(
             # bearer+verifier pair predates the epoch bump and must not
             # publish replacement wrap key material.
             raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+        if fresh.notes_keyring_blob is None:
+            raise ApiError(
+                status_code=409,
+                detail="install notes custody before rotating sharing keys",
+                code="conflict",
+            )
+        if body.expected_custody_version != fresh.custody_version:
+            raise ApiError(
+                status_code=409, detail="custody changed; reload account", code="conflict"
+            )
+        if body.wrap_pub_key != fresh.wrap_pub_key:
+            # A compromised sharing identity is replaced, not archived. Its
+            # existing wraps cannot be opened by the replacement identity.
+            active_patients = list(
+                (
+                    await session.scalars(
+                        select(Consent.user_id).where(
+                            Consent.therapist_id == fresh.id, Consent.status == "active"
+                        )
+                    )
+                ).all()
+            )
+            for patient_id in sorted(active_patients):
+                if (
+                    await session.scalar(
+                        select(RekeyJournal.id).where(RekeyJournal.user_id == patient_id).limit(1)
+                    )
+                    is not None
+                ):
+                    raise ApiError(
+                        status_code=409,
+                        detail="an active patient must finish their pending key rotation first",
+                        code="rekey_in_progress",
+                    )
+            # The therapist sharing fence blocks every content read/grant.
+            # Patient-only revocation/rewrap is fenced separately per pair.
+            await session.commit()  # release read connection before waiting on pair locks
+            for patient_id in sorted(active_patients):
+                await grant_guards.enter_async_context(
+                    sharing_locks.hold(sharing_patient_lock_key(patient_id))
+                )
+                await session.execute(
+                    update(Consent)
+                    .where(
+                        Consent.therapist_id == fresh.id,
+                        Consent.user_id == patient_id,
+                        Consent.status == "active",
+                    )
+                    .values(
+                        status="revoked",
+                        revoked_at=utcnow(),
+                        ephemeral_pub=None,
+                        wrapped_key=None,
+                        summary_blob=None,
+                        summary_eph_pub=None,
+                        summary_updated_at=None,
+                        share_voice=False,
+                    )
+                )
+                await _audit(session, fresh, patient_id, "sharing_identity_revoke")
         fresh.wrap_pub_key = body.wrap_pub_key
         fresh.wrap_key_blob = key_blob
         await _audit(session, fresh, fresh.id, "wrap_key_rotate")
@@ -629,7 +730,10 @@ async def delete_therapist_account(
     await _require_verifier(user, verifier, request, session)
     # Therapist content reads and grants take this lock first, so a deletion
     # cannot commit between their consent decision and response assembly.
-    async with sharing_locks.hold(sharing_therapist_lock_key(user.id)):
+    async with (
+        lifecycle_locks.hold(f"llm-lifecycle:{user.id}"),
+        sharing_locks.hold(sharing_therapist_lock_key(user.id)),
+    ):
         # M-B1 (2026-09-26): liveness AND epoch on a freshly re-read row
         # before the destructive commit — a pre-rotation bearer+verifier
         # pair queued behind the fence must not complete the deletion.
@@ -824,6 +928,7 @@ async def _active_consent(session: AsyncSession, therapist: User, user_id: str) 
     )
     if consent is None or consent.status != "active":
         raise ApiError(status_code=404, detail="patient not found", code="not_found")
+    await ensure_no_rekey(session, user_id)
     return consent
 
 
@@ -1441,7 +1546,13 @@ async def read_patient_audio(
     does for entries.
     """
     from ..models import AudioAttachment
-    from ..services.audio_store import AudioStoreError, get_audio_store_cached
+    from ..services.audio_store import (
+        AudioStoreError,
+        get_audio_store_cached,
+        enqueue_audio_delete,
+        store_for_object,
+        advance_audio_revision,
+    )
 
     settings = request.app.state.settings
     # M1 remediation (audit 2026-09-29): the dark-launch flag must cover
@@ -1462,7 +1573,10 @@ async def read_patient_audio(
             code="audio_storage_unconfigured",
         )
     result: AudioAttachmentOut
-    async with sharing_locks.hold(sharing_therapist_lock_key(user.id)):
+    async with (
+        lifecycle_locks.hold(f"llm-lifecycle:{user_id}"),
+        sharing_locks.hold(sharing_therapist_lock_key(user.id)),
+    ):
         async with sharing_locks.hold(sharing_patient_lock_key(user_id)):
             consent = await _active_consent(session, user, user_id)
             if not consent.share_voice:
@@ -1471,23 +1585,17 @@ async def read_patient_audio(
                     detail="patient has not shared voice recordings",
                     code="consent_voice_share_required",
                 )
-            row = await session.get(AudioAttachment, attachment_id)
+            row = await session.get(AudioAttachment, attachment_id, populate_existing=True)
             if row is None or row.user_id != consent.user_id:
                 raise ApiError(status_code=404, detail="attachment not found", code="not_found")
             if row.expires_at <= utcnow():
-                # Same lazy-expiry contract as the patient path; the audit
-                # row below only records SERVED ciphertext.
-                try:
-                    await store.delete(row.storage_key)
-                except AudioStoreError:
-                    logger.warning("lazy expiry could not delete object for %s; row kept", row.id)
-                    raise ApiError(
-                        status_code=410, detail="recording expired", code="audio_expired"
-                    ) from None
+                enqueue_audio_delete(session, row, store=store)
                 await session.delete(row)
+                await advance_audio_revision(session, user_id)
                 await session.commit()
                 raise ApiError(status_code=410, detail="recording expired", code="audio_expired")
             try:
+                store = store_for_object(settings, row)
                 blob = await store.get(row.storage_key, max_bytes=settings.audio_max_body_bytes)
             except AudioStoreError:
                 logger.warning("audio get failed for attachment %s", row.id)
@@ -1704,7 +1812,7 @@ async def list_notes(
     # page_bytes; legacy requests instead fail loudly if their full requested
     # page would exceed the safe response budget.
     byte_limit = page_bytes if page_bytes is not None else NOTES_PAGE_BLOB_BYTES
-    async with _note_locks.hold(f"notes:{user.id}:{patient_id}"):
+    async with _notes_guard(session, user):
         patient_id = await _note_target(session, user, user_id)
         revision = await _current_notes_revision(session, user.id)
         assert_expected_revision(
@@ -1840,7 +1948,9 @@ async def create_note(
     # same pooling discipline list_notes/update_note already apply; the row
     # is re-resolved under the lock below.
     await session.commit()
-    async with _note_locks.hold(f"notes:{user.id}:{patient_id}"):
+    async with _notes_guard(session, user):
+        _assert_custody_write(user, body.custody_version)
+        patient_id = await _note_target(session, user, user_id)
         existing = (
             (
                 await session.execute(
@@ -1986,15 +2096,16 @@ async def update_note(
     # This read establishes the chart key used for serialization; close its
     # transaction before potentially waiting behind another note update.
     await session.commit()
-    async with _note_locks.hold(f"notes:{user.id}:{row.user_id}"):
+    async with _notes_guard(session, user):
+        _assert_custody_write(user, body.custody_version)
         # Re-fetch under the same chart lock: another request may have
         # deleted the row while this endpoint was waiting to update it.
         row = (
             (
                 await session.execute(
-                    select(TherapistNote).where(
-                        TherapistNote.id == note_id, TherapistNote.therapist_id == user.id
-                    )
+                    select(TherapistNote)
+                    .where(TherapistNote.id == note_id, TherapistNote.therapist_id == user.id)
+                    .execution_options(populate_existing=True)
                 )
             )
             .scalars()
@@ -2088,8 +2199,8 @@ async def rekey_notes(
       * ``base_version`` must match the live row (a concurrent edit means
         the ciphertext is stale — 409, refetch and re-apply; the client
         rekeys that note on its next password change or save);
-      * a rekey NEVER creates a revision, advances a version, or bumps the
-        notes revision counter — the content is unchanged, only its locker;
+      * a rekey creates no plaintext edit revision, but advances note versions
+        and the collection revision so stale writers and snapshots are fenced;
       * every swapped blob must be the SAME LENGTH as the one it replaces
         (GCM preserves plaintext length; an inequality means the client is
         not re-sealing the same content — refuse rather than let the rekey
@@ -2104,6 +2215,8 @@ async def rekey_notes(
         )
     await _require_verifier(user, verifier, request, session)
 
+    if len({item.note_id for item in body.items}) != len(body.items):
+        raise ApiError(status_code=422, detail="duplicate note identifier", code="validation_error")
     decoded: list[tuple[TherapistNote, bytes, list[tuple[TherapistNoteRevision, bytes]]]] = []
     # Decode + ownership + length-parity checks FIRST, one transaction;
     # the swaps then run under the therapist-wide notes lock.
@@ -2133,6 +2246,10 @@ async def rekey_notes(
                 detail="rekey blob length mismatch (the content must be unchanged)",
                 code="validation_error",
             )
+        if len({item.revision_id for item in item.revision_blobs}) != len(item.revision_blobs):
+            raise ApiError(
+                status_code=422, detail="duplicate revision identifier", code="validation_error"
+            )
         rev_pairs: list[tuple[TherapistNoteRevision, bytes]] = []
         for rev_item in item.revision_blobs:
             try:
@@ -2157,9 +2274,7 @@ async def rekey_notes(
                 .first()
             )
             if rev is None:
-                raise ApiError(
-                    status_code=404, detail="note revision not found", code="not_found"
-                )
+                raise ApiError(status_code=404, detail="note revision not found", code="not_found")
             if len(rev_blob) != len(bytes(rev.blob)):
                 raise ApiError(
                     status_code=422,
@@ -2170,7 +2285,8 @@ async def rekey_notes(
         decoded.append((row, new_blob, rev_pairs))
     await session.commit()  # close the read transaction before the lock
 
-    async with _note_locks.hold(f"notes:{user.id}"):
+    async with _notes_guard(session, user):
+        _assert_custody_write(user, body.custody_version)
         for row, new_blob, rev_pairs in decoded:
             fresh = (
                 (
@@ -2188,9 +2304,7 @@ async def rekey_notes(
             current_version = fresh.version if fresh.version is not None else 1
             # The client re-sealed from the version it read; a mismatch is a
             # concurrent EDIT — the rekey must not paper over it.
-            expected = next(
-                item.base_version for item in body.items if item.note_id == fresh.id
-            )
+            expected = next(item.base_version for item in body.items if item.note_id == fresh.id)
             if expected != current_version:
                 raise ApiError(
                     status_code=409,
@@ -2198,9 +2312,39 @@ async def rekey_notes(
                     code="version_conflict",
                     headers={"Retry-After": "1"},
                 )
+            actual_revisions = list(
+                (
+                    await session.scalars(
+                        select(TherapistNoteRevision)
+                        .where(
+                            TherapistNoteRevision.note_id == fresh.id,
+                            TherapistNoteRevision.therapist_id == user.id,
+                        )
+                        .execution_options(populate_existing=True)
+                    )
+                ).all()
+            )
+            if {rev.id for rev in actual_revisions} != {rev.id for rev, _blob in rev_pairs}:
+                raise ApiError(
+                    status_code=409,
+                    detail="revision history changed or incomplete; refetch",
+                    code="version_conflict",
+                )
+            if len(new_blob) != len(bytes(fresh.blob)):
+                raise ApiError(
+                    status_code=409, detail="note changed; refetch", code="version_conflict"
+                )
             fresh.blob = new_blob
-            for rev, rev_blob in rev_pairs:
-                rev.blob = rev_blob
+            fresh.version = current_version + 1
+            replacements = {rev.id: blob for rev, blob in rev_pairs}
+            for revision in actual_revisions:
+                replacement = replacements[revision.id]
+                if len(replacement) != len(bytes(revision.blob)):
+                    raise ApiError(
+                        status_code=409, detail="revision changed; refetch", code="version_conflict"
+                    )
+                revision.blob = replacement
+        await _increment_notes_revision(session, user)
         await _audit(session, user, decoded[0][0].user_id, "rekey_notes")
         await session.commit()
     return None
@@ -2349,15 +2493,15 @@ async def delete_note(
     if row is None:
         raise ApiError(status_code=404, detail="note not found", code="not_found")
     await session.commit()
-    async with _note_locks.hold(f"notes:{user.id}:{row.user_id}"):
+    async with _notes_guard(session, user):
         # The row may have been removed while this delete waited behind an
         # update/delete already holding the same chart lock.
         row = (
             (
                 await session.execute(
-                    select(TherapistNote).where(
-                        TherapistNote.id == note_id, TherapistNote.therapist_id == user.id
-                    )
+                    select(TherapistNote)
+                    .where(TherapistNote.id == note_id, TherapistNote.therapist_id == user.id)
+                    .execution_options(populate_existing=True)
                 )
             )
             .scalars()
@@ -2374,3 +2518,8 @@ async def delete_note(
         # can resume sync from this 204 alone instead of a full re-read.
         response.headers[NOTES_REVISION_HEADER] = str(new_revision)
         await session.commit()
+
+
+from ._custody import router as custody_router  # noqa: E402
+
+router.include_router(custody_router)

@@ -1,0 +1,11 @@
+npm notice run mindpattern-portal@1.0.0 npx
+npm notice run 'vitest' run tests/_temporary_independent_audit.test.tsx --no-coverage
+
+ RUN  v5.0.1 /Users/pradeepreddy/Desktop/mental_health_application/portal
+
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  06:33:55
+   Duration  483ms (tests 73%, transform 22%, import 5%, setup 1%)
+

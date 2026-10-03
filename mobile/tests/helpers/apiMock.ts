@@ -47,6 +47,9 @@ export function makeApiMock() {
     getCachedKeyEnvelope: vi.fn(async () => null),
     clearCachedKeyEnvelope: vi.fn(async () => {}),
     changePassword: vi.fn(async () => ({})),
+    recoveryStatus: vi.fn(async () => ({ enabled: false, set_at: null })),
+    setupRecoveryKit: vi.fn(async () => ({})),
+    removeRecoveryKit: vi.fn(async () => ({})),
     upgradeKeyEnvelope: vi.fn(async () => ({})),
     login: vi.fn(async () => ({ token: "tok", user_id: "user-1" })),
     logout: vi.fn(async () => ({})),
@@ -71,7 +74,7 @@ export function makeApiMock() {
     pinnedOrigin: vi.fn(async () => null),
     confirmCurrentOrigin: vi.fn(async () => {}),
     // Rotation flow (H-1, 2026-09-20)
-    rekeyStoredData: vi.fn(async () => ({ entries: 0, insights: 0, measures: 0 })),
+    rekeyStoredData: vi.fn(async (_old: string, _next: string, _verifier: string, body: { operation_id: string }) => ({ entries: 0, insights: 0, measures: 0, credential_rotated: true, operation_id: body.operation_id })),
     rotateCredential: vi.fn(async () => ({})),
     rewrapConsent: vi.fn(async () => ({})),
     // MBC measures (2026-09-19)

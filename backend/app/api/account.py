@@ -30,7 +30,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..cache import check_keyed_limit_without_count, make_rate_limiter, record_keyed_failure
 from ..db import rowcount as db_rowcount
-from ..deps import ApiError, get_session, require_regular_user, require_therapist, require_user
+from ..deps import (
+    ensure_no_rekey,
+    ApiError,
+    get_session,
+    require_regular_user,
+    require_therapist,
+    require_user,
+)
 from ..locks import lifecycle_locks, sharing_locks, sharing_patient_lock_key
 from ..models import (
     KEY_SCHEME_V1,
@@ -41,6 +48,7 @@ from ..models import (
     Entry,
     Insight,
     Measure,
+    RekeyJournal,
     TotpBackupCode,
     User,
     utcnow,
@@ -305,8 +313,9 @@ async def export_account(
             .scalars()
             .first()
         )
-        if fresh is None:
+        if fresh is None or not fresh.is_active or fresh.token_epoch != user.token_epoch:
             raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+        await ensure_no_rekey(session, fresh.id)
         # L-8 (2026-09-20): the insights section is SNAPSHOT-paginated, and
         # the snapshot of row IDS (ordered by created-at-at-cutoff for a
         # deterministic bundle) is captured here, in the same short head
@@ -349,8 +358,24 @@ async def export_account(
             .scalars()
             .all()
         )
+        export_settings = request.app.state.settings
+        if (
+            get_audio_store_cached(export_settings) is None
+            and await session.scalar(
+                select(AudioAttachment.id)
+                .where(AudioAttachment.user_id == fresh.id, AudioAttachment.expires_at > cutoff)
+                .limit(1)
+            )
+            is not None
+        ):
+            raise ApiError(
+                status_code=503,
+                detail="audio export storage unavailable",
+                code="audio_storage_unconfigured",
+            )
         head = ExportBundle(
-            version=1,
+            version=2,
+            username=fresh.username,
             exported_at=cutoff,
             user_id=fresh.id,
             salt=fresh.salt,
@@ -386,8 +411,22 @@ async def export_account(
 
     sessionmaker = request.app.state.sessionmaker
     head_json = json.dumps(
-        head.model_dump(mode="json", exclude={"shares", "entries", "insights", "measures"})
+        head.model_dump(mode="json", exclude={"shares", "entries", "insights", "measures", "audio"})
     )[1:-1]
+
+    expected_export_epoch = fresh.token_epoch
+    expected_export_revisions = (fresh.entries_revision, fresh.measures_revision)
+
+    async def check_export_snapshot(page_session):
+        current = await page_session.get(User, fresh.id, populate_existing=True)
+        if current is None or not current.is_active or current.token_epoch != expected_export_epoch:
+            raise ApiError(status_code=401, detail="export session retired", code="unauthorized")
+        if (current.entries_revision, current.measures_revision) != expected_export_revisions:
+            raise ApiError(
+                status_code=409,
+                detail="account changed during export; retry",
+                code="collection_changed",
+            )
 
     async def bundle():
         try:
@@ -401,6 +440,7 @@ async def export_account(
             for chunk_start in range(0, len(share_snapshot), EXPORT_METADATA_PAGE_SIZE):
                 chunk_ids = share_snapshot[chunk_start : chunk_start + EXPORT_METADATA_PAGE_SIZE]
                 async with sessionmaker() as page_session:
+                    await check_export_snapshot(page_session)
                     share_rows = (
                         await page_session.execute(
                             select(
@@ -420,7 +460,13 @@ async def export_account(
                     ).all()
                     # SQL IN has no order guarantee: restore the frozen
                     # snapshot order so the bundle is deterministic.
-                    by_id = {row[0]: row for row in share_rows}
+                    shares_by_id = {row[0]: row for row in share_rows}
+                    if set(shares_by_id) != set(chunk_ids):
+                        raise ApiError(
+                            status_code=409,
+                            detail="sharing changed during export; retry",
+                            code="collection_changed",
+                        )
                     rendered = [
                         ShareRecord(
                             therapist_username=username,
@@ -430,7 +476,7 @@ async def export_account(
                             revoked_at=revoked_at,
                         ).model_dump(mode="json")
                         for _, status, granted_at, revoked_at, username, display_name in (
-                            by_id[row_id] for row_id in chunk_ids if row_id in by_id
+                            shares_by_id[row_id] for row_id in chunk_ids if row_id in shares_by_id
                         )
                     ]
                 for item in rendered:
@@ -452,6 +498,7 @@ async def export_account(
                 # topology.
                 async with lifecycle_locks.hold(f"llm-lifecycle:{fresh.id}"):
                     async with sessionmaker() as page_session:
+                        await check_export_snapshot(page_session)
                         # Fetch only ids, order keys, and DB-measured byte
                         # sizes first.  A 100-row page of 1 MiB entries used
                         # to load ~100 MiB into memory before streaming
@@ -508,8 +555,11 @@ async def export_account(
                         for metadata in selected:
                             row = by_id.get(metadata[0])
                             if row is None:
-                                last_processed = metadata
-                                continue
+                                raise ApiError(
+                                    status_code=409,
+                                    detail="record disappeared during export; retry",
+                                    code="collection_changed",
+                                )
                             blob_bytes = len(bytes(row.blob))
                             if rendered and used_blob_bytes + blob_bytes > EXPORT_PAGE_BLOB_BYTES:
                                 break
@@ -543,6 +593,7 @@ async def export_account(
                 # as entries without pinning it across a slow download.
                 async with lifecycle_locks.hold(f"llm-lifecycle:{fresh.id}"):
                     async with sessionmaker() as page_session:
+                        await check_export_snapshot(page_session)
                         sizes = {
                             row_id: int(size or 0)
                             for row_id, size in (
@@ -588,14 +639,12 @@ async def export_account(
                                 selected_rows[row.id] = row
                         for metadata in selected:
                             row = selected_rows.get(metadata[0])
-                            if row is None:
-                                # Deleted since the snapshot (an undated row a
-                                # recompute replaced between pages): nothing
-                                # exists to export. Membership in the bundle
-                                # is snapshot-frozen, but bytes that no longer
-                                # exist cannot be streamed.
-                                processed_pos = position_by_id[metadata[0]]
-                                continue
+                            if row is None or row.created_at > cutoff:
+                                raise ApiError(
+                                    status_code=409,
+                                    detail="analysis changed during export; retry",
+                                    code="collection_changed",
+                                )
                             blob_bytes = len(bytes(row.blob))
                             if rendered and used_blob_bytes + blob_bytes > EXPORT_PAGE_BLOB_BYTES:
                                 break
@@ -650,6 +699,7 @@ async def export_account(
             while True:
                 async with lifecycle_locks.hold(f"llm-lifecycle:{fresh.id}"):
                     async with sessionmaker() as page_session:
+                        await check_export_snapshot(page_session)
                         query = (
                             select(
                                 Measure.id,
@@ -693,8 +743,11 @@ async def export_account(
                         for metadata in selected:
                             row = measure_rows.get(metadata[0])
                             if row is None:
-                                last_processed = metadata
-                                continue
+                                raise ApiError(
+                                    status_code=409,
+                                    detail="record disappeared during export; retry",
+                                    code="collection_changed",
+                                )
                             blob_bytes = len(bytes(row.blob))
                             if rendered and used_blob_bytes + blob_bytes > EXPORT_PAGE_BLOB_BYTES:
                                 break
@@ -730,11 +783,12 @@ async def export_account(
                 get_audio_store_cached(export_settings) if export_settings is not None else None
             )
             audio_cursor: tuple | None = None
-            if audio_store is not None:
+            if audio_store is not None and export_settings is not None:
                 while True:
                     page_meta: list[dict] = []
                     async with lifecycle_locks.hold(f"llm-lifecycle:{fresh.id}"):
                         async with sessionmaker() as page_session:
+                            await check_export_snapshot(page_session)
                             query = (
                                 select(
                                     AudioAttachment.id,
@@ -745,8 +799,15 @@ async def export_account(
                                     AudioAttachment.expires_at,
                                     AudioAttachment.created_at,
                                     AudioAttachment.storage_key,
+                                    AudioAttachment.backend,
+                                    AudioAttachment.storage_locator,
+                                    AudioAttachment.content_version,
                                 )
-                                .where(AudioAttachment.user_id == fresh.id)
+                                .where(
+                                    AudioAttachment.user_id == fresh.id,
+                                    AudioAttachment.created_at <= cutoff,
+                                    AudioAttachment.expires_at > cutoff,
+                                )
                                 .order_by(
                                     AudioAttachment.created_at.asc(),
                                     AudioAttachment.id.asc(),
@@ -774,19 +835,35 @@ async def export_account(
                     for meta in page_meta:
                         key = meta.pop("storage_key")
                         try:
-                            blob = await audio_store.get(key)
+                            from types import SimpleNamespace
+                            from ..services.audio_store import store_for_object
+
+                            source_store = store_for_object(
+                                export_settings, SimpleNamespace(**meta)
+                            )
+                            blob = await source_store.get(
+                                key, max_bytes=export_settings.audio_max_body_bytes
+                            )
                         except AudioStoreError:
-                            # Object gone (expired/erased between listing
-                            # and fetch): the row is skipped, not fabricated.
-                            continue
+                            raise ApiError(
+                                status_code=503,
+                                detail="audio export is incomplete; retry",
+                                code="audio_storage_failed",
+                            ) from None
                         yield ("" if first else ",") + json.dumps(
                             {
-                                **{k: v for k, v in meta.items()},
+                                **{
+                                    k: v
+                                    for k, v in meta.items()
+                                    if k not in {"backend", "storage_locator"}
+                                },
                                 "blob": base64.b64encode(blob).decode("ascii"),
                             },
                             default=str,
                         )
                         first = False
+            async with sessionmaker() as final_session:
+                await check_export_snapshot(final_session)
             yield "]}"
         finally:
             if acquired_export_slot and export_limiter is not None:
@@ -819,133 +896,18 @@ async def rotate_credential(
     user: User = Depends(require_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """Rotate the LOGIN credential (2026-09-20, audit fix H-1/M-3; opened to
-    BOTH roles 2026-09-21, audit C-2/F-4 — a therapist's forgotten or
-    phished verifier used to be fixable only by deleting the account and
-    orphaning every consent's wrapped key).
-
-    The recovery path for a phished verifier or any credential exposure: the
-    standing login credential is the derived auth key, and until now NOTHING
-    could ever retire a captured one. Requires the CURRENT verifier (a
-    stolen bearer must not swap the credential and lock the real user out),
-    stores a fresh client KDF salt + scrypt-verifier for the NEW password,
-    bumps the token epoch (every bearer dies), and purges in-memory
-    processing keys (nothing may outlive the credential it authenticated
-    under).
-
-    Ordering contract with POST /processing/rekey: a client changing its
-    password rekeys the stored blobs FIRST (both keys still derivable),
-    THEN rotates the credential here. This endpoint alone never touches
-    the data key or any stored ciphertext. A THERAPIST additionally re-wraps
-    the wrap-key blob under the new password-derived KEK FIRST via
-    PUT /therapist/wrap-key (same both-keys-derivable window), then
-    rotates here.
-
-    2026-09-26 v2 key scheme: a v2 account answers 409 key_scheme_conflict
-    here — swapping the salt WITHOUT re-wrapping the data-key envelope
-    would strand the random data key behind a locker whose KEK no longer
-    exists (unrecoverable data loss, not a degraded state). v2 clients use
-    PUT /account/password, which swaps the credential and the envelope in
-    one atomically-committed operation.
-    """
+    """Legacy credential-only swaps are unsafe for both encrypted account roles."""
     if user.key_scheme == KEY_SCHEME_V2:
         raise ApiError(
             status_code=409,
-            detail=(
-                "this account uses the v2 key envelope; change the password via "
-                "PUT /account/password (which re-swaps the envelope atomically)"
-            ),
+            detail="use the atomic envelope password endpoint",
             code="key_scheme_conflict",
         )
-    # Old-password proof first: nothing else may run on a bearer alone.
-    # M-B1 (2026-09-26): the proof runs against the freshly re-read row.
-    # The epoch MUST be captured BEFORE the proof: _require_verifier's
-    # populate_existing re-read mutates this very ORM object in place (the
-    # request session's identity map holds it), so reading it afterwards
-    # would compare the post-refresh epoch against itself and fence nothing
-    # (2026-09-26 audit follow-up N-2 — this exact bug shipped with M-B1
-    # and weakened the pre-existing M-2 fence here).
-    expected_epoch = user.token_epoch
-    await _require_verifier(user, body.verifier, request, session)
-    try:
-        new_salt_bytes = base64.b64decode(body.new_salt, validate=True)
-        new_verifier_bytes = base64.b64decode(body.new_verifier, validate=True)
-    except (binascii.Error, ValueError):
-        raise ApiError(
-            status_code=422,
-            detail="new_salt and new_verifier must be base64",
-            code="validation_error",
-        ) from None
-    if len(new_salt_bytes) != SALT_BYTES:
-        raise ApiError(
-            status_code=422,
-            detail=f"new_salt must be exactly {SALT_BYTES} bytes",
-            code="validation_error",
-        )
-    if len(new_verifier_bytes) != AUTH_KEY_SIZE:
-        raise ApiError(
-            status_code=422,
-            detail=f"new_verifier must be {AUTH_KEY_SIZE} bytes",
-            code="validation_error",
-        )
-
-    scrypt_server_salt = os.urandom(16)
-    async with auth_work_slot(request):
-        new_verifier_hash = await hash_verifier_off_loop(
-            new_verifier_bytes,
-            scrypt_server_salt,
-            limiter=_auth_limiter(request),
-            n=request.app.state.settings.scrypt_n,
-        )
-
-    async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
-        fresh = (
-            (
-                await session.execute(
-                    select(User).where(User.id == user.id).execution_options(populate_existing=True)
-                )
-            )
-            .scalars()
-            .first()
-        )
-        # 2026-09-28 deep audit: 404 for the vanished/deactivated account and
-        # 401 for the epoch fence — the same split upgrade_key_envelope
-        # uses, so a client cannot read "account gone" as "re-login" from
-        # one sibling and the opposite from another.
-        if fresh is None or not fresh.is_active:
-            raise ApiError(status_code=404, detail="account not found", code="not_found")
-        if fresh.token_epoch != expected_epoch:
-            raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
-        await session.execute(
-            update(User)
-            .where(User.id == fresh.id)
-            .values(
-                salt=body.new_salt,
-                verifier=new_verifier_hash,
-                scrypt_salt=scrypt_server_salt,
-                token_epoch=User.token_epoch + 1,
-            )
-        )
-        # Audit visibility for the one credential event whose attacker
-        # value is highest (2026-09-26 pentest D-2): a stolen verifier can
-        # drive this endpoint to a permanent takeover + victim lockout.
-        # The row lands in the same transaction as the swap so the trail
-        # cannot be split from it; a locked-out victim (or an operator
-        # recovering the account) can then see exactly WHEN the standing
-        # credential changed. 2026-09-26 audit item 16: routed through the
-        # chained append like every audit write.
-        await append_access_log(
-            session,
-            actor_id=user.id,
-            actor_role=user.role,
-            user_id=user.id,
-            action="credential_rotated",
-        )
-        await session.commit()
-        # The credential every live bearer authenticated under is gone: kill
-        # the sessions and any resident processing keys in the same lifecycle
-        # event, exactly like logout.
-        request.app.state.key_store.destroy_all_for_owner(fresh.id)
+    raise ApiError(
+        status_code=409,
+        detail="upgrade the client to atomically rotate keys and credentials",
+        code="upgrade_required",
+    )
 
 
 # --- key-recovery envelope (wave 3, 2026-09-30) -----------------------------------
@@ -1183,6 +1145,9 @@ async def reset_password_with_recovery_key(
             detail="no recovery kit on this account",
             code="recovery_not_configured",
         )
+    expected_epoch = user.token_epoch
+    expected_recovery_verifier = bytes(user.recovery_verifier)
+    expected_recovery_scheme = user.recovery_scheme
     # Recovery-key proof (off the event loop, same limiter as login).
     recovery_salt = bytes(user.recovery_salt)
     async with auth_work_slot(request):
@@ -1192,7 +1157,7 @@ async def reset_password_with_recovery_key(
             limiter=_auth_limiter(request),
             n=request.app.state.settings.scrypt_n,
         )
-    if not hmac.compare_digest(candidate, bytes(user.recovery_verifier)):
+    if not hmac.compare_digest(candidate, expected_recovery_verifier):
         raise ApiError(status_code=401, detail="invalid credentials", code="invalid_credentials")
     # kdf_params: same canonicalization contract as the password change.
     if body.new_kdf_params is not None:
@@ -1238,89 +1203,72 @@ async def reset_password_with_recovery_key(
             detail="processing session missing or expired",
             code="processing_session_invalid",
         ) from None
-    expected_epoch = user.token_epoch
-    async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
-        fresh = (
-            (
-                await session.execute(
-                    select(User).where(User.id == user.id).execution_options(populate_existing=True)
+    try:
+        async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
+            fresh = (
+                (
+                    await session.execute(
+                        select(User)
+                        .where(User.id == user.id)
+                        .execution_options(populate_existing=True)
+                    )
                 )
+                .scalars()
+                .first()
             )
-            .scalars()
-            .first()
-        )
-        if fresh is None or not fresh.is_active:
-            raise ApiError(status_code=404, detail="account not found", code="not_found")
-        if fresh.token_epoch != expected_epoch:
-            raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
-        # Possession probe — the SAME contract as PUT /account/password
-        # (entry AAD first, insight fallback, vacuous on an empty
-        # corpus), run off the loop via the shared helper.
-        entry_row = (
+            if fresh is None or not fresh.is_active:
+                raise ApiError(status_code=404, detail="account not found", code="not_found")
+            if fresh.token_epoch != expected_epoch:
+                raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+            if (
+                fresh.recovery_verifier is None
+                or fresh.recovery_salt is None
+                or bytes(fresh.recovery_verifier) != expected_recovery_verifier
+                or bytes(fresh.recovery_salt) != recovery_salt
+                or fresh.recovery_scheme != expected_recovery_scheme
+            ):
+                raise ApiError(
+                    status_code=401, detail="invalid credentials", code="invalid_credentials"
+                )
+            # Possession probe — the SAME contract as PUT /account/password
+            # (entry AAD first, insight fallback, vacuous on an empty
+            # corpus), run off the loop via the shared helper.
+            proved = await _prove_current_data_key(
+                session, fresh, candidate_key, request.app.state.settings
+            )
+            if not proved:
+                raise ApiError(
+                    status_code=403,
+                    detail=(
+                        "the processing session's key did not authenticate stored "
+                        "ciphertext; open a session with the account's current data key"
+                    ),
+                    code="envelope_key_mismatch",
+                )
             await session.execute(
-                select(Entry.client_entry_id, Entry.content_version, Entry.blob)
-                .where(Entry.user_id == fresh.id)
-                .order_by(Entry.received_at.desc(), Entry.id.desc())
-                .limit(1)
-            )
-        ).first()
-        proved = False
-        if entry_row is not None:
-            aad = crypto.entry_aad_candidates(fresh.id, entry_row[0], int(entry_row[1]))
-            proved = await anyio.to_thread.run_sync(
-                _authenticate_blob_only, candidate_key, bytes(entry_row[2]), aad
-            )
-        else:
-            insight_row = (
-                await session.execute(
-                    select(Insight.kind, Insight.for_date, Insight.blob)
-                    .where(Insight.user_id == fresh.id)
-                    .limit(1)
+                update(User)
+                .where(User.id == fresh.id)
+                .values(
+                    salt=base64.b64encode(new_salt_bytes).decode("ascii"),
+                    verifier=new_verifier_hash,
+                    scrypt_salt=scrypt_server_salt,
+                    token_epoch=User.token_epoch + 1,
+                    key_scheme=KEY_SCHEME_V2,
+                    wrapped_data_key=wrapped_key_bytes,
+                    kdf_params=params_json,
                 )
-            ).first()
-            if insight_row is not None:
-                kind, for_date, blob = insight_row
-                insight_aad = (
-                    crypto.build_aad("question", fresh.id, for_date.isoformat())
-                    if kind == "question" and for_date is not None
-                    else crypto.build_aad("insights", fresh.id, kind)
-                )
-                proved = await anyio.to_thread.run_sync(
-                    _authenticate_blob_only, candidate_key, bytes(blob), insight_aad
-                )
-            else:
-                proved = True  # empty corpus: possession is vacuous
-        if not proved:
-            raise ApiError(
-                status_code=403,
-                detail=(
-                    "the processing session's key did not authenticate stored "
-                    "ciphertext; open a session with the account's current data key"
-                ),
-                code="envelope_key_mismatch",
             )
-        await session.execute(
-            update(User)
-            .where(User.id == fresh.id)
-            .values(
-                salt=base64.b64encode(new_salt_bytes).decode("ascii"),
-                verifier=new_verifier_hash,
-                scrypt_salt=scrypt_server_salt,
-                token_epoch=User.token_epoch + 1,
-                key_scheme=KEY_SCHEME_V2,
-                wrapped_data_key=wrapped_key_bytes,
-                kdf_params=params_json,
+            await append_access_log(
+                session,
+                actor_id=fresh.id,
+                actor_role=fresh.role,
+                user_id=fresh.id,
+                action="password_reset_via_recovery",
             )
-        )
-        await append_access_log(
-            session,
-            actor_id=fresh.id,
-            actor_role=fresh.role,
-            user_id=fresh.id,
-            action="password_reset_via_recovery",
-        )
-        await session.commit()
-        request.app.state.key_store.destroy_all_for_owner(fresh.id)
+            await session.commit()
+            request.app.state.key_store.destroy_all_for_owner(fresh.id)
+    finally:
+        zeroize(candidate_key)
 
 
 @router.put(
@@ -1495,43 +1443,9 @@ async def change_password(
                 # the fence — entry writes and recomputes hold the same lock,
                 # so the sampled row cannot be re-keyed mid-probe). Run off
                 # the loop: AES-GCM is CPU work sized by the blob cap.
-                entry_row = (
-                    await session.execute(
-                        select(Entry.client_entry_id, Entry.content_version, Entry.blob)
-                        .where(Entry.user_id == fresh.id)
-                        .order_by(Entry.received_at.desc(), Entry.id.desc())
-                        .limit(1)
-                    )
-                ).first()
-                proved = False
-                if entry_row is not None:
-                    aad = crypto.entry_aad_candidates(fresh.id, entry_row[0], int(entry_row[1]))
-                    proved = await anyio.to_thread.run_sync(
-                        _authenticate_blob_only, candidate_key, bytes(entry_row[2]), aad
-                    )
-                else:
-                    insight_row = (
-                        await session.execute(
-                            select(Insight.kind, Insight.for_date, Insight.blob)
-                            .where(Insight.user_id == fresh.id)
-                            .limit(1)
-                        )
-                    ).first()
-                    if insight_row is not None:
-                        kind, for_date, blob = insight_row
-                        insight_aad = (
-                            crypto.build_aad("question", fresh.id, for_date.isoformat())
-                            if kind == "question" and for_date is not None
-                            else crypto.build_aad("insights", fresh.id, kind)
-                        )
-                        proved = await anyio.to_thread.run_sync(
-                            _authenticate_blob_only, candidate_key, bytes(blob), insight_aad
-                        )
-                    else:
-                        # Empty corpus: nothing exists to authenticate against
-                        # — possession is vacuous, and the client is migrating
-                        # before its first write (documented in the docstring).
-                        proved = True
+                proved = await _prove_current_data_key(
+                    session, fresh, candidate_key, request.app.state.settings
+                )
                 if not proved:
                     raise ApiError(
                         status_code=403,
@@ -1594,6 +1508,93 @@ def _authenticate_blob_only(key: bytearray, blob: bytes, aad) -> bool:
         buf.zeroize()
         return True
     return False
+
+
+async def _prove_current_data_key(
+    session: AsyncSession, user: User, key: bytearray, settings
+) -> bool:
+    """Empty means every encrypted store is empty; measures are not optional."""
+    if (
+        await session.scalar(
+            select(RekeyJournal.id).where(RekeyJournal.user_id == user.id).limit(1)
+        )
+        is not None
+    ):
+        raise ApiError(
+            status_code=409,
+            detail="complete the pending key rotation first",
+            code="rekey_in_progress",
+        )
+    entry = (
+        await session.execute(
+            select(Entry.client_entry_id, Entry.content_version, Entry.blob)
+            .where(Entry.user_id == user.id)
+            .order_by(Entry.received_at.desc(), Entry.id.desc())
+            .limit(1)
+        )
+    ).first()
+    if entry is not None:
+        return await anyio.to_thread.run_sync(
+            _authenticate_blob_only,
+            key,
+            bytes(entry[2]),
+            crypto.entry_aad_candidates(user.id, entry[0], int(entry[1])),
+        )
+    insight = (
+        await session.execute(
+            select(Insight.kind, Insight.for_date, Insight.blob)
+            .where(Insight.user_id == user.id)
+            .limit(1)
+        )
+    ).first()
+    if insight is not None:
+        kind, for_date, blob = insight
+        aad = (
+            crypto.build_aad("question", user.id, for_date.isoformat())
+            if kind == "question" and for_date is not None
+            else crypto.build_aad("insights", user.id, kind)
+        )
+        return await anyio.to_thread.run_sync(_authenticate_blob_only, key, bytes(blob), aad)
+    measure = (
+        await session.execute(
+            select(Measure.client_measure_id, Measure.blob)
+            .where(Measure.user_id == user.id)
+            .limit(1)
+        )
+    ).first()
+    if measure is not None:
+        return await anyio.to_thread.run_sync(
+            _authenticate_blob_only,
+            key,
+            bytes(measure[1]),
+            crypto.build_aad("measure", user.id, measure[0]),
+        )
+    audio = await session.scalar(
+        select(AudioAttachment)
+        .where(AudioAttachment.user_id == user.id, AudioAttachment.expires_at > utcnow())
+        .limit(1)
+    )
+    if audio is not None:
+        from ..services.audio_store import AudioStoreError, store_for_object
+
+        try:
+            store = store_for_object(settings, audio)
+            if store is None:
+                raise AudioStoreError("unconfigured")
+            blob = await store.get(audio.storage_key, max_bytes=settings.audio_max_body_bytes)
+        except AudioStoreError:
+            raise ApiError(
+                status_code=503,
+                detail="audio key proof storage unavailable",
+                code="audio_store_error",
+            ) from None
+        return await anyio.to_thread.run_sync(
+            _authenticate_blob_only,
+            key,
+            blob,
+            crypto.build_aad("audio", user.id, audio.client_entry_id, str(audio.content_version)),
+        )
+    return True
 
 
 @router.post(
@@ -1715,43 +1716,9 @@ async def upgrade_key_envelope(
             # Possession probe: one stored blob must authenticate under the
             # popped key (inside the fence — entry writes and recomputes hold
             # the same lock, so the sampled row cannot be re-keyed mid-probe).
-            entry_row = (
-                await session.execute(
-                    select(Entry.client_entry_id, Entry.content_version, Entry.blob)
-                    .where(Entry.user_id == fresh.id)
-                    .order_by(Entry.received_at.desc(), Entry.id.desc())
-                    .limit(1)
-                )
-            ).first()
-            proved = False
-            if entry_row is not None:
-                aad = crypto.entry_aad_candidates(fresh.id, entry_row[0], int(entry_row[1]))
-                proved = await anyio.to_thread.run_sync(
-                    _authenticate_blob_only, candidate_key, bytes(entry_row[2]), aad
-                )
-            else:
-                insight_row = (
-                    await session.execute(
-                        select(Insight.kind, Insight.for_date, Insight.blob)
-                        .where(Insight.user_id == fresh.id)
-                        .limit(1)
-                    )
-                ).first()
-                if insight_row is not None:
-                    kind, for_date, blob = insight_row
-                    insight_aad = (
-                        crypto.build_aad("question", fresh.id, for_date.isoformat())
-                        if kind == "question" and for_date is not None
-                        else crypto.build_aad("insights", fresh.id, kind)
-                    )
-                    proved = await anyio.to_thread.run_sync(
-                        _authenticate_blob_only, candidate_key, bytes(blob), insight_aad
-                    )
-                else:
-                    # Empty corpus: nothing exists to authenticate against —
-                    # possession is vacuous, and the client is migrating
-                    # before its first write (documented above).
-                    proved = True
+            proved = await _prove_current_data_key(
+                session, fresh, candidate_key, request.app.state.settings
+            )
             if not proved:
                 raise ApiError(
                     status_code=403,
@@ -2144,43 +2111,21 @@ async def delete_account(
             )
             await session.execute(delete(Insight).where(Insight.user_id == user.id))
             await session.execute(delete(Entry).where(Entry.user_id == user.id))
-            # M2 remediation (audit 2026-09-29): erasure must remove the
-            # kept-voice OBJECTS too, not just the rows the FK cascade
-            # takes. The storage keys are collected BEFORE the cascade
-            # wipes the rows; an object-store failure is logged and left
-            # to the S3-lifecycle backstop (the account is gone either
-            # way — the objects are undecryptable ciphertext whose data
-            # key no longer exists, but retention hygiene still wants
-            # them gone).
-            try:
-                from ..models import AudioAttachment
-                from ..services.audio_store import AudioStoreError, get_audio_store_cached
+            from ..services.audio_store import enqueue_audio_delete, drain_audio_deletions
 
-                store = get_audio_store_cached(request.app.state.settings)
-                if store is not None:
-                    audio_rows = (
-                        (
-                            await session.execute(
-                                select(AudioAttachment.storage_key).where(
-                                    AudioAttachment.user_id == user.id
-                                )
-                            )
-                        )
-                        .scalars()
-                        .all()
+            store = get_audio_store_cached(request.app.state.settings)
+            audio_rows = list(
+                (
+                    await session.scalars(
+                        select(AudioAttachment).where(AudioAttachment.user_id == user.id)
                     )
-                    for storage_key in audio_rows:
-                        try:
-                            await store.delete(storage_key)
-                        except AudioStoreError:
-                            logger.warning(
-                                "account erasure: audio object %s could not be removed",
-                                storage_key,
-                            )
-            except Exception:  # noqa: BLE001 — erasure stands regardless of store state
-                logger.warning("account erasure: audio object sweep failed", exc_info=True)
+                ).all()
+            )
+            tombstones = [enqueue_audio_delete(session, row, store=store) for row in audio_rows]
+            await session.execute(delete(RekeyJournal).where(RekeyJournal.user_id == user.id))
             await session.execute(delete(User).where(User.id == user.id))
             await session.commit()
+            await drain_audio_deletions(session, request.app.state.settings, identifiers=tombstones)
 
 
 # --- Optional therapist TOTP (2026-09-21 audit C-2/F-4, delivered 2026-09-22) --------

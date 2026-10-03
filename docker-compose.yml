@@ -288,8 +288,8 @@ services:
       # Days to keep dumps. Must match your stated backup-expiry policy —
       # see the retention note above.
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-35}
-      # The dump-encryption key: mounted file preferred (2026-09-26 infra
-      # audit); the env form remains as the dev-overlay fallback.
+      # The dump-encryption key: BACKUP_KEY overrides the file when nonempty.
+      # One helper owns the same resolution for encryption, MAC and restore.
       BACKUP_KEY: ${BACKUP_KEY:-}
       BACKUP_KEY_FILE: /run/secrets/backup_key
     volumes:
@@ -345,16 +345,8 @@ services:
           echo "backup image is missing its required crypto utilities" >&2
           exit 1
         }
-        # Dump-encryption key source (2026-09-26 infra audit): the mounted
-        # secret file when present, else the env var (dev overlay).
-        if [ -s "$$BACKUP_KEY_FILE" ]; then
-          backup_pass="file:$$BACKUP_KEY_FILE"
-        elif [ -n "$$BACKUP_KEY" ]; then
-          backup_pass="env:BACKUP_KEY"
-        else
-          echo "no BACKUP_KEY file or env value — refusing to dump plaintext" >&2
-          exit 1
-        fi
+        # The helper resolves env/file secrets identically for encryption,
+        # authentication and restore, and passes the key through an fd.
         # Database credential: build the pgpass line from the mounted
         # postgres_password secret (raw password -> db:5432:db:user:pass)
         # on the tmpfs, mode 600 — pg_dump then authenticates without the
@@ -394,8 +386,7 @@ services:
           mac="$$out.hmac"
           mac_tmp="$$mac.tmp"
           if pg_dump -h db -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -Fc \
-              | openssl enc -aes-256-cbc -salt -pbkdf2 -iter 600000 -pass "$$backup_pass" -out "$$tmp" \
-              && mindpattern-backup-mac write "$$tmp" "$$mac_tmp"; then
+              | mindpattern-backup-mac encrypt "$$tmp" "$$mac_tmp"; then
             # Sidecar first, ciphertext last: a visible final .dump.enc is
             # therefore never left without its integrity tag if the process
             # is killed between publication steps. An orphan tag is harmless.

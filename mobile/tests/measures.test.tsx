@@ -30,9 +30,10 @@ const {
   phq9Item9Endorsed,
   phq9Payload,
 } = await import("../src/phq9");
-const { render, flush, textOf, pressLabel, pressAlertButton, touchableByLabel, act } = await import("./helpers/rtr");
+const { render, flush, textOf, pressLabel, firePress, pressAlertButton, touchableByLabel, act } = await import("./helpers/rtr");
 const { resetApi } = await import("./helpers/apiMock");
 const storage = (await import("./helpers/storageMock")).default;
+const { __resetLocalKeyLifecycleForTests, changeLocalSessionOwner, freezeLocalKeyWrites, installLocalDataKey } = await import("../src/localWriteGuard");
 
 const dataKey = Buffer.alloc(32, 7);
 const USER = "user-1";
@@ -47,6 +48,7 @@ function measureRow(id: string, score: number, date: string): { client_measure_i
 }
 
 beforeEach(() => {
+  __resetLocalKeyLifecycleForTests();
   resetApi(api as never);
   Alert.alert.mockClear();
   touchActivity.mockClear();
@@ -107,6 +109,33 @@ describe("PHQ-9 semantics", () => {
 });
 
 describe("MeasuresScreen", () => {
+  it("does not send old-screen answers to a replacement account after a suspended first owner lookup", async () => {
+    const root = await render(<MeasuresScreen navigation={{ navigate: vi.fn(), goBack: vi.fn() }} />); await flush();
+    for (let i = 0; i < PHQ9_ITEMS.length; i++) await pressOption(root, `Question ${i + 1}: Not at all`);
+    let release!: () => void;
+    vi.mocked(api.getUserId).mockImplementationOnce(async () => { await new Promise<void>(resolve => { release = resolve; }); return "user-2"; });
+    await firePress(root, "Record this check-in"); await flush(); expect(release).toBeTypeOf("function");
+    changeLocalSessionOwner("user-2");
+    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 2), dataKey: Buffer.alloc(32, 8) }, "user-2");
+    await act(async () => release()); await flush();
+    expect(api.createMeasure).not.toHaveBeenCalled();
+    expect(touchableByLabel(root, "Record this check-in").props.disabled).toBe(false); await act(async () => root.unmount());
+  });
+  it("retains answers without sending an old-key questionnaire after pending backup spans rotation", async () => {
+    installLocalDataKey(USER, dataKey);
+    const root = await render(<MeasuresScreen navigation={{ navigate: vi.fn(), goBack: vi.fn() }} />); await flush();
+    for (let i = 0; i < PHQ9_ITEMS.length; i++) await pressOption(root, `Question ${i + 1}: Not at all`);
+    const pending = await import("../src/pendingMeasure"); const original = pending.savePendingMeasure; let release!: () => void;
+    const gate = vi.spyOn(pending, "savePendingMeasure").mockImplementationOnce(async (...args) => {
+      await original(...args); await new Promise<void>(resolve => { release = resolve; });
+    });
+    await firePress(root, "Record this check-in"); await flush(); expect(release).toBeTypeOf("function");
+    freezeLocalKeyWrites(USER); installLocalDataKey(USER, Buffer.alloc(32, 8));
+    await act(async () => release()); await flush(); gate.mockRestore();
+    expect(api.createMeasure).not.toHaveBeenCalled();
+    expect(touchableByLabel(root, "Record this check-in").props.disabled).toBe(false);
+    expect(Alert.alert).toHaveBeenCalled(); await act(async () => root.unmount());
+  });
   it("renders decrypted history from the patient's own key", async () => {
     vi.mocked(api.listMeasures).mockResolvedValue([
       measureRow("m-2", 9, "2026-09-18"),

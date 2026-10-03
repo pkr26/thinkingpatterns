@@ -22,7 +22,7 @@ const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const nginxPath = resolve(webRoot, "../deploy/nginx/mindpattern.conf.example");
 
 const CSP =
-  "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; frame-src 'none'; upgrade-insecure-requests";
+  "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; frame-src 'none'; upgrade-insecure-requests";
 
 describe("static-host security policy", () => {
   it.skipIf(!existsSync(nginxPath))(

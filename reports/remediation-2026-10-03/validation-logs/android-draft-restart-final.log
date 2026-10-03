@@ -1,0 +1,6 @@
+PASS final native encrypted draft is acknowledged on device before process death
+PASS process restart and verified unlock restore the encrypted draft and authoritative 11/30 progress
+['Today', '11/30 days to your patterns', 'Writing streak: 1 day', 'Already wrote today', 'Draft restored', 'Typed drafts are backed up encrypted on this device. Unsaved recordings are not included.', 'Encrypted draft saved on this device', 'Synthetic native encrypted draft process restart retention.', 'Record instead', 'Hide keyboard', 'Add details (optional)', 'Save entry', 'Today', 'History', 'Patterns', 'Question', 'Settings', 'Get help', '!', 'Open debugger to view warnings.']
+PASS acknowledged native save clears only the matching draft, preserving authoritative progress
+PASS second process restart does not resurrect the acknowledged draft and reloads 11/30 days
+['Today', '11/30 days to your patterns', 'Writing streak: 1 day', 'Already wrote today', 'Typed drafts are backed up encrypted on this device. Unsaved recordings are not included.', 'Something I want to remember…', 'Today felt…', 'A moment worth keeping…', "What's going on today?", 'Record instead', 'Add details (optional)', 'Save entry', 'Today', 'History', 'Patterns', 'Question', 'Settings', 'Get help', '!', 'Open debugger to view warnings.']

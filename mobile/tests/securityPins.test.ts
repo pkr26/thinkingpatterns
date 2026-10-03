@@ -38,6 +38,7 @@ const apiState = {
   cachedSalt: "c2FsdHNhbHRzYWx0c2FsdA==", // "saltsaltsaltsalt"
   consents: [] as Array<Record<string, unknown>>,
   rekeyResult: { entries: 2, insights: 2, measures: 1 },
+  consentsRewrapped: undefined as number | undefined,
   failAt: null as null | "rekey" | "credential" | "relogin" | "verify",
   /** Audit 2026-09-28: make rotateCredential answer 409 key_scheme_conflict
    *  (the account upgraded to the v2 envelope from another device). */
@@ -71,25 +72,27 @@ vi.mock("../src/api/client", async (importOriginal) => {
       // tests/rotationV2.test.ts.
       keyEnvelope: async () => ({ key_scheme: "v1", salt: apiState.cachedSalt, kdf_params: null, wrapped_data_key: null }),
       openProcessingSession: async (key: string) => ({ session_token: `tok-${key.slice(0, 6)}` }),
-      rekeyStoredData: vi.fn(async () => {
+      rekeyStoredData: vi.fn(async (_old, _next, _proof, body) => {
         if (apiState.failAt === "rekey") {
           throw new ApiError(400, "old key did not authenticate every blob", "rekey_key_mismatch");
         }
-        return apiState.rekeyResult;
+        if (apiState.failAt === "credential") throw new ApiError(503, "atomic rotation unavailable");
+        if (apiState.credentialConflict) throw new ApiError(409, "account uses the newer key protection", "key_scheme_conflict");
+        return { ...apiState.rekeyResult, consents_rewrapped: apiState.consentsRewrapped, credential_rotated: true, operation_id: body.operation_id };
       }),
       listConsents: async () => apiState.consents,
       rewrapConsent: vi.fn(async () => ({})),
-      rotateCredential: async () => {
+      rotateCredential: vi.fn(async () => {
         if (apiState.failAt === "credential") throw new ApiError(503, "server busy");
         if (apiState.credentialConflict) {
           throw new ApiError(409, "account uses the newer key protection", "key_scheme_conflict");
         }
         return {};
-      },
-      login: async () => {
+      }),
+      login: vi.fn(async () => {
         if (apiState.failAt === "relogin") throw new ApiError(0, "network unreachable");
-        return { token: "fresh", user_id: "abababababababababababababababab" };
-      },
+        return { token: "fresh", user_id: USER };
+      }),
       setSession: async () => {},
       listEntriesPage: vi.fn(async () => ({ entries: [], nextOffset: null, revision: null })),
       listMeasuresPage: vi.fn(async () => []),
@@ -151,11 +154,21 @@ const keychainMock = Keychain as unknown as { __reset: () => void };
 const DATA_KEY = Buffer.alloc(32, 9);
 const USER = "0123456789abcdef0123456789abcdef";
 
-beforeEach(() => {
+/** Rotation starts from a password-unlocked, verified account. A retry
+ * restores the original keys with writes still suspended by its checkpoint. */
+async function unlockRotationOwner(writeSuspended = false): Promise<void> {
+  const keys = await deriveKeysAsync("correct old password", Buffer.from(apiState.cachedSalt, "base64"));
+  vault.unlock(keys, USER, { writeSuspended });
+}
+
+beforeEach(async () => {
+  (await import("../src/localRekey")).__resetLocalKeyLifecycleForTests();
   store.clear();
+  vi.clearAllMocks();
   apiState.failAt = null;
   apiState.credentialConflict = false;
   apiState.consents = [];
+  apiState.consentsRewrapped = undefined;
   keychainMock.__reset();
   vault.lock();
   // independent audit 2026-09-27 (P2): the queue-drain seam resets to
@@ -283,6 +296,7 @@ describe("entry content-version binding (M-2)", () => {
 // --- H-1: rotation orchestration ----------------------------------------------
 
 describe("rotatePassword (H-1/M-3)", () => {
+  beforeEach(() => unlockRotationOwner());
   it("runs the full flow and re-wraps active grants", async () => {
     apiState.consents = [
       {
@@ -325,7 +339,27 @@ describe("rotatePassword (H-1/M-3)", () => {
       expect(outcome.rewrapped).toBe(1); // revoked grant is skipped
       expect(outcome.rewrapFailures).toEqual([]);
     }
-    expect(rewrap).toHaveBeenCalledTimes(1);
+    expect(rewrap).not.toHaveBeenCalled();
+    expect(api.rotateCredential).not.toHaveBeenCalled();
+    const request = vi.mocked(api.rekeyStoredData).mock.calls[0]![3];
+    expect(request.consent_wraps).toHaveLength(1);
+    expect(request.consent_wraps[0]!.consent_id).toBe("c".repeat(32));
+    expect(request.consent_wraps[0]!.therapist_wrap_pub_key).toBe(spki.toString("base64"));
+    expect(request.consent_wraps[0]!.wrapped_key).toBeTruthy();
+    expect(request.consent_wraps[0]!.ephemeral_pub).toBeTruthy();
+  });
+
+  it("reports the server's zero committed wraps when a grant was revoked during rotation", async () => {
+    const { engine } = await import("../src/crypto/engine");
+    const pair = engine.generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+    apiState.consents = [{ id: "c".repeat(32), therapist_id: "t".repeat(32), status: "active",
+      therapist_wrap_pub_key: pair.publicKey.export({ format: "der", type: "spki" }).toString("base64") }];
+    apiState.consentsRewrapped = 0;
+    const outcome = await rotatePassword({ username: "alice", userId: USER,
+      oldPassword: "correct old password", newPassword: "a strong new passphrase 42!" });
+    expect(outcome).toMatchObject({ ok: true, rewrapped: 0, rewrapFailures: [] });
+    expect(vi.mocked(api.rekeyStoredData).mock.calls[0]![3].consent_wraps).toHaveLength(1);
+    expect(api.rewrapConsent).not.toHaveBeenCalled();
   });
 
   it("refuses to run with a wrong current password", async () => {
@@ -339,132 +373,67 @@ describe("rotatePassword (H-1/M-3)", () => {
     if (!outcome.ok) expect(outcome.stage).toBe("verify");
   });
 
-  it("continues an interrupted rotation — the retry REUSES the pending salt and reads a v2-bound journal (B-1)", async () => {
-    // First attempt: rekey succeeded, credential rotation failed.
-    apiState.failAt = "credential";
-    const first = await rotatePassword({
-      username: "alice",
-      userId: USER,
-      oldPassword: "correct old password",
-      newPassword: "a strong new passphrase 42!",
-    });
-    expect(first.ok).toBe(false);
-    // The dying attempt persisted its salt — the corpus is now under
-    // (newPassword, that salt). A FRESH draw on retry (the old behavior)
-    // could never read it back.
-    const pendingKey = `mindpattern.rotatePendingSalt.${USER}`;
-    const saltB64 = store.get(pendingKey);
-    expect(typeof saltB64).toBe("string");
-    // Derive that exact generation and place a v2-AAD-bound journal row:
-    // the ladder's probe must pass the row's content_version through
-    // (every entry since M-2 is v2-bound; the old probe tried only the
-    // legacy three-part AAD and always failed).
-    const keys = await deriveKeysAsync("a strong new passphrase 42!", Buffer.from(saltB64 as string, "base64"));
-    const row = encryptEntry({ dataKey: keys.dataKey }, USER, "e-b1", "resumed", "2026-09-20", null, undefined, 2);
-    vi.mocked(api.listEntriesPage).mockResolvedValueOnce({
-      entries: [{ id: "i", client_entry_id: "e-b1", blob: row.blobB64, entry_date: "2026-09-20", received_at: "r", content_version: 2 }],
-      nextOffset: null,
-      revision: null,
-    } as never);
-    apiState.failAt = null;
-    vi.mocked(api.rekeyStoredData).mockRejectedValueOnce(
-      new ApiError(400, "old key did not authenticate", "rekey_key_mismatch") as never,
-    );
-    const second = await rotatePassword({
-      username: "alice",
-      userId: USER,
-      oldPassword: "correct old password",
-      newPassword: "a strong new passphrase 42!",
-    });
+  it("retries a lost atomic response with the identical durable operation, body and token headers", async () => {
+    vi.mocked(api.rekeyStoredData).mockRejectedValueOnce(new Error("response lost after commit"));
+    const input = { username: "alice", userId: USER, oldPassword: "correct old password", newPassword: "a strong new passphrase 42!" };
+    const first = await rotatePassword(input);
+    expect(first).toMatchObject({ ok: false, stage: "rekey" });
+    expect(api.login).not.toHaveBeenCalled();
+    expect(await (await import("../src/localRekey")).pendingLocalRekey(USER)).toBe(true);
+    const original = vi.mocked(api.rekeyStoredData).mock.calls[0]!;
+    await unlockRotationOwner(true);
+    const second = await rotatePassword(input);
     expect(second.ok).toBe(true);
-    // Full completion clears the pending salt.
-    expect(store.has(pendingKey)).toBe(false);
-  });
-
-  it("B-2: an empty journal does not trivially verify while measures sit under the foreign key", async () => {
-    vi.mocked(api.rekeyStoredData).mockRejectedValueOnce(
-      new ApiError(400, "old key did not authenticate", "rekey_key_mismatch") as never,
-    );
-    // The rekey also moved the PHQ-9 history — the probe must fall through
-    // to a measure row and refuse to resume on it.
-    // (2026-09-28 audit: listMeasuresPage returns the paged contract shape
-    // { measures, nextOffset, revision } — the entries paging mirror.)
-    const { buildAad, encrypt } = await import("../src/crypto/envelope");
-    const foreign = encrypt(Buffer.alloc(32, 1), Buffer.from('{"v":1}'), buildAad("measure", USER, "m-f")).toString("base64");
-    vi.mocked(api.listMeasuresPage).mockResolvedValueOnce({
-      measures: [{ blob: foreign, client_measure_id: "m-f" }],
-      nextOffset: null,
-      revision: null,
-    } as never);
-    const outcome = await rotatePassword({
-      username: "alice",
-      userId: USER,
-      oldPassword: "correct old password",
-      newPassword: "a strong new passphrase 42!",
-    });
-    expect(outcome.ok).toBe(false);
-    if (!outcome.ok) expect(outcome.reason).toBe("already-rotated-unverifiable");
-  });
-
-  it("B-2: an empty journal with measures under the SAME pending salt resumes and completes", async () => {
-    // Seed the pending salt the interrupted attempt would have left, then
-    // encrypt the measure row under exactly that generation.
-    const salt = Buffer.alloc(16, 3);
-    store.set(`mindpattern.rotatePendingSalt.${USER}`, salt.toString("base64"));
-    const keys = await deriveKeysAsync("a strong new passphrase 42!", salt);
-    const { buildAad, encrypt } = await import("../src/crypto/envelope");
-    const readable = encrypt(keys.dataKey, Buffer.from('{"v":1,"measure":"phq9","score":5}'), buildAad("measure", USER, "m-r")).toString("base64");
-    vi.mocked(api.rekeyStoredData).mockRejectedValueOnce(
-      new ApiError(400, "old key did not authenticate", "rekey_key_mismatch") as never,
-    );
-    vi.mocked(api.listMeasuresPage).mockResolvedValueOnce({
-      measures: [{ blob: readable, client_measure_id: "m-r" }],
-      nextOffset: null,
-      revision: null,
-    } as never);
-    const outcome = await rotatePassword({
-      username: "alice",
-      userId: USER,
-      oldPassword: "correct old password",
-      newPassword: "a strong new passphrase 42!",
-    });
-    expect(outcome.ok).toBe(true);
-  });
-
-  it("B-2 follow-up: a cacheSalt failure after re-login is best-effort — the rotation still self-completes", async () => {
-    vi.mocked(api.cacheSalt).mockRejectedValueOnce(new Error("disk full") as never);
-    const outcome = await rotatePassword({
-      username: "alice",
-      userId: USER,
-      oldPassword: "correct old password",
-      newPassword: "a strong new passphrase 42!",
-    });
-    expect(outcome.ok).toBe(true);
-  });
-
-  it("fails honestly when the retry's new password cannot read an already-rotated journal", async () => {
-    vi.mocked(api.rekeyStoredData).mockRejectedValueOnce(
-      new ApiError(400, "old key did not authenticate", "rekey_key_mismatch") as never,
-    );
-    // listEntriesPage returns rows whose blob only the FIRST new password
-    // could read — the retry uses a different new password.
-    const foreignBlob = encryptEntry({ dataKey: Buffer.alloc(32, 1) }, USER, "e-9", "x", "2026-09-20", null, undefined, 1).blobB64;
-    vi.mocked(api.listEntriesPage).mockResolvedValueOnce({
-      entries: [{ id: "i", client_entry_id: "e-9", blob: foreignBlob, entry_date: "2026-09-20", received_at: "r", content_version: 1 }],
-      nextOffset: null,
-      revision: null,
-    } as never);
-    const outcome = await rotatePassword({
-      username: "alice",
-      userId: USER,
-      oldPassword: "correct old password",
-      newPassword: "a DIFFERENT strong passphrase!",
-    });
-    expect(outcome.ok).toBe(false);
-    if (!outcome.ok) expect(outcome.reason).toBe("already-rotated-unverifiable");
-    // B-3 (web twin): the corpus is under a key this vault cannot read —
-    // the old data key is dead, so the vault must not stay open on it.
+    expect(vi.mocked(api.rekeyStoredData).mock.calls[1]).toEqual(original);
+    expect(api.rotateCredential).not.toHaveBeenCalled();
+    expect(await (await import("../src/localRekey")).pendingLocalRekey(USER)).toBe(false);
     expect(vault.isUnlocked()).toBe(false);
+  });
+
+  it("never bypasses an atomic key mismatch using a readable sample journal or measure", async () => {
+    apiState.failAt = "rekey";
+    const outcome = await rotatePassword({ username: "alice", userId: USER, oldPassword: "correct old password", newPassword: "a strong new passphrase 42!" });
+    expect(outcome).toMatchObject({ ok: false, stage: "rekey", reason: "server" });
+    expect(api.listEntriesPage).not.toHaveBeenCalled();
+    expect(api.listMeasuresPage).not.toHaveBeenCalled();
+    expect(api.rotateCredential).not.toHaveBeenCalled();
+    expect(api.login).not.toHaveBeenCalled();
+  });
+
+  it("retains the checkpoint and refuses a different new password on retry", async () => {
+    vi.mocked(api.rekeyStoredData).mockRejectedValueOnce(new Error("response lost"));
+    const input = { username: "alice", userId: USER, oldPassword: "correct old password", newPassword: "a strong new passphrase 42!" };
+    await rotatePassword(input);
+    const original = [...store.entries()];
+    await unlockRotationOwner(true);
+    const second = await rotatePassword({ ...input, newPassword: "a DIFFERENT strong passphrase!" });
+    expect(second.ok).toBe(false);
+    expect(api.rekeyStoredData).toHaveBeenCalledOnce();
+    expect([...store.entries()]).toEqual(original);
+    expect(vault.isUnlocked()).toBe(false);
+  });
+
+  it("an unsupported old server response cannot become a credential commit", async () => {
+    vi.mocked(api.rekeyStoredData).mockResolvedValueOnce({ entries: 2, insights: 2, measures: 1 });
+    const outcome = await rotatePassword({ username: "alice", userId: USER, oldPassword: "correct old password", newPassword: "a strong new passphrase 42!" });
+    expect(outcome).toMatchObject({ ok: false, stage: "rekey" });
+    expect(api.rotateCredential).not.toHaveBeenCalled();
+    expect(api.login).not.toHaveBeenCalled();
+  });
+
+  it("cacheSalt failure after a committed reset remains a successful rotation", async () => {
+    vi.mocked(api.cacheSalt).mockRejectedValueOnce(new Error("disk full"));
+    const outcome = await rotatePassword({ username: "alice", userId: USER, oldPassword: "correct old password", newPassword: "a strong new passphrase 42!" });
+    expect(outcome.ok).toBe(true);
+    expect(vault.isUnlocked()).toBe(false);
+  });
+
+  it("a broken active sharing grant blocks before remote commit", async () => {
+    apiState.consents = [{ id: "c".repeat(32), therapist_id: "t".repeat(32), status: "active", therapist_wrap_pub_key: null }];
+    const outcome = await rotatePassword({ username: "alice", userId: USER, oldPassword: "correct old password", newPassword: "a strong new passphrase 42!" });
+    expect(outcome).toMatchObject({ ok: false, stage: "rewrap" });
+    expect(api.rekeyStoredData).not.toHaveBeenCalled();
+    expect(api.rotateCredential).not.toHaveBeenCalled();
   });
 
   // 2026-09-26 audit H-2: the flow used to draw its fresh salt from
@@ -519,18 +488,14 @@ describe("rotatePassword failure-path cleanup (audit round 2, 2026-09-21, F-4)",
   // biometric wrap can still restore it) would seal any entry written in the
   // retry window under a key nothing can decrypt with.
   async function unlockWithWrap(): Promise<void> {
-    vault.unlock({
-      masterKey: Buffer.alloc(32, 1),
-      authKey: Buffer.alloc(32, 2),
-      dataKey: Buffer.alloc(32, 3),
-    });
+    await unlockRotationOwner();
     // A wrap sealed under the OLD data key — exactly the stale-key hazard.
-    await enableBiometricUnlock(USER, Buffer.alloc(32, 7));
+    await enableBiometricUnlock(USER, vault.get().dataKey);
     expect(vault.isUnlocked()).toBe(true);
     expect(await hasBiometricUnlock(USER)).toBe(true);
   }
 
-  it("a credential-stage failure locks the vault and drops the biometric wrap before returning ok:false", async () => {
+  it("an atomic commit failure locks the vault and drops the biometric wrap before returning ok:false", async () => {
     await unlockWithWrap();
     apiState.failAt = "credential"; // rotateCredential rejects (503)
     const outcome = await rotatePassword({
@@ -540,7 +505,7 @@ describe("rotatePassword failure-path cleanup (audit round 2, 2026-09-21, F-4)",
       newPassword: "a strong new passphrase 42!",
     });
     expect(outcome.ok).toBe(false);
-    if (!outcome.ok) expect(outcome.stage).toBe("credential");
+    if (!outcome.ok) expect(outcome.stage).toBe("rekey");
     expect(vault.isUnlocked()).toBe(false);
     expect(await hasBiometricUnlock(USER)).toBe(false);
   });
@@ -577,7 +542,7 @@ describe("rotatePassword failure-path cleanup (audit round 2, 2026-09-21, F-4)",
     });
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) {
-      expect(outcome.stage).toBe("credential");
+      expect(outcome.stage).toBe("rekey");
       expect(outcome.detail).toContain("newer key protection");
     }
     expect(vault.isUnlocked()).toBe(false);
@@ -592,6 +557,7 @@ describe("rotatePassword failure-path cleanup (audit round 2, 2026-09-21, F-4)",
 // locally AFTER the server rotation (rejected entries + racing writes), and
 // never let a rewrap failure unwind a completed rotation.
 describe("rotatePassword × offline queue (P2, 2026-09-27)", () => {
+  beforeEach(() => unlockRotationOwner());
   const OLD_PASSWORD = "correct old password";
   const NEW_PASSWORD = "a strong new passphrase 42!";
 

@@ -723,14 +723,13 @@ class TestAct5Movement:
         # the key no longer opens the re-encrypted corpus (dead-wrap state).
         listing = await _patients_list(client, th)
         stale_key = _unwrap(client, th, alice, world.row_for(listing, "e2e-alice"))
-        assert stale_key == old_key
+        assert stale_key == alice.data_key  # wrap committed with the corpus
         rows = await _read_entries(client, th, alice, {"limit": 3})
-        with pytest.raises(crypto.TamperError):
-            _decrypt_entry(stale_key, alice.user_id, rows[0])
+        _decrypt_entry(stale_key, alice.user_id, rows[0])
 
         # The rewrap publishes the NEW key to the same therapist...
         rewrapped = await alice.rewrap_consent(
-            client, consent_id, th.wrap_pub_key, th.user_id, verifier=old_verifier
+            client, consent_id, th.wrap_pub_key, th.user_id, verifier=alice.auth_key_b64
         )
         assert rewrapped["status"] == 200, rewrapped
 
@@ -910,7 +909,7 @@ async def test_act7_full_story_sequential(client, monkeypatch):
             world.consents["alice"]["id"],
             th.wrap_pub_key,
             th.user_id,
-            verifier=old_verifier,
+            verifier=world.alice.auth_key_b64,
         )
     )["status"] == 200
 

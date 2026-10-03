@@ -1,133 +1,87 @@
-/**
- * The account-recovery flow (wave 3, 2026-09-30): forgot password, hold
- * the recovery key, set a new one — without losing a single word.
- *
- * One function drives the whole sequence (the RecoveryScreen calls it):
- *   1. POST /auth/recover with the recovery key (server bumps the epoch —
- *      every old bearer dies; the response carries the SEALED data key).
- *   2. Unseal the data key locally (HKDF(recovery key) → AES-GCM).
- *   3. Prove possession: open a processing session WITH the recovered
- *      data key (the same probe every envelope replacement requires).
- *   4. Derive a brand-new password's keys (fresh salt, canonical params)
- *      and wrap the SAME data key under them; PUT /account/recovery/
- *      password swaps salt + verifier + envelope atomically.
- *   5. Refresh the local salt/envelope caches so the NEXT unlock uses the
- *      new password, and hand the data key to the vault.
- */
-import { api } from "./api/client";
+/** Password recovery keeps the data key, locally selects the kit scheme,
+ * and returns a committed success even when a local cache cannot be saved. */
+import { api, ApiError } from "./api/client";
+import { localWriteScopeEpoch } from "./localWriteGuard";
 import { deriveAuthKey, deriveMasterKeyAsync, zeroize } from "./crypto/kdf";
-import {
-  defaultKdfParams,
-  envelopeKek,
-  wrapDataKey,
-} from "./crypto/keyEnvelope";
-import {
-  recoveryKeyFromB64,
-  recoveryVerifierKeyV2,
-  unsealDataKeyWithRecoveryScheme,
-  type RecoveryScheme,
-} from "./crypto/recovery";
-import { ApiError } from "./api/client";
+import { defaultKdfParams, envelopeKek, wrapDataKey } from "./crypto/keyEnvelope";
+import { recoveryKeyFromB64, recoveryVerifierKeyV2, unsealDataKeyWithRecoveryScheme, type RecoveryScheme } from "./crypto/recovery";
 import { engine } from "./crypto/engine";
-
-export interface RecoveryOutcome {
-  userId: string;
-  username: string;
-  dataKey: Buffer;
-}
-
-export async function recoverAccountWithKey(
-  username: string,
-  recoveryKeyText: string,
-  newPassword: string,
-): Promise<RecoveryOutcome> {
+export interface RecoveryOutcome { userId: string; username: string; dataKey: Buffer; ownershipEpoch: number; localCacheReady?: boolean }
+export async function recoverAccountWithKey(username: string, recoveryKeyText: string, newPassword: string, scheme: RecoveryScheme = "v2", options: { stillCurrent?: () => boolean } = {}): Promise<RecoveryOutcome> {
+  let epoch = localWriteScopeEpoch();
+  const ownsAttempt = () => options.stillCurrent?.() !== false;
+  const current = () => ownsAttempt() && epoch === localWriteScopeEpoch();
+  const assertCurrent = () => { if (!current()) throw new ApiError(0, "Recovery stopped because the account or server changed. Confirm any completed password reset before retrying.", "stale_operation"); };
+  const wait = async <T>(work: () => Promise<T>, discard?: (value: T) => void): Promise<T> => {
+    assertCurrent(); const value = await work();
+    if (!current()) { discard?.(value); assertCurrent(); } return value;
+  };
   const recoveryKey = recoveryKeyFromB64(recoveryKeyText);
-  if (recoveryKey === null) {
-    throw new Error("the recovery key must be 32 bytes of base64 (copy it exactly from your kit)");
-  }
-  // 2026-10-01 audit C1: scheme negotiation. New kits are v2 — transmit
-  // ONLY the domain-separated verifier (never the raw key). A kit stored
-  // under v1 answers 401 recovery_scheme_mismatch (protocol negotiation,
-  // not a credential miss): retry once with the legacy raw-key form.
-  const verifierV2 = recoveryVerifierKeyV2(recoveryKey);
-  let result: Awaited<ReturnType<typeof api.recoverLogin>>;
-  let proofB64: string;
-  try {
-    result = await api.recoverLogin(username.trim(), verifierV2.toString("base64"), "v2");
-    proofB64 = verifierV2.toString("base64");
-  } catch (err) {
-    if (!(err instanceof ApiError) || err.code !== "recovery_scheme_mismatch") throw err;
-    result = await api.recoverLogin(username.trim(), recoveryKey.toString("base64"), "v1");
-    proofB64 = recoveryKey.toString("base64");
-  } finally {
-    verifierV2.fill(0);
-  }
-  const kitScheme: RecoveryScheme = result.recovery_scheme ?? "v1";
-  // The new bearer is stored FIRST (every subsequent call rides the
-  // recovery session) — but 2026-10-01 audit M9 wraps the REST of the
-  // flow so a mid-flight failure clears it again: no stored half-state.
-  await api.setSession(result.token, result.user_id, username.trim());
-  let dataKey: Buffer;
+  if (!recoveryKey) throw new Error("the recovery key must be 32 bytes of base64 (copy it exactly from your kit)");
+  let dataKey: Buffer | null = null;
   let salt: Buffer | null = null;
+  let verifier: Buffer | null = null;
+  let returned = false;
+  let sessionAttempted = false;
   try {
-    const sealed = Buffer.from(result.recovery_wrapped_data_key, "base64");
-    const opened = unsealDataKeyWithRecoveryScheme(recoveryKey, sealed, result.user_id, kitScheme);
-    if (opened === null) {
-      throw new Error(
-        "the recovery key did not open this account's sealed key — check the kit and username",
-      );
-    }
-    dataKey = opened;
-
-    // Possession probe (same contract as every envelope replacement).
-    const processingToken = await api.openProcessingSession(dataKey.toString("base64"));
-
-    // New password → fresh salt + canonical params; the DATA KEY NEVER
-    // CHANGES (v2 semantics — only its locker does).
+    const selected: RecoveryScheme = recoveryKeyText.trim().startsWith("mindpattern-recovery:v1:") ? "v1" : scheme;
+    if (recoveryKeyText.trim().startsWith("mindpattern-recovery:v2:") && selected !== "v2") throw new Error("A v2 recovery kit cannot be used as a legacy kit");
+    // Remote errors/metadata can never ask us to send a v2 kit's raw key.
+    verifier = selected === "v2" ? recoveryVerifierKeyV2(recoveryKey) : Buffer.from(recoveryKey);
+    const proof = verifier.toString("base64");
+    const result = await wait(() => api.recoverLogin(username.trim(), proof, selected));
+    if ((result.recovery_scheme ?? "v1") !== selected) throw new Error("The account's recovery scheme does not match the selected kit");
+    const canonicalUsername = typeof result.username === "string" && result.username ? result.username : username.trim();
+    dataKey = unsealDataKeyWithRecoveryScheme(recoveryKey, Buffer.from(result.recovery_wrapped_data_key, "base64"), result.user_id, selected);
+    if (!dataKey) throw new Error("the recovery key did not open this account's sealed key — check the kit and username");
+    sessionAttempted = true;
+    assertCurrent();
+    const pending = api.setSession(result.token, result.user_id, canonicalUsername, { stillCurrent: ownsAttempt });
+    epoch = localWriteScopeEpoch(); await pending; assertCurrent();
+    const { session_token: processingToken } = await wait(() => api.openProcessingSession(dataKey!.toString("base64")));
+    if (typeof processingToken !== "string" || !processingToken) throw new Error("Invalid processing-session response");
     salt = Buffer.from(engine.randomBytes(16));
     const params = defaultKdfParams();
-    const master = await deriveMasterKeyAsync(newPassword, salt, params.iterations);
+    const master = await wait(() => deriveMasterKeyAsync(newPassword, salt!, params.iterations), value => zeroize(value));
+    let wrapped: Buffer;
     try {
       const authKey = deriveAuthKey(master);
       const kek = envelopeKek(master, salt);
-      const wrapped = wrapDataKey(dataKey, kek, username.trim(), params);
-      zeroize(kek);
-      await api.resetPasswordWithRecovery(
-        proofB64,
-        {
-          new_salt: salt.toString("base64"),
-          new_verifier: authKey.toString("base64"),
-          new_kdf_params: params,
-          wrapped_data_key: wrapped.toString("base64"),
-        },
-        processingToken,
-      );
-      zeroize(authKey);
-    } finally {
-      zeroize(master);
+      try { wrapped = wrapDataKey(dataKey, kek, canonicalUsername, params); } finally { zeroize(kek); }
+      try {
+        await wait(() => api.resetPasswordWithRecovery(proof, {
+          new_salt: salt!.toString("base64"), new_verifier: authKey.toString("base64"),
+          new_kdf_params: params, wrapped_data_key: wrapped.toString("base64"),
+        }, processingToken));
+      } finally { zeroize(authKey); }
+    } finally { zeroize(master); }
+    // Credential reset has committed. Cache failures require an online unlock,
+    // not another reset or a false report that the new password failed.
+    let localCacheReady = true;
+    try {
+      await wait(() => api.cacheSalt(canonicalUsername, salt!.toString("base64")));
+      await wait(() => api.cacheKeyEnvelope(canonicalUsername, {
+        scheme: "v2", saltB64: salt!.toString("base64"), kdfParams: params, wrappedB64: wrapped!.toString("base64"),
+      }));
+    } catch {
+      assertCurrent();
+      localCacheReady = false;
+      await Promise.allSettled([
+        Promise.resolve().then(() => api.clearCachedSalt(canonicalUsername)),
+        Promise.resolve().then(() => api.clearCachedKeyEnvelope(canonicalUsername)),
+      ]);
+      assertCurrent();
     }
+    assertCurrent();
+    returned = true;
+    return { userId: result.user_id, username: canonicalUsername, dataKey, ownershipEpoch: epoch, localCacheReady };
   } catch (err) {
-    // M9: the recovery did not prove out — drop the stored bearer and the
-    // switched account so a retry starts clean (a hostile server_id or a
-    // mid-flow network failure must not leave a half-session behind).
-    await api.clearSession().catch(() => undefined);
+    if (sessionAttempted && current()) await api.clearSession().catch(() => {});
     throw err;
+  } finally {
+    zeroize(recoveryKey);
+    if (salt) zeroize(salt);
+    if (verifier) zeroize(verifier);
+    if (dataKey && !returned) zeroize(dataKey);
   }
-  // The recovery key outlives the reset proof, then dies.
-  zeroize(recoveryKey);
-
-  // Local caches follow the new credential so the next unlock works.
-  if (salt !== null) {
-    await api.cacheSalt(username.trim(), salt.toString("base64"));
-    const fresh = await api.keyEnvelope();
-    await api.cacheKeyEnvelope(username.trim(), {
-      scheme: "v2",
-      saltB64: salt.toString("base64"),
-      kdfParams: fresh.kdf_params,
-      wrappedB64: fresh.wrapped_data_key,
-    });
-    zeroize(salt);
-  }
-
-  return { userId: result.user_id, username: username.trim(), dataKey };
 }

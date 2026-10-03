@@ -185,21 +185,26 @@ describe("PatientsView TOTP enrollment (2026-09-22)", () => {
     expect(textOf(root)).not.toContain("otpauth://totp/Fathom:drportal");
     expect(textOf(root)).toContain("•".repeat(32)); // same-length mask
     expect(buttonByLabel(root, "Show secret")).toBe(true);
+    expect(root.root.findAllByProps({ "aria-label": "Scan this QR code with your authenticator app" })).toHaveLength(0);
     expect(mockedApi.totpSetup).toHaveBeenCalledTimes(1);
     // …not yet enabled: no enable call happened.
     expect(mockedApi.totpEnable).not.toHaveBeenCalled();
 
     // The deliberate reveal shows both the secret and the URI…
     await press(root, "Show secret");
+    await act(async()=>{await import("../src/TotpQr");});
     await flush();
     expect(textOf(root)).toContain("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP");
     expect(textOf(root)).toContain("otpauth://totp/Fathom:drportal");
+    expect(root.root.findAllByProps({ "aria-label": "Scan this QR code with your authenticator app" })).toHaveLength(1);
     // …and hiding re-masks them while the setup stage stays armed.
     await press(root, "Hide secret");
     await flush();
     expect(textOf(root)).not.toContain("JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP");
     expect(textOf(root)).not.toContain("otpauth://totp/Fathom:drportal");
     expect(textOf(root)).toContain("•".repeat(32));
+
+    expect(root.root.findAllByProps({ "aria-label": "Scan this QR code with your authenticator app" })).toHaveLength(0);
 
     await typeInto(root, "Current password (to authorize setup)", "deep-password-1");
     await typeInto(root, "6-digit code from the app", "123456");

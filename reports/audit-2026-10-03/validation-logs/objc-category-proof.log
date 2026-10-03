@@ -1,0 +1,13 @@
+/tmp/mindpattern-objc-category-proof.m:2:12: error: cannot define category for undefined class 'RCTAppleHealthKit'
+    2 | @interface RCTAppleHealthKit (MindPatternStateOfMind)
+      |            ^
+/tmp/mindpattern-objc-category-proof.m:1:8: note: forward declaration of class here
+    1 | @class RCTAppleHealthKit;
+      |        ^
+/tmp/mindpattern-objc-category-proof.m:4:17: error: cannot find interface declaration for 'RCTAppleHealthKit'
+    4 | @implementation RCTAppleHealthKit (MindPatternStateOfMind)
+      |                 ^
+/tmp/mindpattern-objc-category-proof.m:1:8: note: forward declaration of class here
+    1 | @class RCTAppleHealthKit;
+      |        ^
+2 errors generated.

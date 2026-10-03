@@ -16,6 +16,7 @@ from sqlalchemy import (
     Integer,
     LargeBinary,
     String,
+    Text,
     UniqueConstraint,
     text,
 )
@@ -118,6 +119,17 @@ class User(Base):
     # under an HKDF subkey of the therapist's password-derived master key.
     # The server stores the blob and cannot open it.
     wrap_key_blob: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    # Client-encrypted notes key custody survives password/sharing rotations.
+    notes_keyring_blob: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    custody_version: Mapped[int] = mapped_column(BigInteger, default=0, server_default=text("0"))
+    custody_operation_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    custody_operation_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    custody_operation_epoch: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Exact response-loss recovery for an atomic corpus + credential rotation.
+    rekey_operation_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    rekey_operation_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    rekey_operation_epoch: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rekey_operation_result: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Bumped on logout: stateless HMAC tokens embed the epoch they were issued
     # under, so one integer per account is a full revocation list.
     token_epoch: Mapped[int] = mapped_column(default=1)
@@ -527,6 +539,7 @@ class AudioAttachment(Base):
     # Server-generated storage key (uuid-based; client_entry_id is never
     # used in a path). Format: audio/{user_id}/{32-hex}.enc
     storage_key: Mapped[str] = mapped_column(String(256))
+    storage_locator: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     size_bytes: Mapped[int] = mapped_column(Integer)
     mime_type: Mapped[str] = mapped_column(String(64))
     # Client-declared recording length (advisory metadata, like the
@@ -539,6 +552,18 @@ class AudioAttachment(Base):
     )
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
+class AudioDeletion(Base):
+    """Durable object tombstones; intentionally independent of deleted accounts."""
+
+    __tablename__ = "audio_deletions"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    backend: Mapped[str] = mapped_column(String(8))
+    storage_key: Mapped[str] = mapped_column(String(256))
+    storage_locator: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    not_before: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
 
 
 class TherapistNoteRevision(Base):
@@ -684,6 +709,10 @@ class RekeyJournal(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     user_id: Mapped[str] = mapped_column(String(32))
+    operation_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    request_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    old_key_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    new_key_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # "entries" | "insights" | "measures" | "done" — the stage whose INPUT
     # cursor is stored; a resumed run continues from it.
     stage: Mapped[str] = mapped_column(String(16), nullable=False, default="entries")

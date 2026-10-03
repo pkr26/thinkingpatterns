@@ -16,14 +16,20 @@
  * the one part of a safety plan the app can honestly contribute itself.
  */
 import React, { useEffect, useRef, useState } from "react";
-import { Alert, BackHandler, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, AppState, BackHandler, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { api } from "../api/client";
 import { vault } from "../vault";
+import { captureLocalWritePermit } from "../localRekey";
+import { localWriteScopeEpoch } from "../localWriteGuard";
 import { useSession } from "../store";
 import {
+  MAX_FIELD_CHARS,
   emptySafetyPlan,
   loadSafetyPlan,
   saveSafetyPlan,
+  loadSafetyPlanDraft,
+  saveSafetyPlanDraft,
+  clearSafetyPlanDraft,
   SAFETY_PLAN_FIELDS,
   type SafetyPlan,
 } from "../safetyPlan";
@@ -50,19 +56,38 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
   const planRef = useRef<SafetyPlan>(emptySafetyPlan());
   /** The last SAVED/LOADED plan — the baseline for "unsaved changes". */
   const savedPlanRef = useRef<SafetyPlan>(emptySafetyPlan());
+  const ownerRef = useRef<string | null>(null);
+  const draftKeyRef = useRef<Buffer | null>(null);
+  const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const draftWrites = useRef<Promise<void>>(Promise.resolve());
+
+  const persistDraft = () => {
+    if (draftTimer.current) { clearTimeout(draftTimer.current); draftTimer.current = null; }
+    const owner = ownerRef.current;
+    if (!owner || !draftKeyRef.current || !planIsDirty()) return;
+    const ownedKey = Buffer.from(draftKeyRef.current);
+    const snapshot = { ...planRef.current };
+    draftWrites.current = draftWrites.current.catch(() => {}).then(async () => {
+      try { await saveSafetyPlanDraft(ownedKey, owner, snapshot); }
+      finally { ownedKey.fill(0); }
+    });
+    // A failed draft never masquerades as an explicitly saved plan.
+    void draftWrites.current.catch(() => {});
+  };
 
   const updatePlan = (next: SafetyPlan) => {
     planRef.current = next;
     setPlan(next);
+    if (draftTimer.current) clearTimeout(draftTimer.current);
+    draftTimer.current = setTimeout(persistDraft, 300);
   };
 
   /** Audit 2026-09-28 (MEDIUM): leaving the editor with any field differing
    *  from the loaded/saved plan used to discard SILENTLY (hardware back or
    *  the on-screen Back). A CONFIRM was chosen over silent auto-persistence
    *  by constraint: the plan is intimate, user-authored content whose only
-   *  write path is the explicit Save — persisting half-finished or
-   *  reconsidered text without consent would betray that contract, and a
-   *  deliberate "Discard" answer keeps the user's intent explicit. */
+   *  saved-plan write path remains the explicit Save. A separate encrypted
+   *  draft survives interruption, and Discard removes that draft. */
   const planIsDirty = () => SAFETY_PLAN_FIELDS.some((field) => planRef.current[field] !== savedPlanRef.current[field]);
 
   const confirmDiscardPlan = (leave: () => void) => {
@@ -72,7 +97,18 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
     }
     Alert.alert(tr("safetyplan.discardTitle"), tr("safetyplan.discardBody"), [
       { text: tr("safetyplan.discardCancel"), style: "cancel" },
-      { text: tr("safetyplan.discardConfirm"), style: "destructive", onPress: leave },
+      { text: tr("safetyplan.discardConfirm"), style: "destructive", onPress: async () => {
+        try {
+          const owner = ownerRef.current, key = draftKeyRef.current;
+          if (!owner || !key) throw new Error("The plan owner is unavailable");
+          const writePermit = captureLocalWritePermit(owner, key);
+          if (draftTimer.current) { clearTimeout(draftTimer.current); draftTimer.current = null; }
+          draftWrites.current = draftWrites.current.catch(() => {}).then(() => clearSafetyPlanDraft(owner, writePermit));
+          await draftWrites.current;
+          savedPlanRef.current = planRef.current;
+          leave();
+        } catch { Alert.alert(tr("safetyplan.saveFailedTitle"), tr("safetyplan.saveFailedBody")); }
+      } },
     ]);
   };
 
@@ -88,11 +124,14 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
     void (async () => {
       try {
         const userId = await api.getUserId();
+        if (cancelled) return;
         if (!userId || !vault.isUnlocked()) {
           if (!cancelled) setLocked(true);
           return;
         }
-        const stored = await loadSafetyPlan(vault.get().dataKey, userId);
+        ownerRef.current = userId;
+        draftKeyRef.current = Buffer.from(vault.get().dataKey);
+        const stored = await loadSafetyPlan(draftKeyRef.current, userId);
         if (cancelled) return;
         if (stored !== null) {
           savedPlanRef.current = stored;
@@ -106,6 +145,11 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
           savedPlanRef.current = prefilled;
           updatePlan(prefilled);
         }
+        const draft = await loadSafetyPlanDraft(draftKeyRef.current, userId);
+        if (!cancelled && draft) {
+          updatePlan(draft);
+          showStatus(tr("safetyplan.draftRestored"), "ok");
+        }
       } catch {
         if (!cancelled) setLocked(true);
       } finally {
@@ -114,8 +158,15 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
     })();
     return () => {
       cancelled = true;
+      persistDraft();
+      draftKeyRef.current?.fill(0); draftKeyRef.current = null;
       if (statusTimer.current) clearTimeout(statusTimer.current);
     };
+  }, []);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", state => { if (state !== "active") persistDraft(); });
+    return () => subscription.remove();
   }, []);
 
   // Android hardware back (audit 2026-09-28): while the editor is up with
@@ -133,12 +184,29 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
     // Stryker disable next-line ArrayDeclaration: the handlers read refs (planRef/savedPlanRef) and stable closures; loading/locked alone gate the listener — re-running for other renders only re-attaches an identical listener
   }, [loading, locked, navigation]);
 
+  // Native header back and iOS gestures must share the dirty-plan guard.
+  useEffect(() => {
+    if (typeof navigation.addListener !== "function") return;
+    return navigation.addListener("beforeRemove", (event: any) => {
+      if (!planIsDirty()) return;
+      event.preventDefault();
+      confirmDiscardPlan(() => {
+        savedPlanRef.current = planRef.current;
+        navigation.dispatch(event.data.action);
+      });
+    });
+  }, [navigation]);
+
   const save = async () => {
     if (busy) return;
     touchActivity();
     setBusy(true);
+    const savedSnapshot = { ...planRef.current };
+    const matchesSavedSnapshot = () => SAFETY_PLAN_FIELDS.every(field => planRef.current[field] === savedSnapshot[field]);
+    const submitEpoch = localWriteScopeEpoch();
     try {
       const userId = await api.getUserId();
+      if (submitEpoch !== localWriteScopeEpoch()) throw new Error(tr("common.sessionDamagedTitle"));
       if (!userId) {
         Alert.alert(tr("common.sessionDamagedTitle"), tr("measures.sessionDamagedBody"));
         return;
@@ -148,8 +216,19 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
         Alert.alert(tr("safetyplan.lockedTitle"), tr("safetyplan.lockedBody"));
         return;
       }
-      await saveSafetyPlan(vault.get().dataKey, userId, plan);
-      savedPlanRef.current = plan; // the discard baseline moved with the save
+      if (vault.ownerUserId() !== userId) throw new Error(tr("common.sessionDamagedTitle"));
+      const dataKey = vault.get().dataKey;
+      const writePermit = captureLocalWritePermit(userId, dataKey);
+      await saveSafetyPlan(dataKey, userId, savedSnapshot);
+      savedPlanRef.current = savedSnapshot;
+      if (matchesSavedSnapshot() && draftTimer.current) { clearTimeout(draftTimer.current); draftTimer.current = null; }
+      // Serialize ACK removal with draft writes and leave later edits
+      // recoverable rather than acknowledging a different editor state.
+      draftWrites.current = draftWrites.current.catch(() => {}).then(async () => {
+        if (matchesSavedSnapshot()) await clearSafetyPlanDraft(userId, writePermit);
+      });
+      await draftWrites.current;
+      if (!matchesSavedSnapshot()) persistDraft();
       showStatus(tr("safetyplan.saved"), "ok");
     } catch {
       // Nothing was lost: the fields are still on screen exactly as typed.
@@ -186,6 +265,7 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
       <Text style={{ color: t.colors.body, fontSize: t.type.bodySmall.fontSize, lineHeight: 19 }}>
         {tr("safetyplan.intro")}
       </Text>
+      <Text style={{ color: t.colors.muted, fontSize: t.type.bodySmall.fontSize }}>{tr("safetyplan.draftInfo")}</Text>
 
       {loading ? null : (
         <>
@@ -205,8 +285,13 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
                   updatePlan({ ...plan, [field]: text });
                 }}
                 multiline
+                maxLength={MAX_FIELD_CHARS}
+                autoCorrect={false}
+                spellCheck={false}
+                textContentType="none"
                 accessibilityLabel={tr(`safetyplan.field.${field}`)}
               />
+              <Text style={{ color: plan[field].length > MAX_FIELD_CHARS ? t.colors.error : t.colors.muted }}>{plan[field].length}/{MAX_FIELD_CHARS}</Text>
             </View>
           ))}
 

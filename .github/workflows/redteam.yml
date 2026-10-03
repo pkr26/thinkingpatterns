@@ -12,8 +12,8 @@ name: Red-team campaigns
 # that succeeded) or an ERROR verdict (a harness crashed — a crashed
 # harness certifies nothing), and when any expected per-harness results
 # file is missing (a harness that died before dumping its buffer).
-# run_all.sh itself always exits 0 — it prints a summary — so the gate
-# below parses the same redteam/results/*.json files the summary reads.
+# run_all.sh fails failed/incomplete campaigns. The gate below additionally
+# rejects new findings using the documented residual register.
 #
 # DOCUMENTED RESIDUALS: the standing FINDING verdicts — enumerated, with
 # their written defenses, in the DOCUMENTED_RESIDUALS set inside the gate
@@ -31,12 +31,14 @@ name: Red-team campaigns
 #   mobile harness executes the real shipping modules under vitest in
 #   Node (no hardware), c1_multiworker binds a throwaway uvicorn on
 #   loopback :8971, d_llm runs against a fake in-process LLM endpoint.
-# - Two verdicts legitimately read NOT-RUN in this environment, for
+# - Dependency/DB inspections may read NOT-RUN in this environment, for
 #   environment-shaped reasons the harnesses themselves report:
 #   G1.dump-contents (a fresh checkout has no dev sqlite DB to inspect)
 #   and G2.npm-audit (g_infra looks for the developers' bundled
 #   .tools/node/bin/npm; CI's node comes from setup-node — the mobile
 #   dependency audit already gates ci.yml's mobile job instead).
+#   G2.pip-audit may be unavailable; its separate CI audit must pass.
+#   No attack scenario may use NOT-RUN; verdict_inventory.json is required.
 # - run_all.sh hardcodes ../.venv/bin/python relative to redteam/, so
 #   this job builds the repo-root venv from the pinned backend dev lock.
 
@@ -87,6 +89,9 @@ jobs:
         run: |
           python - <<'EOF'
           import json
+          import sys
+          sys.path.insert(0, "redteam")
+          from validate_results import validate
           from collections import Counter
           from pathlib import Path
 
@@ -97,52 +102,14 @@ jobs:
           # got fixed is welcome and should update both. Anything NOT here
           # that reads FINDING fails CI.
           DOCUMENTED_RESIDUALS = {
-              # The auth verifier is password-equivalent by design (the
-              # server never sees the password, only scrypt(verifier)) —
-              # replaying it equals presenting the password. TLS-only
-              # transport + per-IP/username rate limits bound it.
+              # Password-equivalent verifier replay until credential rotation;
+              # logout revokes bearer sessions, not the underlying credential.
               "B1.verifier-replay",
-              # A replayed verifier can also toggle the opt-in LLM consent
-              # (re-authenticated action). Same password-equivalence class;
-              # egress remains opt-in, disclosed, and per-user.
-              "B1.verifier-enables-llm-egress",
-              # Journal text to the configured third-party LLM endpoint is
-              # plaintext AT the provider — inherent to optional LLM
-              # analysis; opt-in per user, provider/retention disclosed at
-              # consent time, off by default.
-              "D2.plaintext-egress",
-              # A hostile LLM endpoint can shape surfaced card copy; the
-              # sanitizer length-caps and verifies phrases against the
-              # user's actual text, bounding it to copy within the app.
-              "D2.endpoint-to-card-injection",
-              # A deliberately slow LLM endpoint stretches the single-use
-              # processing session's key lifetime for that one request;
-              # sessions stay memory-only, single-use, TTL-bounded, purged.
-              "D2.slow-endpoint-key-lifetime",
-              # The on-device mood log / offline state is an offline
-              # password oracle (keys derive from the password) and
-              # discloses state to a device holder — the zero-knowledge
-              # trade itself; the threat model excludes the device owner
-              # attacking their own account.
+              # Exposed password envelopes/ciphertext support offline guessing
+              # at the full KDF cost. UI throttling does not stop external tools.
               "A2.offline-oracle",
-              # The data key crosses the wire to /processing/sessions —
-              # the documented v1 server-side-analysis trade-off
-              # (README security note #2): single-use, TLS in production,
-              # memory-only, destroyed on consumption. The harness runs
-              # cleartext localhost by construction.
-              "F2.http-key-shipment",
-              # The server holds per-entry dates/sizes (metadata
-              # inference) — documented in README security note #7;
-              # content stays opaque.
+              # Server-visible dates and ciphertext sizes reveal metadata.
               "H1.metadata-inference",
-              # The tracked-secrets hygiene rule matches any *.env path,
-              # which catches mobile/ios/.xcode.env — the React Native
-              # Xcode template (NODE_BINARY export only) that MUST be
-              # versioned for Xcode script phases. No credential, key, or
-              # connection string; inspected line-by-line. Full defense in
-              # docs/SECURITY_RESIDUALS.md. Found by the 2026-09-21
-              # independent verification audit (V-1).
-              "G3.tracked-secrets",
           }
 
           # The register is load-bearing: every allowlisted id must carry
@@ -154,20 +121,10 @@ jobs:
               + ", ".join(undocumented)
           )
 
-          expected = {
-              "a_crypto", "b_auth", "c_api", "e_crisis", "e2_brain",
-              "g_infra", "h_privacy", "d_llm", "c1_multiworker", "f_mobile",
-          }
-          files = sorted(Path("redteam/results").glob("*.json"))
-          seen = {f.stem for f in files}
-          rows = []
-          for f in files:
-              rows += json.loads(f.read_text(encoding="utf-8"))
+          rows = validate(Path("redteam/results"))
 
-          missing = sorted(expected - seen)
           findings = sorted(r["id"] for r in rows if r["status"] == "FINDING")
           errors = sorted(r["id"] for r in rows if r["status"] == "ERROR")
-          assert not missing, f"harness produced no results file: {', '.join(missing)}"
           new_findings = sorted(set(findings) - DOCUMENTED_RESIDUALS)
           assert not new_findings, (
               "NEW FINDING verdicts (attacks that succeeded, not in the "

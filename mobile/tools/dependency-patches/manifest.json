@@ -1,0 +1,83 @@
+{
+  "description": "Exact source security backports and Expo Gradle compiler compatibility patches. Upstream package versions and npm audit results remain unchanged.",
+  "packages": [
+    {
+      "name": "braces",
+      "version": "3.0.3",
+      "source": "https://github.com/micromatch/braces/pull/72",
+      "files": [
+        {
+          "path": "lib/constants.js",
+          "before": "c18ac5adb57308f1ce42a28552da3a31f5d83709743ebd9a636336813a744d4b",
+          "after": "f9fb688959232eee3e6ad7906a5b0e3234815db49ee857ef86983d65b917dc7c"
+        },
+        {
+          "path": "lib/stringify.js",
+          "before": "379f22d77bfa1478341ccd49c5e4267464aabcbba03558bab332aac23fc6f23a",
+          "after": "49dc2d8bafa74f34715a18a845bcb82ce66caaf3bab4cf117998e06b1f9a50a9"
+        },
+        {
+          "path": "lib/parse.js",
+          "before": "e572166565f15fa6ad9865ae49d678218e32aabfd1b3720f6d0d43d39800d310",
+          "after": "72aabaadaa555cdfbd07fbd7c7f743373e4dc8eec04a97550cc57bbeec30eb6c"
+        },
+        {
+          "path": "lib/expand.js",
+          "before": "41ccc196ebfa7b7781a634e721eb744e4e7bcb54cba427a7e3d6806a1b9e58f7",
+          "after": "7ea3e14c2b2b256ef244fd3d83b8fcaa20aa2232b4e6d768c3bb6ab567f66cf5"
+        },
+        {
+          "path": "lib/compile.js",
+          "before": "dc98f22eee3d511785d92a00758d5f0d48efed5f5813bdecc2de430c529b5c9f",
+          "after": "b651f7715e6db8942ce61d3394357b4d81c8ece88240aa31a458ea1165edd195"
+        }
+      ]
+    },
+    {
+      "name": "node-forge",
+      "version": "1.4.0",
+      "source": "https://github.com/digitalbazaar/forge/pull/1152/commits/ceba34402e329f0365134f23fe19898756527d65",
+      "files": [
+        {
+          "path": "lib/rsa.js",
+          "before": "fd4740238145ec26470eb3f06a627c72039538ce1307dbdce40521f94dfd0a50",
+          "after": "acc22e5d36e27832c34e02dd3933aad7977d45b047eead5016520735efedc9c5"
+        }
+      ]
+    },
+    {
+      "name": "expo-modules-autolinking",
+      "version": "57.0.13",
+      "source": "https://github.com/expo/expo/issues/49550",
+      "files": [
+        {
+          "path": "android/expo-gradle-plugin/build.gradle.kts",
+          "before": "15f163cb092886b3d9baaf5bb14cf75a6661924890e32f5bb060138e0ff2af82",
+          "after": "f43a78068aaa078c40a55f6d165be415971e80cd98e0993046933953561a209f"
+        }
+      ]
+    },
+    {
+      "name": "expo-modules-core",
+      "version": "57.0.20",
+      "source": "https://github.com/expo/expo/issues/49550",
+      "files": [
+        {
+          "path": "expo-module-gradle-plugin/build.gradle.kts",
+          "before": "ba6abd3ffd9c725ad3bc0d4629cdbd11c1ccdc9b1a58fc9243d0ddde3baa6c4c",
+          "after": "b9bfdd47878cadfc0b7eccd9c838e736132d108d720e6d524e88cbf633803686"
+        },
+        {
+          "path": "expo-module-gradle-plugin/src/main/kotlin/expo/modules/plugin/android/AndroidLibraryExtension.kt",
+          "before": "a8a1a82a46c1d47d4201827d1fc1cdbcc4ca2e4a62f38973dc8a45267337663a",
+          "after": "edda27574938f05e772c55cbd418dc4632f758d77044d672d0ba261fc497df74"
+        },
+        {
+          "path": "android/cmake/main.cmake",
+          "before": "e5fbe04cb6fefe02c15e6fbd45d47194b532bc6923443d3324a867029fd2265e",
+          "after": "cf5abf1bda666868f35a48d764299c14da8ec870115377e2287b6b0306c03471"
+        }
+      ]
+    }
+  ]
+}

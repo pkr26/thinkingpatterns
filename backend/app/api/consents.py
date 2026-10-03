@@ -33,7 +33,13 @@ from sqlalchemy.orm.exc import ObjectDeletedError, StaleDataError
 
 from ..cache import make_rate_limiter
 from ..db import rowcount as db_rowcount
-from ..deps import ApiError, get_session, require_regular_user, require_sharing_enabled
+from ..deps import (
+    ensure_no_rekey,
+    ApiError,
+    get_session,
+    require_regular_user,
+    require_sharing_enabled,
+)
 from ..locks import (
     sharing_locks,
     sharing_patient_lock_key,
@@ -365,6 +371,7 @@ async def grant_consent(
                 # (and its verifier proof) predate the epoch bump and must
                 # not widen disclosure. 401 per the M-2 pattern.
                 raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+            await ensure_no_rekey(session, user.id)
 
             existing = (
                 (
@@ -560,6 +567,7 @@ async def rewrap_consent(
             # M-B1 (2026-09-26): pre-rotation bearer+verifier must not swap
             # key material inside a live share.
             raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+        await ensure_no_rekey(session, user.id)
         row = (
             await session.execute(
                 select(Consent, User)

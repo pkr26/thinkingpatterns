@@ -12,7 +12,7 @@ import { unwrapEnvelope } from "../src/crypto/envelope";
 import { buildAad } from "../src/crypto/aad";
 import { deriveMasterKey, encrypt, fromBase64, toBase64, zeroize } from "../src/crypto/core";
 import { derivePatientKeys } from "../src/crypto/keys";
-import { kv, setKvBackendForTests, type KvBackend } from "../src/kvstore";
+import { kv, setKvBackendForTests, writeGenerationKey, type KvBackend } from "../src/kvstore";
 import { enqueue, queueLength, rejectedEntries } from "../src/offlineQueue";
 import { buildFeedbackBlob, recordFeedbackTap } from "../src/questionFeedback";
 import { recentMoods, recordMood } from "../src/moodLog";
@@ -60,6 +60,11 @@ const memoryBackend = (): KvBackend & { dump(): Map<string, string> } => {
     async setItem(k, v) {
       map.set(k, v);
     },
+    async compareAndSet(k, expected, value) {
+      if ((map.get(k) ?? null) !== expected) return false;
+      map.set(k, value);
+      return true;
+    },
     async removeItem(k) {
       map.delete(k);
     },
@@ -71,13 +76,13 @@ const memoryBackend = (): KvBackend & { dump(): Map<string, string> } => {
 };
 
 /** The endpoints every Settings mount touches before any button. */
-function baseStubs(extra?: { rekey?: () => Response; credential?: () => Response; entries?: () => Response; measures?: () => Response }): ReturnType<typeof stubFetch> {
+function baseStubs(extra?: { rekey?: (init: RequestInit) => Response; credential?: () => Response; entries?: () => Response; measures?: () => Response }): ReturnType<typeof stubFetch> {
   return stubFetch((url, init) => {
     if (url.endsWith("/meta")) return jsonResponse({ version: "1", api_version: "v1", unlock_days: 30, llm_available: true, sharing_available: true, sharing_disclosure_version: "v2" });
     if (url.endsWith("/llm-consent") && init.method === "GET") return jsonResponse({ enabled: false });
     if (url.endsWith("/access-log")) return jsonResponse([]);
     if (url.endsWith("/processing/sessions")) return jsonResponse({ session_token: "pst", expires_in: 300 });
-    if (url.endsWith("/processing/rekey")) return (extra?.rekey ?? (() => new Response(null, { status: 204 })))();
+    if (url.endsWith("/processing/rekey")) return extra?.rekey ? extra.rekey(init) : jsonResponse({credential_rotated:true,operation_id:JSON.parse(String(init.body)).operation_id});
     if (url.endsWith("/account/credential")) return (extra?.credential ?? (() => new Response(null, { status: 204 })))();
     if (url.endsWith("/consents")) return jsonResponse([]);
     if (url.startsWith(`${ORIGIN}/api/v1/entries?`)) return (extra?.entries ?? (() => jsonResponse([], { headers: { "X-Entries-Revision": "1" } })))();
@@ -130,8 +135,8 @@ describe("SettingsView rotation (H-4/M-W2, audit 2026-09-26)", () => {
     expect(opened).toHaveLength(0);
   });
 
-  it("rekey succeeds but the credential rotation fails → LOCKDOWN with the honest moved-key message, and the derived new keys are zeroized", async () => {
-    baseStubs({ credential: () => jsonResponse({ detail: "later step exploded" }, { status: 500 }) });
+  it("an ambiguous atomic response locks the old-key session, retains checkpoints, and zeroizes temporary keys", async () => {
+    baseStubs({ rekey: () => jsonResponse({ detail: "atomic response unavailable" }, { status: 500 }) });
     const core = await import("../src/crypto/core");
     const zeroSpy = vi.spyOn(core, "zeroize");
     const onLockdown = vi.fn();
@@ -143,8 +148,8 @@ describe("SettingsView rotation (H-4/M-W2, audit 2026-09-26)", () => {
     // The server HAS moved the corpus to the new key — a live session with
     // the now-dead old key must be locked down, honestly.
     expect(onLockdown).toHaveBeenCalledTimes(1);
-    expect(onLockdown.mock.calls[0]![0]).toContain("server has already moved your journal to the new key");
-    expect(onLockdown.mock.calls[0]![0]).toContain("repeat the password change");
+    expect(onLockdown.mock.calls[0]![0]).toContain("could not be confirmed");
+    expect(onLockdown.mock.calls[0]![0]).toContain("repeat the same change");
     // H-4(c): the derived new-key generation is zeroized in finally — the
     // spy keeps the buffer references, so their END state proves the wipe.
     const wiped = zeroSpy.mock.calls
@@ -164,7 +169,7 @@ describe("SettingsView rotation (H-4/M-W2, audit 2026-09-26)", () => {
     window.localStorage.setItem(PENDING_SALT_KEY, toBase64(PENDING_SALT));
     const { dataKey } = await derivePendingKeys();
     const { blobB64 } = await encryptEntry(dataKey, USER, "e-resume", "already under the new key", "2026-09-25T00:00:00Z", null, undefined, 1);
-    const rekeyMock = vi.fn(() => jsonResponse({ detail: "old key mismatch", code: "rekey_key_mismatch" }, { status: 400 }));
+    const rekeyMock = vi.fn((init:RequestInit) => jsonResponse({credential_rotated:true,operation_id:JSON.parse(String(init.body)).operation_id}));
     baseStubs({
       rekey: rekeyMock,
       entries: () => jsonResponse(
@@ -181,7 +186,7 @@ describe("SettingsView rotation (H-4/M-W2, audit 2026-09-26)", () => {
     // The ladder resumed (no honest-stop lockdown copy) and the rotation
     // completed: the success lockdown fired, the rekey endpoint was only
     // ever asked once (idempotent completion, not a restart-from-zero)...
-    expect(textOf(root)).not.toContain("already re-encrypted under a different new password");
+    expect(textOf(root)).not.toContain("could not be authenticated");
     expect(onLockdown).toHaveBeenCalledTimes(1);
     expect(onLockdown.mock.calls[0]![0]).toContain("Password changed");
     expect(rekeyMock).toHaveBeenCalledTimes(1);
@@ -189,52 +194,16 @@ describe("SettingsView rotation (H-4/M-W2, audit 2026-09-26)", () => {
     expect(window.localStorage.getItem(PENDING_SALT_KEY)).toBeNull();
   });
 
-  it("B-1: a retry after a post-rekey death derives the SAME keys from the persisted pending salt and finishes", async () => {
-    // Attempt 1: the rekey lands, the credential step dies → moved-key
-    // lockdown. The vault's old key is dead but the CREDENTIAL still
-    // works, so the user signs back in and retries.
-    const credential = vi.fn()
-      .mockImplementationOnce(() => jsonResponse({ detail: "later step exploded" }, { status: 500 }))
-      .mockImplementationOnce(() => new Response(null, { status: 204 }));
-    baseStubs({ credential });
-    const first = vi.fn();
-    let root = await render(<SettingsView onLockdown={first} />);
-    await settle(40, 3);
-    await fillRotateForm(root);
-    await press(root, "Change password");
-    await settle(120, 6);
-    expect(first).toHaveBeenCalledTimes(1);
-    expect(first.mock.calls[0]![0]).toContain("repeat the password change");
-    // The dying attempt persisted its salt — that is the whole B-1 fix.
-    const saltB64 = window.localStorage.getItem(PENDING_SALT_KEY);
-    expect(saltB64).toBeTruthy();
-    // The corpus now sits under (NEW_PASSWORD, that salt). Derive it here
-    // and pre-encrypt the live journal row the retry's ladder will probe.
-    const salt = fromBase64(saltB64!);
-    const master = await deriveMasterKey(NEW_PASSWORD, salt);
-    const keys = await derivePatientKeys(master);
-    const { blobB64 } = await encryptEntry(keys.dataKey, USER, "e-retry", "under attempt one's key", "2026-09-25T00:00:00Z", null, undefined, 1);
-    zeroize(master, keys.masterKey, keys.authKey, keys.dataKey);
-    // Attempt 2 (fresh view, same vault): rekey answers mismatch — with a
-    // FRESH salt this would be unverifiable; reusing the pending salt it
-    // must resume and complete.
-    baseStubs({
-      rekey: () => jsonResponse({ detail: "old key mismatch", code: "rekey_key_mismatch" }, { status: 400 }),
-      credential: () => new Response(null, { status: 204 }),
-      entries: () => jsonResponse(
-        [{ id: "r1", client_entry_id: "e-retry", blob: blobB64, entry_date: "2026-09-25", received_at: "r", content_version: 1 }],
-        { headers: { "X-Entries-Revision": "1" } },
-      ),
-    });
-    const second = vi.fn();
-    root = await render(<SettingsView onLockdown={second} />);
-    await settle(40, 3);
-    await fillRotateForm(root);
-    await press(root, "Change password");
-    await settle(120, 6);
-    expect(second).toHaveBeenCalledTimes(1);
-    expect(second.mock.calls[0]![0]).toContain("Password changed");
-    expect(window.localStorage.getItem(PENDING_SALT_KEY)).toBeNull();
+  it("exact atomic retries and a remounted retry reuse the credential operation and new salt", async () => {
+    const requests: string[] = [];
+    const failed=baseStubs({rekey:(init)=>{requests.push(String(init.body));return jsonResponse({detail:"lost response"},{status:500});}});
+    const first=vi.fn();let root=await render(<SettingsView onLockdown={first}/>);await settle(40,3);await fillRotateForm(root);await press(root,"Change password");await settle(120,8);
+    expect(first.mock.calls[0]![0]).toContain("could not be confirmed");expect(requests).toHaveLength(4);expect(new Set(requests).size).toBe(1);
+    expect(failed.mock.calls.some(([url])=>String(url).endsWith("/account/credential"))).toBe(false);
+    const saved=JSON.parse(requests[0]!);expect(saved.operation_id).toMatch(/^[a-f0-9-]{36}$/);expect(await kv.getItem(`mindpattern.localRotation.${USER}`)).not.toBeNull();
+    const second=vi.fn();baseStubs({rekey:(init)=>{requests.push(String(init.body));return jsonResponse({credential_rotated:true,operation_id:JSON.parse(String(init.body)).operation_id});}});
+    root=await render(<SettingsView onLockdown={second}/>);await settle(40,3);await fillRotateForm(root);await press(root,"Change password");await settle(120,8);
+    expect(requests[4]).toBe(requests[0]);expect(second.mock.calls[0]![0]).toContain("Password changed");expect(await kv.getItem(`mindpattern.localRotation.${USER}`)).toBeNull();
   });
 
   it("B-3: rekey_key_mismatch with an UNREADABLE corpus LOCKS DOWN with the honest message — never a banner over live keys", async () => {
@@ -254,7 +223,7 @@ describe("SettingsView rotation (H-4/M-W2, audit 2026-09-26)", () => {
     // H-4 rule: the corpus is under a key this vault cannot read; the
     // session must not keep writing under the dead old key.
     expect(onLockdown).toHaveBeenCalledTimes(1);
-    expect(onLockdown.mock.calls[0]![0]).toContain("already re-encrypted under a different new password");
+    expect(onLockdown.mock.calls[0]![0]).toContain("could not be authenticated");
     expect(textOf(root)).not.toContain("NOTHING was changed");
   });
 
@@ -279,7 +248,7 @@ describe("SettingsView rotation (H-4/M-W2, audit 2026-09-26)", () => {
     await press(root, "Change password");
     await settle(120, 6);
     expect(onLockdown).toHaveBeenCalledTimes(1);
-    expect(onLockdown.mock.calls[0]![0]).toContain("already re-encrypted under a different new password");
+    expect(onLockdown.mock.calls[0]![0]).toContain("could not be authenticated");
   });
 
   it("B-2: an empty journal with measures under the SAME pending-salt key resumes and completes", async () => {
@@ -287,7 +256,7 @@ describe("SettingsView rotation (H-4/M-W2, audit 2026-09-26)", () => {
     const { dataKey } = await derivePendingKeys();
     const readableBlob = toBase64(await encrypt(dataKey, new TextEncoder().encode('{"v":1,"measure":"phq9","score":5}'), buildAad("measure", USER, "m-read")));
     baseStubs({
-      rekey: () => jsonResponse({ detail: "old key mismatch", code: "rekey_key_mismatch" }, { status: 400 }),
+      rekey: init => jsonResponse({credential_rotated:true,operation_id:JSON.parse(String(init.body)).operation_id}),
       entries: () => jsonResponse([], { headers: { "X-Entries-Revision": "1" } }),
       measures: () => jsonResponse(
         [{ id: "m1", client_measure_id: "m-read", blob: readableBlob, measure_date: "2026-09-20", received_at: "r" }],
@@ -329,7 +298,7 @@ describe("SettingsView rotation (H-4/M-W2, audit 2026-09-26)", () => {
     expect(feedbackBlob).toBeTruthy();
   });
 
-  it("B-4: one grant's rewrap failure does not abort the rotation — the flow completes with the partial notice", async () => {
+  it("every active grant wrap is included in the same atomic rekey request", async () => {
     // A real P-256 SPKI so wrapDataKeyForTherapist succeeds.
     const pair = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
     const spki = new Uint8Array(await crypto.subtle.exportKey("spki", pair.publicKey));
@@ -343,7 +312,7 @@ describe("SettingsView rotation (H-4/M-W2, audit 2026-09-26)", () => {
       if (url.endsWith("/llm-consent") && init.method === "GET") return jsonResponse({ enabled: false });
       if (url.endsWith("/access-log")) return jsonResponse([]);
       if (url.endsWith("/processing/sessions")) return jsonResponse({ session_token: "pst", expires_in: 300 });
-      if (url.endsWith("/processing/rekey")) return new Response(null, { status: 204 });
+      if (url.endsWith("/processing/rekey")) { const body=JSON.parse(String(init.body)); rewrapped.push(...body.consent_wraps.map((row:{consent_id:string})=>row.consent_id)); return jsonResponse({credential_rotated:true,operation_id:body.operation_id}); }
       if (url.endsWith("/account/credential")) return new Response(null, { status: 204 });
       if (url.endsWith("/consents") && init.method === "GET") {
         return jsonResponse([
@@ -368,10 +337,10 @@ describe("SettingsView rotation (H-4/M-W2, audit 2026-09-26)", () => {
     await settle(120, 6);
     // The surviving grant WAS re-wrapped and the rotation COMPLETED despite
     // the second grant's failure — with the honest partial notice.
-    expect(rewrapped).toEqual([CONSENT_OK]);
+    expect(rewrapped).toEqual([CONSENT_OK,CONSENT_BAD]);
     expect(onLockdown).toHaveBeenCalledTimes(1);
     expect(onLockdown.mock.calls[0]![0]).toContain("Password changed");
-    expect(onLockdown.mock.calls[0]![0]).toContain("could not be re-wrapped");
+
   });
 });
 
@@ -709,6 +678,11 @@ describe("SettingsView key-scheme routing (v2 envelope, 2026-09-26)", () => {
     await expect(
       unwrapEnvelope(wrongMaster, fromBase64(String(body.new_salt)), "tester", String(body.wrapped_data_key), KDF_PARAMS_800K),
     ).rejects.toThrow();
+    // The login verifier always uses the fixed authentication KDF;
+    // envelope iteration metadata changes wrapping only.
+    const authKeys = await derivePatientKeys(wrongMaster);
+    expect(body.new_verifier).toBe(toBase64(authKeys.authKey));
+    zeroize(authKeys.authKey,authKeys.dataKey);
     zeroize(newMaster, wrongMaster);
     expect(onLockdown).toHaveBeenCalledTimes(1);
   });
@@ -774,22 +748,22 @@ describe("SettingsView key-scheme routing (v2 envelope, 2026-09-26)", () => {
       // ...and a THIRD session, opened with the NEW key, carried the
       // possession probe of the envelope swap (old + new + probe).
       const sessions = calls.filter(([url, init]) => url.endsWith("/processing/sessions") && init.method === "POST");
-      expect(sessions).toHaveLength(3);
+      expect(sessions).toHaveLength(2);
       // The swap went through the O(1) PUT — NOT the v1 credential route a
       // v2 account cannot use (409 key_scheme_conflict after the rekey).
-      const put = calls.find(([url, init]) => url.endsWith("/account/password") && init.method === "PUT");
+      const put = calls.find(([url, init]) => url.endsWith("/processing/rekey") && init.method === "POST");
       expect(put).toBeTruthy();
       expect(calls.some(([url, init]) => url.endsWith("/account/credential") && init.method === "PUT")).toBe(false);
       const body = JSON.parse(String(put![1].body)) as Record<string, string>;
-      expect(body.verifier).toBe(toBase64(OLD_KEY)); // the CURRENT verifier
+      expect((put![1].headers as Record<string,string>)["X-Account-Verifier"]).toBe(toBase64(OLD_KEY));
       expect(body.new_salt).toBe(toBase64(PENDING_SALT)); // the pending salt
       // The uploaded envelope wraps the FRESH data key of the new password's
       // generation — the old vault key is evicted from the account, which is
       // the entire point of the hint (MED-3).
       const { dataKey } = await derivePendingKeys();
       const newMaster = await deriveMasterKey("a-fresh-long-passphrase-7", PENDING_SALT);
-      const reopened = await unwrapEnvelope(newMaster, PENDING_SALT, "tester", body.wrapped_data_key!, KDF_PARAMS);
-      expect(toBase64(reopened)).toBe(toBase64(dataKey));
+      const reopened = await unwrapEnvelope(newMaster, PENDING_SALT, "tester", body.new_wrapped_data_key!, KDF_PARAMS);
+      expect(reopened.length).toBe(32); expect(toBase64(reopened)).not.toBe(toBase64(dataKey));
       expect(toBase64(reopened)).not.toBe(toBase64(OLD_KEY));
       zeroize(newMaster);
       // The hint and the pending salt are consumed; the honest v1-style
@@ -863,9 +837,9 @@ describe("SettingsView v1 rotation × mid-flow vault lock (FE-4, pentest 2026-09
     await recordMood(OLD_KEY, USER, "2026-09-24", 0.4);
     window.localStorage.setItem(PENDING_SALT_KEY, toBase64(PENDING_SALT));
     const apiMod = await import("../src/api/client");
-    const listSpy = vi.spyOn(apiMod.api, "listConsents").mockImplementation(async () => {
-      vault.lock(); // the lock lands AFTER the rekey committed server-side
-      return [];
+    const listSpy = vi.spyOn(apiMod.api, "rekeyStoredData").mockImplementation(async (_old,_new,_proof,body) => {
+      vault.lock();
+      return {credential_rotated:true,operation_id:body.operation_id};
     });
     baseStubs();
     const onLockdown = vi.fn();
@@ -920,9 +894,12 @@ describe("SettingsView deletion (M-W3, audit 2026-09-26)", () => {
     await press(root, "Delete my account");
     await settle(60, 4);
     expect(onLockdown).toHaveBeenCalledTimes(1);
-    // Nothing survives for the account: queue (+rejected/quarantine
-    // scopes), feedback, mood log, version marks, generation mark, mutes.
-    expect((await kv.keys()).filter((k) => k.startsWith("mindpattern"))).toEqual([]);
+    // Every ciphertext/cache is erased. A minimal deleted-generation marker
+    // survives so suspended callbacks cannot recreate account ciphertext.
+    expect((await kv.keys()).filter((k) => k.startsWith("mindpattern"))).toEqual([writeGenerationKey("user-1")]);
+    const fence=JSON.parse((await kv.getItem(writeGenerationKey("user-1")))!);
+    expect(Object.keys(fence).sort()).toEqual(["deleted","nonce","v"]);
+    expect(fence).toMatchObject({v:1,deleted:true});
   });
 });
 

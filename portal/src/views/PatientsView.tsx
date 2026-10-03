@@ -4,11 +4,11 @@
  * states. Selecting an active patient opens the pattern view.
  *
  * NEW-3 / F.4 (2026-09-22): the "Account security" panel surfaces the
- * backend's verifier-gated rotation routes (PUT /therapist/wrap-key,
- * PUT /account/credential) — password change, interrupted-change
+ * backend's verifier-gated atomic custody/password routes and
+ * PUT /therapist/wrap-key — password change, legacy interrupted-change
  * recovery, and compromise rotation of the sharing key.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { api, auth, ApiError, type AccessLogRow, type Patient } from "../api";
 import {
   decryptCaseloadSummary,
@@ -25,8 +25,7 @@ import {
   unwrapPatientDataKey,
 } from "../crypto";
 import {
-  decryptNote as decryptNoteLegacy,
-  encryptNote,
+  decryptNoteAny, includeNotesCustodyKey, createNotesKeyring, openNotesKeyring, sealNotesKeyring, wipeNotesKeyring, type NotesKeyring,
   noteKeyV2FromPrivateKey,
   type Bytes,
   type CaseloadSummary,
@@ -35,6 +34,7 @@ import { copyToClipboard, currentOrigin, downloadTextFile, randomBytes, sessionS
 import { Button, Card, Disclosure, ErrorBanner, Field, Note } from "../ui";
 import { normalizeBaseUrl, passwordPolicyError } from "./LoginView";
 import { verifyInsightsGeneration, localDateISO, type PortalSession } from "./PatientView";
+const TotpQr = lazy(() => import("../TotpQr").then(module => ({default:module.TotpQr})));
 
 const dayOf = (iso: string): string => iso.slice(0, 10);
 
@@ -239,120 +239,26 @@ export function PatientsView(props: {
     }
   };
 
-  /** The FINAL credential PUT is the one request whose failure strands the
-   *  account in the re-wrapped window, so transient faults get up to three
-   *  retries — network-unreachable (status 0) and 5xx only. A 403 is the
-   *  server rejecting the current verifier: retrying it is pointless and
-   *  burns the shared auth rate limit. */
-  const putCredentialWithRetry = async (
-    verifierB64: string,
-    newSaltB64: string,
-    newVerifierB64: string,
-  ): Promise<void> => {
-    for (let attempt = 0; ; attempt += 1) {
-      try {
-        await api.rotateCredential(verifierB64, newSaltB64, newVerifierB64);
-        return;
-      } catch (err) {
-        const status = err instanceof ApiError ? err.status : -1;
-        if (attempt >= 3 || (status !== 0 && status < 500)) throw err;
-      }
-    }
-  };
-
-  /** 2026-10-01 audit C3: walk every patient's notes; any blob that
-   *  decrypts under the LEGACY password-derived key is re-sealed (with its
-   *  full revision history) under the v2 identity key and swapped through
-   *  the verifier-gated batch endpoint. Chunks of 20 notes per request.
-   *  Already-migrated (v2) blobs fail the legacy decrypt and are skipped. */
-  const rekeyLegacyNotes = async (
-    pkcs8: Bytes,
-    currentKeys: PortalKeySet,
-    username: string,
-    verifierB64: string,
-  ): Promise<void> => {
-    const noteKeyV2 = await noteKeyV2FromPrivateKey(pkcs8);
-    try {
-      const patients = await api.patients();
-      const items: Array<{
-        note_id: string;
-        blob: string;
-        base_version: number;
-        revision_blobs: Array<{ revision_id: string; blob: string }>;
-      }> = [];
-      for (const patient of patients) {
-        let offset = 0;
-        // Bounded walk: notes pages report the next offset (the api.notes
-        // contract); 500 pages is far beyond any real caseload.
-        for (let page = 0; page < 500; page += 1) {
-          const result = await api.notes(patient.user_id, { offset });
-          for (const note of result.notes) {
-            let legacyText: string;
-            try {
-              legacyText = await decryptNoteLegacy(
-                currentKeys.noteKey,
-                username,
-                patient.user_id,
-                note.client_note_id,
-                note.blob,
-              );
-            } catch {
-              continue; // already v2 (or unreadable — not ours to touch)
-            }
-            const sealed = await encryptNote(
-              noteKeyV2,
-              username,
-              patient.user_id,
-              note.client_note_id,
-              legacyText,
-            );
-            const revision_blobs: Array<{ revision_id: string; blob: string }> = [];
-            try {
-              const revisions = await api.noteRevisions(note.id);
-              for (const rev of revisions) {
-                let revText: string;
-                try {
-                  revText = await decryptNoteLegacy(
-                    currentKeys.noteKey,
-                    username,
-                    patient.user_id,
-                    note.client_note_id,
-                    rev.blob,
-                  );
-                } catch {
-                  continue;
-                }
-                const revSealed = await encryptNote(
-                  noteKeyV2,
-                  username,
-                  patient.user_id,
-                  note.client_note_id,
-                  revText,
-                );
-                revision_blobs.push({
-                  revision_id: rev.id,
-                  blob: revSealed.blobB64,
-                });
-              }
-            } catch {
-              /* revision history unavailable: the live note still rekeys */
-            }
-            items.push({
-              note_id: note.id,
-              blob: sealed.blobB64,
-              base_version: note.version ?? 1,
-              revision_blobs,
-            });
+  // Verify every accessible current/revision blob under UUID binding before a
+  // security change. Custody preserves ciphertext byte-for-byte; no valid
+  // revision is skipped and no migration overwrites a concurrent clinical edit.
+  const verifyNotesCustody = async (ring: NotesKeyring): Promise<void> => {
+    const owner = props.session!.userId;
+    for (const patient of await api.patients()) {
+      let offset = 0; let revision: string | undefined;
+      for (let page = 0; page < 500; page += 1) {
+        const result = await api.notes(patient.user_id, { offset, expectedRevision: revision });
+        revision = result.revision;
+        for (const note of result.notes) {
+          await decryptNoteAny(ring.active, ring.historical[0]!, owner, patient.user_id, note.client_note_id, note.blob, ring.historical);
+          for (const row of await api.noteRevisions(note.id)) {
+            await decryptNoteAny(ring.active, ring.historical[0]!, owner, patient.user_id, note.client_note_id, row.blob, ring.historical);
           }
-          if (result.nextOffset === null) break;
-          offset = result.nextOffset;
         }
+        if (result.nextOffset === null) break;
+        if (page === 499) throw new Error("Notes custody verification exceeded its limit — nothing was changed.");
+        offset = result.nextOffset;
       }
-      for (let i = 0; i < items.length; i += 20) {
-        await api.rekeyNotes(verifierB64, items.slice(i, i + 20));
-      }
-    } finally {
-      noteKeyV2.fill(0);
     }
   };
 
@@ -396,38 +302,30 @@ export function PatientsView(props: {
       const newVerifierB64 = toBase64(newKeys.authKey);
       newKeys.authKey.fill(0);
       const me = await api.me();
-      // Ordering contract (backend rotate_wrap_key docstring): re-wrap the
-      // SAME private key under the NEW password's KEK FIRST, while both
-      // passwords are derivable, THEN rotate the login credential.
       pkcs8 = await openSealedPrivateKey(currentKeys.wrapKek, me.wrap_key_blob, username);
-      if (!pkcs8) {
-        throw new Error("the current password did not unlock your stored sharing key — nothing was changed");
-      }
-      // 2026-10-01 audit C3: migrate every legacy (password-sealed) note
-      // and its revision history to the v2 identity key BEFORE either
-      // rotation call — while the old password's key is still derivable.
-      // A rekey preserves content (no revision, no version advance); the
-      // server enforces same-length blobs and per-note version fences.
-      await rekeyLegacyNotes(pkcs8, currentKeys, username, verifierB64);
-      const resealedBlob = await sealPrivateKeyForUpload(newKeys.wrapKek, pkcs8, username);
-      await api.rotateWrapKey(verifierB64, me.wrap_pub_key, resealedBlob);
+      if (!pkcs8) throw new Error("The current password did not unlock your sharing identity — nothing was changed.");
+      const identityKey = await noteKeyV2FromPrivateKey(pkcs8);
+      let ring: NotesKeyring | null = null;
       try {
-        await putCredentialWithRetry(verifierB64, newSaltB64, newVerifierB64);
-      } catch (err) {
-        // The interrupted-change window: the blob is now sealed under the
-        // NEW password while the sign-in credential is unchanged. Retain
-        // the new salt so the recovery form below can re-derive the
-        // intended-new KEK — the only state that keeps the account
-        // repairable (see interruptedSaltB64).
-        setInterruptedSaltB64(newSaltB64);
-        if (props.session) sessionStore.set(interruptedSaltKey(props.session.userId), newSaltB64);
-        throw new Error(
-          `the password change did not complete (${err instanceof Error ? err.message : "credential rotation failed"}) — `
-            + "your sharing key is now wrapped under the NEW password while your sign-in password is unchanged. "
-            + "Recover it with “Recover sharing key” below BEFORE leaving this page (the recovery state survives a "
-            + "reload of this tab, but not closing it).",
-        );
-      }
+        ring = me.notes_keyring_blob
+          ? await openNotesKeyring(currentKeys.wrapKek, props.session.userId, me.notes_keyring_blob)
+          : createNotesKeyring(currentKeys.noteKey, identityKey);
+        includeNotesCustodyKey(ring,currentKeys.noteKey);
+        includeNotesCustodyKey(ring,identityKey);
+        await verifyNotesCustody(ring);
+        const notesBlob = await sealNotesKeyring(newKeys.wrapKek, props.session.userId, ring);
+        const resealedBlob = await sealPrivateKeyForUpload(newKeys.wrapKek, pkcs8, username);
+        const version = me.custody_version ?? 0;
+        const payload = { operation_id: crypto.randomUUID(), expected_custody_version: version, custody_version: version + 1,
+          verifier: verifierB64, new_salt: newSaltB64, new_verifier: newVerifierB64,
+          wrap_pub_key: me.wrap_pub_key, wrap_key_blob: resealedBlob, notes_keyring_blob: notesBlob };
+        // Identical operation IDs/payloads make lost-response retries safe;
+        // backend commits credential/privatewrap/custody/epoch together.
+        for (let attempt = 0; ; attempt += 1) {
+          try { await api.changePasswordAtomic(payload); break; }
+          catch (err) { if (attempt >= 3 || !(err instanceof ApiError) || (err.status !== 0 && err.status < 500)) throw err; }
+        }
+      } finally { identityKey.fill(0); wipeNotesKeyring(ring); }
       // Success: the server bumped the token epoch — every bearer,
       // including this session's, is dead. Lock down through the same
       // path as sign-out so no key material outlives the credential.
@@ -470,8 +368,27 @@ export function PatientsView(props: {
       if (!pkcs8) {
         throw new Error("the second password did not unlock the stored sharing key — nothing was changed; check the password you were changing to");
       }
-      const resealedBlob = await sealPrivateKeyForUpload(currentKeys.wrapKek, pkcs8, username);
-      await api.rotateWrapKey(verifierB64, me.wrap_pub_key, resealedBlob);
+      const identityKey = await noteKeyV2FromPrivateKey(pkcs8);
+      let ring: NotesKeyring | null = null;
+      try {
+        if (me.notes_keyring_blob) {
+          // Legacy two-step clients could leave custody under either KEK.
+          // This local authentication fallback never changes the credential.
+          try { ring = await openNotesKeyring(currentKeys.wrapKek, props.session.userId, me.notes_keyring_blob); }
+          catch { ring = await openNotesKeyring(intendedKeys.wrapKek, props.session.userId, me.notes_keyring_blob); }
+        } else ring = createNotesKeyring(currentKeys.noteKey, identityKey);
+        includeNotesCustodyKey(ring, currentKeys.noteKey);
+        includeNotesCustodyKey(ring, intendedKeys.noteKey);
+        includeNotesCustodyKey(ring, identityKey);
+        await verifyNotesCustody(ring);
+        const version = me.custody_version ?? 0;
+        const blob = await sealNotesKeyring(currentKeys.wrapKek, props.session.userId, ring);
+        await api.installNotesCustody({ verifier: verifierB64, operation_id: crypto.randomUUID(), expected_custody_version: version, custody_version: version + 1, notes_keyring_blob: blob });
+        const confirmed = await api.me();
+        if (confirmed.notes_keyring_blob !== blob || confirmed.custody_version !== version + 1) throw new Error("Notes custody was not confirmed — sharing identity was not changed.");
+        const resealedBlob = await sealPrivateKeyForUpload(currentKeys.wrapKek, pkcs8, username);
+        await api.rotateWrapKey(verifierB64, me.wrap_pub_key, resealedBlob, version + 1);
+      } finally { identityKey.fill(0); wipeNotesKeyring(ring); }
       setInterruptedSaltB64(null);
       if (props.session) sessionStore.removePrefix(interruptedSaltKey(props.session.userId));
       setSecNotice("Sharing key recovered — it is sealed under your current sign-in password again. Your sign-in password never changed; you can retry the password change.");
@@ -500,13 +417,31 @@ export function PatientsView(props: {
       currentKeys = await deriveFor(compCurrent, salt);
       const verifierB64 = toBase64(currentKeys.authKey);
       currentKeys.authKey.fill(0);
-      // A genuinely FRESH keypair sealed under the CURRENT password's KEK
-      // — nothing derived from the possibly-compromised old key is reused.
-      const pair = await generateTherapistKeyPair(currentKeys.wrapKek, username);
-      await api.rotateWrapKey(verifierB64, pair.publicKeySpkiB64, pair.wrapKeyBlobB64);
-      setSecNotice(
-        "Sharing key rotated. Existing grants stay readable only after each patient re-wraps their data key via the pairing fingerprint path; grants that never re-wrap are intentionally lost — retiring the compromised key is the point. Until you sign out, this tab still holds the old key in memory, so not-yet-re-wrapped grants may keep opening here.",
-      );
+      const me = await api.me();
+      const privateBytes = await openSealedPrivateKey(currentKeys.wrapKek, me.wrap_key_blob, username);
+      if (!privateBytes) throw new Error("The current password did not unlock your sharing identity — nothing was changed.");
+      const identityKey = await noteKeyV2FromPrivateKey(privateBytes);
+      let ring: NotesKeyring | null = null;
+      let version = me.custody_version ?? 0;
+      try {
+        ring = me.notes_keyring_blob ? await openNotesKeyring(currentKeys.wrapKek, props.session.userId, me.notes_keyring_blob) : createNotesKeyring(currentKeys.noteKey, identityKey);
+        includeNotesCustodyKey(ring,currentKeys.noteKey);
+        includeNotesCustodyKey(ring,identityKey);
+        await verifyNotesCustody(ring);
+        {
+          // Re-seal the keyring even when already installed: legacy clients
+          // may have written under the current identity/password since then.
+          const blob = await sealNotesKeyring(currentKeys.wrapKek, props.session.userId, ring);
+          await api.installNotesCustody({ verifier: verifierB64, operation_id: crypto.randomUUID(), expected_custody_version: version, custody_version: version + 1, notes_keyring_blob: blob });
+          const confirmed = await api.me();
+          if (confirmed.notes_keyring_blob !== blob || confirmed.custody_version !== version + 1) throw new Error("Notes custody was not confirmed — sharing identity was not changed.");
+          version += 1;
+        }
+        const pair = await generateTherapistKeyPair(currentKeys.wrapKek, username);
+        await api.rotateWrapKey(verifierB64, pair.publicKeySpkiB64, pair.wrapKeyBlobB64, version);
+        setSecNotice("Sharing identity rotated. Existing patient grants were revoked. Sign in again. Each patient must verify the new pairing fingerprint and share again; historical notes remain readable through independent encrypted custody.");
+        if (props.onSessionsEnded) props.onSessionsEnded(); else props.onSignOut();
+      } finally { privateBytes.fill(0); identityKey.fill(0); wipeNotesKeyring(ring); }
     } catch (err) {
       setSecError(err instanceof Error ? err.message : "could not rotate the sharing key");
     } finally {
@@ -1208,10 +1143,9 @@ export function PatientsView(props: {
                 On success every session — including this one — is signed out. There is still no
                 password reset: keep the new password in a password manager.
               </Note>
-              <Disclosure summary="How the change works (re-wrap ordering)">
-                Your sharing key is re-wrapped under the new password first, then the login
-                credential is rotated — so an interruption between the two steps leaves the
-                account repairable by the "Recover sharing key" flow below.
+              <Disclosure summary="How the change works (atomic custody)">
+                Your new credential, re-wrapped sharing identity, and encrypted notes keyring commit together in one transaction.
+                A lost response retries the same operation safely. No intermediate password or private-key state is published.
               </Disclosure>
               <Field label="Current password" value={pwCurrent} onChange={setPwCurrent} type="password" autoComplete="current-password" />
               <Field label="New password" value={pwNew} onChange={setPwNew} type="password" autoComplete="new-password" />
@@ -1257,16 +1191,13 @@ export function PatientsView(props: {
               <hr className="divider" />
               <h3 className="section-label section-label--flush">Rotate sharing key (suspected compromise)</h3>
               <Note>
-                Publishes a brand-new sharing keypair sealed under your current password; grants from
-                patients who never re-wrap are intentionally lost — retiring the compromised key is the
-                point. Your notes are unaffected.
+                Publishes a brand-new sharing keypair sealed under your current password and revokes existing patient grants.
+                Each patient must pair and share again with the replacement identity. Existing notes remain readable through independently encrypted notes custody. Copies already obtained cannot be recalled.
               </Note>
               <Disclosure summary="What happens to existing patient grants">
-                Existing grants stay readable only after each patient re-wraps their data key via the
-                pairing fingerprint path; grants that never re-wrap are intentionally lost. Your notes
-                are unaffected: they are sealed under your account's sharing key, and any still sealed
-                under your OLD password are re-sealed automatically as part of this change
-                (2026-10-01 — they used to become permanently unreadable).
+                Existing grants are revoked. Each patient must verify the new pairing fingerprint and share again. Your notes
+                remain readable through an independently encrypted notes keyring, including older password-derived notes and all verified revisions.
+                Existing ciphertext is preserved; retaining historical keys does not recall copies already obtained by someone else.
               </Disclosure>
               <Field label="Current password (to authorize rotation)" value={compCurrent} onChange={setCompCurrent} type="password" autoComplete="current-password" />
               <label className="confirm-label">
@@ -1276,7 +1207,7 @@ export function PatientsView(props: {
                   onChange={(e) => setCompConfirmed(e.target.checked)}
                   aria-label="Confirm sharing-key rotation"
                 />
-                I understand that grants from patients who never re-wrap are intentionally lost.
+                I understand that existing grants will be revoked and patients must share again.
               </label>
               <Button
                 label={secBusy ? "Rotating…" : "Rotate sharing key"}
@@ -1312,7 +1243,7 @@ export function PatientsView(props: {
               {totpPending && (
                 <>
                   <Note tone="warn">
-                    Enter this secret in your authenticator app NOW — it is shown exactly once and
+                    Scan the QR code or enter this secret in your authenticator app NOW — it is shown exactly once and
                     never again. It is HIDDEN by default here: press “Show secret” only while you
                     are typing it in, and hide it again afterwards. Two-factor only takes effect
                     after you confirm a code below.
@@ -1331,6 +1262,9 @@ export function PatientsView(props: {
                         ? totpPending.secretBase32
                         : totpPending.secretBase32.replace(/\S/g, "•")}
                     </p>
+                    {totpSecretVisible && (
+                      <Suspense fallback={<Note role="status">Generating the authenticator QR code on this device…</Note>}><TotpQr uri={totpPending.otpauthUri} /></Suspense>
+                    )}
                     {totpSecretVisible && (
                       <p
                         aria-label="otpauth URI for apps that accept it"

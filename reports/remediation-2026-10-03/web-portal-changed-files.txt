@@ -1,0 +1,101 @@
+ M portal/index.html
+ M portal/package-lock.json
+ M portal/package.json
+ M portal/public/_headers
+ M portal/public/portal.css
+ M portal/src/App.tsx
+ M portal/src/ErrorBoundary.tsx
+ M portal/src/api.ts
+ M portal/src/crypto.ts
+ M portal/src/ui.tsx
+ M portal/src/views/LoginView.tsx
+ M portal/src/views/PatientView.tsx
+ M portal/src/views/PatientsView.tsx
+ M portal/tests/a11y.test.tsx
+ M portal/tests/api.test.ts
+ M portal/tests/app.test.tsx
+ M portal/tests/crypto.test.ts
+ M portal/tests/errorBoundary.test.tsx
+ M portal/tests/helpers/rtr.tsx
+ M portal/tests/helpers/setup.ts
+ M portal/tests/mutation_2026_09_22_frontend.pins.test.tsx
+ M portal/tests/pentest_2026_09_26.test.tsx
+ M portal/tests/remediation_2026_09_29.test.tsx
+ M portal/tests/rotation_2026_09_22.test.tsx
+ M portal/tests/totp_2026_09_22.test.tsx
+ M portal/tests/views.test.tsx
+ M portal/vite.config.ts
+ M web/index.html
+ M web/package-lock.json
+ M web/package.json
+ M web/public/_headers
+ M web/public/app.css
+ M web/src/App.tsx
+ M web/src/api/client.ts
+ M web/src/audio/player.ts
+ M web/src/audio/recorder.ts
+ M web/src/crypto/patient.ts
+ M web/src/entryDraft.ts
+ M web/src/entryVersions.ts
+ M web/src/kvstore.ts
+ M web/src/locales/en.ts
+ M web/src/locales/es.ts
+ M web/src/moodLog.ts
+ M web/src/offlineQueue.ts
+ M web/src/patternMutes.ts
+ M web/src/pendingMeasure.ts
+ M web/src/platform.ts
+ M web/src/questionFeedback.ts
+ M web/src/safetyPlan.ts
+ M web/src/strings.ts
+ M web/src/sync.ts
+ M web/src/tabLockdown.ts
+ M web/src/ui.tsx
+ M web/src/views/Entry.tsx
+ M web/src/views/History.tsx
+ M web/src/views/LoginView.tsx
+ M web/src/views/Measures.tsx
+ M web/src/views/Patterns.tsx
+ M web/src/views/Question.tsx
+ M web/src/views/SafetyPlan.tsx
+ M web/src/views/Settings.tsx
+ M web/src/views/Share.tsx
+ M web/tests/apiSurface.test.ts
+ M web/tests/app.test.tsx
+ M web/tests/crypto.test.ts
+ M web/tests/entry.test.tsx
+ M web/tests/entryDraft.test.tsx
+ M web/tests/helpers/rtr.tsx
+ M web/tests/helpers/setup.ts
+ M web/tests/history.test.tsx
+ M web/tests/i18n.test.ts
+ M web/tests/kvstore.idb.test.ts
+ M web/tests/parity.test.tsx
+ M web/tests/parityBranches.test.tsx
+ M web/tests/patterns.test.tsx
+ M web/tests/platform.test.ts
+ M web/tests/safetyPlan.test.tsx
+ M web/tests/securityConfig.test.ts
+ M web/tests/settings.test.tsx
+ M web/tests/sync.test.ts
+ M web/tools/add-sri.mjs
+ M web/vite.config.ts
+?? portal/src/TotpQr.tsx
+?? portal/src/browserRoute.ts
+?? portal/src/kvstore.ts
+?? portal/src/noteDrafts.ts
+?? portal/tests/browserRoute.test.ts
+?? portal/tests/custodyRegressions.test.tsx
+?? portal/tests/kvstore.idb.test.ts
+?? web/src/browserRoute.ts
+?? web/src/localErasure.ts
+?? web/src/localRotation.ts
+?? web/src/locales/preauth.ts
+?? web/tests/auditRegressions.test.ts
+?? web/tests/auditRegressionsUI.test.tsx
+?? web/tests/browserRoute.test.ts
+?? web/tests/localErasure.test.ts
+?? web/tests/localRotation.idb.test.ts
+?? web/tests/localRotation.test.ts
+?? web/tests/tabLockdown.test.ts
+?? web/tools/make-preauth-catalogs.mjs

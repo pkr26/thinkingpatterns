@@ -51,11 +51,18 @@ export function recoveryKeyToB64(recoveryKey: Buffer): string {
   return recoveryKey.toString("base64");
 }
 
+export function recoveryKitText(recoveryKey: Buffer): string {
+  return `mindpattern-recovery:v2:${recoveryKeyToB64(recoveryKey)}`;
+}
+
 export function recoveryKeyFromB64(text: string): Buffer | null {
-  const trimmed = text.trim().replace(/\s+/g, "");
+  const trimmed = text.trim().replace(/\s+/g, "").replace(/^mindpattern-recovery:v[12]:/, "");
+  if (!/^[A-Za-z0-9+/]{43}=$/.test(trimmed)) return null;
   try {
     const raw = Buffer.from(trimmed, "base64");
-    return raw.length === RECOVERY_KEY_SIZE ? raw : null;
+    if (raw.length === RECOVERY_KEY_SIZE && raw.toString("base64") === trimmed) return raw;
+    raw.fill(0);
+    return null;
   } catch {
     return null;
   }

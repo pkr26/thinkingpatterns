@@ -8,6 +8,7 @@
  */
 import { beforeEach, describe, expect, it } from "vitest";
 import * as Keychain from "react-native-keychain";
+import storage from "./helpers/storageMock";
 import {
   biometricsSupported,
   disableBiometricUnlock,
@@ -24,6 +25,7 @@ const mock = Keychain as unknown as {
   __failWrites: (v: boolean) => void;
   __failReads: (v: boolean) => void;
   __setBiometryType: (v: string | null) => void;
+  __getReadCount: () => number;
   __lastGetOptions: () => { service?: string; accessControl?: string };
   __lastSetCall: () => { username: string; options?: Record<string, unknown> };
 };
@@ -33,6 +35,7 @@ const DATA_KEY_B = Buffer.alloc(32, 11);
 
 beforeEach(() => {
   mock.__reset();
+  storage.__reset();
 });
 
 describe("biometricsSupported", () => {
@@ -58,14 +61,15 @@ describe("enable / has / disable round-trip", () => {
     expect(stored).toEqual({ username: "user-1", password: DATA_KEY.toString("base64") });
   });
 
-  it("hasBiometricUnlock is a QUIET read (no accessControl option) bound to the account", async () => {
+  it("presence/enable/disable do not retrieve protected credentials", async () => {
     await enableBiometricUnlock("user-1", DATA_KEY);
     await expect(hasBiometricUnlock("user-1")).resolves.toBe(true);
-    expect(mock.__lastGetOptions()).toEqual({ service: serviceFor("user-1"), accessControl: undefined });
+    expect(mock.__getReadCount()).toBe(0);
     // A different account (or no wrap at all) reads false.
     await expect(hasBiometricUnlock("user-2")).resolves.toBe(false);
     await disableBiometricUnlock("user-1");
     await expect(hasBiometricUnlock("user-1")).resolves.toBe(false);
+    expect(mock.__getReadCount()).toBe(0);
   });
 
   it("enable fails honestly when the Keychain refuses the write", async () => {
@@ -115,8 +119,9 @@ describe("per-account wrap slots (L-50)", () => {
       service: SERVICE,
       accessControl: Keychain.ACCESS_CONTROL.BIOMETRY_CURRENT_SET,
     });
-    // Ownership still binds: another account's legacy wrap is not theirs.
-    await expect(hasBiometricUnlock("user-2")).resolves.toBe(false);
+    // Metadata cannot attribute a legacy shared item without a prompt.
+    // Availability is only an unlock affordance; the explicit unwrap checks ownership.
+    await expect(hasBiometricUnlock("user-2")).resolves.toBe(true);
     await expect(unwrapBiometricDataKey("user-2")).resolves.toBeNull();
   });
 
@@ -125,24 +130,35 @@ describe("per-account wrap slots (L-50)", () => {
     // user-2 disabling must NOT destroy user-1's legacy wrap.
     await disableBiometricUnlock("user-2");
     await expect(hasBiometricUnlock("user-1")).resolves.toBe(true);
-    // user-1 disabling removes it — and a later has-check stays false (the
-    // resurrection bug the legacy cleanup exists to prevent).
+    // Without authenticating user-1, disable suppresses fallback for that
+    // account without retrieving/deleting a possibly foreign shared item.
     await disableBiometricUnlock("user-1");
     await expect(hasBiometricUnlock("user-1")).resolves.toBe(false);
     await expect(unwrapBiometricDataKey("user-1")).resolves.toBeNull();
   });
 
-  it("re-enabling retires this account's legacy shared wrap", async () => {
+  it("re-enabling suppresses an unowned legacy fallback without prompting", async () => {
     await Keychain.setGenericPassword("user-1", DATA_KEY.toString("base64"), { service: SERVICE });
     const rotated = Buffer.alloc(32, 21);
     await enableBiometricUnlock("user-1", rotated);
     // The per-account slot answers with the NEW key…
     expect((await unwrapBiometricDataKey("user-1"))!.equals(rotated)).toBe(true);
-    // …and the stale legacy slot is gone (a later disable cannot resurrect
-    // the old wrap through the fallback).
-    expect(await Keychain.getGenericPassword({ service: SERVICE })).toBe(false);
+    // …and the unverified shared slot remains protected. A later disable
+    // cannot resurrect this account's old key because its fallback is tombstoned.
+    expect(await Keychain.hasGenericPassword({ service: SERVICE })).toBe(true);
     await disableBiometricUnlock("user-1");
     await expect(hasBiometricUnlock("user-1")).resolves.toBe(false);
+  });
+});
+
+describe("legacy ownership cleanup", () => {
+  it("only explicit owner authentication permits removing the shared slot", async () => {
+    await Keychain.setGenericPassword("legacy-owner", DATA_KEY.toString("base64"), { service: SERVICE });
+    await expect(hasBiometricUnlock("legacy-owner")).resolves.toBe(true);
+    expect(mock.__getReadCount()).toBe(0);
+    expect(await unwrapBiometricDataKey("legacy-owner")).toEqual(DATA_KEY);
+    await disableBiometricUnlock("legacy-owner");
+    await expect(Keychain.hasGenericPassword({ service: SERVICE })).resolves.toBe(false);
   });
 });
 

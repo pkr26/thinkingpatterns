@@ -44,9 +44,9 @@ services:
   # least-privilege IAM credentials supplied via compose secrets.
   audio-minio:
     # 2026-10-01 audit LOW: pinned to a dated release instead of :latest (the
-            # one unpinned image in the tree); digest-pin like prod when the
-            # dev image is next rebuilt.
-            image: minio/minio:RELEASE.2023-09-30T13-39-29Z
+    # one unpinned image in the tree); digest-pin like prod when the
+    # dev image is next rebuilt.
+    image: minio/minio:RELEASE.2023-09-30T13-39-29Z
     command: server /data --console-address ":9001"
     ports:
       - "127.0.0.1:9000:9000"

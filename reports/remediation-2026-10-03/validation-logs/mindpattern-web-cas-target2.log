@@ -1,0 +1,11 @@
+npm notice run mindpattern-web@0.1.0 npx
+npm notice run 'vitest' run tests/localRotation.test.ts tests/localRotation.idb.test.ts tests/kvstore.idb.test.ts tests/localErasure.test.ts
+
+ RUN  v5.0.2 /Users/pradeepreddy/Desktop/mental_health_application/web
+
+
+ Test Files  4 passed (4)
+      Tests  12 passed (12)
+   Start at  10:09:35
+   Duration  171ms (transform 68%, setup 21%, tests 5%, import 4%, worker 1%)
+

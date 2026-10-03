@@ -1,0 +1,11 @@
+npm notice run mindpattern-mobile@1.0.0 npx
+npm notice run 'vitest' run tests/localWriteGeneration.test.ts tests/rotationOwnership.test.ts tests/rotationV2.test.ts tests/reauth.test.ts tests/client.envelope.test.ts tests/client.originSwitch.test.ts tests/client.pins.test.ts tests/client.request.test.ts tests/client.rotation.test.ts tests/client.sharing.test.ts tests/client.test.ts tests/safetyPlan.test.ts tests/pendingMeasure.test.ts tests/questionFeedback.test.ts tests/moodLog.test.ts tests/entryVersions.test.ts tests/journalDraft.test.ts tests/offlineQueue.test.ts tests/audioQueue.test.ts tests/accountErasure.test.ts --coverage.enabled=false
+
+ RUN  v4.1.11 /Users/pradeepreddy/Desktop/mental_health_application/mobile
+
+
+ Test Files  18 passed (18)
+      Tests  358 passed (358)
+   Start at  12:00:32
+   Duration  4.07s (transform 3.17s, setup 1.06s, import 3.31s, tests 7.46s, environment 1ms)
+

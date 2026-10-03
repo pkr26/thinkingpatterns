@@ -17,15 +17,37 @@ changes, and before any v2 security review.
 
 | ID | Harness | Standing verdict and written defense |
 |---|---|---|
-| `B1.verifier-replay` | b_auth | The auth verifier is password-equivalent by design (the server never sees the password, only scrypt(verifier)) — replaying it equals presenting the password. TLS-only transport plus per-IP/per-username rate limits bound it. |
-| `B1.verifier-enables-llm-egress` | b_auth | A replayed verifier can also toggle the opt-in LLM consent (a re-authenticated action). Same password-equivalence class; the egress remains opt-in, disclosed, and per-user. |
-| `D2.plaintext-egress` | d_llm | Journal text sent to the configured third-party LLM endpoint is plaintext AT the provider — inherent to optional LLM analysis; opt-in per user, provider and retention disclosed at consent time, off by default. |
-| `D2.endpoint-to-card-injection` | d_llm | A hostile LLM endpoint can shape surfaced card copy; the sanitizer length-caps and verifies phrases against the user's actual text, bounding the attack to copy within the app. |
-| `D2.slow-endpoint-key-lifetime` | d_llm | A deliberately slow LLM endpoint stretches the single-use processing session's key lifetime for that one request; sessions stay memory-only, single-use, TTL-bounded, purged. |
-| `A2.offline-oracle` | a_crypto | The on-device mood log / offline state is an offline password oracle (keys derive from the password) and discloses state to a device holder — the zero-knowledge trade itself; the threat model excludes the device owner attacking their own account. |
-| `F2.http-key-shipment` | f_mobile | The data key crosses the wire to `/processing/sessions` — the documented v1 server-side-analysis trade-off (README security note #2): single-use, TLS in production, memory-only, destroyed on consumption. The harness runs cleartext localhost by construction. |
+| `B1.verifier-replay` | b_auth | The auth verifier is password-equivalent by design (the server never sees the password, only scrypt(verifier)) — replaying it equals presenting the password. TLS-only transport plus per-IP/per-username rate limits bound online replay. Logout retires bearer sessions; atomic password/security reset rotates this underlying credential. |
+| `A2.offline-oracle` | f_mobile | The on-device mood log / offline state is an offline password oracle (keys derive from the password) and discloses state to a device holder — the zero-knowledge trade itself; a stolen-device/password-envelope attacker remains relevant; strong passwords and KDF cost bound guessing, while UI backoff cannot throttle external scripts. |
 | `H1.metadata-inference` | h_privacy | The server holds per-entry dates and sizes (metadata inference) — documented in README security note #7; content stays opaque. |
-| `G3.tracked-secrets` | g_infra | The tracked-secrets hygiene rule matches any git-tracked path ending in `.env`, which catches `mobile/ios/.xcode.env` — the React Native Xcode template that resolves `NODE_BINARY` for script phases. It is REQUIRED to be versioned (the per-developer override is the unversioned `.xcode.env.local`), contains no credential, key, or connection string (only `export NODE_BINARY=$(command -v node)`), and was inspected line-by-line when registered. Re-review if that file ever grows anything beyond the NODE_BINARY export. |
+
+## October 3 reassessment of previously registered findings
+
+The three table entries above remain real architectural observations. The
+October 3 workflow allowlist is pruned to exactly those entries. This does not
+claim that new dependency findings are accepted: `G2.npm-audit` remains visible
+and fails the unchanged hard audit/release gates despite the reviewed local
+backports described in `mobile/tools/dependency-patches/README.md`.
+
+- `B1.verifier-enables-llm-egress` and `D2.plaintext-egress`,
+  `D2.endpoint-to-card-injection`, `D2.slow-endpoint-key-lifetime`: successful
+  consent-ON/OFF recompute now dispatches no narration provider request, ignores
+  a rogue marker and has no provider-delay coupling. The historic consent bit
+  does not enable that removed dispatch. Separately consented translation and
+  historic provider retention remain different obligations.
+- `F2.http-key-shipment`: current production URL checks refuse non-loopback
+  HTTP, including a tampered persisted address, before a sensitive fetch. Local
+  development analysis still ships a transient key over loopback; real remote
+  analysis still uses TLS and the disclosed in-memory server window.
+- `G3.tracked-secrets`: the inspected RN `.xcode.env` template contains only
+  NODE_BINARY discovery and is excluded by the actual credential-content
+  hygiene test. New content still needs review.
+
+The current harness compares live Python/TypeScript crisis matchers, obtains
+fresh role-bound therapist tokens and requires a real key-dependent insight
+recompute when testing single-use. These corrections remove stale fixture
+false positives without suppressing actual attacks. Exact campaign and
+verdict-ID inventories reject partial or skipped attack evidence.
 
 ## Web client residuals (2026-09-25; re-swept 2026-09-26)
 
@@ -44,12 +66,10 @@ test-pinned). What stands: open-tab offline only, the in-memory
 plaintext window (bounded by the 5-min idle/hidden-tab/bfcache locks),
 GC-owned memory strings, the single encrypted draft slot (no cross-tab
 merge), the first Stryker floor (run pending), and the inherited
-server-side analysis window. One NEW alignment note: the deploy/nginx
-**portal** vhost example still carries `style-src 'self'
-'unsafe-inline'` while the portal's shipped meta CSP does not —
-browsers enforce both policies (the intersection), so this is
-example-config drift, not a live hole; align it when next touching
-that template.
+server-side analysis window. The October 3 remediation aligns both deployment vhosts with the shipped
+client policies: `style-src 'self'` and `media-src 'self' blob:`. The
+previous portal example-policy drift is resolved; actual deployed headers
+still require release verification.
 
 ## Mobile transport residuals (2026-09-26, audit F-2 decision)
 
@@ -59,12 +79,13 @@ recorded decision rather than an oversight:
 - **No static pins** — the product is self-hostable and the patient may
   point the app at their own server (`Settings → Advanced`), so no fixed
   pin-set can exist. The web client does not need pinning: its origin is
-  fixed and HSTS-pinned by the header set.
+  fixed and the header set declares HSTS to prevent HTTP downgrade. HSTS
+  does not pin a server certificate.
 - **No TOFU pinning** — React Native's JS `fetch` never exposes the TLS
   peer certificate, so first-use SPKI pinning requires a native
   networking module (an invasive, hard-to-test change this repo's
-  CI — static native preflight, no device builds — cannot safely land
-  blind). Revisit if/when a native CI build exists.
+  CI cannot establish against biometric/network hardware or production
+  endpoints merely from compilation). Revisit if/when a native CI build exists.
 - **What shipped instead (Android)** — `network_security_config.xml`
   trusts SYSTEM certificate authorities only in release (a user-installed
   CA — enterprise proxy or attacker-with-device-access — can no longer
@@ -133,11 +154,13 @@ because this file is the register reviewers read):
   itself is unchanged by the 2026-09-26 waves (still the single-use
   ≤5-min session); the on-device port is the closing path.
 - **Single-process deployment:** the sliding-window rate counter,
-  keystore, and token epochs are in-process state (one worker per
-  instance; scale horizontally behind a shared counter when needed).
-- **Consented LLM egress is plaintext at the provider** (unchanged;
-  `D2.plaintext-egress` above) — provider retention is disclosed at
-  consent time and out of the operator's hands once sent.
+  keystore and lifecycle operations require one active API process per
+  database. Cross-host advisory guards enforce that contract; distributed
+  operation requires shared custody/session/lifecycle semantics, not only
+  a shared rate counter.
+- **Historic provider retention and separately consented translation**
+  remain operator/provider obligations. Narration-only journal egress is
+  disabled; it is no longer an active recompute residual.
 - **The access audit log outlives account deletion** for
   `MINDPATTERN_ACCESS_LOG_RETENTION_DAYS` (default 730 days, 1–3650
   selectable) — deliberate and defended in `docs/DPIA_SKELETON.md` §4;

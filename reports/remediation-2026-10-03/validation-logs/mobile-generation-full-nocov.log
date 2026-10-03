@@ -1,0 +1,219 @@
+
+ RUN  v4.1.11 /Users/pradeepreddy/Desktop/mental_health_application/mobile
+
+stderr | tests/screens/entryScreen.test.tsx > EntryScreen save pipeline > reports a locked vault instead of crashing
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/entryScreen.test.tsx > EntryScreen save pipeline > reports a locked vault instead of crashing
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/entryScreen.test.tsx > EntryScreen save pipeline > reports a locked vault instead of crashing
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/entryScreen.test.tsx > EntryScreen save pipeline > reports a locked vault instead of crashing
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/entryScreen.test.tsx > EntryScreen save pipeline > reports a locked vault instead of crashing
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/historyScreen.test.tsx > HistoryScreen edit (atomic replacement) > a locked vault mid-edit reports honestly instead of crashing
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/historyScreen.test.tsx > HistoryScreen edit (atomic replacement) > a locked vault mid-edit reports honestly instead of crashing
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/historyScreen.test.tsx > HistoryScreen edit (atomic replacement) > a locked vault mid-edit reports honestly instead of crashing
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/historyScreen.test.tsx > HistoryScreen edit (atomic replacement) > a locked vault mid-edit reports honestly instead of crashing
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/historyScreen.test.tsx > HistoryScreen edit (atomic replacement) > a locked vault mid-edit reports honestly instead of crashing
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/historyScreen.test.tsx > HistoryScreen edit (atomic replacement) > a locked vault mid-edit reports honestly instead of crashing
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/historyScreen.test.tsx > HistoryScreen edit (atomic replacement) > a locked vault mid-edit reports honestly instead of crashing
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/historyScreen.test.tsx > HistoryScreen edit (atomic replacement) > a locked vault mid-edit reports honestly instead of crashing
+The current testing environment is not configured to support act(...)
+
+ ❯ tests/screens/historyScreen.test.tsx (70 tests | 1 failed) 1282ms
+     × a locked vault mid-edit reports honestly instead of crashing 18ms
+ ❯ tests/screens/entryScreen.test.tsx (106 tests | 1 failed) 1589ms
+     × reports a locked vault instead of crashing 11ms
+stderr | tests/screens/checklistLanguageNote.test.tsx > InsightsScreen language honesty note (checklist 8c) > renders the 'not yet supported' card when the engine reports language='other'
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/checklistLanguageNote.test.tsx > InsightsScreen language honesty note (checklist 8c) > renders the 'not yet supported' card when the engine reports language='other'
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+ ❯ tests/screens/checklistLanguageNote.test.tsx (2 tests | 1 failed) 30ms
+     × renders the 'not yet supported' card when the engine reports language='other' 16ms
+stderr | tests/i18n.test.tsx > screens render under es > EntryScreen check-in labels localize by value; the saved payload keeps English wire values
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+The current testing environment is not configured to support act(...)
+
+stderr | tests/i18n.test.tsx > screens render under es > EntryScreen check-in labels localize by value; the saved payload keeps English wire values
+The current testing environment is not configured to support act(...)
+
+stderr | tests/i18n.test.tsx > screens render under es > EntryScreen check-in labels localize by value; the saved payload keeps English wire values
+The current testing environment is not configured to support act(...)
+
+stderr | tests/i18n.test.tsx > screens render under es > EntryScreen check-in labels localize by value; the saved payload keeps English wire values
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/i18n.test.tsx > screens render under es > EntryScreen check-in labels localize by value; the saved payload keeps English wire values
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/i18n.test.tsx > screens render under es > EntryScreen check-in labels localize by value; the saved payload keeps English wire values
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/i18n.test.tsx > screens render under es > EntryScreen check-in labels localize by value; the saved payload keeps English wire values
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/i18n.test.tsx > screens render under es > EntryScreen check-in labels localize by value; the saved payload keeps English wire values
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/i18n.test.tsx > screens render under es > EntryScreen check-in labels localize by value; the saved payload keeps English wire values
+The current testing environment is not configured to support act(...)
+
+stderr | tests/i18n.test.tsx > screens render under es > EntryScreen check-in labels localize by value; the saved payload keeps English wire values
+The current testing environment is not configured to support act(...)
+
+ ❯ tests/i18n.test.tsx (18 tests | 1 failed) 1176ms
+     × EntryScreen check-in labels localize by value; the saved payload keeps English wire values 1060ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/i18n.test.tsx > screens render under es > EntryScreen check-in labels localize by value; the saved payload keeps English wire values
+AssertionError: expected "vi.fn()" to be called at least once
+ ❯ tests/i18n.test.tsx:244:60
+    242|     await pressLabel(root, "Trabajo");
+    243|     await pressLabel(root, "Guardar entrada");
+    244|     await vi.waitFor(() => expect(vi.mocked(encryptEntry)).toHaveBeenC…
+       |                                                            ^
+    245|     const call = vi.mocked(encryptEntry).mock.calls[0]!;
+    246|     expect(call[5]).toBe(-1); // mood value, not a label
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  tests/screens/checklistLanguageNote.test.tsx > InsightsScreen language honesty note (checklist 8c) > renders the 'not yet supported' card when the engine reports language='other'
+AssertionError: expected 'beginProgressRead is not a function\n…' to contain 'About your journal\'s language'
+
+- Expected
++ Received
+
+- About your journal's language
++ beginProgressRead is not a function
++ Try again
++ Need help now? Crisis resources
+
+ ❯ tests/screens/checklistLanguageNote.test.tsx:60:18
+     58|     });
+     59|     const text = allText(root).join("\n");
+     60|     expect(text).toContain("About your journal's language");
+       |                  ^
+     61|     expect(text).toContain("Pattern analysis runs in English and Spani…
+     62|     // The rest of the insight phase still renders — no crash, no blan…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  tests/screens/entryScreen.test.tsx > EntryScreen save pipeline > reports a locked vault instead of crashing
+AssertionError: expected "vi.fn()" to be called with arguments: [ 'Could not save', …(2) ]
+
+Received:
+
+  1st vi.fn() call:
+
+  [
+    "Could not save",
+-   "vault is locked",
+-   ArrayContaining [
+-     ObjectContaining {
++   "Session damaged",
++   [
++     {
++       "onPress": [Function onPress],
+        "text": "OK",
+      },
+    ],
+  ]
+
+
+Number of calls: 1
+
+ ❯ tests/screens/entryScreen.test.tsx:600:25
+    598|     // re-acquired AFTER the user-id await, so the save dies loudly he…
+    599|     // instead of encrypting under the zeroized key.
+    600|     expect(Alert.alert).toHaveBeenCalledWith(
+       |                         ^
+    601|       "Could not save",
+    602|       "vault is locked",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  tests/screens/historyScreen.test.tsx > HistoryScreen edit (atomic replacement) > a locked vault mid-edit reports honestly instead of crashing
+AssertionError: expected 'Session damaged' to be 'vault is locked' // Object.is equality
+
+Expected: "vault is locked"
+Received: "Session damaged"
+
+ ❯ tests/screens/historyScreen.test.tsx:1037:28
+    1035|     await flush();
+    1036|     expect(lastAlert()[0]).toBe("Could not update");
+    1037|     expect(lastAlert()[1]).toBe("vault is locked");
+       |                            ^
+    1038|     vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(…
+    1039|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  4 failed | 100 passed | 1 skipped (105)
+      Tests  4 failed | 2215 passed | 1 skipped (2220)
+   Start at  11:36:35
+   Duration  4.41s (transform 7.95s, setup 2.96s, import 12.21s, tests 28.94s, environment 5ms)
+

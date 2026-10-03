@@ -19,7 +19,7 @@
  */
 import { buildAad } from "./crypto/aad";
 import { decrypt, encrypt, fromBase64, toBase64, zeroize, type Bytes } from "./crypto/core";
-import { kv } from "./kvstore";
+import { kv, StorageReadError, type WritePermit } from "./kvstore";
 import { vault } from "./vault";
 
 /** The six Stanley-Brown-inspired fields, in display order. All free
@@ -35,7 +35,7 @@ export interface SafetyPlan {
 
 /** Generous but bounded: a plan is a set of short lists in prose, not a
  *  second journal. */
-const FIELD_MAX = 4_000;
+export const FIELD_MAX = 4_000;
 
 export const EMPTY_SAFETY_PLAN: SafetyPlan = {
   warningSigns: "",
@@ -79,31 +79,32 @@ function parsePlan(raw: string | null): SafetyPlan | null {
  *  editor). Throws on a storage failure — the view surfaces it, the plan
  *  also stays on screen. */
 export async function saveSafetyPlan(dataKey: Bytes, userId: string, plan: SafetyPlan): Promise<void> {
-  if (safetyPlanIsEmpty(plan)) {
-    await clearSafetyPlan(userId);
-    return;
-  }
+  if (parsePlan(JSON.stringify(plan)) === null) throw new Error(`Each safety-plan field must be text of at most ${FIELD_MAX} characters.`);
+  const keyCopy=new Uint8Array(dataKey);
   const payload = new TextEncoder().encode(JSON.stringify(plan));
   try {
-    const blob = await encrypt(dataKey, payload, buildAad("safety-plan", userId));
-    await kv.setItem(key(userId), toBase64(blob));
+    const permit=await kv.captureWritePermit(userId,keyCopy);
+    if (safetyPlanIsEmpty(plan)) {await clearSafetyPlan(userId,permit);return;}
+    const blob = await encrypt(keyCopy, payload, buildAad("safety-plan", userId));
+    await kv.setItem(key(userId), toBase64(blob),permit);
   } finally {
-    zeroize(payload);
+    zeroize(payload,keyCopy);
   }
 }
 
-/** The sealed plan for this account, or null when absent, corrupt, or
- *  under the wrong key (account switch / rotation): the plan degrades to
- *  "start writing", never an error surface. Never throws. */
+/** Return null only for an absent record. Unreadable ciphertext is retained
+ *  and raises StorageReadError so hydration cannot replace it as empty. */
 export async function loadSafetyPlan(dataKey: Bytes, userId: string): Promise<SafetyPlan | null> {
   const raw = await kv.getItem(key(userId));
   if (!raw) return null;
   let plaintext: Bytes | null = null;
   try {
     plaintext = await decrypt(dataKey, fromBase64(raw), buildAad("safety-plan", userId));
-    return parsePlan(new TextDecoder().decode(plaintext));
-  } catch {
-    return null;
+    const plan = parsePlan(new TextDecoder().decode(plaintext));
+    if (!plan) throw new Error("Stored safety-plan shape is invalid.");
+    return plan;
+  } catch (cause) {
+    throw new StorageReadError("A saved safety plan could not be authenticated or restored. Retry with the correct account key before changing stored writing.", { cause });
   } finally {
     zeroize(plaintext);
   }
@@ -111,16 +112,16 @@ export async function loadSafetyPlan(dataKey: Bytes, userId: string): Promise<Sa
 
 /** The plan's custody ended: erased field-by-field, or the account is
  *  gone (deletion's per-account sweep). */
-export async function clearSafetyPlan(userId: string): Promise<void> {
-  await kv.removeItem(key(userId));
+export async function clearSafetyPlan(userId: string,permit?:WritePermit): Promise<void> {
+  await kv.removeItem(key(userId),permit);
 }
 
 /** Rotation parity with the B-7 rewrap family: re-seal an existing plan
  *  under the incoming key so it survives a v1 password change. A failure
- *  propagates so the rotation falls back to clearing. */
+ *  propagates without clearing the recoverable original. */
 /** Rotation parity with the B-7 rewrap family: re-seal an existing plan
  *  under the incoming key so it survives a v1 password change. A failure
- *  propagates so the rotation falls back to clearing. */
+ *  propagates without clearing the recoverable original. */
 export async function rewrapSafetyPlan(oldKey: Bytes, newKey: Bytes, userId: string): Promise<void> {
   const plan = await loadSafetyPlan(oldKey, userId);
   if (plan === null) return;

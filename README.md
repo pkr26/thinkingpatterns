@@ -11,6 +11,18 @@ reflective question a day.
 **No advice. No diagnosis. No therapy. Pattern observations only — and every
 observation shows you its evidence.**
 
+
+## Current audit and remediation
+
+The [October 3 audit](AUDIT_2026-10-03.md) found new data-integrity,
+recovery, native integration and delivery defects. The historical tests
+and campaigns below are scoped evidence; their results do not establish
+current release readiness, real-user benefit or device accessibility.
+[PLAN_TO_90_PLUS.md](PLAN_TO_90_PLUS.md) defines the implementation and
+independent validation gates. Implemented changes, current local checks and
+remaining release work are recorded in [REMEDIATION_STATUS.md](REMEDIATION_STATUS.md).
+Scores await independent reassessment and the required external evidence.
+
 ## What's in this repo
 
 | Path | What |
@@ -19,8 +31,8 @@ observation shows you its evidence.**
 | `CHANGELOG.md` | Release notes, plus the running log of the audit/remediation waves |
 | `backend/` | FastAPI service (Python 3.12+): entry sync, secure processing session, stateful deterministic "mini-brain" v3 (see below), 30-day threshold, daily questions |
 | `backend/tests/` | Unit + API integration + crypto vectors + production-hardening, adversarial red-team, and remediation-regression suites |
-| `backend/scripts/seed_demo.py` | Seed a demo account with 84 days of realistic journal + real computed insights (see "Demo") |
-| `backend/probe_brain.py` | Ground-truth probe: a planted-pattern corpus the brain must get right (9/9) with zero false associations |
+| `backend/scripts/seed_demo.py` | Seed a demo account with 84 days of synthetic journal + real computed insights (see "Demo") |
+| `backend/probe_brain.py` | Ground-truth probe: planted-pattern and noise corpora with explicit emitted verdicts |
 | `mobile/` | React Native (iOS/Android) client: encrypted journal with atomic entry edits, history search + mood calendar, one-tap mood check-in behind an optional details disclosure, reflective questions (auto-loaded, key-shipment still explicit), evidence-view pattern cards with per-pattern mute, one-time threshold-crossing notice, opt-in local daily reminders, optional biometric unlock (data key wrapped under Keychain biometry-current-set; password always remains), the on-device brain's graded sentiment engine (vector-pinned to the server's), optional PHQ-9 wellbeing measures shared with the therapist through the same consent, English/Spanish localization (device locale), crisis resources, therapist sharing, and scoped offline sync. Export is deliberately disabled pending a reviewed native streaming-to-file implementation. |
 | `web/` | Patient WEB client (React + Vite + WebCrypto, 2026-09-25): the mobile app's journaling experience in the browser — same zero-knowledge crypto (four-way vector-pinned), full multi-device peer of the mobile app (the S-contract in WEB_PLAN.md), strict memory-only session custody, offline ciphertext queue, explicit-only recompute, measures/sharing/settings parity, encrypted-bundle export. Served like the portal (own subdomain, same-origin /api) |
 | `portal/` | Therapist web portal (React + WebCrypto): patient list, pattern cards with "Why this?" evidence panels, per-pattern drill-down into the decrypted evidence entries, therapist-private encrypted notes (editable, searchable, templates), the "since your last review" delta anchored to an explicit Mark-reviewed action, printable session summaries, caseload triage scan, mood sparklines, 401-expiry + idle auto-lock — read-only by construction |
@@ -68,12 +80,14 @@ contract-gate extension, registered in
 Patterns carry a **lifecycle** (`candidate → emerging → confirmed → fading →
 archived`, 45-day evidence half-life). Statistical kinds (`temporal`,
 `mood_correlation`, `link`, `inertia`, `instability`, `mood_shift`) surface
-only after qualifying on **≥2 distinct recompute days that constitute an
-independent second observation** — evidence-date kinds need a qualification
+only after qualifying on **≥2 distinct recompute days** — evidence-date kinds need a qualification
 day contributing NEW evidence; window-stat kinds (computed on a sliding
 window — consecutive recomputes share ~179 of 180 days) need qualification
-days ≥2 calendar days apart. Consequence: re-running an
-unchanged corpus the next day surfaces nothing new. Direct-measurement
+days ≥2 calendar days apart. This is a repeated-qualification guard, not
+independent replication: overlapping windows reuse observations. It does
+not by itself establish a user-level false-discovery rate or clinical
+validity. Consequence: re-running an unchanged corpus the next day
+surfaces nothing new. Direct-measurement
 kinds (a literally repeated phrase, a persistent topic presence) report
 what is in the text and keep immediate surfacing. A **semantic flip**
 (dominant weekday, direction) retires the old pattern-id to fading and
@@ -603,15 +617,16 @@ selectable) as plain metadata (actor, action, target id, timestamp — no
 journal content). It does **not** reach: database backups/WAL (retain per
 your own policy and expire
 them), any reverse-proxy logs in front of the API (this image disables
-uvicorn access logs; configure your proxy likewise), or a third-party LLM
-provider's copies if a user consented to LLM analysis (provider retention
-is out of our hands — surface that in consent copy). The optional compose
+uvicorn access logs; configure your proxy likewise), or copies previously sent to a provider. Narration-only dispatch is now
+disabled; separately opted-in STT/translation and historic provider retention
+need the actual provider's deletion policy and consent disclosure. The optional compose
 backup service makes retention concrete: every dump taken before a deletion
 still holds that user's rows until it ages out, so `BACKUP_RETENTION_DAYS`
 (default 35) is the expiry you are promising users — keep it short, encrypt
 the dumps (they carry the full metadata set the live DB holds), and
 rehearse `pg_restore` before you need it. The export bundle
-includes `user_id` and `salt` so `mobile/tools/decrypt_export.mjs` can
+includes canonical `username`, `user_id`, `salt`, the v2 key envelope when
+applicable and recording metadata so `mobile/tools/decrypt_export.mjs` can
 turn it back into readable files offline.
 
 ## Scope decisions
@@ -628,48 +643,36 @@ turn it back into readable files offline.
   ever explicit: the Question screen's button opens the single-use
   processing session itself — no screen ships the data key automatically
   (the at-most-daily auto-refresh was removed after the red-team audit).
-- The default analyzer is **deterministic**; the LLM path is INVERTED
-  (2026-09-17): the model receives the brain's findings and may only
-  attach one sanitized narrative to them — label-restricted by
-  construction, it cannot mint claims that bypassed the statistics. It
-  remains consent-gated and threshold-gated; the HTTP seam (`_post`) is
-  monkeypatched in tests, and `backend/tests/test_llm.py` carries 34
-  tests over the sanitizer, narrative filters, and that seam's auth /
-  oversized-response / stream-deadline behavior. `app/services/llm.py`
-  is also inside mutation scope (pyproject.toml notes it is fully
-  unit-testable for exactly this reason).
+- The analyzer is **deterministic**. Production recompute no longer sends
+  journal text to a narration-only LLM provider or attaches provider-generated
+  narratives (October3 remediation). Historical narrative fields are ignored
+  by the mobile client. The bounded provider/sanitizer helpers remain tested,
+  but those unit tests are not evidence of clinically safe generated text.
+  Separately opted-in speech transcription/translation remains a distinct
+  provider path with its own disclosure, completeness and consent checks.
 - The enclave is an in-process seam (`app/security/enclave.py`); SGX/TEE
   attestation is deployment work, not application logic.
-- Single-process deployment: the rate counter, keystore, and token epochs
-  assume one worker per instance (scale horizontally behind a shared
-  counter when needed).
-- Password rotation shipped (2026-09-20): a leaked password or captured
-  data key is a recoverable event, not account recreation. The client
-  re-authenticates with the old password, then POST /api/v1/processing/rekey
-  re-encrypts every stored blob old data key → new as a **resumable
-  chunk-journaled run** (2026-09-26: a per-stage `rekey_journal` row
-  records stage + cursor; a run interrupted mid-corpus resumes
-  idempotently — rows already under the new key authenticate and are
-  skipped — and a wrong old key still aborts with `rekey_key_mismatch`
-  with nothing changed), each active therapist grant
-  is re-wrapped to the new key, and PUT /api/v1/account/credential
-  retires the old credential (the epoch bump kills every bearer). The
-  vault then re-locks and the biometric wrap resets — the next unlock
-  happens under the new password. A leaked token still dies at logout
-  (jti revocation for the one token; epoch bump for the account) or
-  expiry.
-- **Therapists have the same recovery path** (2026-09-21, audit C-2):
-  `PUT /api/v1/account/credential` accepts therapist tokens, and
-  `PUT /api/v1/therapist/wrap-key` (verifier-gated) replaces the sharing
-  keypair. Password change: re-wrap the wrap-key blob under the new
-  password-derived KEK via `/therapist/wrap-key` FIRST, then rotate the
-  credential. Wrap-key compromise: mint a fresh keypair — patients see
-  the new `therapist_wrap_pub_key` in `ConsentOut` and re-wrap through
-  the existing `PUT /consents/{id}/rewrap` without re-pairing; grants
-  not yet re-wrapped stay openable only with the OLD private key, which
-  the client keeps until every active grant has rotated (intentionally
-  lost after a compromise rotation — that is the point of retiring the
-  key). Rotations are audit-logged (`wrap_key_rotate`).
+- **Single active API process per database** is the supported deployment.
+  File and PostgreSQL advisory guards reject a second owner; loss of guard
+  ownership fails readiness and protected admission. Adding a shared rate
+  counter alone does not make keystore/custody/lifecycle behavior distributed.
+- **Patient key/password rotation** uses an exact saved UUID operation and
+  staged local ciphertext. `POST /api/v1/processing/rekey` rotates every
+  supported server ciphertext, credentials, optional v2 envelope, active
+  grant wraps and epoch in one resumable finalization. A lost response retries
+  the same body; a different generation fails closed. There is no subsequent
+  credential-only request. Fresh new-password login resumes verified local
+  replacements. An obsolete recovery kit is invalidated and must be replaced.
+  Password changes revoke previous account sessions; ordinary logout revokes
+  the presented bearer token.
+- **Clinician notes have independent key custody.** Password change atomically
+  commits the auth verifier, rewrapped sharing private key and encrypted notes
+  keyring under custody-version CAS. Historical note/revision keys remain
+  encrypted in that keyring. Separate sharing-identity replacement verifies
+  retained note custody and revokes grants encrypted to the retired public key;
+  patients approve sharing again. Identity replacement cannot retract copies
+  already decrypted by a recipient. Forgotten clinician passwords have no
+  automatic reset; second-factor backup codes do not recover note keys.
 - **Optional TOTP second factor for therapist accounts** (2026-09-21
   audit C-2, delivered 2026-09-22): RFC 6238 (SHA-1, 6 digits, 30 s ±1
   step drift — the authenticator-app contract). Enrollment is three
@@ -684,8 +687,9 @@ turn it back into readable files offline.
   rejects wrong/stale codes with `totp_code_invalid`; each accepted code
   is single-use (the consumed timestep is persisted as a replay fence —
   bounded multiworker race documented in SECURITY_RESIDUALS.md). A lost
-  authenticator is an operator action (clear `users.totp_*`), matching
-  the no-account-recovery design. Patients stay password-only by design;
+  authenticator can use a saved single-use factor recovery code; operator
+  intervention is a separate incident procedure. Those codes recover the
+  second factor, not a forgotten password or encryption key. Patients stay password-only by design;
   the mobile client has no TOTP surface.
 - Mobile native projects ship in-tree (`ios/`, `android/`, generated
   2026-09-21) with the hardening checklist applied — `FLAG_SECURE`,
@@ -726,16 +730,18 @@ names the finding it guards; the durable summary lives in CHANGELOG.md
 preserved in git history. The executable attack harnesses remain in
 `redteam/` (`bash redteam/run_all.sh`).
 
-A standing full-system E2E campaign extends that history: **the 1-year,
-13-user (10 typed + 3 voice), every-endpoint simulation**
-(`reports/simulation1y/`, 2026-09-29, **366/366 checks**) drives every
-mounted route over live HTTP with the real client crypto — a full
+A dated, scoped E2E campaign extends that history: **the 1-year,
+13-user (10 typed + 3 voice) simulation**
+(`reports/simulation1y/`, 2026-09-29, **366/366 checks**) drives the routes
+listed in its report over live HTTP with the real client crypto — a full
 simulated journaling year per persona (including a 365-day pure-noise
 control that surfaces zero statistical kinds and a spoken-year voice
 control), encrypted PHQ-9 measures, the therapist-sharing lifecycle end
 to end, key rotations/rekey/envelope-v2/TOTP, exports, deletion, and
-at-rest zero-knowledge probes of the raw database file and the audio
-object store. The voice users exercise the whole voice pipeline against
+sampled at-rest ciphertext checks and fixed plaintext probes of the raw
+database file and audio object store. Recovery, recovery-kit administration,
+clinician note rekey and note deletion routes added outside that run are
+not covered by its historical result. The voice users exercise the whole voice pipeline against
 in-process fake STT/LLM providers: consent walls (voice ≠ LLM
 translation consent — the H4 gate), 995 spoken takes transcribed,
 translated, and saved as payload-v3 entries, kept-recording
@@ -765,9 +771,9 @@ Facts an operator should know from that history:
 - Documented residuals (accepted with written rationale; the full
   register is `docs/SECURITY_RESIDUALS.md`, and the operator-facing
   statement lives in `docs/OPERATOR_PACK.md`): data-key escrow during
-  consented recomputes (recoverable via key rotation; the v2 envelope
-  makes the credential side O(1), the corpus rekey stays chunk-journaled
-  and resumable); the client KDF is PBKDF2-600k, not Argon2id — the
+  requested recomputes (future ciphertext can use a rotated key, but rotation
+  cannot retract disclosed keys or plaintext; the v2 envelope makes the
+  credential side O(1), while corpus rekey remains checkpointed); the client KDF is PBKDF2-600k, not Argon2id — the
   documented WebCrypto tradeoff, with the versioned `kdf_params` blob
   ready for a later client switch; the processing enclave is an
   in-process seam (no TEE attestation — deployment work); no TLS
@@ -776,14 +782,11 @@ Facts an operator should know from that history:
   Android ships system-CA-only trust, the iOS user-installed-CA residual
   stands); single-process deployment (in-process counters/keystore/
   locks); the access audit log outlives account deletion for the
-  configured 730-day window (defended in the DPIA); consented LLM
-  egress, when an operator enables it, is plaintext at the provider by
-  design; and the deploy/nginx **portal** vhost example still carries a
-  stale `style-src 'unsafe-inline'` header copy (the portal's own
-  shipped meta CSP has none, and browsers enforce both policies — the
-  intersection — so this is alignment debt in the example config, not a
-  live injection path; the web vhost and both client bundles ship
-  `'self'`-only, test-pinned). Previously listed and now FIXED: CSP
+  configured 730-day window (defended in the DPIA); historical provider
+  retention and separately opted-in voice/translation egress remain
+  provider/operator obligations. Narration-only journal dispatch is disabled.
+  Both deployment vhosts now align with the clients' self-only style policy
+  and blob audio permission. Previously listed and now FIXED: CSP
   `unsafe-inline` in the shipped clients, operator-tooling mutable
   image tags (every compose image is digest-pinned and CI-gated by
   `deploy/monitoring/verify.sh --production`), rekey as a single
@@ -792,8 +795,10 @@ Facts an operator should know from that history:
   `version_conflict`), unversioned measures corrections (DELETE
   correction path, verifier-gated, audit-logged), and the web client's
   plaintext draft-at-lock (now preserved as ciphertext;
-  mobile's draft stash remains memory-only plaintext surviving a lock —
-  account-bound and wiped at sign-out, a scoped residual that stands).
+  mobile typed drafts are also encrypted on-device for process restart;
+  its account/origin-bound RAM fallback can retain unsaved plaintext across
+  a lock and is wiped at sign-out. A compromised live app process can read
+  its editor state; an unsaved recording is outside the typed-draft backup).
 
 
 ## License

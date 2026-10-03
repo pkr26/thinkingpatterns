@@ -1,0 +1,2 @@
+import base from '/Users/pradeepreddy/Desktop/mental_health_application/mobile/vitest.config.ts';
+export default { ...base, root: '/var/folders/yy/8vxx571s72vbb5jg4zt6v2fm0000gn/T/mindpattern-native-rekey-h6fbzm96', test: { ...base.test, include: ["*.test.ts"], setupFiles: ['/Users/pradeepreddy/Desktop/mental_health_application/mobile/tests/helpers/i18nSetup.ts'], coverage: { enabled: false } } };

@@ -402,3 +402,4 @@ input[type="checkbox"] { accent-color: var(--primary-focus); width: 16px; height
  * owns everything the summary looks like on paper and re-shows the block
  * with !important under @media print. */
 .print-only { display: none; }
+.totp-qr { max-width: 100%; height: auto; }

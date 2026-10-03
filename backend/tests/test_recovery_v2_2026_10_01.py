@@ -141,9 +141,7 @@ class TestRecoveryV2:
         assert retry.status_code == 200, retry.text
         assert retry.json()["recovery_scheme"] == "v1"
 
-    async def test_v2_kit_rejects_a_v1_hint_with_the_negotiation_code(
-        self, client, recovery_key
-    ):
+    async def test_v2_kit_rejects_a_v1_hint_with_the_negotiation_code(self, client, recovery_key):
         emu = ClientEmulator("rec2-v1hint", "correct horse battery staple")
         await emu.register(client)
         await _setup_v2(client, emu, recovery_key)

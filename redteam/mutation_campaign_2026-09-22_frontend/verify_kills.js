@@ -1,64 +1,84 @@
 #!/usr/bin/env node
-// Compare two Stryker mutation.json runs over the same tree (before/after a
-// pin batch) and report, per file, which previously-surviving mutants died —
-// and which still survive. Mutant identity = (file, start line, start column,
-// mutator, replacement), stable across runs of the same tree.
-//
-// Usage: node verify_kills.js <baseline.json> <after.json> [--file <substr>]
+// Attribute pin-test kills only to matching mutants over identical source/scope.
+// Usage: node verify_kills.js BEFORE AFTER [--file SUBSTRING]
 import { readFileSync } from 'node:fs';
 
 const args = process.argv.slice(2);
-const [baselinePath, afterPath] = [args.shift(), args.shift()];
+const [baselinePath, afterPath] = args.splice(0, 2);
 let fileFilter = null;
-if (args[0] === '--file') fileFilter = args[1];
-
-const key = (rel, m) => `${rel}:${m.location.start.line}:${m.location.start.column}:${m.mutatorName}:${JSON.stringify(m.replacement ?? '')}`;
-
-const load = (path) => {
-  const r = JSON.parse(readFileSync(path, 'utf8'));
-  const map = new Map();
-  const perFile = new Map();
-  for (const [abs, f] of Object.entries(r.files ?? {})) {
-    const rel = abs.replace(/^.*\/(portal|mobile)\//, '$1/');
+if (args.length === 2 && args[0] === '--file' && args[1]) fileFilter = args[1];
+else if (args.length) {
+  console.error('usage: verify_kills.js BEFORE AFTER [--file SUBSTRING]');
+  process.exit(64);
+}
+const terminal = new Set(['Killed', 'Timeout', 'Survived', 'NoCoverage', 'CompileError', 'RuntimeError', 'Ignored']);
+const surviving = new Set(['Survived', 'NoCoverage']);
+const killed = new Set(['Killed', 'Timeout']);
+const relative = (path) => path.replaceAll('\\', '/').replace(/^.*\/(portal|mobile|web)\//, '$1/');
+function identity(rel, m) {
+  if (!m.location?.start || !m.location?.end || typeof m.mutatorName !== 'string') throw new Error(`invalid mutant identity in ${rel}`);
+  return JSON.stringify([rel, m.location.start, m.location.end, m.mutatorName, m.replacement ?? '']);
+}
+function load(path) {
+  const report = JSON.parse(readFileSync(path, 'utf8'));
+  if (!report.files || typeof report.files !== 'object') throw new Error(`missing file scope in ${path}`);
+  const mutants = new Map(), files = new Map();
+  for (const [name, file] of Object.entries(report.files)) {
+    const rel = relative(name);
     if (fileFilter && !rel.includes(fileFilter)) continue;
-    perFile.set(rel, { total: f.mutants.length, survived: 0, killed: 0 });
-    for (const m of f.mutants) {
-      if (m.status === 'Survived' || m.status === 'NoCoverage') {
-        map.set(key(rel, m), { rel, m });
-        perFile.get(rel).survived += 1;
-      } else if (m.status === 'Killed' || m.status === 'Timeout') {
-        perFile.get(rel).killed += 1;
-      }
+    if (files.has(rel) || typeof file.source !== 'string' || !Array.isArray(file.mutants)) throw new Error(`missing/ambiguous source or mutants: ${rel}`);
+    const counts = { total: 0, survived: 0, killed: 0, errors: 0, ignored: 0 };
+    files.set(rel, { source: file.source, counts });
+    for (const m of file.mutants) {
+      if (!terminal.has(m.status)) throw new Error(`incomplete mutant ${m.id} in ${rel}: ${m.status}`);
+      const key = identity(rel, m);
+      if (mutants.has(key)) throw new Error(`ambiguous duplicate mutant identity in ${rel}`);
+      mutants.set(key, { rel, m });
+      if (surviving.has(m.status)) counts.survived++;
+      else if (killed.has(m.status)) counts.killed++;
+      else if (m.status === 'Ignored') counts.ignored++;
+      else counts.errors++;
+      counts.total++;
     }
   }
-  return { map, perFile };
-};
-
-const before = load(baselinePath);
-const after = load(afterPath);
-
-let killedByPins = 0, stillAlive = 0, newSurvivors = 0;
-const stillByFile = new Map();
-for (const [k, entry] of before.map) {
-  if (after.map.has(k)) {
-    stillAlive += 1;
-    stillByFile.set(entry.rel, (stillByFile.get(entry.rel) ?? 0) + 1);
-  } else {
-    killedByPins += 1;
-  }
+  if (!files.size || !mutants.size) throw new Error('empty selected source/mutant scope');
+  return { mutants, files };
 }
-for (const k of after.map.keys()) if (!before.map.has(k)) newSurvivors += 1;
-
-console.log(`survivors before: ${before.map.size}`);
-console.log(`survivors after:  ${after.map.size}`);
-console.log(`killed by the pin batch: ${killedByPins}`);
-console.log(`still surviving:         ${stillAlive}`);
-console.log(`NEW survivors (regression or nondeterminism): ${newSurvivors}`);
-console.log('\nper-file scores after (killed/total, score) vs survivors before -> after:');
-const rels = [...new Set([...before.perFile.keys(), ...after.perFile.keys()])].sort();
-for (const rel of rels) {
-  const b = before.perFile.get(rel);
-  const a = after.perFile.get(rel);
-  const score = a && a.total ? ((a.killed / a.total) * 100).toFixed(1) : 'n/a';
-  console.log(`  ${rel}: ${score}% | survivors ${b?.survived ?? 0} -> ${a?.survived ?? 0}`);
+try {
+  if (!baselinePath || !afterPath) throw new Error('two report paths are required');
+  const before = load(baselinePath), after = load(afterPath);
+  if (before.files.size !== after.files.size || before.mutants.size !== after.mutants.size) throw new Error('source/mutant scope changed; kills cannot be attributed');
+  for (const [rel, file] of before.files) {
+    if (after.files.get(rel)?.source !== file.source) throw new Error(`source changed or missing: ${rel}`);
+  }
+  for (const key of before.mutants.keys()) if (!after.mutants.has(key)) throw new Error('mutant disappeared or changed identity; not a kill');
+  let killedByPins = 0, stillAlive = 0, newSurvivors = 0, unresolved = 0;
+  for (const [key, { m }] of before.mutants) {
+    const next = after.mutants.get(key).m;
+    if (surviving.has(m.status)) {
+      if (killed.has(next.status)) killedByPins++;
+      else if (surviving.has(next.status)) stillAlive++;
+      else unresolved++;
+    } else if (surviving.has(next.status)) newSurvivors++;
+    else if (killed.has(m.status) && !killed.has(next.status)) unresolved++;
+    if (next.status === 'RuntimeError' && !surviving.has(m.status) && !killed.has(m.status)) unresolved++;
+  }
+  const beforeSurvivors = [...before.files.values()].reduce((sum, f) => sum + f.counts.survived, 0);
+  const afterSurvivors = [...after.files.values()].reduce((sum, f) => sum + f.counts.survived, 0);
+  console.log(`survivors before: ${beforeSurvivors}`);
+  console.log(`survivors after:  ${afterSurvivors}`);
+  console.log(`killed by the pin batch: ${killedByPins}`);
+  console.log(`still surviving: ${stillAlive}`);
+  console.log(`unresolved mutants (errors/ignored or lost kills): ${unresolved}`);
+  console.log(`NEW survivors (regression or nondeterminism): ${newSurvivors}`);
+  for (const [rel, file] of [...after.files].sort(([a], [b]) => a.localeCompare(b))) {
+    const a = file.counts, b = before.files.get(rel).counts;
+    const scoreable = a.killed + a.survived;
+    console.log(`  ${rel}: ${scoreable ? (100 * a.killed / scoreable).toFixed(1) : 'n/a'}% | survivors ${b.survived} -> ${a.survived} | errors ${a.errors} | ignored ${a.ignored}`);
+  }
+  if (unresolved) process.exitCode = 2;
+  else if (newSurvivors) process.exitCode = 1;
+} catch (error) {
+  console.error(`invalid mutation comparison: ${error.message}`);
+  process.exitCode = 2;
 }

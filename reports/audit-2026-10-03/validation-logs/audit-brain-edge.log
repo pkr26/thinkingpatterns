@@ -1,0 +1,10 @@
+{"valid_entries": 40, "explicit_mood": false, "exception": "ZeroDivisionError", "message": "division by zero"}
+Traceback (most recent call last):
+  File "<stdin>", line 9, in <module>
+  File "/Users/pradeepreddy/Desktop/mental_health_application/backend/app/services/brain.py", line 5060, in update
+    _detect_themes(residual_per_entry, weekday_days, len(day_buckets), resid_lag1, language)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/pradeepreddy/Desktop/mental_health_application/backend/app/services/brain.py", line 3102, in _detect_themes
+    delta = sum(moods_without) / len(moods_without) - sum(moods_with) / len(moods_with)
+                                                      ~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~
+ZeroDivisionError: division by zero

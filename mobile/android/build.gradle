@@ -5,7 +5,7 @@ buildscript {
         compileSdkVersion = 37
         targetSdkVersion = 36
         ndkVersion = "27.1.12297006"
-        kotlinVersion = "2.2.0"
+        kotlinVersion = "2.2.21"
     }
     repositories {
         google()
@@ -19,3 +19,14 @@ buildscript {
 }
 
 apply plugin: "com.facebook.react.rootproject"
+
+// Expo LogBox declares BuildConfig fields but SDK 57 omits the explicit
+// feature flag required by AGP 9. Configure the library before its DSL
+// finalizes; the app's release/debug privacy configuration is unchanged.
+subprojects { module ->
+    if (module.name == "expo-log-box") {
+        module.plugins.withId("com.android.library") {
+            module.extensions.getByName("android").buildFeatures.buildConfig = true
+        }
+    }
+}

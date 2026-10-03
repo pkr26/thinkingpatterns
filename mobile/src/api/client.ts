@@ -9,6 +9,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { secureStore } from "../secureStore";
 import type { KdfParams } from "../crypto/keyEnvelope";
+import { changeLocalOrigin, changeLocalSessionOwner, advanceLocalWriteScope, localWriteScopeEpoch, assertLocalWritePermit, waitLocalWriteCommits, type LocalWritePermit } from "../localWriteGuard";
 
 /** Every endpoint is versioned under /api/v1. The server still mounts the
  *  legacy /api tree during the transition, but new clients speak v1 — the
@@ -49,6 +50,7 @@ const legacyEnvelopeKey = (username: string): string => `@mindpattern/keyenvelop
  *  legacy value is still SERVED (a read must never fail because a cleanup
  *  could not complete); the next read retries the migration. */
 async function readThroughMigrate(legacy: string, next: string): Promise<string | null> {
+  const epoch = localWriteScopeEpoch();
   let value: string | null = null;
   try {
     value = await AsyncStorage.getItem(next);
@@ -59,9 +61,14 @@ async function readThroughMigrate(legacy: string, next: string): Promise<string 
   try {
     const old = await AsyncStorage.getItem(legacy);
     if (old === null) return null;
-    await AsyncStorage.setItem(next, old);
-    await AsyncStorage.removeItem(legacy);
-    return old;
+    return await serializedCredentials(async () => {
+      assertCredentialEpoch(epoch);
+      const current = await AsyncStorage.getItem(next); assertCredentialEpoch(epoch);
+      if (current !== null) return current;
+      await AsyncStorage.setItem(next, old); assertCredentialEpoch(epoch);
+      await AsyncStorage.removeItem(legacy); assertCredentialEpoch(epoch);
+      return old;
+    });
   } catch {
     try {
       return await AsyncStorage.getItem(legacy);
@@ -96,7 +103,8 @@ declare const __DEV__: boolean;
  *  fails loudly (no such host) — the correct failure; the alternative this
  *  constant exists to end was a release build silently defaulting to a
  *  device-local dev server. */
-export const PRODUCTION_BASE_URL = "https://api.mindpattern.example";
+declare const __API_ORIGIN__: string | null;
+export const PRODUCTION_BASE_URL = typeof __API_ORIGIN__ === "string" ? __API_ORIGIN__ : "https://api.mindpattern.example";
 
 /** 2026-09-26 audit LOW: the default is selected by BUILD, not shipped
  *  once: dev builds keep the device-local loopback server, release builds
@@ -335,6 +343,25 @@ function isOriginBoundKey(key: string): boolean {
   );
 }
 
+// Credential slots and server selection share one physical transition queue.
+// New admission invalidates older work immediately; checks between native
+// commits prevent an old transition continuing after a newer one is queued.
+let credentialTransitions: Promise<unknown> = Promise.resolve();
+function serializedCredentials<T>(run: () => Promise<T>): Promise<T> {
+  const pending = credentialTransitions.then(run, run);
+  credentialTransitions = pending.catch(() => {}); return pending;
+}
+function assertCredentialEpoch(epoch: number): void {
+  if (epoch !== localWriteScopeEpoch()) throw new ApiError(0, "A newer account/server transition superseded this operation", "stale_operation");
+}
+async function currentCredentialCache<T>(operation: (check: () => void) => Promise<T>): Promise<T> {
+  const epoch = localWriteScopeEpoch();
+  return serializedCredentials(async () => {
+    const check = () => assertCredentialEpoch(epoch); check();
+    const result = await operation(check); check(); return result;
+  });
+}
+
 export async function setBaseUrl(url: string, opts: { allowInsecure?: boolean } = {}): Promise<string | null> {
   void opts;
   const parsed = parseServerUrl(url);
@@ -348,45 +375,60 @@ export async function setBaseUrl(url: string, opts: { allowInsecure?: boolean } 
     await AsyncStorage.setItem(INSECURE_OK_KEY, "0");
     return "This server uses plain HTTP. Use HTTPS for any server other than localhost or 127.0.0.1.";
   }
-  const previous = (await AsyncStorage.getItem(BASE_URL_KEY)) ?? DEFAULT_BASE_URL;
-  let originChanged = false;
-  try {
-    originChanged = (await originOf(previous)) !== (await originOf(parsed.url));
-  } catch {
-    // An old/corrupt setting is never a reason to retain a live credential.
-    originChanged = true;
-  }
-  if (originChanged) {
-    // IMPORTANT ORDERING: erase the old credential BEFORE persisting the new
-    // base URL. A request racing this function therefore either (a) reads the
-    // old URL and can only send its token to its old origin, or (b) reads the
-    // new URL after this wipe and has no token to attach. Persisting first was
-    // a real bearer-token exfiltration window.
-    await secureStore.removeItem(TOKEN_KEY);
-    await secureStore.removeItem(USER_ID_KEY);
-    await secureStore.removeItem(USERNAME_KEY);
+  let epoch = advanceLocalWriteScope();
+  await serializedCredentials(async () => {
+    assertCredentialEpoch(epoch);
+    const previous = (await AsyncStorage.getItem(BASE_URL_KEY)) ?? DEFAULT_BASE_URL;
+    assertCredentialEpoch(epoch);
+    let originChanged = false;
     try {
-      await onOriginChange?.();
+      originChanged = (await originOf(previous)) !== (await originOf(parsed.url));
     } catch {
-      // Credential erasure is complete even if a UI subscriber has already
-      // unmounted. Do not leave a half-switched origin because of that.
+      // An old/corrupt setting is never a reason to retain a live credential.
+      originChanged = true;
     }
-    // KDF salts, unlock proofs, recompute stamps, mood logs and queue
-    // quarantine data are equally origin-bound: one server's salt must
-    // never be used to derive keys against another server's account.
-    try {
-      const keys = await AsyncStorage.getAllKeys();
-      const stale = keys.filter(isOriginBoundKey);
-      // Stryker disable next-line ConditionalExpression,EqualityOperator: stale is always an array (Array#filter), and multiRemove([]) is a documented no-op — an always-taken branch is unobservable
-      if (stale.length > 0) await AsyncStorage.multiRemove(stale);
-    } catch {
-      // getAllKeys unavailable: the session wipe above is the critical part.
+    assertCredentialEpoch(epoch);
+    if (originChanged) {
+      changeLocalOrigin(); epoch = localWriteScopeEpoch();
+      await waitLocalWriteCommits();
+      // IMPORTANT ORDERING: erase the old credential BEFORE persisting the new
+      // base URL. A request racing this function therefore either (a) reads the
+      // old URL and can only send its token to its old origin, or (b) reads the
+      // new URL after this wipe and has no token to attach. Persisting first was
+      // a real bearer-token exfiltration window.
+      assertCredentialEpoch(epoch);
+      await secureStore.removeItem(TOKEN_KEY);
+      assertCredentialEpoch(epoch);
+      await secureStore.removeItem(USER_ID_KEY);
+      assertCredentialEpoch(epoch);
+      await secureStore.removeItem(USERNAME_KEY);
+      try {
+        await onOriginChange?.();
+      } catch {
+        // Credential erasure is complete even if a UI subscriber has already
+        // unmounted. Do not leave a half-switched origin because of that.
+      }
+      // KDF salts, unlock proofs, recompute stamps, mood logs and queue
+      // quarantine data are equally origin-bound: one server's salt must
+      // never be used to derive keys against another server's account.
+      try {
+        const keys = await AsyncStorage.getAllKeys();
+        const stale = keys.filter(isOriginBoundKey);
+        // Stryker disable next-line ConditionalExpression,EqualityOperator: stale is always an array (Array#filter), and multiRemove([]) is a documented no-op — an always-taken branch is unobservable
+        assertCredentialEpoch(epoch);
+        if (stale.length > 0) await AsyncStorage.multiRemove(stale);
+      } catch {
+        // getAllKeys unavailable: the session wipe above is the critical part.
+      }
     }
-  }
-  await AsyncStorage.setItem(BASE_URL_KEY, parsed.url);
-  // Remove a legacy consent value rather than carrying a cleartext exception
-  // forward into a later client version.
-  await AsyncStorage.setItem(INSECURE_OK_KEY, "0");
+    assertCredentialEpoch(epoch);
+    await AsyncStorage.setItem(BASE_URL_KEY, parsed.url);
+    // Remove a legacy consent value rather than carrying a cleartext exception
+    // forward into a later client version.
+    assertCredentialEpoch(epoch);
+    await AsyncStorage.setItem(INSECURE_OK_KEY, "0");
+    assertCredentialEpoch(epoch);
+  });
   return null; // null = saved
 }
 
@@ -591,6 +633,7 @@ export function setUnauthorizedHandler(handler: (() => void) | null): void {
 }
 
 interface RequestOptions {
+  localWritePermit?: LocalWritePermit;
   /** The request ships a credential that must never survive a redirect
    *  (verifier, data key). For these, an unverifiable final URL — some
    *  network stacks leave response.url empty — is treated as a redirect
@@ -634,7 +677,18 @@ async function request(
   extraHeaders: Record<string, string> = {},
   opts: RequestOptions = {},
 ): Promise<any> {
+  const ownershipEpoch = localWriteScopeEpoch();
+  let dispatched = false;
+  const assertOwnership = (): void => {
+    let stale = ownershipEpoch !== localWriteScopeEpoch();
+    if (opts.localWritePermit) {
+      try { assertLocalWritePermit(opts.localWritePermit); } catch { stale = true; }
+    }
+    if (stale) throw new ApiError(0, dispatched ? "The account or key generation changed. This request may already have committed; confirm its outcome before retrying." : "The account or key generation changed; no request was sent.", "stale_operation");
+  };
+  assertOwnership();
   const base = await getBaseUrl();
+  assertOwnership();
   // 2026-09-26 audit LOW: parse/validate FIRST. A corrupt persisted base URL
   // (restored backup, tampering) used to reach `new URL(base)` before this
   // graceful guard and escape as a raw TypeError — every caller branches on
@@ -658,6 +712,7 @@ async function request(
     throw new OriginPinnedError(opts.expectedOrigin, actualOrigin);
   }
   const token = opts.noBearer ? null : await secureStore.getItem(TOKEN_KEY);
+  assertOwnership();
   const headers: Record<string, string> = { "Content-Type": "application/json", ...extraHeaders };
   if (token) headers.Authorization = `Bearer ${token}`;
   const controller = new AbortController();
@@ -676,6 +731,8 @@ async function request(
   // in docs/SECURITY_RESIDUALS.md ("Mobile transport residuals") together
   // with the native-pin design for when a native CI build exists.
   try {
+    assertOwnership();
+    dispatched = true;
     response = await fetch(`${base}${path}`, {
       method,
       headers,
@@ -697,6 +754,7 @@ async function request(
   } finally {
     clearTimeout(timer);
   }
+  assertOwnership();
   // RN's fetch follows redirects transparently and re-sends the headers: a
   // hostile server can bounce a request to another origin. The leak happens
   // on the first hop and cannot be undone — but refusing the response
@@ -719,6 +777,7 @@ async function request(
       throw new ApiError(0, "server redirected the request off the configured origin — check your server URL");
     }
   }
+  assertOwnership();
   if (response.status === 204) return opts.includeResponse ? { data: null, response } : null;
   // BODY-READ TIMEOUT (audit 2026-09-28): the headers-phase timer above is
   // cleared the moment fetch() resolves — i.e. when the response HEADERS
@@ -739,6 +798,7 @@ async function request(
   } finally {
     clearTimeout(bodyTimer);
   }
+  assertOwnership();
   if (!response.ok) {
     // Audit 2026-09-25: a 410 only means account death when the server says
     // so in its code (account_deleted/gone, exactly the web client's gate).
@@ -784,7 +844,7 @@ export class ApiError extends Error {
     public status: number,
     message: string,
     /** Machine-readable v1 error code; undefined on legacy servers. */
-    public code?: ApiErrorCode,
+    public code?: ApiErrorCode | "stale_operation",
     /** Server-advised retry delay (429/503 Retry-After), clamped; else absent. */
     public retryAfterMs?: number,
   ) {
@@ -943,7 +1003,7 @@ function pageRevision(collection: "entry" | "measure", header: string | null): E
 }
 
 export const api = {
-  setSession: async (token: string, userId: string, username?: string) => {
+  setSession: async (token: string, userId: string, username?: string, options: { stillCurrent?: () => boolean } = {}) => {
     // L-7 (2026-09-20): a server-controlled account id becomes the vault's
     // owner binding and the AAD owner part of every stored blob — only the
     // backend's exact id shape may be adopted. A mismatched shape is a
@@ -952,19 +1012,48 @@ export const api = {
     if (!USER_ID_PATTERN.test(userId)) {
       throw new ApiError(0, "the server returned an invalid account id — refusing to trust this server");
     }
-    // All three values are session material and live encrypted at rest
-    // (see secureStore): a device backup must not contain a usable token.
-    await secureStore.setItem(TOKEN_KEY, token);
-    await secureStore.setItem(USER_ID_KEY, userId);
-    if (username !== undefined) await secureStore.setItem(USERNAME_KEY, username);
-    // M-3: pin the origin on first successful authentication. Later logins
-    // at a different origin render the warning (see originPinStatus).
-    try {
-      const pinned = await secureStore.getItem(PINNED_ORIGIN_KEY);
-      if (pinned === null) await secureStore.setItem(PINNED_ORIGIN_KEY, canonicalOrigin(await originOf(await getBaseUrl())));
-    } catch {
-      // best effort: the warning surface degrades to "unpinned" silently
-    }
+    if (options.stillCurrent?.() === false) throw new ApiError(0, "This authentication attempt was retired", "stale_operation");
+    changeLocalSessionOwner(userId);
+    const epoch = localWriteScopeEpoch();
+    const check = () => {
+      assertCredentialEpoch(epoch);
+      if (options.stillCurrent?.() === false) throw new ApiError(0, "This authentication attempt was retired", "stale_operation");
+    };
+    return serializedCredentials(async () => {
+      try {
+        check();
+        await waitLocalWriteCommits();
+        // All three values are session material and live encrypted at rest
+        // (see secureStore): a device backup must not contain a usable token.
+        check();
+        await secureStore.setItem(TOKEN_KEY, token);
+        check();
+        await secureStore.setItem(USER_ID_KEY, userId);
+        check();
+        if (username !== undefined) await secureStore.setItem(USERNAME_KEY, username);
+        // M-3: pin the origin on first successful authentication. Later logins
+        // at a different origin render the warning (see originPinStatus).
+        try {
+          const pinned = await secureStore.getItem(PINNED_ORIGIN_KEY);
+          const origin = canonicalOrigin(await originOf(await getBaseUrl()));
+          check();
+          if (pinned === null) await secureStore.setItem(PINNED_ORIGIN_KEY, origin);
+        } catch {
+          // best effort: the warning surface degrades to "unpinned" silently
+        }
+        check();
+      } catch (err) {
+        // A caller retired without a replacement transition must not leave a
+        // partially published bearer. A newer transition owns its own wipe.
+        if (epoch === localWriteScopeEpoch() && options.stillCurrent?.() === false) {
+          for (const key of [TOKEN_KEY, USER_ID_KEY, USERNAME_KEY]) {
+            if (epoch !== localWriteScopeEpoch()) break;
+            await secureStore.removeItem(key);
+          }
+        }
+        throw err;
+      }
+    });
   },
   /** M-3: the first origin this device ever authenticated against (null
    *  before the first login, or if the pin could not be stored). */
@@ -992,9 +1081,16 @@ export const api = {
   getUserId: async () => secureStore.getItem(USER_ID_KEY),
   getUsername: async () => secureStore.getItem(USERNAME_KEY),
   clearSession: async () => {
-    await secureStore.removeItem(TOKEN_KEY);
-    await secureStore.removeItem(USER_ID_KEY);
-    await secureStore.removeItem(USERNAME_KEY);
+    changeLocalSessionOwner(null);
+    const epoch = localWriteScopeEpoch();
+    return serializedCredentials(async () => {
+      assertCredentialEpoch(epoch);
+      await waitLocalWriteCommits();
+      assertCredentialEpoch(epoch); await secureStore.removeItem(TOKEN_KEY);
+      assertCredentialEpoch(epoch); await secureStore.removeItem(USER_ID_KEY);
+      assertCredentialEpoch(epoch); await secureStore.removeItem(USERNAME_KEY);
+      assertCredentialEpoch(epoch);
+    });
   },
   isLoggedIn: async () => (await secureStore.getItem(TOKEN_KEY)) !== null,
 
@@ -1038,12 +1134,15 @@ export const api = {
     // Bind the salt to the origin it was served from: an offline unlock
     // under server B must never derive keys with server A's salt.
     // v1 envelope: pre-v1 records were a bare { o, s } — see getCachedSalt.
-    const record = JSON.stringify({ v: 1, o: await getBaseUrl(), s: saltB64 });
-    await AsyncStorage.setItem(saltKey(username), record);
+    return currentCredentialCache(async check => {
+      const origin = await getBaseUrl(); check();
+      await AsyncStorage.setItem(saltKey(username), JSON.stringify({ v: 1, o: origin, s: saltB64 }));
+    });
   },
   /** The last server-known salt for this username FROM THE CURRENT SERVER,
    *  or null. Enables offline vault unlock without cross-origin replay. */
   getCachedSalt: async (username: string) => {
+    const epoch = localWriteScopeEpoch();
     const raw = await readThroughMigrate(legacySaltKey(username), saltKey(username));
     // Stryker disable next-line ConditionalExpression: with the guard skipped, JSON.parse of a falsy raw ("" / null) throws or yields null inside the try below, and the catch returns the same null
     if (!raw) return null;
@@ -1060,9 +1159,11 @@ export const api = {
         // Read-through migration (same idiom as the mood log): refresh the
         // record to the v1 envelope so the legacy window stays bounded. A
         // failed rewrite never fails the read.
-        await AsyncStorage.setItem(saltKey(username), JSON.stringify({ v: 1, o: parsed.o, s: parsed.s })).catch(
-          () => {},
-        );
+        await serializedCredentials(async () => {
+          assertCredentialEpoch(epoch);
+          await AsyncStorage.setItem(saltKey(username), JSON.stringify({ v: 1, o: parsed.o, s: parsed.s }));
+          assertCredentialEpoch(epoch);
+        }).catch(() => {});
       }
       return parsed.s;
     } catch {
@@ -1072,8 +1173,10 @@ export const api = {
   clearCachedSalt: async (username: string) => {
     // Both forms: a clear must be complete whether or not a read ever got
     // to migrate the legacy key across (audit 2026-09-28).
-    await AsyncStorage.removeItem(saltKey(username));
-    await AsyncStorage.removeItem(legacySaltKey(username));
+    return currentCredentialCache(async check => {
+      await AsyncStorage.removeItem(saltKey(username)); check();
+      await AsyncStorage.removeItem(legacySaltKey(username));
+    });
   },
   /** v2 key-envelope cache (2026-09-26): the last server-known envelope for
    *  this username FROM THE CURRENT SERVER. The wrapped data key is
@@ -1084,10 +1187,10 @@ export const api = {
    *  bound like the salt cache; the record carries the scheme so an
    *  offline unlock also knows a v1 account when it sees one. */
   cacheKeyEnvelope: async (username: string, record: KeyEnvelopeCacheRecord) => {
-    await AsyncStorage.setItem(
-      envelopeKey(username),
-      JSON.stringify({ v: 1, o: await getBaseUrl(), ...record }),
-    );
+    return currentCredentialCache(async check => {
+      const origin = await getBaseUrl(); check();
+      await AsyncStorage.setItem(envelopeKey(username), JSON.stringify({ v: 1, o: origin, ...record }));
+    });
   },
   getCachedKeyEnvelope: async (username: string): Promise<KeyEnvelopeCacheRecord | null> => {
     const raw = await readThroughMigrate(legacyEnvelopeKey(username), envelopeKey(username));
@@ -1113,8 +1216,10 @@ export const api = {
   },
   clearCachedKeyEnvelope: async (username: string) => {
     // Both forms (same completeness constraint as clearCachedSalt).
-    await AsyncStorage.removeItem(envelopeKey(username));
-    await AsyncStorage.removeItem(legacyEnvelopeKey(username));
+    return currentCredentialCache(async check => {
+      await AsyncStorage.removeItem(envelopeKey(username)); check();
+      await AsyncStorage.removeItem(legacyEnvelopeKey(username));
+    });
   },
   login: (username: string, authKeyB64: string) =>
     // noBearer: a login 401 means the VERIFIER was wrong (wrong password),
@@ -1196,19 +1301,20 @@ export const api = {
    *  is the point (credential rotation, password change, deletion). */
   logout: () => request("POST", `${API_PREFIX}/auth/logout`),
 
-  createEntry: (clientEntryId: string, blobB64: string, entryDate: string, contentVersion?: number) =>
+  createEntry: (clientEntryId: string, blobB64: string, entryDate: string, contentVersion?: number, localWritePermit?: LocalWritePermit) =>
     request("POST", `${API_PREFIX}/entries`, {
       client_entry_id: clientEntryId,
       blob: blobB64,
       entry_date: entryDate,
       ...(contentVersion !== undefined ? { content_version: contentVersion } : {}),
-    }),
+    }, {}, { localWritePermit }),
   /** MBC measures (2026-09-19): opaque encrypted questionnaire records. */
-  createMeasure: (clientMeasureId: string, blobB64: string, measureDate: string) =>
+  createMeasure: (clientMeasureId: string, blobB64: string, measureDate: string, localWritePermit?: LocalWritePermit) =>
     request(
       "POST",
       `${API_PREFIX}/measures`,
       { client_measure_id: clientMeasureId, blob: blobB64, measure_date: measureDate },
+      {}, { localWritePermit },
     ),
   /** One bounded ciphertext page of the patient's own measures, newest
    *  first (the server orders by (measure_date, received_at, id) DESC — a
@@ -1359,7 +1465,7 @@ export const api = {
    *  contentVersion (M-2): the version bound into the replacement blob's
    *  v2 AAD — must be stored+1; a 409 version_conflict means another device
    *  edited first (refetch, re-encrypt, retry). */
-  updateEntry: async (clientEntryId: string, blobB64: string, entryDate: string, contentVersion?: number) => {
+  updateEntry: async (clientEntryId: string, blobB64: string, entryDate: string, contentVersion?: number, localWritePermit?: LocalWritePermit) => {
     if (!ENTRY_ID_PATTERN.test(clientEntryId)) {
       throw new ApiError(0, "invalid entry id — refusing the request");
     }
@@ -1371,6 +1477,7 @@ export const api = {
         entry_date: entryDate,
         ...(contentVersion !== undefined ? { content_version: contentVersion } : {}),
       },
+      {}, { localWritePermit },
     );
   },
   /** One bounded ciphertext page. Screens use this rather than materializing
@@ -1644,11 +1751,11 @@ export const api = {
   /** Server-side re-encryption of every stored blob under a new data key.
    *  Both keys arrive as single-use processing-session tokens; the OLD
    *  password proof gates the operation. All-or-nothing. */
-  rekeyStoredData: (oldProcessingToken: string, newProcessingToken: string, verifierB64: string) =>
+  rekeyStoredData: (oldProcessingToken: string, newProcessingToken: string, verifierB64: string, credential: { operation_id: string; new_salt: string; new_verifier: string; consent_wraps: Array<{ consent_id: string; therapist_wrap_pub_key: string; ephemeral_pub: string; wrapped_key: string }> }) =>
     request(
       "POST",
       `${API_PREFIX}/processing/rekey`,
-      undefined,
+      credential,
       {
         "X-Processing-Token": oldProcessingToken,
         "X-New-Processing-Token": newProcessingToken,

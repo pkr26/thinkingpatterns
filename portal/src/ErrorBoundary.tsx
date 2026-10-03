@@ -14,7 +14,7 @@ import { Button, Card } from "./ui";
 
 const CRASH_TITLE = "Something went wrong";
 const CRASH_BODY =
-  "The portal hit an unexpected error. Nothing was lost — signed-out data stays locked. Reloading usually fixes it.";
+  "The portal hit an unexpected error. Saved records stay encrypted. Unsaved edits may not have finished saving; retry this view before reloading.";
 
 interface BoundaryState {
   failed: boolean;

@@ -1,0 +1,77 @@
+[
+  {
+    "id": "G1.backup-profile-config",
+    "status": "BLOCKED",
+    "summary": "compose backup profile: pg_dump=True, 35-day retention=yes, AES-256-CBC/PBKDF2-600k dump encryption with the key REQUIRED via the mounted secret file (env-fallback line=True, BACKUP_KEY_FILE mount=True, secrets: entry=True, shared helper=True, -iter pin=True) \u2014 a stolen backup volume is ciphertext at rest and a missing key refuses the dump outright. Residual by design: dumps taken before a deletion still hold the user's rows until retention expires; the README states this as the deletion-and-retention scope"
+  },
+  {
+    "id": "G1.dump-contents",
+    "status": "INFO",
+    "summary": "what a dump carries (same columns): 0 usernames, 0 entries, 0 distinct dates, blob sizes (None, None, None) \u2014 with the 2026-09-16 fix this metadata is only readable by a BACKUP_KEY holder (AES-256-CBC at rest); the residual is the retention-vs-deletion window, not plaintext-on-disk"
+  },
+  {
+    "id": "G2.pip-audit",
+    "status": "BLOCKED",
+    "summary": "pip-audit on requirements.lock.txt: rc=0, vulnerability lines=0 []"
+  },
+  {
+    "id": "G2.npm-audit",
+    "status": "FINDING",
+    "summary": "npm audit (mobile): {'info': 0, 'low': 0, 'moderate': 0, 'high': 28, 'critical': 0, 'total': 28}; registry findings remain visible. The pinned postinstall patches and verify_dependency_patches.mjs exercise the two remaining unpublished advisory mitigations; registry metadata does not certify those source patches."
+  },
+  {
+    "id": "G2.lockfile-hashes",
+    "status": "BLOCKED",
+    "summary": "requirements.lock.txt: 990/1029 requirement lines carry --hash pins; Docker installs with --no-deps"
+  },
+  {
+    "id": "G2.actions-pinning",
+    "status": "BLOCKED",
+    "summary": "GitHub Actions refs: 31 uses, unpinned/floating: []"
+  },
+  {
+    "id": "G2.mutation-gate",
+    "status": "INFO",
+    "summary": "mutation workflow: survivors do not fail the run (True) \u2014 quality signal only, documented"
+  },
+  {
+    "id": "G3.prod-default-secret",
+    "status": "BLOCKED",
+    "summary": "env=production refused boot (fail-closed RuntimeError), expected=refusal"
+  },
+  {
+    "id": "G3.prod-short-secret",
+    "status": "BLOCKED",
+    "summary": "env=production refused boot (fail-closed RuntimeError), expected=refusal"
+  },
+  {
+    "id": "G3.prod-sqlite",
+    "status": "BLOCKED",
+    "summary": "env=production refused boot (fail-closed RuntimeError), expected=refusal"
+  },
+  {
+    "id": "G3.prod-http-llm-url",
+    "status": "BLOCKED",
+    "summary": "env=production refused boot (fail-closed RuntimeError), expected=refusal"
+  },
+  {
+    "id": "G3.typo-env-fails-closed",
+    "status": "BLOCKED",
+    "summary": "env=staging  refused boot (fail-closed RuntimeError), expected=refusal"
+  },
+  {
+    "id": "G3.staging-valid-boots-under-prod-gates",
+    "status": "BLOCKED",
+    "summary": "env=staging booted, expected=boot"
+  },
+  {
+    "id": "G3.tracked-secrets",
+    "status": "BLOCKED",
+    "summary": "git-tracked secret/db/keystore files: none (+ 1 reviewed RN template shim) (781 files tracked)"
+  },
+  {
+    "id": "G3.dockerignore-db",
+    "status": "BLOCKED",
+    "summary": "backend/.dockerignore excludes dev DBs: True (mindpattern.db exists on disk in backend/ and must never enter the image)"
+  }
+]

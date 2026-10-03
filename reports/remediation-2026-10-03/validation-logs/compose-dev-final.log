@@ -1,0 +1,2 @@
+error while interpolating services.api.image: required variable MINDPATTERN_API_IMAGE is missing a value: set MINDPATTERN_API_IMAGE to the API @sha256 reference from the release env asset
+error while interpolating services.backup.image: required variable MINDPATTERN_BACKUP_IMAGE is missing a value: set MINDPATTERN_BACKUP_IMAGE to the backup @sha256 reference from the release env asset

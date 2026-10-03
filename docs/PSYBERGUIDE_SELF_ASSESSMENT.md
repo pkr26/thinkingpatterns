@@ -2,8 +2,10 @@
 
 PsyberGuide's three criteria: **credibility, user experience, data
 security** (expert scores do not track star ratings — Neary et al. 2021:
-161 reviewed apps averaged 2.51/5 on credibility). This document is the
-submission-ready self-assessment; every claim is testable in this repo.
+161 reviewed apps averaged 2.51/5 on credibility). This document is a
+working self-assessment, not an independent PsyberGuide review. Real-device,
+usability and clinical evaluation remain separate evidence requirements;
+see the October 3 audit and remediation plan at the project root.
 
 ## Credibility
 
@@ -19,15 +21,20 @@ submission-ready self-assessment; every claim is testable in this repo.
   Konjarski et al. 2018 systematic review; EWMA charts per Snippe et
   al. 2023 with the Smit/Schat/Ceulemans 2023 methods tutorial, control
   limit Monte-Carlo-calibrated to a ≤5% false-alarm probability;
-  rumination clustering per Ehring & Watkins 2008...).
+  rumination clustering per Ehring & Watkins 2008...). These references
+  motivate methods; they do not validate this app. True-parameter chart
+  calibration is distinct from the deployed estimated-parameter detector.
+  The October 3 detector-only diagnostic observed nominal p≤.05 rates
+  from 0.4% to 6.7% across nine specified AR(1) cells (1,000 runs each),
+  so a universal ≤5% guarantee is unsupported.
 - **Honest statistics**: Benjamini–Hochberg correction across every
   simultaneous claim, replication gating, effect-size floors, and a
-  ground-truth probe (9/9) — all CI-gated. A 60-day noise-control
-  simulation (zero false cards) exists as a reproducible manual report
-  (`reports/simulation60/`, deterministic seed); CI does not run the
-  60-day replay itself — it pins the smaller statistical regressions
-  (false-alarm-rate sims, noise-corpus tests) that guard the same
-  guarantees per-change.
+  ground-truth probe — CI-gated implementation checks. The historical
+  60-day noise-control report (`reports/simulation60/`) uses a deterministic
+  seed but its original results have not been re-established for the current
+  engine. CI does not run that full replay. Smaller detector/noise regressions
+  do not establish end-to-end user-level false-discovery control, independent
+  replication on overlapping windows or clinical benefit.
 
 ## User experience
 

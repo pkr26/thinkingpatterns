@@ -13,13 +13,30 @@ With the backup profile running, verify and inspect a dump in the worker:
 ```bash
 docker compose --profile backups exec backup sh -ceu '
   set -- /backups/mindpattern-*.dump.enc
-  mindpattern-backup-mac verify "$1"
-  openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass env:BACKUP_KEY -in "$1" | pg_restore --list
+  set -o pipefail
+  mindpattern-backup-mac decrypt "$1" | pg_restore --list
 '
 ```
 
-Use the same pipeline to restore only after verification. A missing or
-mismatched `.hmac` is a hard stop. To exercise a full restore into a
+The decrypt command verifies the HMAC before emitting any plaintext. It
+copies ciphertext into an owner-only, automatically deleted disk snapshot,
+then authenticates and decrypts those exact bytes even if the original is
+changed concurrently. Reserve scratch space equal to the encrypted dump in
+the backup directory; for a read-only source, set `BACKUP_SNAPSHOT_DIR` to a
+writable directory with sufficient disk space. Plaintext is streamed only.
+It uses
+one resolver for encryption, authentication and decryption: a nonempty
+`BACKUP_KEY` takes precedence; otherwise `BACKUP_KEY_FILE` is read and trimmed.
+Use one source per deployment where possible. Keys must be a single line of at
+most 256 UTF-8 bytes (the cap avoids OpenSSL passphrase truncation); the
+helper rejects embedded newlines/NUL and passes the secret to OpenSSL by file
+descriptor, never as a process argument. Use the same pipeline to restore. A missing or
+mismatched `.hmac` is a hard stop. The worker uses `encrypt CIPHERTEXT SIDECAR`
+to encrypt and authenticate with one resolved key even during secret-file
+rotation. Publish the ciphertext and sidecar only after that command succeeds.
+Keep retired backup keys securely available until all backups using them
+expire; replacing a mounted key does not re-encrypt existing backups.
+To exercise a full restore into a
 throwaway same-major Postgres container and compare live row counts, run:
 
 ```bash

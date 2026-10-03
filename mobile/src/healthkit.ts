@@ -30,7 +30,7 @@
  *    which can only fail honestly.
  *  - saveStateOfMind(sample): persists one record
  *    { kind, valence, date } where kind is one of the five labels below,
- *    valence is HealthKit's DISCRETE -2..2 classification, and date is an
+ *    valence is HealthKit's continuous [-1,1] value, and date is an
  *    ISO-8601 local calendar day.
  *  - A linked module that lacks saveStateOfMind (pre-iOS-18 State of Mind
  *    support) reads as unavailable with its own reason, not as broken.
@@ -93,9 +93,8 @@ async function probeAsync(moduleName: string): Promise<unknown | null> {
 }
 
 /** The five HKStateOfMind valence classifications, most unpleasant first.
- *  HealthKit's valence is a DISCRETE -2..2 classification; Fathom's
- *  check-in scale is CONTINUOUS [-1, 1] (src/mood.ts), so the mirror
- *  quantizes before writing. */
+ *  Fathom's continuous [-1,1] check-in value remains continuous in the
+ *  native sample; this label is the UI's coarser five-level description. */
 export type StateOfMindKind =
   | "very_unpleasant"
   | "unpleasant"
@@ -219,23 +218,28 @@ export async function ensureStateOfMindWriteAccess(): Promise<boolean> {
 
 /**
  * Write one mood check-in to the Health app as an HKStateOfMind sample.
- * The continuous [-1, 1] valence is quantized to HealthKit's discrete
- * classification (stateOfMindKind) before anything crosses the bridge.
+ * The continuous [-1,1] valence stays continuous across the bridge; the
+ * kind label provides the UI's coarser description.
  * Returns false — never throws — when the module is absent (this build),
  * the valence is not a finite number, write access is denied, or the
  * native call fails. The caller (the entry save path) treats false as
  * "nothing was mirrored this time" and never alarms the user.
  */
-export async function writeStateOfMind(valence: number, dateISO: string): Promise<boolean> {
+export async function writeStateOfMind(valence: number, dateISO: string, ownsWrite: () => boolean = () => true, recheckOptIn?: () => Promise<boolean>): Promise<boolean> {
   const kind = stateOfMindKind(valence);
   if (kind === null) return false;
   const api = healthFrom(await probeAsync(HEALTH_MODULE));
   if (api === null) return false;
   try {
+    if (!ownsWrite()) return false;
     if (!(await writeAccessGranted(api))) return false;
+    if (recheckOptIn && !(await recheckOptIn())) return false;
+    // Check synchronously at the native dispatch boundary too: account or
+    // preference ownership may change in any preceding native await.
+    if (!ownsWrite()) return false;
     const saved = await api.saveStateOfMind({
       kind,
-      valence: KINDS.indexOf(kind) - 2,
+      valence: Math.max(-1, Math.min(1, valence)),
       date: dateISO,
     });
     return saved !== false;
@@ -256,6 +260,9 @@ interface MirrorPrefs {
 const DEFAULT_MIRROR_PREFS: Readonly<MirrorPrefs> = { enabled: false };
 
 const key = (userId: string): string => `@mindpattern/mirror_mood_to_health_${userId}`;
+const preferenceGeneration = new Map<string, number>();
+const preferenceRevision = (userId: string) => preferenceGeneration.get(userId) ?? 0;
+function invalidatePreference(userId: string): void { preferenceGeneration.set(userId, preferenceRevision(userId) + 1); }
 
 /** Full validation of anything read back from storage. null = not a
  *  usable record (absent, unparsable, or hostile). */
@@ -291,11 +298,13 @@ async function writePrefs(userId: string, prefs: MirrorPrefs): Promise<void> {
 /** Flip the opt-in. Throwing surfaces to the caller as an honest failure —
  *  the UI never pretends a preference was saved when it was not. */
 export async function setMoodMirrorPref(userId: string, enabled: boolean): Promise<void> {
+  invalidatePreference(userId);
   await writePrefs(userId, { enabled });
 }
 
 /** Account-deletion hygiene: the preference must not outlive its account. */
 export async function clearMoodMirrorPref(userId: string): Promise<void> {
+  invalidatePreference(userId);
   await AsyncStorage.removeItem(key(userId));
 }
 
@@ -304,10 +313,21 @@ export async function clearMoodMirrorPref(userId: string): Promise<void> {
  * mood check-in when (and only when) the per-account preference is on.
  * Returns false — never throws — on every skip and every failure, so the
  * entry save can invoke it without awaiting and swallow the result. The
- * vault-locked guard is the caller's (EntryScreen holds the vault), not
- * this module's: healthkit.ts deliberately knows nothing about app state.
+ * ownership guard is supplied by the caller, which owns the account and
+ * vault; this module rechecks it after native awaits and at dispatch.
  */
-export async function mirrorMoodCheckIn(userId: string, valence: number, dateISO: string): Promise<boolean> {
-  if (!(await getMoodMirrorPref(userId))) return false;
-  return writeStateOfMind(valence, dateISO);
+export async function mirrorMoodCheckIn(userId: string, valence: number, dateISO: string, ownsAccount: () => boolean = () => true): Promise<boolean> {
+  try {
+    let checkedRevision = preferenceRevision(userId);
+    const ownsWrite = () => ownsAccount() && checkedRevision === preferenceRevision(userId);
+    const recheckOptIn = async () => {
+      if (!ownsAccount()) return false;
+      const revision = preferenceRevision(userId);
+      const enabled = await getMoodMirrorPref(userId);
+      checkedRevision = revision;
+      return enabled && ownsWrite();
+    };
+    if (!(await recheckOptIn())) return false;
+    return await writeStateOfMind(valence, dateISO, ownsWrite, recheckOptIn);
+  } catch { return false; }
 }

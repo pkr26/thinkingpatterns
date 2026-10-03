@@ -29,6 +29,7 @@ import { deriveMasterKeyAsync, zeroize } from "./crypto/kdf";
 import { cacheEnvelope, fetchEnvelope } from "./keyScheme";
 import { verifyPasswordForVault } from "./reauth";
 import { vault } from "./vault";
+import { captureLocalWritePermit, assertLocalWritePermit, localWriteScopeEpoch } from "./localWriteGuard";
 
 export type UpgradeStage = "verify" | "wrap" | "upgrade";
 
@@ -56,11 +57,23 @@ export async function upgradeKeyProtection(input: {
   verifierB64?: string;
 }): Promise<UpgradeOutcome> {
   const { username, userId, password } = input;
+  const epoch = localWriteScopeEpoch();
+  if (!vault.isUnlocked() || vault.ownerUserId() !== userId) return { ok: false, stage: "verify", reason: "locked" };
+  const original = vault.get();
+  const dataKeyCopy = Buffer.from(original.dataKey);
+  const assertOwner = () => {
+    if (epoch !== localWriteScopeEpoch() || !vault.isUnlocked() || vault.ownerUserId() !== userId || vault.get().dataKey !== original.dataKey) throw new Error("The account or unlocked key changed during the upgrade");
+  };
+  try {
+  const permit = captureLocalWritePermit(userId, original.dataKey);
+  const assertCurrent = () => { assertOwner(); assertLocalWritePermit(permit); };
+
 
   // --- 1. password proof -----------------------------------------------------
   let verifierB64 = input.verifierB64 ?? null;
   if (verifierB64 === null) {
     const reauth = await verifyPasswordForVault(password);
+    assertCurrent();
     if (!reauth.ok) {
       return {
         ok: false,
@@ -74,7 +87,9 @@ export async function upgradeKeyProtection(input: {
   }
 
   // --- 2. the account's current scheme ----------------------------------------
+  assertCurrent();
   const fetched = await fetchEnvelope();
+  assertCurrent();
   if (fetched.status === "unreachable") {
     return { ok: false, stage: "verify", reason: "offline" };
   }
@@ -98,6 +113,7 @@ export async function upgradeKeyProtection(input: {
     // Already upgraded (another device, or a fresh v2 registration): refresh
     // the local cache so offline unlocks know, and report the no-op.
     await cacheEnvelope(username, fetched.envelope).catch(() => {});
+    assertCurrent();
     return { ok: true, already: true };
   }
 
@@ -117,9 +133,10 @@ export async function upgradeKeyProtection(input: {
   let wrappedB64: string;
   try {
     master = await deriveMasterKeyAsync(password, salt);
+    assertCurrent();
     const kek = envelopeKek(master, salt);
     try {
-      wrappedB64 = wrapDataKey(vault.get().dataKey, kek, username, params).toString("base64");
+      wrappedB64 = wrapDataKey(dataKeyCopy, kek, username, params).toString("base64");
     } finally {
       zeroize(kek);
     }
@@ -136,8 +153,11 @@ export async function upgradeKeyProtection(input: {
 
   // --- 4. possession proof + upload --------------------------------------------
   try {
-    const session = await api.openProcessingSession(vault.get().dataKey.toString("base64"));
+    assertCurrent();
+    const session = await api.openProcessingSession(dataKeyCopy.toString("base64"));
+    assertCurrent();
     await api.upgradeKeyEnvelope(params, wrappedB64, String(session.session_token), verifierB64);
+    assertCurrent();
   } catch (err) {
     if (err instanceof ApiError && err.code === "envelope_key_mismatch") {
       // The processing session's key did not authenticate stored ciphertext:
@@ -172,6 +192,7 @@ export async function upgradeKeyProtection(input: {
   }
 
   // --- 5. cache the envelope: the next unlock (and offline unlock) is v2 -------
+  assertCurrent();
   await cacheEnvelope(username, {
     scheme: "v2",
     saltB64: fetched.envelope.saltB64,
@@ -180,5 +201,9 @@ export async function upgradeKeyProtection(input: {
   }).catch(() => {});
   // The data key is unchanged: the unlock proof, the biometric wrap, the
   // offline queue and every stored blob keep working as they are.
+  assertCurrent();
   return { ok: true, already: false };
+  } catch {
+    return { ok: false, stage: "verify", reason: "locked", detail: "The account or key changed; unlock again before upgrading" };
+  } finally { zeroize(dataKeyCopy); }
 }

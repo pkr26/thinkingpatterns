@@ -7,17 +7,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
 
-vi.mock("../../src/api/client", async () => {
+vi.mock("../../src/api/client", async (importOriginal) => {
+  const actualApi = await importOriginal<typeof import("../../src/api/client")>();
   const { makeApiMock, ApiError } = await import("../helpers/apiMock");
-  return { ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
+  return { ...actualApi, ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
 });
 
 const refreshActiveDays = vi.fn(async () => {});
 const applyActiveDays = vi.fn();
 const touchActivity = vi.fn();
+const beginProgressRead = vi.fn(async () => ({ owner: "user-1", generation: 0, request: 1 }));
+const finishProgressRead = vi.fn();
 vi.mock("../../src/store", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/store")>();
-  return { ...actual, useSession: () => ({ refreshActiveDays, applyActiveDays, unlockDays: 30, touchActivity }) };
+  return { ...actual, useSession: () => ({ refreshActiveDays, applyActiveDays, beginProgressRead, finishProgressRead, unlockDays: 30, touchActivity }) };
 });
 
 const { api } = await import("../../src/api/client");
@@ -42,7 +45,7 @@ beforeEach(() => {
   applyActiveDays.mockClear();
   touchActivity.mockClear();
   vault.lock();
-  vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey });
+  vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey }, "user-1");
 });
 
 describe("InsightsScreen language honesty note (checklist 8c)", () => {

@@ -1,0 +1,28 @@
+npm notice run mindpattern-web@0.1.0 build
+npm notice run node tools/make-preauth-catalogs.mjs && tsc --noEmit && vite build && node tools/add-sri.mjs
+vite v6.4.3 building for production...
+transforming...
+✓ 90 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                             1.75 kB │ gzip:  0.88 kB
+dist/assets/dates-Bsg31wvr.js               0.19 kB │ gzip:  0.15 kB
+dist/assets/mood-VvoMPWck.js                1.06 kB │ gzip:  0.46 kB
+dist/assets/measureCadence-DZQA9cGO.js      1.09 kB │ gzip:  0.59 kB
+dist/assets/questionFeedback-Bzbo0r9i.js    1.62 kB │ gzip:  0.76 kB
+dist/assets/sharing-Dr9L1GTP.js             1.68 kB │ gzip:  0.82 kB
+dist/assets/SafetyPlan-DjOLTycI.js          2.47 kB │ gzip:  1.09 kB
+dist/assets/Share-BGG9Hv0t.js               5.67 kB │ gzip:  2.01 kB
+dist/assets/Patterns-DyHulaAQ.js            7.67 kB │ gzip:  2.82 kB
+dist/assets/Question-6GZkR6SR.js            8.78 kB │ gzip:  3.43 kB
+dist/assets/Measures-CcM23H39.js            9.61 kB │ gzip:  3.74 kB
+dist/assets/moodLog-D2rrF8my.js            14.65 kB │ gzip:  5.46 kB
+dist/assets/History-5diWYw93.js            14.83 kB │ gzip:  5.05 kB
+dist/assets/Settings-C4ytCqll.js           15.63 kB │ gzip:  4.91 kB
+dist/assets/en-BnYhSr3M.js                 83.37 kB │ gzip: 24.40 kB
+dist/assets/es-DEyvnbp0.js                 92.45 kB │ gzip: 26.99 kB
+dist/assets/index-0wSwFPwW.js             306.69 kB │ gzip: 96.86 kB
+dist/assets/Entry-DDZoK-EK.js             331.83 kB │ gzip: 97.16 kB
+✓ built in 540ms
+add-sri: stamped 3 subresource integrity attribute(s) into dist/index.html
+add-sri: public/.well-known/security.txt still contains placeholder marker(s): security@example.com, app.example.com — replace the example contact and canonical URL with the real operator values before shipping.

@@ -16,6 +16,10 @@
  * drain protection only — disclosed here rather than silently claimed.
  */
 const CHANNEL_NAME = "mindpattern-session-lockdown";
+// BroadcastChannel excludes the sending CHANNEL OBJECT, not its whole page.
+// A separate subscriber channel in this page would otherwise lock our own
+// credential change before it can commit.
+const PAGE_SOURCE_ID = globalThis.crypto.randomUUID();
 
 export type TabLockdownReason = "rotation";
 
@@ -39,7 +43,7 @@ export function broadcastTabLockdown(reason: TabLockdownReason): void {
   if (Ctor === null) return;
   try {
     const channel = new Ctor(CHANNEL_NAME);
-    channel.postMessage({ reason });
+    channel.postMessage({ reason, source_id: PAGE_SOURCE_ID });
     channel.close();
   } catch {
     // Broadcasting must never break the caller's own rotation.
@@ -53,6 +57,7 @@ export function subscribeTabLockdown(handler: (reason: TabLockdownReason) => voi
   if (Ctor === null) return () => undefined;
   const channel = new Ctor(CHANNEL_NAME);
   channel.onmessage = (event) => {
+    if ((event.data as { source_id?: unknown } | null)?.source_id === PAGE_SOURCE_ID) return;
     const reason = (event.data as { reason?: unknown } | null)?.reason;
     if (reason === "rotation") handler("rotation");
   };

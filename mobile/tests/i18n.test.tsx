@@ -53,6 +53,9 @@ vi.mock("../src/moodLog", async (importOriginal) => {
 });
 
 vi.mock("../src/offlineQueue", () => ({
+  prepareQueueRekey: vi.fn(async () => []),
+  pendingEntryIds: vi.fn(async () => []),
+  abortInFlightFlush: vi.fn(),
   QueueFullError: class extends Error {},
   QueueAbandonedError: class extends Error {},
   enqueue: vi.fn(async () => {}),
@@ -185,7 +188,7 @@ describe("screens render under es", () => {
     const { vault } = await import("../src/vault");
     const { render, textOf, inputByPlaceholder } = await import("./helpers/rtr");
     vault.lock();
-    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, 2) });
+    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, 2) }, "user-1");
     sessionState = { activeDays: 0, unlockDays: 30, touchActivity: vi.fn() };
     const root = await render(<EntryScreen navigation={{ navigate: vi.fn() }} />);
     const text = textOf(root);
@@ -208,7 +211,7 @@ describe("screens render under es", () => {
     const { encryptEntry } = await import("../src/crypto/MindPatternCrypto");
     const { render, textOf, pressLabel, typeInto } = await import("./helpers/rtr");
     vault.lock();
-    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, 2) });
+    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, 2) }, "user-1");
     sessionState = { activeDays: 0, unlockDays: 30, touchActivity: vi.fn() };
     const root = await render(<EntryScreen navigation={{ navigate: vi.fn() }} />);
     await pressLabel(root, "Agregar detalles (opcional)");

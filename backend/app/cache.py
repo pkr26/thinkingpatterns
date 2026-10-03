@@ -420,6 +420,7 @@ class TokenRevocationStore:
         # database round-trip. Once entries have been evicted, a miss is
         # ambiguous and is_revoked_checked falls back to a point query.
         self._overflowed = False
+        self._hydrated = False
 
     def revoke(self, jti: str, expires_at_epoch: float, now: float | None = None) -> None:
         """Record one revoked token id until its expiry.
@@ -533,6 +534,7 @@ class TokenRevocationStore:
             # that did not fit the newest-expiry-first window.
             if len(rows) == self._max_entries:
                 self._overflowed = True
+            self._hydrated = True
             return len(rows)
 
     async def is_revoked_checked(self, session, jti: str | None, now: float | None = None) -> bool:
@@ -550,7 +552,8 @@ class TokenRevocationStore:
             return True
         with self._lock:
             overflowed = self._overflowed
-        if not overflowed:
+            hydrated = self._hydrated
+        if hydrated and not overflowed:
             return False
         from sqlalchemy import select
 

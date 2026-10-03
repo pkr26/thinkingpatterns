@@ -26,8 +26,7 @@
  */
 
 import { localStore } from "./platform";
-import { en } from "./locales/en";
-import { es } from "./locales/es";
+import { en, es } from "./locales/preauth";
 
 export type Locale = "en" | "es";
 
@@ -129,11 +128,21 @@ export function __setLocaleForTests(locale: Locale): void {
 }
 
 const catalogs: Record<Locale, Record<string, string>> = { en, es };
+let fullCatalogs: Promise<void> | null = null;
+/** Keep first paint small; authenticated screens retain synchronous lookup
+ * after this one load of both supported languages. */
+export function loadFullCatalogs(): Promise<void> {
+  if (!fullCatalogs) fullCatalogs = Promise.all([import("./locales/en"),import("./locales/es")]).then(([english,spanish]) => {
+    catalogs.en = english.en; catalogs.es = spanish.es;
+    notifyLanguageChanged();
+  }).catch(error => { fullCatalogs = null; throw error; });
+  return fullCatalogs;
+}
 
 /** Catalog lookup with "{name}" interpolation. Missing key in the active
  *  locale → English; missing everywhere → the raw key. Never throws. */
 export function t(key: string, vars?: Record<string, string | number>): string {
-  const template = catalogs[currentLocale][key] ?? en[key] ?? key;
+  const template = catalogs[currentLocale][key] ?? catalogs.en[key] ?? key;
   if (!vars) return template;
   return template.replace(/\{([a-zA-Z][a-zA-Z0-9_]*)\}/g, (match, name: string) =>
     name in vars ? String(vars[name]) : match,
@@ -142,4 +151,5 @@ export function t(key: string, vars?: Record<string, string | number>): string {
 
 // Re-exported for the completeness test (es must carry every en key) and
 // for tooling that audits the catalogs.
-export { en as enCatalog, es as esCatalog };
+export { en as enCatalog } from "./locales/en";
+export { es as esCatalog } from "./locales/es";

@@ -403,7 +403,7 @@ def cohens_d(a: list[float], b: list[float], variance_floor: float = 0.0) -> flo
     failure modes, and only this one is safe.
     """
     n1, n2 = len(a), len(b)
-    if n1 + n2 < 3:
+    if not a or not b or n1 + n2 < 3:
         return 0.0
     m1, m2 = _mean(a), _mean(b)
     v1 = _variance(a) if n1 > 1 else 0.0

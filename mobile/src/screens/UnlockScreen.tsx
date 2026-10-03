@@ -26,7 +26,10 @@
  * never demoted, never hidden, and stays the default; every biometric
  * failure lands as one calm inline line, not a lockout.
  */
-import React, { useEffect, useState } from "react";
+import { localWriteScopeEpoch } from "../localWriteGuard";
+import { resumeLocalRekey, pendingLocalRekey, pendingLocalRekeyOldSalt } from "../localRekey";
+import { rotatePassword } from "../rotation";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -69,7 +72,32 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
   const t = useTheme();
   const { signOut, refreshActiveDays } = useSession();
   const [password, setPassword] = useState("");
+  const [rotationPending, setRotationPending] = useState(false);
+  const [rotationPassword, setRotationPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  const mounted = useRef(true), attempt = useRef(0), submitting = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; attempt.current++; }; }, []);
+  const beginAttempt = () => {
+    submitting.current = true; const id = ++attempt.current; let epoch = localWriteScopeEpoch();
+    const ownsAttempt = () => mounted.current && attempt.current === id;
+    const current = () => ownsAttempt() && epoch === localWriteScopeEpoch();
+    const assertCurrent = () => { if (!current()) throw new ApiError(0, "This unlock attempt ended when the account or server changed. Try again.", "stale_operation"); };
+    const wait = async <T,>(work: () => Promise<T>, discard?: (value: T) => void): Promise<T> => {
+      assertCurrent(); const value = await work();
+      if (!current()) { discard?.(value); assertCurrent(); } return value;
+    };
+    const adoptSession = async (token: string, userId: string, name: string) => {
+      assertCurrent(); const pending = api.setSession(token,userId,name,{ stillCurrent: ownsAttempt });
+      epoch = localWriteScopeEpoch(); await pending; assertCurrent();
+    };
+    const finish = () => { if (attempt.current === id) submitting.current = false; if (ownsAttempt()) setBusy(false); };
+    const adoptCommittedRotation = (completionScope: number | undefined) => {
+      if (completionScope === undefined) { assertCurrent(); return; }
+      if (!ownsAttempt() || completionScope !== localWriteScopeEpoch()) throw new ApiError(0,"The rotation completed in a retired session.","stale_operation");
+      epoch = completionScope; assertCurrent();
+    };
+    return { ownsAttempt,current,assertCurrent,wait,adoptSession,adoptCommittedRotation,finish };
+  };
   /** Offered only when this device has biometrics AND the account has a
    *  stored wrap — the check itself never prompts (biometricUnlock.ts). */
   const [showBiometric, setShowBiometric] = useState(false);
@@ -78,6 +106,7 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
 
   useEffect(() => {
     let cancelled = false;
+    void api.getUserId().then(async userId => { if (userId && !cancelled) setRotationPending(await pendingLocalRekey(userId)); }).catch(() => {});
     void (async () => {
       // Quiet probe: unsupported device, no stored wrap, or no session
       // account all leave the screen exactly as it was — password only.
@@ -99,12 +128,15 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
   }, []);
 
   const unlockWithBiometrics = async () => {
-    if (busy) return;
+    if (busy || submitting.current) return;
+    const {current,assertCurrent,wait,finish} = beginAttempt();
     setBusy(true);
+    let ownedDataKey: Buffer | null = null;
     try {
-      const userId = await api.getUserId();
+      const userId = await wait(() => api.getUserId());
       if (!userId) throw new Error("no saved account on this device");
-      const dataKey = await unwrapBiometricDataKey(userId);
+      const dataKey = await wait(() => unwrapBiometricDataKey(userId), key => key?.fill(0));
+      ownedDataKey = dataKey;
       if (dataKey === null) throw new Error("biometric unlock declined");
       // Audit fix 8 (2026-09-21): the unwrapped key runs the SAME sealed
       // proof check the password path runs. A stale wrap (a rotation or a
@@ -112,9 +144,9 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
       // wrong key and the whole journal reads as tamper failures. A "wrong"
       // proof deletes the stored wrap; any non-ok proof refuses the unlock
       // and falls back to the password path below.
-      const proof = await verifyUnlockProof(dataKey, userId);
+      const proof = await wait(() => verifyUnlockProof(dataKey, userId));
       if (proof !== "ok") {
-        if (proof === "wrong") await disableBiometricUnlock(userId).catch(() => {});
+        if (proof === "wrong") await wait(() => disableBiometricUnlock(userId).catch(() => {}));
         setShowBiometric(false);
         setBiometricError(true);
         return;
@@ -129,25 +161,30 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
       // against them (that reported every correct password as wrong) — it
       // verifies online via api.login instead, until the real key is
       // re-adopted.
+      await wait(() => resumeLocalRekey(userId, dataKey));
+      assertCurrent();
       vault.unlock(
         { masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32), dataKey },
         userId,
         { authKeyKnown: false },
       );
+      ownedDataKey = null; // the vault owns and zeroizes this buffer
       setPassword(""); // the field was empty anyway; keep the invariant
       setBiometricError(false);
-      await refreshActiveDays();
+      await wait(() => refreshActiveDays());
     } catch {
       // Cancel, lockout, missing wrap, read failure — one calm line. The
       // password path below is untouched and still the guaranteed way in.
-      setBiometricError(true);
+      if (current()) setBiometricError(true);
     } finally {
-      setBusy(false);
+      ownedDataKey?.fill(0);
+      finish();
     }
   };
 
   const unlock = async () => {
-    if (!password || busy) return;
+    if (!password || busy || submitting.current) return;
+    const {current,assertCurrent,wait,adoptSession,finish} = beginAttempt();
     setBusy(true);
     let derived: Keys | null = null;
     let username: string | null = null;
@@ -155,26 +192,29 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
     // takes ownership (the catch zeroizes it on a mid-flow failure).
     let sessionDataKey: Buffer | null = null;
     try {
-      username = await api.getUsername();
+      username = await wait(() => api.getUsername());
+      const expectedOwner = await wait(() => api.getUserId());
+      if (!expectedOwner) throw new Error(tr("unlock.noAccount"));
       if (!username) throw new Error(tr("unlock.noAccount"));
       let saltB64: string;
       let offline = false;
       try {
-        const { salt } = await api.saltFor(username);
+        const { salt } = await wait(() => api.saltFor(username!));
         saltB64 = salt;
         // Cache the (public, origin-bound) salt: it is what makes the NEXT
         // unlock work when the network is unreachable.
-        await api.cacheSalt(username, salt);
+        await wait(() => api.cacheSalt(username!, salt));
       } catch (saltErr) {
+        assertCurrent();
         // Offline with a cached salt: derive keys locally. Unlocking the
         // vault never needed a bearer token — sync just fails and retries.
-        const cached = await api.getCachedSalt(username);
+        const cached = await wait(() => api.getCachedSalt(username!));
         if (!cached) throw saltErr;
         saltB64 = cached;
         offline = true; // the salt fetch already proved the network dead
       }
       // Async derivation: no 100–400ms JS-thread freeze mid-flow.
-      derived = await deriveKeysAsync(password, Buffer.from(saltB64, "base64"));
+      derived = await wait(() => deriveKeysAsync(password, Buffer.from(saltB64, "base64")), key => zeroize(key.masterKey,key.authKey,key.dataKey));
       const keys = derived;
       // TS narrowing: the null check above proved `username` non-null, but
       // the unwrapFor closure below would otherwise still see string|null.
@@ -188,12 +228,12 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
        *  consistency check (online); a structural failure is a calm local
        *  error, never "wrong password". */
       const unwrapFor = async (envelope: EnvelopeInfo): Promise<Buffer> => {
-        const res = await unwrapSessionDataKey({
+        const res = await wait(() => unwrapSessionDataKey({
           password,
           username: accountName,
           envelope,
           derivedMaster: { key: keys.masterKey, saltB64, iterations: KDF_ITERATIONS },
-        });
+        }), value => { if (value.ok) zeroize(value.dataKey); });
         if (res.ok) return res.dataKey;
         if (res.reason === "tamper") {
           // S-5: the envelope did not open under this password — the same
@@ -226,49 +266,52 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
       let envelopeRefusal: string | null = null;
       if (!offline) {
         try {
-          const body = await api.login(username, keys.authKey.toString("base64"));
-          await api.setSession(body.token, body.user_id, username);
+          const body = await wait(() => api.login(username!, keys.authKey.toString("base64")));
+          if (body.user_id !== expectedOwner) throw new ApiError(0,"The account changed before unlock.","stale_operation");
+          await adoptSession(body.token, body.user_id, username);
           // KEY SCHEME: the fresh bearer fetches the envelope. Only a
           // definitive answer routes the session; a FAILED fetch falls back
           // to the cached envelope, and only a cached v2 ENVELOPE (which
           // authenticates the password itself through GCM) may carry the
           // session from there.
-          const fetched = await fetchEnvelope();
+          const fetched = await wait(() => fetchEnvelope());
           if (fetched.status === "ok") {
             const envelope = fetched.envelope;
             if (envelope.scheme === "v2") {
               const dataKey = await unwrapFor(envelope);
+              sessionDataKey = dataKey;
               // Verified online AND by the envelope's own authentication:
               // refresh the sealed proof so a future offline unlock (and the
               // biometric path) checks against this very key.
-              await storeUnlockProof(dataKey, body.user_id);
-              await cacheEnvelope(username, envelope).catch(() => {});
-              sessionDataKey = dataKey;
+              await wait(() => storeUnlockProof(dataKey, body.user_id));
+              await wait(() => cacheEnvelope(username!, envelope).catch(() => {}));
             } else {
               // Definitive v1 answer: refresh the sealed proof so the next
               // offline unlock checks against this very key.
-              await storeUnlockProof(keys.dataKey, body.user_id);
-              await cacheEnvelope(username, envelope).catch(() => {});
+              await wait(() => storeUnlockProof(keys.dataKey, body.user_id));
+              await wait(() => cacheEnvelope(username!, envelope).catch(() => {}));
             }
           } else if (fetched.status === "legacy") {
             // 404 from a pre-envelope server — a definitive answer that
             // cannot host a v2 account: v1 semantics hold.
-            await storeUnlockProof(keys.dataKey, body.user_id);
+            await wait(() => storeUnlockProof(keys.dataKey, body.user_id));
           } else {
             // "unreachable" | "invalid": the server gave NO scheme answer
             // this session. Only a cached v2 envelope (material + its own
             // GCM proof) may proceed; a stale v1 marker may not.
-            const cached = await cachedEnvelope(username);
+            const cached = await wait(() => cachedEnvelope(username!));
             if (cached !== null && cached.scheme === "v2") {
               const dataKey = await unwrapFor(cached);
-              await storeUnlockProof(dataKey, body.user_id);
               sessionDataKey = dataKey;
+              await wait(() => storeUnlockProof(dataKey, body.user_id));
             } else {
               envelopeRefusal = tr(fetched.status === "invalid" ? "login.envelopeUnrecognized" : "unlock.schemeUnconfirmed");
             }
           }
           verifiedOnline = true;
         } catch (loginErr) {
+          assertCurrent();
+          if (loginErr instanceof ApiError && loginErr.code === "stale_operation") throw loginErr;
           // A definitive wrong-password rejection is never an offline case.
           if (loginErr instanceof ApiError && loginErr.status === 401) throw loginErr;
           // Otherwise (network died mid-flow): fall through to the sealed
@@ -287,13 +330,13 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
         // OFFLINE PATH — must be VERIFIED, never assumed. v2 accounts open
         // the CACHED envelope: the wrong password fails its GCM
         // authentication, exactly like the sealed marker does for v1.
-        const cached = await cachedEnvelope(username);
+        const cached = await wait(() => cachedEnvelope(username!));
         if (cached !== null && cached.scheme === "v2") {
           sessionDataKey = await unwrapFor(cached);
         } else {
-          const userId = await api.getUserId();
+          const userId = await wait(() => api.getUserId());
           if (!userId) throw new Error(tr("unlock.noAccount"));
-          const proof = await verifyUnlockProof(keys.dataKey, userId);
+          const proof = await wait(() => verifyUnlockProof(keys.dataKey, userId));
           if (proof === "absent") {
             throw new Error(tr("unlock.offlineNotEnabled"));
           }
@@ -307,25 +350,30 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
           }
         }
       }
+      const localOwner = await wait(() => api.getUserId());
+      if (localOwner !== expectedOwner) throw new Error("The saved account changed before key adoption.");
+      await wait(() => resumeLocalRekey(expectedOwner, sessionDataKey ?? keys.dataKey, { credentialConfirmed: !offline }));
+      assertCurrent();
       if (sessionDataKey !== null) {
         vault.unlock(
           { masterKey: keys.masterKey, authKey: keys.authKey, dataKey: sessionDataKey },
-          (await api.getUserId()) ?? undefined,
+          expectedOwner,
         );
         zeroize(keys.dataKey); // the v1 data label never protects v2 storage
       } else {
-        vault.unlock(derived, (await api.getUserId()) ?? undefined); // vault takes ownership and zeroizes the master key
+        vault.unlock(derived, expectedOwner); // vault takes ownership and zeroizes the master key
       }
       sessionDataKey = null; // the vault owns it now
       derived = null;
       setPassword(""); // minimize the password's lifetime in memory
       setBiometricError(false); // the promised password path worked — retract the biometric nudge
       // S-5: an honest success forgives the whole failure count.
-      if (username) await clearUnlockFailures(username).catch(() => {});
-      await refreshActiveDays();
+      if (username) await wait(() => clearUnlockFailures(username!).catch(() => {}));
+      await wait(() => refreshActiveDays());
     } catch (err) {
       if (sessionDataKey) zeroize(sessionDataKey);
       if (derived) zeroize(derived.masterKey, derived.authKey, derived.dataKey);
+      if (!current()) return;
       vault.lock(); // a failed unlock must never leave stale keys live
       // 401 = wrong password (our own sealed proof throws the same). Other
       // ApiErrors map to calm copy; our own local Error text passes through.
@@ -334,7 +382,9 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
         // durable counter (the server throttles per-IP; this throttles
         // per-DEVICE, covering the offline oracle's online twin).
         const failures = username ? await recordUnlockFailure(username).catch(() => 1) : 1;
+        if (!current()) return;
         await new Promise((resolve) => setTimeout(resolve, unlockFailureDelayMs(failures)));
+        if (!current()) return;
       }
       const message =
         err instanceof ApiError && err.status === 401
@@ -342,8 +392,36 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
           : requestFailureCopy(err);
       Alert.alert(tr("unlock.failedTitle"), message);
     } finally {
-      setBusy(false);
+      finish();
     }
+  };
+
+  const finishInterruptedRotation = async () => {
+    if (busy || submitting.current || !password || !rotationPassword) return;
+    const {current,assertCurrent,wait,adoptCommittedRotation,finish} = beginAttempt();
+    setBusy(true); let ownedKeys: Keys | null = null;
+    try {
+      const userId = await wait(() => api.getUserId()); const username = await wait(() => api.getUsername());
+      if (!userId || !username) throw new Error(tr("common.reauthNoAccount"));
+      const salt = await wait(() => pendingLocalRekeyOldSalt(userId)) ?? await wait(() => api.getCachedSalt(username));
+      if (!salt) throw new Error(tr("common.reauthOffline"));
+      ownedKeys = await wait(() => deriveKeysAsync(password, Buffer.from(salt, "base64")), key => zeroize(key.masterKey,key.authKey,key.dataKey));
+      const proof = await wait(() => verifyUnlockProof(ownedKeys!.dataKey, userId));
+      if (proof !== "ok") throw new Error(tr("common.wrongPassword"));
+      assertCurrent();
+      // The delegate separately guards its remote/key transition. A
+      // restricted vault cannot admit ordinary old-key producers.
+      vault.unlock(ownedKeys, userId, { writeSuspended: true }); ownedKeys = null;
+      const outcome = await rotatePassword({ username, userId, oldPassword: password, newPassword: rotationPassword });
+      if (!outcome.ok) { assertCurrent(); throw new Error(outcome.detail ?? tr("settings.rotateFailedTitle")); }
+      // A successful rotation admits at most its one deliberate re-login.
+      adoptCommittedRotation(outcome.sessionScope);
+      vault.lock();
+      setRotationPending(false); setPassword(""); setRotationPassword("");
+      Alert.alert(tr("settings.rotateSuccessTitle"), tr("unlock.rotationFinished"));
+    } catch (err) {
+      if (current()) { vault.lock(); Alert.alert(tr("settings.rotateFailedTitle"), requestFailureCopy(err)); }
+    } finally { if (ownedKeys) zeroize(ownedKeys.masterKey,ownedKeys.authKey,ownedKeys.dataKey); finish(); }
   };
 
   return (
@@ -362,7 +440,7 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
         {tr("unlock.body")}
       </Text>
       {showBiometric && (
-        <PrimaryButton
+      <PrimaryButton
           label={tr("unlock.biometric")}
           onPress={() => void unlockWithBiometrics()}
           disabled={busy}
@@ -395,8 +473,13 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
         textContentType="password"
         autoComplete="current-password"
       />
+        {rotationPending && <>
+        <Text style={{ color: t.colors.body }}>{tr("unlock.rotationPending")}</Text>
+        <TextInput value={rotationPassword} onChangeText={setRotationPassword} secureTextEntry autoCapitalize="none" autoCorrect={false} accessibilityLabel={tr("unlock.rotationPassword")} style={{ color: t.colors.text, backgroundColor: t.colors.card, padding: 14 }} />
+        <GhostButton label={tr("unlock.finishRotation")} disabled={busy} onPress={() => void finishInterruptedRotation()} />
+      </>}
       <PrimaryButton label={tr("unlock.button")} onPress={unlock} disabled={!password} busy={busy} />
-      <GhostButton label={tr("unlock.signOutInstead")} onPress={() => void signOut()} />
+      <GhostButton label={tr("unlock.signOutInstead")} onPress={() => { attempt.current++; submitting.current = false; void signOut(); }} />
       {/* Crisis help needs no unlock and no network — the locked state is
           exactly when it must be one tap away. */}
       <CrisisHelpButton onPress={() => navigation.navigate("Crisis")} />

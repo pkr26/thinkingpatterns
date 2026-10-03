@@ -457,6 +457,8 @@ async def run():
             report["users"].append({
                 "name": p.name, "blurb": p.blurb, "expected": p.expected,
                 "entries": len(p.entries),
+                "sync_succeeded": ok,
+                "sync_failed": fail,
                 "active_days": live["active_days"],
                 "patterns_live": live_patterns,
                 "patterns_replay_daily": final_patterns,
@@ -546,4 +548,9 @@ class Pattern_shim:
 
 
 if __name__ == "__main__":
-    asyncio.run(run())
+    result = asyncio.run(run())
+    failures = [u["name"] for u in result["users"]
+                if u.get("sync_failed", 0) or not u["determinism_live_eq_singleshot"]]
+    if failures:
+        print(f"simulation failed sync/determinism for: {', '.join(failures)}", file=sys.stderr)
+        sys.exit(1)

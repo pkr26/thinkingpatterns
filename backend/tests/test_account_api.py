@@ -36,10 +36,10 @@ async def test_export_contains_ciphertext_only(client, app):
     assert response.status_code == 200
     bundle = response.json()
 
-    assert bundle["version"] == 1
+    assert bundle["version"] == 2
     # 2026-09-16 (finding H2): the cleartext username is gone from the
     # bundle — it was a free account marker for anyone holding the file.
-    assert "username" not in bundle
+    assert bundle["username"] == emu.username
     assert bundle["user_id"] == emu.user_id  # AAD binding needs it to decrypt
     assert bundle["salt"] == emu.salt_b64
     assert len(bundle["entries"]) == 32

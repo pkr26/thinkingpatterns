@@ -1,0 +1,38 @@
+npm notice run mindpattern-web@0.1.0 npx
+npm notice run 'vitest' run tests/localRotation.idb.test.ts -t pre-rotation encrypted callback
+
+ RUN  v5.0.2 /Users/pradeepreddy/Desktop/mental_health_application/web
+
+ ❯ tests/localRotation.idb.test.ts (4 tests | 1 failed | 3 skipped) 13ms
+   ❯ transactional migration custody (4)
+     × rejects a pre-rotation encrypted callback after checkpoint cleanup, retaining the readable current plan 12ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/localRotation.idb.test.ts > transactional migration custody > rejects a pre-rotation encrypted callback after checkpoint cleanup, retaining the readable current plan
+AssertionError: promise resolved "undefined" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+undefined
+
+ ❯ tests/localRotation.idb.test.ts:30:29
+     28|   });
+     29|   const late=saveSafetyPlan(oldKey,owner,{...originalPlan,coping:"Susp…
+     30|   const rejected=expect(late).rejects.toThrow("not saved");
+       |                             ^
+     31|   for(let i=0;i<50&&!release;i++)await new Promise(resolve=>setTimeout…
+     32|   expect(release).toBeTypeOf("function");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 skipped (4)
+   Start at  10:59:16
+   Duration  192ms (transform 64%, setup 20%, tests 9%, import 5%, worker 1%)
+

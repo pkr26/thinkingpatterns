@@ -310,12 +310,14 @@ async function fetchWithTimeout(
   timeoutMs: number = REQUEST_TIMEOUT_MS,
 ): Promise<Response> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const abortForSessionEnd = (): void => controller.abort();
+  let timer: ReturnType<typeof setTimeout>;
+  const cleanup = (): void => { clearTimeout(timer); sessionSignal?.removeEventListener("abort", abortForSessionEnd); };
+  const abortForSessionEnd = (): void => { controller.abort(); cleanup(); };
+  timer = setTimeout(() => { controller.abort(); cleanup(); }, timeoutMs);
   if (sessionSignal?.aborted) controller.abort();
   else sessionSignal?.addEventListener("abort", abortForSessionEnd, { once: true });
   try {
-    const response = await fetch(url, {
+    let response = await fetch(url, {
       ...init,
       // Credentials are supplied only in Authorization, never ambient
       // cookies. Refusing redirects means a 30x cannot forward that bearer
@@ -336,17 +338,44 @@ async function fetchWithTimeout(
         throw new ApiError(0, "server returned an invalid response origin");
       }
     }
+    // A 204 is complete even when a proxy/alternate fetch exposes an empty
+    // stream. Constructing Response with that status and a body is forbidden.
+    if (response.status === 204) {
+      void response.body?.cancel().catch(() => undefined);
+      cleanup();
+      return response;
+    }
+    if (response instanceof Response && response.body) response = guardResponseStream(response,controller,cleanup,timeoutMs === EXPORT_REQUEST_TIMEOUT_MS ? 100 * 1024 * 1024 : 16 * 1024 * 1024);
+    for (const method of ["text", "json", "arrayBuffer", "blob", "formData"] as const) {
+      const original = response[method]?.bind(response);
+      if (!original) continue;
+      Object.defineProperty(response, method, { configurable: true, value: async () => {
+        try {
+          // Race consumption against abort even for alternate fetch implementations that ignore its signal.
+          const value = await new Promise<unknown>((resolve, reject) => {
+            const onAbort = (): void => reject(new ApiError(0, sessionSignal?.aborted ? "session ended" : "request timed out while reading response"));
+            if (controller.signal.aborted) { onAbort(); return; }
+            controller.signal.addEventListener("abort", onAbort, { once: true });
+            Promise.resolve(original()).then(resolve, reject).finally(() => controller.signal.removeEventListener("abort", onAbort));
+          });
+          if (controller.signal.aborted) throw new ApiError(0, "session ended or response timed out");
+          return value;
+        } finally { cleanup(); }
+      } });
+    }
+    if (response.status === 204 || response.body === null) {
+      // Mocks may omit body while still implementing json/text. Native empty bodies need no deadline.
+      if (response instanceof Response && response.body === null) cleanup();
+    }
     return response;
   } catch (err) {
+    cleanup();
     if (err instanceof ApiError) throw err;
     if (err instanceof Error && err.name === "AbortError") {
       if (sessionSignal?.aborted) throw new ApiError(0, "session ended");
       throw new ApiError(0, `request timed out after ${timeoutMs / 1000}s`);
     }
     throw err;
-  } finally {
-    clearTimeout(timer);
-    sessionSignal?.removeEventListener("abort", abortForSessionEnd);
   }
 }
 
@@ -405,6 +434,7 @@ async function requestWithResponse<T>(
   // session that initiated this request.
   if (session !== activeSession) throw new ApiError(0, "session ended");
   const raw = response.status === 204 ? "{}" : await response.text();
+  if (session !== activeSession) throw new ApiError(0, "session ended");
   const data = safeJson(raw) as { detail?: unknown; code?: unknown };
   const code = sanitizeCode(data.code);
   if (isSessionDeath(response.status, code) && !sessionExpiredFired) {
@@ -1000,7 +1030,7 @@ export const api = {
     // fires the same one-shot session-expiry latch every gated request
     // uses — the app used to keep a dead session until the next call.
     try {
-      return await fetchWithTimeout(
+      const response = await fetchWithTimeout(
         `${activeSession.baseUrl}${API_PREFIX}/account/export`,
         {
           method: "GET",
@@ -1011,6 +1041,14 @@ export const api = {
         activeSession.controller.signal,
         EXPORT_REQUEST_TIMEOUT_MS,
       );
+      if (session !== activeSession) throw new ApiError(0, "session ended");
+      if (response.status === 401 || response.status === 410) {
+        const err = new ApiError(response.status, "session ended", response.status === 410 ? "gone" : undefined);
+        if (!sessionExpiredFired) { sessionExpiredFired = true; sessionExpiredHandler?.(err); }
+        void response.body?.cancel().catch(() => undefined);
+        throw err;
+      }
+      return response;
     } catch (err) {
       if (err instanceof ApiError && err.status === 401 && !sessionExpiredFired) {
         // The one-shot expiry latch (same funnel as every gated request):
@@ -1038,11 +1076,11 @@ export const api = {
     return { rows, nextCursor: next && next.trim() ? next : null };
   },
 
-  rekeyStoredData: (oldProcessingToken: string, newProcessingToken: string, verifierB64: string) =>
-    request<null>(
+  rekeyStoredData: (oldProcessingToken: string, newProcessingToken: string, verifierB64: string, credential: import("../localRotation").RotationCredential) =>
+    request<{ credential_rotated: true; operation_id: string }>(
       "POST",
       "/processing/rekey",
-      undefined,
+      credential,
       {
         "X-Processing-Token": oldProcessingToken,
         "X-New-Processing-Token": newProcessingToken,
@@ -1134,3 +1172,32 @@ export const api = {
     return request<null>("DELETE", `/consents/${consentId}`, undefined, { "X-Account-Verifier": verifierB64 });
   },
 };
+
+export type InsightsResponse = Awaited<ReturnType<typeof api.insights>>;
+
+/** Fence every stream read, including callers consuming Response.body directly. */
+function guardResponseStream(response: Response, controller: AbortController, cleanup: () => void, maxBytes: number): Response {
+  if (!response.body) return response;
+  const reader = response.body.getReader(); let received = 0; let finished = false;
+  const stream = new ReadableStream<Uint8Array>({
+    start(target) {
+      const abort = () => { if (!finished) { finished = true; target.error(new ApiError(0,"session ended or response timed out")); void reader.cancel().catch(() => undefined); cleanup(); } };
+      if (controller.signal.aborted) abort(); else controller.signal.addEventListener("abort",abort,{once:true});
+    },
+    async pull(target) {
+      if (finished) return;
+      try {
+        const row = await reader.read();
+        if (finished || controller.signal.aborted) return;
+        if (row.done) { finished = true; target.close(); cleanup(); return; }
+        received += row.value.byteLength;
+        if (received > maxBytes) throw new ApiError(0,"Server response exceeded this client's safe size limit.");
+        target.enqueue(row.value);
+      } catch (err) { if (!finished) { finished = true; target.error(err); void reader.cancel().catch(() => undefined); cleanup(); } }
+    },
+    cancel(reason) { finished = true; cleanup(); return reader.cancel(reason); },
+  });
+  const guarded = new Response(stream,{ status:response.status,statusText:response.statusText,headers:response.headers });
+  Object.defineProperty(guarded,"url",{value:response.url});
+  return guarded;
+}

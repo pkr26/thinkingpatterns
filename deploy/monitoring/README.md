@@ -20,6 +20,9 @@ below).
   the host-metrics node_exporter scrape (see "Host-level failure modes").
 - `alerts.yml` — alert rules, each with a `runbook` annotation pointing at
   `docs/INCIDENT_RUNBOOK.md`.
+- `alert-tests.yml` — synthetic fault and healthy/boundary scenarios for
+  all seven default alerts. Run `promtool test rules alert-tests.yml` from
+  this directory; `verify.sh` runs these when promtool is installed.
 - `blackbox-modules.yml` — the blackbox exporter's module set as code:
   `http_2xx` (equivalent to the stock module incl. its 5s timeout and ip4 preference, used by the `/readyz`
   probe) and `tls` (the cert-expiry probe; see the file's header for why

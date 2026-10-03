@@ -1,0 +1,32 @@
+verify: --production: enforcing the digest-pinned image contract
+verify: --production digest assertion: OK
+verify: YAML interpreter: /Users/pradeepreddy/Desktop/mental_health_application/deploy/monitoring/../../.venv/bin/python (PyYAML 6.0.3)
+verify: promtool not on PATH — skipping semantic validation (YAML syntax + structure still checked below)
+verify: metrics.py render() exports: mindpattern_audit_chain_failures, mindpattern_keystore_sessions, mindpattern_llm_calls_total, mindpattern_recompute_seconds_bucket, mindpattern_recompute_seconds_count, mindpattern_recompute_seconds_sum, mindpattern_requests_total
+verify: yaml parse OK: prometheus.yml
+verify: yaml parse OK: alerts.yml
+verify: alert MindPatternAPIDown [S2] grounded in: up
+verify: alert MindPatternHigh5xxRatio [S2] grounded in: mindpattern_requests_total
+verify: alert MindPatternRecomputeP95Slow [S3] grounded in: mindpattern_recompute_seconds_bucket
+verify: alert MindPatternKeystoreSessionsStuck [S2] grounded in: mindpattern_keystore_sessions
+verify: alert MindPatternLLMFailureRatioHigh [S3] grounded in: mindpattern_llm_calls_total
+verify: alert MindPatternAuditChainFailures [S2] grounded in: mindpattern_audit_chain_failures
+verify: alert MindPatternReadyzProbeFailing [S2] grounded in: probe_success
+verify: alerts.yml: 7 alert rule(s) across 2 group(s)
+verify: dashboard grafana/dashboards/mindpattern-overview.json: 9 panel(s), 10 grounded expression(s)
+verify: yaml parse OK: blackbox-modules.yml
+verify: prometheus.yml module references grounded: http_2xx, tls
+verify: yaml parse OK: docker-compose.yml
+verify: docker-compose.yml: single-form limits OK (no deploy.resources, mem_limit everywhere)
+verify: yaml parse OK: grafana/provisioning/datasources/datasource.yml
+verify: yaml parse OK: grafana/provisioning/dashboards/dashboards.yml
+verify: yaml parse OK: alertmanager/alertmanager.example.yml
+verify: yaml parse OK: ../backup-offsite/docker-compose.yml
+verify: ../backup-offsite/docker-compose.yml: single-form limits OK (no deploy.resources, mem_limit everywhere)
+verify: structure + metric grounding OK
+verify: YAML structure pass: OK
+verify: sh -n check-backup-freshness.sh: OK
+verify: sh -n backup-heartbeat.sh: OK
+verify: shellcheck not on PATH — skipped (sh -n syntax check still ran)
+verify: metrics token sink check skipped (needs both deploy/secrets/metrics_token and deploy/monitoring/token)
+verify: ALL CHECKS PASSED

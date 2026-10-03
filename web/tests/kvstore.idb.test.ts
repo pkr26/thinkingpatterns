@@ -19,7 +19,7 @@ function installFakeIdb(): { dump: () => Map<string, string>; failNext: () => vo
     return req;
   };
   const fire = (tx: { oncomplete: ((e: Event) => void) | null; onerror: ((e: Event) => void) | null }): void => {
-    queueMicrotask(() => tx.oncomplete?.(new Event("complete")));
+    queueMicrotask(() => fail ? tx.onerror?.(new Event("error")) : tx.oncomplete?.(new Event("complete")));
   };
   const db = {
     objectStoreNames: { contains: () => true },
@@ -89,14 +89,14 @@ describe("kvstore over IndexedDB", () => {
     expect(await kv.getItem("b")).toBeNull();
   });
 
-  it("a failing request degrades to null / silent no-throw, never crashes", async () => {
+  it("failed read, write and delete requests reject without acknowledging custody", async () => {
     const fake = installFakeIdb();
     await kv.setItem("k", "v");
     fake.failNext();
-    expect(await kv.getItem("k")).toBeNull(); // read failure → null
+    await expect(kv.getItem("k")).rejects.toThrow("could not be read");
     fake.failNext();
-    await kv.setItem("k", "v2"); // write failure → silent
+    await expect(kv.setItem("k", "v2")).rejects.toThrow("not saved");
     fake.failNext();
-    await kv.removeItem("k"); // remove failure → silent
+    await expect(kv.removeItem("k")).rejects.toThrow("did not finish");
   });
 });

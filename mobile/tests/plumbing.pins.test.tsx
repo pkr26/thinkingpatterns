@@ -23,6 +23,9 @@ vi.mock("../src/api/client", async (importOriginal) => {
 });
 
 vi.mock("../src/offlineQueue", () => ({
+  prepareQueueRekey: vi.fn(async () => []),
+  pendingEntryIds: vi.fn(async () => []),
+  abortInFlightFlush: vi.fn(),
   enqueue: vi.fn(async () => {}),
   flushQueue: vi.fn(async () => 0),
   QueueFullError: class QueueFullError extends Error {},
@@ -218,10 +221,9 @@ describe("reauth pins", () => {
     expect(vi.mocked(zeroize).mock.calls.some((c) => c.length === 3)).toBe(true);
   });
 
-  it("a correct password zeroizes master and data keys (2 buffers), never the verifier", async () => {
+  it("a correct password returns its verifier string and zeroizes all derived buffers", async () => {
     const result = await verifyPasswordForVault(PASSWORD);
     expect(result.ok).toBe(true);
-    expect(vi.mocked(zeroize).mock.calls.some((c) => c.length === 2)).toBe(true);
-    expect(vi.mocked(zeroize).mock.calls.some((c) => c.length === 3)).toBe(false);
+    expect(vi.mocked(zeroize).mock.calls.some((c) => c.length === 3)).toBe(true);
   });
 });

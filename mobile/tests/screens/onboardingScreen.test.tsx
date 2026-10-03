@@ -8,9 +8,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
 import { Switch } from "react-native";
 
-vi.mock("../../src/api/client", async () => {
+vi.mock("../../src/api/client", async (importOriginal) => {
+  const actualApi = await importOriginal<typeof import("../../src/api/client")>();
   const { makeApiMock, ApiError } = await import("../helpers/apiMock");
-  return { ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
+  return { ...actualApi, ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
 });
 
 const touchActivity = vi.fn();
@@ -48,13 +49,13 @@ describe("OnboardingScreen", () => {
     await pressLabel(root, "Continue");
     expect(textOf(root)).toContain("2 of 3");
     expect(textOf(root)).toContain("Your words stay yours");
-    expect(textOf(root)).toContain("the server stores only ciphertext");
+    expect(textOf(root)).toContain("the server stores ciphertext");
     expect(textOf(root)).toContain("held in memory for up to 5 minutes");
 
     await pressLabel(root, "Continue");
     expect(textOf(root)).toContain("3 of 3");
     expect(textOf(root)).toContain("Keep your password safe");
-    expect(textOf(root)).toContain("There is no password reset");
+    expect(textOf(root)).toContain("recovery kit");
     expect(textOf(root)).toContain("Fathom is for people 18 and older");
 
     await pressLabel(root, "I understand — start writing");

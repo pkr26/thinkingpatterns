@@ -23,6 +23,9 @@ vi.mock("../src/api/client", async () => {
 });
 
 vi.mock("../src/offlineQueue", () => ({
+  prepareQueueRekey: vi.fn(async () => []),
+  pendingEntryIds: vi.fn(async () => []),
+  abortInFlightFlush: vi.fn(),
   abortInFlightFlush: vi.fn(),
   flushQueueOnReconnect: vi.fn(async () => {}),
 }));

@@ -35,17 +35,19 @@ export type SessionKeys = Pick<Keys, "authKey" | "dataKey"> & { authKeyKnown: bo
 
 let current: SessionKeys | null = null;
 let ownerUserId: string | null = null;
+let writesSuspended = false;
 
 export const vault = {
   /** Unlock with the account these keys were derived for. The id is what
    *  lets key-shipping operations prove the keys match the session.
    *  opts.authKeyKnown defaults to true; UnlockScreen's biometric path is
    *  the one caller that passes false (placeholder-zero auth key). */
-  unlock(keys: Keys, userId?: string, opts: { authKeyKnown?: boolean } = {}): void {
+  unlock(keys: Keys, userId?: string, opts: { authKeyKnown?: boolean; writeSuspended?: boolean } = {}): void {
     if (current) zeroize(current.authKey, current.dataKey);
     zeroize(keys.masterKey); // only auth/data keys are useful from here on
     current = { authKey: keys.authKey, dataKey: keys.dataKey, authKeyKnown: opts.authKeyKnown ?? true };
     ownerUserId = userId ?? null;
+    writesSuspended = opts.writeSuspended === true;
     notify();
   },
   get(): SessionKeys {
@@ -56,8 +58,9 @@ export const vault = {
     return { authKey: current.authKey, dataKey: current.dataKey, authKeyKnown: current.authKeyKnown };
   },
   isUnlocked(): boolean {
-    return current !== null;
+    return current !== null && !writesSuspended;
   },
+  canReauthenticate(): boolean { return current !== null; },
   /** The account id the unlocked keys belong to, or null if unknown
    *  (legacy callers) — key-shipping code must treat null as unverified. */
   ownerUserId(): string | null {
@@ -79,6 +82,7 @@ export const vault = {
     if (current) zeroize(current.authKey, current.dataKey);
     current = null;
     ownerUserId = null;
+    writesSuspended = false;
     notify();
   },
   subscribe(listener: Listener): () => void {

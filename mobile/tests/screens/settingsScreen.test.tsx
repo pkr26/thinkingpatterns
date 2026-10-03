@@ -6,7 +6,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
-import { Alert, Share, Switch, TextInput } from "react-native";
+import { Alert, AppState, Share, Switch, TextInput } from "react-native";
 import * as Keychain from "react-native-keychain";
 
 vi.mock("../../src/api/client", async (importOriginal) => {
@@ -33,6 +33,9 @@ vi.mock("../../src/reauth", async (importOriginal) => {
 });
 
 vi.mock("../../src/offlineQueue", () => ({
+  prepareQueueRekey: vi.fn(async () => []),
+  pendingEntryIds: vi.fn(async () => []),
+  abortInFlightFlush: vi.fn(),
   flushQueue: vi.fn(async () => 0),
   clearQueue: vi.fn(async () => {}),
   rejectedEntryCount: vi.fn(async () => 0),
@@ -133,6 +136,8 @@ const {
   lastAlert,
   touchableByLabel,
   inputByPlaceholder,
+  act,
+  firePress,
 } = await import("../helpers/rtr");
 const { resetApi, SALT_B64 } = await import("../helpers/apiMock");
 const storage = (await import("../helpers/storageMock")).default;
@@ -145,7 +150,8 @@ const keychainMock = Keychain as unknown as {
   __setBiometryType: (v: string | null) => void;
 };
 
-beforeEach(() => {
+beforeEach(async () => {
+  (await import("../../src/localRekey")).__resetLocalKeyLifecycleForTests();
   resetApi(api as never);
   storage.__reset();
   keychainMock.__reset();
@@ -183,7 +189,7 @@ beforeEach(() => {
   vi.mocked(Share.share).mockReset();
   vi.mocked(Share.share).mockImplementation(async () => ({}));
   vault.lock();
-  vault.unlock({ ...keys });
+  vault.unlock({ ...keys }, "user-1");
   verifyPasswordForVault.mockClear();
   verifyPasswordForVault.mockImplementation(async () => ({ ok: true as const, verifierB64: authKeyB64() }));
 });
@@ -221,6 +227,118 @@ describe("therapist-sharing availability copy", () => {
     expect(textOf(root)).toContain("Can’t reach the server to confirm therapist-sharing availability");
     expect(textOf(root)).not.toContain("not available on this server");
     expect(textOf(root)).not.toContain("Share with my therapist");
+  });
+});
+
+describe("saved recording custody controls", () => {
+  async function seedRecording(): Promise<void> {
+    const { enqueueAudio } = await import("../../src/audioQueue");
+    const { encryptAudio } = await import("../../src/crypto/MindPatternCrypto");
+    await enqueueAudio({ userId: "user-1", clientEntryId: "recording:one", ...encryptAudio({ dataKey: vault.get().dataKey }, "user-1", "recording:one", Buffer.from("private voice")), mime: "audio/m4a", durationSeconds: 5 });
+  }
+
+  it("exports ciphertext without deleting it, and deletes only after explicit confirmation", async () => {
+    const fs = await import("../helpers/expoFsMock");
+    const sharing = await import("../helpers/expoSharingMock");
+    sharing.shareAsync.mockClear();
+    await seedRecording();
+    const root = await render(<SettingsScreen navigation={nav as never} />);
+    await flush();
+    expect(textOf(root)).toContain("1 encrypted recordings saved");
+    await pressLabel(root, "Export encrypted recording 1");
+    const uri = sharing.shareAsync.mock.calls.at(-1)![0];
+    const exported = await fs.readAsStringAsync(uri);
+    expect(exported).not.toContain("private voice");
+    expect(JSON.parse(exported)).toMatchObject({ version: 2, username: "alice", audio: [expect.objectContaining({ client_entry_id: "recording:one" })] });
+    expect(textOf(root)).toContain("1 encrypted recordings saved");
+    await pressLabel(root, "Remove saved recording 1");
+    await pressAlertButton("Cancel");
+    expect(textOf(root)).toContain("1 encrypted recordings saved");
+    await pressLabel(root, "Remove saved recording 1");
+    await pressAlertButton("Remove recording");
+    await flush();
+    expect(textOf(root)).not.toContain("1 encrypted recordings saved");
+    expect(fs.__hasFile(uri)).toBe(false);
+  });
+
+  it("keeps a failed upload available and exposes a usable encrypted export failure", async () => {
+    await seedRecording();
+    vi.mocked(api.uploadAudioAttachment).mockRejectedValue(new Error("network unavailable"));
+    const root = await render(<SettingsScreen navigation={nav as never} />);
+    await flush();
+    await pressLabel(root, "Retry saved recordings");
+    expect(api.uploadAudioAttachment).toHaveBeenCalledOnce();
+    expect(textOf(root)).toContain("1 encrypted recordings saved");
+    const sharing = await import("../helpers/expoSharingMock");
+    sharing.isAvailableAsync.mockResolvedValueOnce(false);
+    await pressLabel(root, "Export encrypted recording 1");
+    expect(lastAlert()[0]).toBe("Export failed");
+    expect(textOf(root)).toContain("1 encrypted recordings saved");
+  });
+});
+
+describe("fresh recovery-kit verification and secret lifetime", () => {
+  it.each(["recovery", "delete"])("refuses a %s mutation when the fresh password proof settles after account replacement", async action => {
+    const { changeLocalSessionOwner } = await import("../../src/localWriteGuard");
+    const root = await render(<SettingsScreen navigation={nav as never} />); await flush();
+    if (action === "recovery") await pressLabel(root, "Create recovery kit");
+    else {
+      await pressLabel(root, "Delete my account and data"); await pressAlertButton("Continue"); await pressAlertButton("Continue to password");
+    }
+    await typeInto(root, "password", "correct horse"); let release!: () => void;
+    verifyPasswordForVault.mockImplementationOnce(async () => { await new Promise<void>(resolve => { release = resolve; }); return { ok: true as const, verifierB64: authKeyB64() }; });
+    await firePress(root, "Confirm with password"); await flush(); expect(release).toBeTypeOf("function");
+    changeLocalSessionOwner("user-2"); vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 2), dataKey: Buffer.alloc(32, 9) }, "user-2");
+    await act(async () => release()); await flush();
+    expect(api.setupRecoveryKit).not.toHaveBeenCalled(); expect(api.deleteAccount).not.toHaveBeenCalled(); expect(signOut).not.toHaveBeenCalled();
+    expect(vault.ownerUserId()).toBe("user-2");
+  });
+  it("creates a versioned kit only after fresh proof, confirms storage, and removes it with another proof", async () => {
+    const root = await render(<SettingsScreen navigation={nav as never} />);
+    await flush();
+    await pressLabel(root, "Create recovery kit");
+    expect(api.setupRecoveryKit).not.toHaveBeenCalled();
+    await reauth(root);
+    expect(api.setupRecoveryKit).toHaveBeenCalledWith(authKeyB64(), expect.any(String), expect.any(String), "v2");
+    expect(textOf(root)).toContain("mindpattern-recovery:v2:");
+    await pressLabel(root, "I saved the key");
+    expect(textOf(root)).not.toContain("mindpattern-recovery:v2:");
+    await pressLabel(root, "Remove kit");
+    expect(api.removeRecoveryKit).not.toHaveBeenCalled();
+    await reauth(root);
+    expect(api.removeRecoveryKit).toHaveBeenCalledWith(authKeyB64());
+    expect(textOf(root)).toContain("No recovery kit.");
+  });
+
+  it("requires a replacement warning and never reveals a late setup key after backgrounding", async () => {
+    vi.mocked(api.recoveryStatus).mockResolvedValue({ enabled: true, set_at: "2026-10-01" } as never);
+    let finish!: () => void;
+    vi.mocked(api.setupRecoveryKit).mockImplementationOnce(() => new Promise(resolve => { finish = () => resolve({} as never); }));
+    const root = await render(<SettingsScreen navigation={nav as never} />);
+    await flush();
+    await pressLabel(root, "Replace kit key");
+    await pressAlertButton("Cancel");
+    expect(api.setupRecoveryKit).not.toHaveBeenCalled();
+    await pressLabel(root, "Replace kit key");
+    await pressAlertButton("Replace kit key");
+    await typeInto(root, "password", "correct horse");
+    await firePress(root, "Confirm with password");
+    await flush();
+    const listener = vi.mocked(AppState.addEventListener).mock.calls.at(-1)![1];
+    await act(async () => { listener("background"); finish(); });
+    await flush();
+    expect(textOf(root)).not.toContain("mindpattern-recovery:v2:");
+    expect(textOf(root)).not.toContain("Confirm with password");
+  });
+
+  it("reports a refused recovery-kit mutation without showing a key", async () => {
+    vi.mocked(api.setupRecoveryKit).mockRejectedValueOnce(new Error("service unavailable"));
+    const root = await render(<SettingsScreen navigation={nav as never} />);
+    await flush();
+    await pressLabel(root, "Create recovery kit");
+    await reauth(root);
+    expect(textOf(root)).not.toContain("mindpattern-recovery:v2:");
+    expect(lastAlert()[1]).toContain("could not be created");
   });
 });
 
@@ -1385,6 +1503,18 @@ describe("recovered entries surface — edge branches", () => {
 });
 
 describe("change-password rotation self-completes (audit fix 7, 2026-09-21)", () => {
+  it.each(["getUserId", "getUsername"] as const)("refuses a replacement account during the initial %s lookup", async lookup => {
+    const { changeLocalSessionOwner } = await import("../../src/localWriteGuard");
+    const root = await render(<SettingsScreen navigation={nav as never} />); await flush();
+    await pressLabel(root, "Change password"); await typeInto(root, "password", "correct old password");
+    await typeInto(root, "New password (12+ characters)", "a strong new passphrase 42!");
+    rotatePasswordMock.mockClear(); let release!: () => void;
+    vi.mocked(api[lookup]).mockImplementationOnce(async () => { await new Promise<void>(resolve => { release = resolve; }); return lookup === "getUserId" ? "user-2" : "replacement"; });
+    await firePress(root, "Rotate keys and sign in again"); await flush(); expect(release).toBeTypeOf("function");
+    changeLocalSessionOwner("user-2"); vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 2), dataKey: Buffer.alloc(32, 9) }, "user-2");
+    await act(async () => release()); await flush();
+    expect(rotatePasswordMock).not.toHaveBeenCalled(); expect(api.changePassword).not.toHaveBeenCalled(); expect(api.rekeyStoredData).not.toHaveBeenCalled();
+  });
   it("locks the vault and drops the biometric wrap BEFORE the alert — even when the alert is dismissed without OK", async () => {
     const { enableBiometricUnlock, hasBiometricUnlock } = await import("../../src/biometricUnlock");
     // A biometric wrap exists for this account — the stale-key hazard the

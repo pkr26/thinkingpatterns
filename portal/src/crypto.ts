@@ -453,12 +453,12 @@ export async function decryptNoteAny(
   userId: string,
   clientNoteId: string,
   blobB64: string,
+  historicalKeys: Bytes[] = [],
 ): Promise<string> {
-  try {
-    return await decryptNote(noteKeyV2, therapistId, userId, clientNoteId, blobB64);
-  } catch {
-    return await decryptNote(legacyNoteKey, therapistId, userId, clientNoteId, blobB64);
+  for (const key of [noteKeyV2, legacyNoteKey, ...historicalKeys]) {
+    try { return await decryptNote(key, therapistId, userId, clientNoteId, blobB64); } catch { /* try authenticated historical custody */ }
   }
+  throw new Error("This note could not be authenticated with the account's notes custody. It was not changed.");
 }
 
 export async function decryptNote(
@@ -522,7 +522,7 @@ export async function decryptInsights(
   try {
     encrypted = unb64(blobB64);
     plain = await decrypt(dataKey, encrypted, buildAad("insights", userId, "patterns"));
-    return decodeJson(plain) as { state_seq?: number; stats: { patterns: PatternPayload[] } };
+    return validateInsights(decodeJson(plain)) as unknown as { state_seq?: number; stats: { patterns: PatternPayload[] } };
   } finally {
     zeroize(encrypted, plain);
   }
@@ -593,13 +593,7 @@ export async function decryptEntry(
       }
     }
     if (plain === null) throw failure ?? new Error("entry could not be decrypted");
-    const payload = decodeJson(plain) as { v?: unknown; text?: string };
-    // M-8b (audit 2026-09-29): the AEAD bound the bytes to this
-    // account/entry, but nothing else vouches for the version field.
-    if (!ENTRY_PAYLOAD_VERSIONS.includes(payload.v as number)) {
-      throw new Error(`unsupported entry payload version: ${String(payload.v)}`);
-    }
-    if (typeof payload.text !== "string") throw new Error("entry payload malformed");
+    const payload = validateEntry(decodeJson(plain));
     return payload as { text: string };
   } finally {
     zeroize(encrypted, plain);
@@ -621,6 +615,7 @@ export interface PatternPayload {
     last_seen?: string;
     is_new?: boolean;
     sample_days?: number;
+    sample_entries?: number;
     evidence_dates?: string[];
     sensitive?: boolean;
     [key: string]: unknown;
@@ -776,4 +771,92 @@ export async function decryptAudio(
     encrypted,
     buildAad("audio", userId, clientEntryId, String(AUDIO_PAYLOAD_VERSION)),
   );
+}
+
+/** Password-sealed independent notes custody. Historical keys preserve authenticated revisions. */
+export interface NotesKeyring { active: Bytes; historical: Bytes[] }
+export function createNotesKeyring(legacy: Bytes, identity: Bytes): NotesKeyring {
+  const active = new Uint8Array(KEY_SIZE); crypto.getRandomValues(active);
+  return { active, historical: [new Uint8Array(legacy), new Uint8Array(identity)] };
+}
+export function wipeNotesKeyring(ring: NotesKeyring | null | undefined): void {
+  ring?.active.fill(0); for (const key of ring?.historical ?? []) key.fill(0);
+}
+export async function sealNotesKeyring(kek: Bytes, therapistId: string, ring: NotesKeyring): Promise<string> {
+  const { buildAad } = await import("./aad");
+  if (ring.active.length !== KEY_SIZE || ring.historical.length > 512 || ring.historical.some(key => key.length !== KEY_SIZE)) throw new Error("Invalid notes custody.");
+  const plain = new TextEncoder().encode(JSON.stringify({ v: 1, active: b64(ring.active), historical: ring.historical.map(b64) }));
+  try { return b64(await encrypt(kek, plain, buildAad("portal-notes-keyring", therapistId, "v1"))); }
+  finally { plain.fill(0); }
+}
+export async function openNotesKeyring(kek: Bytes, therapistId: string, blob: string): Promise<NotesKeyring> {
+  const { buildAad } = await import("./aad");
+  const plain = await decrypt(kek, unb64(blob), buildAad("portal-notes-keyring", therapistId, "v1"));
+  const keys: Bytes[] = [];
+  try {
+    const value: unknown = JSON.parse(new TextDecoder().decode(plain));
+    if (!value || typeof value !== "object") throw new Error("Invalid notes custody.");
+    const row = value as Record<string, unknown>;
+    if (row.v !== 1 || typeof row.active !== "string" || !Array.isArray(row.historical) || row.historical.length > 512) throw new Error("Unsupported notes custody.");
+    for (const encoded of [row.active, ...row.historical]) {
+      if (typeof encoded !== "string") throw new Error("Invalid notes custody key.");
+      const key = unb64(encoded); keys.push(key);
+      if (key.length !== KEY_SIZE || b64(key) !== encoded) throw new Error("Invalid notes custody key.");
+    }
+    return { active: keys[0]!, historical: keys.slice(1) };
+  } catch (err) { for (const key of keys) key.fill(0); throw err; }
+  finally { plain.fill(0); }
+}
+
+
+function payloadRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Encrypted payload must be an object.");
+  return value as Record<string, unknown>;
+}
+function finiteField(row: Record<string, unknown>, key: string, min: number, max: number): void {
+  const value = row[key];
+  if (value !== undefined && value !== null && (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max)) throw new Error(`Invalid encrypted ${key}.`);
+}
+function validateEntry(value: unknown): Record<string, unknown> {
+  const row = payloadRecord(value);
+  if (![1,2,3].includes(row.v as number)) throw new Error(`unsupported entry payload version: ${String(row.v)}`);
+  if (typeof row.text !== "string" || row.text.length > 100_000) throw new Error("entry payload malformed");
+  if (row.created_at !== undefined && (typeof row.created_at !== "string" || !Number.isFinite(Date.parse(row.created_at)))) throw new Error("Invalid encrypted entry date.");
+  finiteField(row,"sentiment",-1,1); finiteField(row,"energy",-1,5); finiteField(row,"sleep",1,5);
+  if (row.tags !== undefined && (!Array.isArray(row.tags) || row.tags.length > 200 || row.tags.some(tag => typeof tag !== "string" || tag.length > 200))) throw new Error("Invalid encrypted tags.");
+  if (row.english_text !== undefined && row.english_text !== null && (typeof row.english_text !== "string" || row.english_text.length > 100_000)) throw new Error("Invalid encrypted translation.");
+  if (row.input_mode !== undefined && row.input_mode !== "typed" && row.input_mode !== "voice") throw new Error("Invalid encrypted input mode.");
+  if (row.transcript_lang !== undefined && (typeof row.transcript_lang !== "string" || !/^[a-z]{2,3}(?:-[A-Za-z]{2,8})?$/.test(row.transcript_lang))) throw new Error("Invalid encrypted transcript language.");
+  if (row.tod !== undefined && !["morning","afternoon","evening","night"].includes(row.tod as string)) throw new Error("Invalid encrypted time bucket.");
+  return row;
+}
+function validateInsights(value: unknown): Record<string, unknown> {
+  const row = payloadRecord(value);
+  if (row.v !== 2) throw new Error(`unsupported insights payload version: ${String(row.v)}`);
+  if (row.state_seq !== undefined && (!Number.isSafeInteger(row.state_seq) || (row.state_seq as number) < 0)) throw new Error("Invalid encrypted analysis generation.");
+  if (row.stats === undefined) return row;
+  const stats = payloadRecord(row.stats);
+  finiteField(stats,"avg_sentiment",-1,1); finiteField(stats,"total_entries",0,10_000_000); finiteField(stats,"active_days",0,10_000_000);
+  if (stats.patterns !== undefined) {
+    if (!Array.isArray(stats.patterns) || stats.patterns.length > 1_000) throw new Error("Invalid encrypted patterns.");
+    for (const raw of stats.patterns) {
+      const pattern = payloadRecord(raw);
+      if (typeof pattern.label !== "string" || pattern.label.length > 1_000 || typeof pattern.kind !== "string" || pattern.kind.length > 100) throw new Error("Invalid encrypted pattern label.");
+      finiteField(pattern,"confidence",0,1); finiteField(pattern,"occurrences",0,10_000_000);
+      if (pattern.detail !== undefined) {
+        const detail = payloadRecord(pattern.detail);
+        if (detail.evidence_dates !== undefined && (!Array.isArray(detail.evidence_dates) || detail.evidence_dates.length > 10_000 || detail.evidence_dates.some(date => typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)))) throw new Error("Invalid encrypted evidence dates.");
+        for (const key of ["pattern_pid","pattern_state","first_seen","last_seen"]) if (detail[key] !== undefined && typeof detail[key] !== "string") throw new Error("Invalid encrypted pattern detail.");
+        for (const key of ["sensitive","is_new"]) if (detail[key] !== undefined && typeof detail[key] !== "boolean") throw new Error("Invalid encrypted pattern flags.");
+      }
+    }
+  }
+  return row;
+}
+
+/** Preserve current legacy-client keys before a credential/identity change too. */
+export function includeNotesCustodyKey(ring: NotesKeyring, key: Bytes): void {
+  if ([ring.active,...ring.historical].some(known => known.length === key.length && known.every((value,index) => value === key[index]))) return;
+  if (key.length !== KEY_SIZE || ring.historical.length >= 512) throw new Error("Notes custody requires a verified key retirement before another rotation; nothing was changed.");
+  ring.historical.push(new Uint8Array(key));
 }

@@ -32,7 +32,7 @@ import { toBase64, type Bytes } from "../crypto/core";
 import { useRecorder } from "../audio/recorder";
 import { detectCrisisLanguage } from "../crisisDetect";
 import { crisisDialogShownOn, recordCrisisDialogShown } from "../crisisDialog";
-import { clearActiveDraft, loadActiveDraft, registerDraftSource, type EntryDraft } from "../entryDraft";
+import { clearActiveDraft, loadActiveDraft, saveActiveDraft, preserveActiveDraft, registerDraftSource, type EntryDraft } from "../entryDraft";
 import { localDateISO } from "../dates";
 import { newClientEntryId } from "../entryId";
 import { recordMood, localStreak } from "../moodLog";
@@ -44,6 +44,7 @@ import { zeroize } from "../crypto/core";
 import { detectLanguage, sentimentScore } from "../brain/sentiment";
 import { dateLocaleTag, getLocale, t } from "../strings";
 import { vault } from "../vault";
+import { kv } from "../kvstore";
 import { Button, Card, Chip, DotScale, BarScale, ErrorBanner, Icon, MoodScale, Note, PillNote, TextArea, Toggle } from "../ui";
 
 export type SaveResult = "sent" | "queued";
@@ -167,7 +168,23 @@ export function EntryView(props: {
   // not destroy it (entryDraft.ts, audit 2026-09-26).
   const draftRef = useRef<EntryDraft>({ text, mood: moodPick, energy: energyPick, sleep: sleepPick, tags });
   draftRef.current = { text, mood: moodPick, energy: energyPick, sleep: sleepPick, tags };
-  useEffect(() => registerDraftSource(() => draftRef.current), []);
+  useEffect(() => {
+    const unregister = registerDraftSource(() => draftHydrated.current ? draftRef.current : null);
+    return () => { void preserveActiveDraft(); unregister(); };
+  }, []);
+  const draftHydrated = useRef(false);
+  const [draftReady,setDraftReady] = useState(false);
+  const [restoreAttempt,setRestoreAttempt] = useState(0);
+  const [draftStatus,setDraftStatus] = useState<string | null>(null);
+  useEffect(() => {
+    if (!draftHydrated.current || !userId || !vault.isUnlocked()) return;
+    const timer = setTimeout(() => {
+      if (!vault.isUnlocked()) return;
+      const key = new Uint8Array(vault.get().dataKey);
+      void saveActiveDraft(key,userId,draftRef.current).then(() => setDraftStatus(t("entry.draftSaved"))).catch(err => setDraftStatus(err instanceof Error ? err.message : t("entry.draftFailed"))).finally(() => key.fill(0));
+    },300);
+    return () => clearTimeout(timer);
+  },[text,moodPick,energyPick,sleepPick,tags,userId]);
 
   // The on-device read is a display-only estimate — it never rides in the
   // payload (H-5); only an explicit pick does.
@@ -196,7 +213,9 @@ export function EntryView(props: {
     let cancelled = false;
     loadActiveDraft(vault.get().dataKey, owner)
       .then((draft) => {
-        if (cancelled || !draft) return;
+        if (cancelled) return;
+        draftHydrated.current = true; setDraftReady(true);
+        if (!draft) return;
         // Never clobber typing that raced the restore: the slot keeps the
         // draft either way.
         const live = draftRef.current;
@@ -208,11 +227,11 @@ export function EntryView(props: {
         setTags(draft.tags);
         setDraftRestored(true);
       })
-      .catch(() => undefined);
+      .catch(err => { if (!cancelled) setDraftStatus(err instanceof Error ? err.message : t("entry.draftFailed")); });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [restoreAttempt]);
 
   const toggleTag = (tag: string): void => {
     setTags((current) => (current.includes(tag) ? current.filter((x) => x !== tag) : [...current, tag]));
@@ -338,7 +357,8 @@ export function EntryView(props: {
   };
 
   const save = async (): Promise<void> => {
-    if (!text.trim()) {
+    if (!draftReady) { setError(t("entry.draftFailed")); return; }
+    if (!text.trim() && moodPick === null && energyPick === null && sleepPick === null && tags.length === 0) {
       setError(t("entry.empty"));
       return;
     }
@@ -359,6 +379,7 @@ export function EntryView(props: {
       setError(t("common.sessionLocked"));
       return;
     }
+    const submitted = JSON.stringify(draftRef.current);
     const date = localDateISO();
     // The crisis dialog tier runs PRE-encryption, on what was just typed:
     // the resource prompt must precede any encrypt/send call. Throttled to
@@ -398,6 +419,7 @@ export function EntryView(props: {
       const dataKey = new Uint8Array(new ArrayBuffer(keys.dataKey.length));
       dataKey.set(keys.dataKey);
       try {
+        const writePermit=await kv.captureWritePermit(owner,dataKey);
         // Voice sessions keep english_text in sync with the SAVED text
         // (the v3 contract): an edited transcript re-translates before
         // encryption; a failed/offline re-translation degrades to null
@@ -463,16 +485,20 @@ export function EntryView(props: {
             // the queue's M-5 GET-verification exists to referee. The entry
             // stays safe locally either way; the queue proves or refutes the
             // 409 before dropping anything.
-            await enqueue({ userId: owner, clientEntryId, blobB64, entryDate });
+            await enqueue({ userId: owner, clientEntryId, blobB64, entryDate },writePermit);
           }
         } else {
-          await enqueue({ userId: owner, clientEntryId, blobB64, entryDate });
+          await enqueue({ userId: owner, clientEntryId, blobB64, entryDate },writePermit);
         }
-        setText("");
-        setMoodPick(null);
-        setEnergyPick(null);
-        setSleepPick(null);
-        setTags([]);
+        const unchanged = JSON.stringify(draftRef.current) === submitted;
+        if (unchanged) {
+          draftRef.current = { text: "",mood:null,energy:null,sleep:null,tags:[] };
+          setText("");
+          setMoodPick(null);
+          setEnergyPick(null);
+          setSleepPick(null);
+          setTags([]);
+        }
         // 2026-10-01 audit M3: the crisis prompt is NOT cleared here — it
         // rides past the save and stays until dismissed from the card.
         setDraftRestored(false);
@@ -492,7 +518,7 @@ export function EntryView(props: {
         }
         // The entry is safe (server or ciphertext queue) — the sealed draft's
         // custody ends here (entryDraft.ts, audit 2026-09-26).
-        await clearActiveDraft(owner).catch(() => undefined);
+        if (unchanged && draftHydrated.current) await clearActiveDraft(owner,writePermit).catch(err => setDraftStatus(err instanceof Error ? err.message : t("entry.draftFailed")));
         props.onSaved(result, date);
       } finally {
         zeroize(dataKey);
@@ -520,7 +546,7 @@ export function EntryView(props: {
     setDraftRestored(false);
     discardVoice();
     const owner = vault.ownerUserId();
-    if (owner) void clearActiveDraft(owner).catch(() => undefined);
+    if (owner && vault.isUnlocked()) void kv.captureWritePermit(owner,vault.get().dataKey).then(permit=>clearActiveDraft(owner,permit)).catch(err=>setDraftStatus(err instanceof Error?err.message:t("entry.draftFailed")));
   };
 
   const now = new Date();
@@ -565,10 +591,10 @@ export function EntryView(props: {
           frictionless); every dimension is optional and never blocks saving. */}
       <Card title={t("entry.checkinTitle")}>
         <span className="checkin-optional">{t("entry.optionalHint")}</span>
-        <div className="checkin-grid">
+        <fieldset disabled={!draftReady} className="checkin-fields"><div className="checkin-grid">
           <div className="stack" style={{ gap: "var(--space-2)" }}>
             <span className="checkin-label">{t("entry.moodQuestion")}</span>
-            <MoodScale options={MOOD_OPTIONS} value={moodPick} onChange={setMoodPick} />
+            <MoodScale groupLabel={t("entry.moodQuestion")} options={MOOD_OPTIONS} value={moodPick} onChange={setMoodPick} />
           </div>
           <div className="stack" style={{ gap: "var(--space-2)" }}>
             <span className="checkin-label">{t("entry.energyQuestion")}</span>
@@ -576,7 +602,7 @@ export function EntryView(props: {
           </div>
           <div className="stack" style={{ gap: "var(--space-2)" }}>
             <span className="checkin-label">{t("entry.sleepQuestion")}</span>
-            <DotScale options={SLEEP_OPTIONS} value={sleepPick} onChange={setSleepPick} />
+            <DotScale groupLabel={t("entry.sleepQuestion")} options={SLEEP_OPTIONS} value={sleepPick} onChange={setSleepPick} />
           </div>
           <div className="stack" style={{ gap: "var(--space-2)" }}>
             <span className="checkin-label">{t("entry.activitiesQuestion")}</span>
@@ -587,17 +613,21 @@ export function EntryView(props: {
             </div>
           </div>
         </div>
-        <Note tone="muted">{t("entry.detailsNote")}</Note>
+        </fieldset><Note tone="muted">{t("entry.detailsNote")}</Note>
       </Card>
 
       <Card title={t("entry.title")}>
         <TextArea
           label={t("entry.question")}
+          maxLength={100_000}
+          disabled={!draftReady}
           value={text}
           onChange={setText}
           placeholder={t("entry.placeholderWeb")}
           rows={8}
         />
+        {draftStatus && <Note role="status">{draftStatus}</Note>}
+        {!draftReady && <Button label={t("entry.retryDraft")} onPress={() => setRestoreAttempt(value => value + 1)} small />}
         {/* Voice capture (VOICE_PLAN 2026-09-29): the mic renders on
             recorder capability; the first press confirms the server has
             the feature before any recording starts. */}
@@ -700,7 +730,7 @@ export function EntryView(props: {
             label={busy ? t("entry.saving") : t("entry.save")}
             icon="check"
             onPress={() => void save()}
-            disabled={busy || transcribing || recorder.state === "recording"}
+            disabled={busy || !draftReady || transcribing || recorder.state === "recording"}
             block
           />
           <span className="row" style={{ justifyContent: "center" }}>

@@ -25,6 +25,8 @@ import { api, ApiError } from "../api/client";
 import { buildAad, decrypt, encrypt } from "../crypto/envelope";
 import { engine } from "../crypto/engine";
 import { vault } from "../vault";
+import { assertLocalWritePermit, captureLocalWritePermit, type LocalWritePermit } from "../localRekey";
+import { localWriteScopeEpoch } from "../localWriteGuard";
 import { useSession } from "../store";
 import { localDateISO } from "../moodLog";
 import { crisisDialogShownOn, recordCrisisDialogShown } from "../crisisDialog";
@@ -212,8 +214,11 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
     // One copy taken at the check, used for both the persistence and the
     // encrypt, closes that window (the savePendingMeasure keyCopy idiom).
     let keyCopy: Buffer | null = null;
+    let writePermit: LocalWritePermit | null = null;
+    const submitEpoch = localWriteScopeEpoch();
     try {
       const userId = await api.getUserId();
+      if (submitEpoch !== localWriteScopeEpoch()) throw new Error(tr("common.sessionDamagedTitle"));
       if (!userId) {
         Alert.alert(tr("measures.sessionDamagedTitle"), tr("measures.sessionDamagedBody"));
         return;
@@ -223,7 +228,9 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
         Alert.alert(tr("measures.lockedTitle"), tr("measures.lockedBody"));
         return;
       }
+      if (vault.ownerUserId() !== userId) throw new Error(tr("common.sessionDamagedTitle"));
       keyCopy = Buffer.from(vault.get().dataKey);
+      writePermit = captureLocalWritePermit(userId, keyCopy);
       const today = localDateISO();
       // 2026-09-26 audit LOW: persist BEFORE the send (a status-0 failure
       // can be a timeout AFTER the server committed; the stable id is what
@@ -234,6 +241,7 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
       pendingRef.current = record;
       await savePendingMeasure(keyCopy, userId, record).catch(() => {});
       const safetyFlagged = safetyItemEndorsed(record.kind, record.picks);
+      assertLocalWritePermit(writePermit);
       const blob = encrypt(
         keyCopy,
         Buffer.from(measurePayload(record.kind, record.picks, record.date), "utf8"),
@@ -251,8 +259,9 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
             : previous,
         );
       };
-      await api.createMeasure(record.clientMeasureId, blob, record.date);
-      await clearPendingMeasure(userId).catch(() => {});
+      assertLocalWritePermit(writePermit);
+      await api.createMeasure(record.clientMeasureId, blob, record.date, writePermit);
+      await clearPendingMeasure(userId, writePermit).catch(() => {});
       finishSent();
       showStatus(tr("measures.recordedStatus"), "ok");
       // The MBC cadence clock (2026-09-27): a completed questionnaire
@@ -287,7 +296,7 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
         // Idempotent retry of a send that already landed: the record dies
         // here too (under its OWN account id — never a fallback ""), or
         // every mount would retry it forever.
-        if (sentUserId) await clearPendingMeasure(sentUserId).catch(() => {});
+        if (sentUserId && writePermit) await clearPendingMeasure(sentUserId, writePermit).catch(() => {});
         finishSent();
         showStatus(tr("measures.alreadyRecorded"), "neutral");
         await load();
@@ -490,7 +499,7 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
 
         <PrimaryButton
           label={tr("measures.recordButton")}
-          onPress={submit}
+          onPress={() => void submit()}
           disabled={!measureComplete(active, responses)}
           busy={busy}
         />

@@ -7,9 +7,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
 import { Alert } from "react-native";
 
-vi.mock("../../src/api/client", async () => {
+vi.mock("../../src/api/client", async (importOriginal) => {
+  const actualApi = await importOriginal<typeof import("../../src/api/client")>();
   const { makeApiMock, ApiError } = await import("../helpers/apiMock");
-  return { ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
+  return { ...actualApi, ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
 });
 
 vi.mock("../../src/unlockProof", () => ({
@@ -125,9 +126,13 @@ describe("UnlockScreen", () => {
     await flush();
     expect(textOf(root)).toContain("Locked");
     expect(textOf(root)).toContain("Re-enter your password");
-    // The honest copy: keys only you hold + the one bounded exception.
-    expect(textOf(root)).toContain("Your journal is encrypted with keys only you hold");
-    expect(textOf(root)).toContain("held in memory, then destroyed");
+    // The actual flow: encrypted sync, visible metadata, explicit analysis
+    // access and optional voice/translation processing.
+    expect(textOf(root)).toContain("Your writing syncs encrypted");
+    expect(textOf(root)).toContain("account and entry metadata");
+    expect(textOf(root)).toContain("temporarily gives the server access to your journal key");
+    expect(textOf(root)).toContain("Optional voice transcription and translation");
+    expect(textOf(root)).not.toContain("Nothing else ever leaves");
     expect(textOf(root)).not.toContain("never leave this device");
     expect(touchableByLabel(root, "Unlock").props.disabled).toBe(true);
 
@@ -145,7 +150,7 @@ describe("UnlockScreen", () => {
     expect(api.saltFor).toHaveBeenCalledWith("alice");
     expect(vi.mocked(deriveKeysAsync)).toHaveBeenCalledWith("correct horse", Buffer.from(SALT_B64, "base64"));
     expect(api.login).toHaveBeenCalledTimes(1);
-    expect(api.setSession).toHaveBeenCalledWith("tok", "user-1", "alice");
+    expect(api.setSession).toHaveBeenCalledWith("tok", "user-1", "alice", { stillCurrent: expect.any(Function) });
     expect(vault.isUnlocked()).toBe(true);
     expect(refreshActiveDays).toHaveBeenCalledTimes(1);
     expect(Alert.alert).not.toHaveBeenCalled();
@@ -389,16 +394,15 @@ describe("UnlockScreen", () => {
     );
   });
 
-  it("a successful online unlock tolerates a missing stored user id", async () => {
-    // The vault's account binding is best-effort metadata: a null id must
-    // not block an unlock the server already verified.
+  it("a missing saved owner refuses key adoption and directs the user to sign in", async () => {
     vi.mocked(api.getUserId).mockResolvedValue(null);
     const root = await render(<UnlockScreen />);
     await typeInto(root, "password", "correct horse");
     await pressLabel(root, "Unlock");
     await flush();
-    expect(vault.isUnlocked()).toBe(true);
-    expect(Alert.alert).not.toHaveBeenCalled();
+    expect(vault.isUnlocked()).toBe(false);
+    expect(api.login).not.toHaveBeenCalled();
+    expect(Alert.alert).toHaveBeenCalledWith("Unlock failed", "no saved account on this device — please sign in");
   });
 
   it("a non-Error failure in the outer flow reports calm fallback copy", async () => {
@@ -423,7 +427,7 @@ describe("UnlockScreen", () => {
     await submitInput(root, "password");
     expect(api.login).toHaveBeenCalledTimes(1);
     await act(async () => {
-      resolveLogin?.({ token: "tok", user_id: "u" });
+      resolveLogin?.({ token: "tok", user_id: "user-1" });
     });
     await flush();
     expect(api.login).toHaveBeenCalledTimes(1);
@@ -618,7 +622,7 @@ describe("UnlockScreen biometric unlock (offered only when a wrap exists)", () =
     await flush();
 
     // The same proof check the password path runs, on the unwrapped key.
-    expect(verifyUnlockProof).toHaveBeenCalledWith(Buffer.alloc(32, 9), "user-1");
+    expect(verifyUnlockProof).toHaveBeenCalledWith(Buffer.alloc(32), "user-1"); // rejected owned key has been zeroized
     // The stale wrap is deleted — the next visit cannot offer it again.
     expect(disableBiometricUnlock).toHaveBeenCalledWith("user-1");
     // The vault NEVER unlocked under the wrong key.

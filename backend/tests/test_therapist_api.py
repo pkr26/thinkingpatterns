@@ -963,7 +963,7 @@ class TestNotes:
         patient, th = await self._shared(client)
         original_note_out = therapist_api._note_out
         observed_locked: list[bool] = []
-        chart_key = f"notes:{th.user_id}:{patient.user_id}"
+        chart_key = f"notes:{th.user_id}"
 
         def observe_note_out(row):
             entry = therapist_api._note_locks._locks.get(chart_key)  # noqa: SLF001 - fence seam

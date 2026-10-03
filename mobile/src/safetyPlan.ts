@@ -21,6 +21,7 @@
  * offline and pre-unlock; the plan is one more thing a person can hold,
  * readable only while the vault is unlocked.
  */
+import { captureLocalWritePermit, captureOpaqueLocalWritePermit, commitLocalWrite, type LocalWritePermit } from "./localRekey";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { buildAad, decrypt, encrypt } from "./crypto/envelope";
 
@@ -52,7 +53,9 @@ export const SAFETY_PLAN_FIELDS: readonly (keyof SafetyPlan)[] = [
 /** Generous but bounded: a plan field is a note, not a document — the
  *  bound keeps a hostile/half-written blob from masquerading as megabytes
  *  of "plan" in memory. */
-const MAX_FIELD_CHARS = 4_000;
+export const MAX_FIELD_CHARS = 4_000;
+// Preserve plans written by older releases without the write bound.
+const MAX_LEGACY_FIELD_CHARS = 100_000;
 
 export function emptySafetyPlan(): SafetyPlan {
   return {
@@ -66,6 +69,7 @@ export function emptySafetyPlan(): SafetyPlan {
 }
 
 const key = (userId: string): string => `@mindpattern/safety_plan_${userId}`;
+const draftKey = (userId: string): string => `@mindpattern/safety_plan_draft_${userId}`;
 
 /** Full validation of anything read back from storage (the pendingMeasure
  *  discipline): every field must be a bounded string; anything else is a
@@ -78,7 +82,7 @@ function parsePlan(raw: string | null): SafetyPlan | null {
     const plan = emptySafetyPlan();
     for (const field of SAFETY_PLAN_FIELDS) {
       const value = (parsed as Record<string, unknown>)[field];
-      if (typeof value !== "string" || value.length > MAX_FIELD_CHARS) return null;
+      if (typeof value !== "string" || value.length > MAX_LEGACY_FIELD_CHARS) return null;
       plan[field] = value;
     }
     return plan;
@@ -94,13 +98,18 @@ function parsePlan(raw: string | null): SafetyPlan | null {
  *  storage failure — the screen reports it honestly; the plan is also
  *  still on screen. */
 export async function saveSafetyPlan(dataKey: Buffer, userId: string, plan: SafetyPlan): Promise<void> {
+  const permit = captureLocalWritePermit(userId, dataKey);
+  for (const field of SAFETY_PLAN_FIELDS) {
+    if (typeof plan[field] !== "string" || plan[field].length > MAX_FIELD_CHARS) {
+      throw new Error(`Safety plan fields must contain at most ${MAX_FIELD_CHARS} characters`);
+    }
+  }
   const keyCopy = Buffer.from(dataKey);
-  const blob = encrypt(
-    keyCopy,
-    Buffer.from(JSON.stringify(plan), "utf8"),
-    buildAad("safety-plan", userId),
-  );
-  await AsyncStorage.setItem(key(userId), blob.toString("base64"));
+  const plaintext = Buffer.from(JSON.stringify(plan), "utf8");
+  try {
+    const blob = encrypt(keyCopy, plaintext, buildAad("safety-plan", userId));
+    await commitLocalWrite(permit, () => AsyncStorage.setItem(key(userId), blob.toString("base64")));
+  } finally { keyCopy.fill(0); plaintext.fill(0); }
 }
 
 /** The plan for this account, or null when absent, corrupt, or under the
@@ -108,20 +117,46 @@ export async function saveSafetyPlan(dataKey: Buffer, userId: string, plan: Safe
  *  cannot be read is reported as absent; the user can always write a new
  *  one, and the static crisis resources never depended on it. */
 export async function loadSafetyPlan(dataKey: Buffer, userId: string): Promise<SafetyPlan | null> {
+  const keyCopy = Buffer.from(dataKey);
+  let plain: Buffer | null = null;
   try {
-    const keyCopy = Buffer.from(dataKey);
     const raw = await AsyncStorage.getItem(key(userId));
     if (!raw) return null;
-    const plain = decrypt(keyCopy, Buffer.from(raw, "base64"), buildAad("safety-plan", userId));
+    plain = decrypt(keyCopy, Buffer.from(raw, "base64"), buildAad("safety-plan", userId));
     return parsePlan(plain.toString("utf8"));
-  } catch {
-    return null;
-  }
+  } catch { return null; }
+  finally { keyCopy.fill(0); plain?.fill(0); }
 }
 
 /** Account-deletion hygiene (the deletion flow locks the vault first, so
  *  this intentionally needs NO key — it removes the slot, it does not
  *  read it). The plan must not outlive its account on a shared device. */
 export async function clearSafetyPlan(userId: string): Promise<void> {
-  await AsyncStorage.removeItem(key(userId));
+  await AsyncStorage.multiRemove([key(userId), draftKey(userId)]);
+}
+
+/** A separately encrypted, explicitly labelled unsaved draft. Never
+ * replaces the saved safety plan until the person chooses Save. */
+export async function saveSafetyPlanDraft(dataKey: Buffer, userId: string, plan: SafetyPlan): Promise<void> {
+  const permit = captureLocalWritePermit(userId, dataKey);
+  if (!parsePlan(JSON.stringify(plan))) throw new Error("Invalid safety-plan draft");
+  const keyCopy = Buffer.from(dataKey);
+  const plaintext = Buffer.from(JSON.stringify(plan));
+  try {
+    const blob = encrypt(keyCopy, plaintext, buildAad("safety-plan-draft", userId));
+    await commitLocalWrite(permit, () => AsyncStorage.setItem(draftKey(userId), blob.toString("base64")));
+  } finally { keyCopy.fill(0); plaintext.fill(0); }
+}
+export async function loadSafetyPlanDraft(dataKey: Buffer, userId: string): Promise<SafetyPlan | null> {
+  const keyCopy = Buffer.from(dataKey); let plaintext: Buffer | null = null;
+  try {
+    const raw = await AsyncStorage.getItem(draftKey(userId)); if (!raw) return null;
+    plaintext = decrypt(keyCopy, Buffer.from(raw, "base64"), buildAad("safety-plan-draft", userId));
+    return parsePlan(plaintext.toString("utf8"));
+  } catch { return null; }
+  finally { keyCopy.fill(0); plaintext?.fill(0); }
+}
+export async function clearSafetyPlanDraft(userId: string, source?: LocalWritePermit): Promise<void> {
+  const permit = captureOpaqueLocalWritePermit(userId, source);
+  await commitLocalWrite(permit, () => AsyncStorage.removeItem(draftKey(userId)));
 }

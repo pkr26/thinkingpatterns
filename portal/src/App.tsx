@@ -8,13 +8,14 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { clearSession, api, hasSession, setUnauthorizedHandler, type Patient } from "./api";
-import { unlockWrapPrivateKeyWithNotesKey } from "./crypto";
+import { unlockWrapPrivateKeyWithNotesKey, openNotesKeyring, wipeNotesKeyring, type NotesKeyring } from "./crypto";
 import { LoginView, type PortalKeys } from "./views/LoginView";
 import { PatientsView, resetScanConfirmation } from "./views/PatientsView";
 import { PatientView, type PortalSession } from "./views/PatientView";
 import { InfoBanner } from "./ui";
 import { ViewBoundary } from "./ErrorBoundary";
 import { localStore, sessionStore, visitAnchorStore } from "./platform";
+import { readPatientRoute, writePatientRoute } from "./browserRoute";
 
 type View =
   | { kind: "login"; error?: string }
@@ -36,12 +37,13 @@ const IDLE_LOCK_MS = 10 * 60 * 1000;
  * wipeKeys never ran. Every holder that reaches this function leaves
  * zeroed. */
 function wipePortalSession(
-  value: { noteKey?: Uint8Array; noteKeyV2?: Uint8Array; wrapKek?: Uint8Array } | null,
+  value: { noteKey?: Uint8Array; noteKeyV2?: Uint8Array; historicalNoteKeys?: Uint8Array[]; wrapKek?: Uint8Array } | null,
 ): void {
   if (!value) return;
   value.wrapKek?.fill(0);
   value.noteKey?.fill(0);
   value.noteKeyV2?.fill(0);
+  for (const key of value.historicalNoteKeys ?? []) key.fill(0);
 }
 
 export function App(): React.JSX.Element {
@@ -53,6 +55,34 @@ export function App(): React.JSX.Element {
   const sessionRef = useRef<PortalSession | null>(null);
   const lifecycle = useRef(0);
   const loginAttempt = useRef(0);
+  useEffect(() => {
+    if (!session) return;
+    let generation = 0;
+    let alive = true;
+    const followHistory = async (): Promise<void> => {
+      const request = ++generation;
+      const patientId = readPatientRoute();
+      if (!patientId) { setView({ kind: "patients" }); return; }
+      // Resolve only against this authenticated clinician's accessible list.
+      // A URL alone never grants chart access or creates a patient object.
+      try {
+        const patients = await api.patients();
+        if (!alive || request !== generation) return;
+        const patient = patients.find(row => row.user_id === patientId);
+        if (patient) setView({ kind: "patient", patient });
+        else { setNotice("That patient is not available to this account."); setView({ kind: "patients" }); }
+      } catch (error) {
+        if (!alive || request !== generation) return;
+        setNotice(error instanceof Error ? error.message : "The patient could not be opened. Retry when connected.");
+        setView({ kind: "patients" });
+      }
+    };
+    const onHistory = (): void => { void followHistory(); };
+    window.addEventListener("popstate", onHistory);
+    window.addEventListener("hashchange", onHistory);
+    if (readPatientRoute()) onHistory();
+    return () => { alive = false; generation += 1; window.removeEventListener("popstate", onHistory); window.removeEventListener("hashchange", onHistory); };
+  }, [session]);
 
   const replacePortalSession = useCallback((next: PortalSession | null): void => {
     const previous = sessionRef.current;
@@ -221,6 +251,7 @@ export function App(): React.JSX.Element {
     const attempt = ++loginAttempt.current;
     setUnlockError("");
     setNotice(null);
+    let identityNotes: Uint8Array | null = null; let custody: NotesKeyring | null = null; let adopted = false;
     try {
       const me = await api.me();
       const { privateKey, noteKeyV2 } = await unlockWrapPrivateKeyWithNotesKey(
@@ -232,22 +263,27 @@ export function App(): React.JSX.Element {
       // non-extractable private-key handle instead. Zero the raw KEK bytes
       // now so a memory disclosure for the rest of the session (extension,
       // crash dump) cannot recover the key that decrypts wrap_key_blob.
+      identityNotes = noteKeyV2;
+      custody = me.notes_keyring_blob ? await openNotesKeyring(keys.wrapKek, keys.userId, me.notes_keyring_blob) : null;
       keys.wrapKek.fill(0);
       // A 401, explicit logout, or component teardown may have occurred
       // while the encrypted wrap key was being fetched/decrypted.  Never
       // resurrect a completed session after that boundary.
       if (attempt !== loginAttempt.current || startedAt !== lifecycle.current || !hasSession()) {
-        wipePortalSession(keys);
+        wipePortalSession(keys); noteKeyV2.fill(0); custody?.active.fill(0); for (const key of custody?.historical ?? []) key.fill(0);
         return;
       }
       replacePortalSession({
         username: keys.username,
         userId: keys.userId,
         noteKey: keys.noteKey,
-        noteKeyV2,
+        noteKeyV2: custody?.active ?? noteKeyV2,
+        historicalNoteKeys: custody ? [...custody.historical, noteKeyV2] : [],
+        ...(custody ? { custodyVersion: me.custody_version ?? 0 } : {}),
         privateKey,
         publicKeyB64: me.wrap_pub_key,
       });
+      adopted = true;
       setDisplayName(me.display_name);
       setView({ kind: "patients" });
     } catch (err) {
@@ -270,7 +306,7 @@ export function App(): React.JSX.Element {
         );
         setView({ kind: "login" });
       }
-    }
+    } finally { if (!adopted) { identityNotes?.fill(0); wipeNotesKeyring(custody); } }
   };
 
   if (view.kind === "login") {
@@ -305,7 +341,7 @@ export function App(): React.JSX.Element {
         <PatientView
           patient={view.patient}
           session={session}
-          onBack={() => setView({ kind: "patients" })}
+          onBack={() => { writePatientRoute(null); setView({ kind: "patients" }); }}
           // 2026-09-26 audit round (L): an explicit sign-out also clears the
           // session-backed visit anchors (see lockDown's carve-out).
           onSignOut={() => lockDown("Signed out. Your in-memory keys were cleared.", { clearAnchors: true })}
@@ -319,7 +355,7 @@ export function App(): React.JSX.Element {
       <PatientsView
         displayName={displayName}
         session={session}
-        onOpen={(patient) => setView({ kind: "patient", patient })}
+        onOpen={(patient) => { writePatientRoute(patient.user_id); setView({ kind: "patient", patient }); }}
         onSignOut={() => {
           // Same explicit-sign-out anchor carve-out as the chart's button.
           lockDown("Signed out. Your in-memory keys were cleared.", { clearAnchors: true });

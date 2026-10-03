@@ -159,7 +159,14 @@ def _pool_owners(patterns, user_id: str) -> list[tuple[str | None, str]]:
     """Spec mirror of build_pool: top-5 by feedback rank FIRST, sensitive
     skipped AFTER the slice — the same ordering questions.question_for_today
     consumes."""
-    top = sorted(patterns, key=questions.feedback_rank)[: questions.MAX_PATTERN_QUESTIONS]
+    top = sorted(
+        [
+            p
+            for p in patterns
+            if not questions.pattern_is_muted(p) and not questions.pattern_is_sensitive(p)
+        ],
+        key=questions.feedback_rank,
+    )[: questions.MAX_PATTERN_QUESTIONS]
     owners: list[tuple[str | None, str]] = []
     for p in top:
         if questions.pattern_is_sensitive(p):
@@ -198,9 +205,16 @@ def test_chosen_pattern_pid_mirrors_build_pool_ordering():
             f"day {day}: pid {pid!r} != build_pool owner {expected_owner!r} "
             f"(question {expected_q!r})"
         )
-        assert pid in (None, "pid-family", "pid-running", "pid-reading", "pid-cooking"), (
+        assert pid in (
+            None,
+            "pid-family",
+            "pid-running",
+            "pid-reading",
+            "pid-cooking",
+            "pid-music",
+        ), (
             f"day {day}: pid {pid!r} comes from outside the top-5 slice — "
-            "the sensitive-skip must happen AFTER the slice, like build_pool"
+            "the eligible filter must happen before the five-pattern cap"
         )
 
 

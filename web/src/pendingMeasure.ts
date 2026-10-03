@@ -28,7 +28,7 @@
  */
 import { buildAad } from "./crypto/aad";
 import { decrypt, encrypt, fromBase64, toBase64, zeroize, type Bytes } from "./crypto/core";
-import { kv } from "./kvstore";
+import { kv,type WritePermit } from "./kvstore";
 import { INSTRUMENTS, type MeasureId } from "./measures";
 
 /** One completed-but-unsent questionnaire. */
@@ -74,12 +74,14 @@ function parseRecord(raw: string | null): PendingMeasure | null {
  *  storage failure — the caller treats persistence as best-effort relative
  *  to the send, never as a reason to drop the answers. */
 export async function savePendingMeasure(dataKey: Bytes, userId: string, record: PendingMeasure): Promise<void> {
+  const keyCopy=new Uint8Array(dataKey);
   const payload = new TextEncoder().encode(JSON.stringify(record));
   try {
-    const blob = await encrypt(dataKey, payload, buildAad("pending-measure", userId));
-    await kv.setItem(key(userId), toBase64(blob));
+    const permit=await kv.captureWritePermit(userId,keyCopy);
+    const blob = await encrypt(keyCopy, payload, buildAad("pending-measure", userId));
+    await kv.setItem(key(userId), toBase64(blob),permit);
   } finally {
-    zeroize(payload);
+    zeroize(payload,keyCopy);
   }
 }
 
@@ -102,8 +104,8 @@ export async function loadPendingMeasure(dataKey: Bytes, userId: string): Promis
 
 /** The send landed (201) or was already recorded (409): the record must
  *  not outlive its questionnaire. */
-export async function clearPendingMeasure(userId: string): Promise<void> {
-  await kv.removeItem(key(userId));
+export async function clearPendingMeasure(userId: string,permit?:WritePermit): Promise<void> {
+  await kv.removeItem(key(userId),permit);
 }
 
 /** Rotation parity with the B-7 rewrap family: re-seal an in-flight

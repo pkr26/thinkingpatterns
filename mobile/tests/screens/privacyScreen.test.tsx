@@ -24,19 +24,19 @@ describe("PrivacyScreen", () => {
     expect(text).toContain("Privacy, in plain language");
     // What's encrypted
     expect(text).toContain("What is encrypted");
-    expect(text).toContain("Everything you write");
-    expect(text).toContain("The server stores only ciphertext");
+    expect(text).toContain("Journal entries and observations");
+    expect(text).toContain("New accounts use a random data key");
     // The no-recovery honesty sits in the encryption section (zero-knowledge
     // cuts both ways) — the same sentence registration shows.
-    expect(text).toContain("There is no password reset");
-    expect(text).toContain("no one — including us — can recover your journal");
+    expect(text).toContain("recovery kit");
+    expect(text).toContain("we cannot recover your journal");
     // What the server sees
     expect(text).toContain("What the server sees");
     expect(text).toContain("when and how much you wrote — never what");
     // The analysis exception
-    expect(text).toContain("The one exception: pattern analysis");
-    expect(text).toContain("held in memory for up to 5 minutes");
-    expect(text).toContain("never sent for any other reason");
+    expect(text).toContain("Temporary server decryption");
+    expect(text).toContain("kept in memory for up to 5 minutes");
+    expect(text).toContain("never persisted by the server");
     // Optional AI analysis
     expect(text).toContain("Optional AI analysis");
     expect(text).toContain("Off by default");

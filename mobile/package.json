@@ -13,14 +13,18 @@
     "verify:vectors": "node tools/verify_vectors.mjs",
     "verify:native-release": "node tools/verify_native_release.mjs",
     "decrypt:export": "node tools/decrypt_export.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "postinstall": "node tools/apply_dependency_patches.mjs",
+    "verify:dependency-patches": "node tools/verify_dependency_patches.mjs"
   },
   "overrides": {
     "decode-uri-component": "^0.5.0",
     "qs": "^6.16.0",
     "image-size": "2.0.4",
     "uuid": "11.1.1",
-    "@xmldom/xmldom": "0.9.12"
+    "@xmldom/xmldom": "0.9.12",
+    "brace-expansion@^5.0.0": "5.0.12",
+    "fast-uri@^3.0.0": "3.1.8"
   },
   "dependencies": {
     "@notifee/react-native": "^9.1.8",
@@ -31,6 +35,7 @@
     "expo": "^57.0.26",
     "expo-audio": "^57.0.5",
     "expo-file-system": "^57.0.7",
+    "expo-sharing": "~57.0.22",
     "react": "19.2.3",
     "react-native": "0.87.1",
     "react-native-health": "^1.19.0",

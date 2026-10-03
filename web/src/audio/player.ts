@@ -29,7 +29,10 @@ export async function playAttachment(options: {
     options.clientEntryId,
     fetched.blob,
   );
-  const url = URL.createObjectURL(new Blob([plaintext], { type: fetched.mime_type }));
+  let url: string;
+  try { url = URL.createObjectURL(new Blob([plaintext], { type: fetched.mime_type })); }
+  finally { plaintext.fill(0); }
+  const revokeObjectUrl = URL.revokeObjectURL.bind(URL);
   let released = false;
   return {
     url,
@@ -38,7 +41,7 @@ export async function playAttachment(options: {
     release: (): void => {
       if (!released) {
         released = true;
-        URL.revokeObjectURL(url);
+        revokeObjectUrl(url);
       }
     },
   };

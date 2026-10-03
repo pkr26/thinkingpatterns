@@ -6,7 +6,12 @@ EXISTING consent rewrap endpoint (no re-pairing).
 
 from __future__ import annotations
 
+import base64
+import os
+import uuid
+
 from sqlalchemy import select
+from app.security import crypto, sharing as sharing_crypto
 
 from app.models import AccessLog, Consent
 from tests.helpers import ClientEmulator, TherapistEmulator, patient_wrap_for
@@ -30,12 +35,24 @@ async def test_therapist_rotates_password_credential(client):
     await old.register(client)
     successor = TherapistEmulator("ther-rot", "brand-new-password")
     response = await client.put(
-        "/api/account/credential",
+        "/api/therapist/password",
         headers=old.headers,
         json={
             "verifier": old.auth_key_b64,
             "new_salt": successor.salt_b64,
             "new_verifier": successor.auth_key_b64,
+            "operation_id": str(uuid.uuid4()),
+            "expected_custody_version": 0,
+            "custody_version": 1,
+            "notes_keyring_blob": base64.b64encode(os.urandom(60)).decode(),
+            "wrap_pub_key": old.wrap_pub_key,
+            "wrap_key_blob": base64.b64encode(
+                crypto.encrypt(
+                    successor.wrap_kek,
+                    old._pkcs8(),
+                    crypto.build_aad(sharing_crypto.THERAPIST_KEY_CONTEXT, old.username),
+                )
+            ).decode(),
         },
     )
     assert response.status_code == 204, response.text
@@ -51,12 +68,18 @@ async def test_therapist_credential_rotation_rejects_wrong_verifier(client):
     await emu.register(client)
     impostor = TherapistEmulator("ther-rot-bad", "wrong-password")
     response = await client.put(
-        "/api/account/credential",
+        "/api/therapist/password",
         headers=emu.headers,
         json={
             "verifier": impostor.auth_key_b64,
             "new_salt": impostor.salt_b64,
             "new_verifier": impostor.auth_key_b64,
+            "operation_id": str(uuid.uuid4()),
+            "expected_custody_version": 0,
+            "custody_version": 1,
+            "notes_keyring_blob": base64.b64encode(os.urandom(60)).decode(),
+            "wrap_pub_key": emu.wrap_pub_key,
+            "wrap_key_blob": impostor.wrap_key_blob_b64(),
         },
     )
     assert response.status_code == 403
@@ -68,7 +91,7 @@ async def test_therapist_credential_rotation_rejects_wrong_verifier(client):
 # --- wrap-key rotation (audit C-2) ---------------------------------------------------
 
 
-async def test_wrap_key_rotation_and_patient_rewrap_without_repairing(client, app):
+async def test_wrap_key_rotation_revokes_old_grants_then_patient_repairs(client, app):
     therapist = TherapistEmulator("ther-wrap", "deep-password")
     await therapist.register(client)
     patient = ClientEmulator("ther-wrap-pat", "deep-password")
@@ -79,12 +102,25 @@ async def test_wrap_key_rotation_and_patient_rewrap_without_repairing(client, ap
     # A genuinely fresh keypair: same username (the blob's AAD binds it),
     # new P-256 material, blob wrapped under the CURRENT password KEK.
     successor = TherapistEmulator("ther-wrap", "deep-password")
+    custody = await client.put(
+        "/api/therapist/custody",
+        headers=therapist.headers,
+        json={
+            "verifier": therapist.auth_key_b64,
+            "operation_id": str(uuid.uuid4()),
+            "expected_custody_version": 0,
+            "custody_version": 1,
+            "notes_keyring_blob": base64.b64encode(os.urandom(60)).decode(),
+        },
+    )
+    assert custody.status_code == 204, custody.text
     rotation = await client.put(
         "/api/therapist/wrap-key",
         headers={**therapist.headers, "X-Account-Verifier": therapist.auth_key_b64},
         json={
             "wrap_pub_key": successor.wrap_pub_key,
             "wrap_key_blob": successor.wrap_key_blob_b64(),
+            "expected_custody_version": 1,
         },
     )
     assert rotation.status_code == 204, rotation.text
@@ -99,15 +135,21 @@ async def test_wrap_key_rotation_and_patient_rewrap_without_repairing(client, ap
     assert consents.status_code == 200
     out = consents.json()[0]
     assert out["id"] == consent_id
-    assert out["status"] == "active"
+    assert out["status"] == "revoked"
     assert out["therapist_wrap_pub_key"] == successor.wrap_pub_key
     wrap = patient_wrap_for(patient, successor.wrap_pub_key, therapist.user_id)
-    rewrapped = await client.put(
-        f"/api/consents/{consent_id}/rewrap",
+    # Replacing a compromised identity retires every old grant. A new
+    # explicit pairing consent is required, and preserves the pair's row ID.
+    from app.api.consents import SHARING_DISCLOSURE_VERSION
+
+    code = await therapist.create_pairing_code(client)
+    rewrapped = await client.post(
+        "/api/consents",
         headers={**patient.headers, "X-Account-Verifier": patient.auth_key_b64},
-        json=wrap,
+        json={"code": code, **wrap, "disclosure": SHARING_DISCLOSURE_VERSION},
     )
-    assert rewrapped.status_code == 200, rewrapped.text
+    assert rewrapped.status_code == 201, rewrapped.text
+    assert rewrapped.json()["id"] == consent_id
 
     # The stored grant now wraps to the new public half, and the SUCCESSOR's
     # private key (the post-rotation material) unwraps the patient's data key.

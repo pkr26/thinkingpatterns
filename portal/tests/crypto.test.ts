@@ -421,7 +421,7 @@ describe("payload decryption helpers", () => {
   it("decrypts an insights payload and entry blobs with the right AAD", async () => {
     const dataKey = crypto.getRandomValues(new Uint8Array(32));
     const userId = "user-9";
-    const insights = { stats: { patterns: [{ kind: "topic", label: "guitar", occurrences: 5, confidence: 0.9, detail: { evidence_dates: ["2026-09-01"] } }] } };
+    const insights = { v: 2, stats: { patterns: [{ kind: "topic", label: "guitar", occurrences: 5, confidence: 0.9, detail: { evidence_dates: ["2026-09-01"] } }] } };
     const insightsBlob = await encrypt(
       dataKey,
       new TextEncoder().encode(JSON.stringify(insights)),
@@ -503,13 +503,13 @@ describe("payload decryption helpers", () => {
     const userId = "user-wipe";
     const insightsBlob = await encrypt(
       dataKey,
-      new TextEncoder().encode('{"stats":{"patterns":[]}}'),
+      new TextEncoder().encode('{"v":2,"stats":{"patterns":[]}}'),
       buildAad("insights", userId, "patterns"),
     );
     const insightsPlain = captureDecryptBuffer();
     try {
       await expect(decryptInsights(dataKey, userId, toB64(insightsBlob))).resolves.toEqual({
-        stats: { patterns: [] },
+        v: 2, stats: { patterns: [] },
       });
       expectWiped(insightsPlain.bytes());
     } finally {

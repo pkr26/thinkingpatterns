@@ -9,6 +9,9 @@ const files = new Map<string, string>();
 
 export const EncodingType = { Base64: "base64", UTF8: "utf8" } as const;
 
+export const documentDirectory = "/tmp/mindpattern-test-documents/";
+export const makeDirectoryAsync = vi.fn(async () => {});
+
 export const cacheDirectory = "/tmp/mindpattern-test-cache/";
 
 export const readAsStringAsync = vi.fn(async (uri: string) => {
@@ -21,7 +24,7 @@ export const writeAsStringAsync = vi.fn(async (uri: string, content: string) => 
 });
 
 export const deleteAsync = vi.fn(async (uri: string) => {
-  files.delete(uri);
+  for (const file of files.keys()) if (file === uri || (uri.endsWith("/") && file.startsWith(uri))) files.delete(file);
 });
 
 /** Test seams: seed a take/scratch file, observe what still exists, and
@@ -38,6 +41,8 @@ export const __resetFiles = (): void => {
 };
 
 export default {
+  documentDirectory,
+  makeDirectoryAsync,
   EncodingType,
   cacheDirectory,
   readAsStringAsync,

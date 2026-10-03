@@ -1,0 +1,2 @@
+PASS current nonignored project syntax: {'Python': 234, 'YAML': 21, 'JSON': 58}
+PASS publication secret-scan TOML parses

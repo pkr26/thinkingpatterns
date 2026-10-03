@@ -1,0 +1,49 @@
+{
+  "date": "2026-10-03",
+  "scope": "11 current executable campaigns; complete108-verdict inventory. Findings policy remains in CI; complete is not a clean security assessment.",
+  "counts": {
+    "BLOCKED": 92,
+    "FINDING": 4,
+    "INFO": 10,
+    "PARTIAL": 2,
+    "NOT-RUN": 0,
+    "ERROR": 0
+  },
+  "findings": [
+    {
+      "id": "B1.verifier-replay",
+      "status": "FINDING",
+      "summary": "old bearer after logout=401 (epoch revocation works), but the captured verifier logs straight back in (200): logout revokes issued bearer sessions, not the underlying password-equivalent auth_key. Atomic password/security reset rotates that credential; until rotation, an intercepted verifier remains a reusable login credential."
+    },
+    {
+      "id": "A2.offline-oracle",
+      "status": "FINDING",
+      "summary": "a deliberately selected weak fixture password was recovered through the local password oracle in 4 guesses (43 ms/guess at 600000 iters on ONE cpu core). This assumes code executing with access to the application's local ciphertext/proof; it is not a random-password or hardware-keystore bypass. UI backoff cannot throttle an external offline script. Password-protected envelopes and authenticated v1 ciphertext inherently allow candidate verification if the required stored metadata is disclosed; device sealing adds a separate access boundary. Strong passwords and the pinned KDF remain necessary. 'absent' also discloses local proof presence."
+    },
+    {
+      "id": "G2.npm-audit",
+      "status": "FINDING",
+      "summary": "npm audit (mobile): {'info': 0, 'low': 0, 'moderate': 0, 'high': 28, 'critical': 0, 'total': 28}; registry findings remain visible. The pinned postinstall patches and verify_dependency_patches.mjs exercise the two remaining unpublished advisory mitigations; registry metadata does not certify those source patches."
+    },
+    {
+      "id": "H1.metadata-inference",
+      "status": "FINDING",
+      "summary": "operator-view inference from entry_date+length only: subject journals on ['Sunday'] exclusively (15 entries over 120 days); a 21-day silence ending 2026-08-02; 33% of entries are 10x longer than the rest (crisis-length writes vs routine updates) \u2014 an operator can infer religious observance or work schedules, episode timing, and possibly severity from SIZE alone, with zero decryption"
+    }
+  ],
+  "partials": [
+    {
+      "id": "A4.server-cannot-verify",
+      "status": "PARTIAL",
+      "summary": "a hand-rolled 1-iteration derivation still registers (201) \u2014 the server never sees the password, so client work factors are structurally unverifiable; the floor removes every accidental/honest downgrade path"
+    },
+    {
+      "id": "B2.eviction-flood",
+      "status": "PARTIAL",
+      "summary": "after 121k attacker hits across 11k keys, victim bucket count=11 (reset=no): eviction is possible but costs ~121k requests to reset ONE near-limit bucket \u2014 smallest-count/oldest bias makes flooding strictly worse for the attacker than waiting out the window"
+    }
+  ],
+  "new_unaccepted_finding": "G2.npm-audit",
+  "pipeline_policy": "Existing three architectural residuals remain documented. Mobile hard npm audit and new-finding release gate remain blocked on G2; no allowlist expansion.",
+  "mobile_refresh": "Final eight mobile red-team tests rerun after native ownership/authentication changes; see validation-logs/mobile-redteam.log. Other ten campaign sources unchanged since redteam-final-current.log."
+}

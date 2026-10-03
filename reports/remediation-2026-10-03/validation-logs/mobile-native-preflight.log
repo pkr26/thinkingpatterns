@@ -1,0 +1,24 @@
+npm notice run mindpattern-mobile@1.0.0 verify:native-release
+npm notice run node tools/verify_native_release.mjs
+Native release preflight: PASS native projects exist — ios/ and android/ are present
+Native release preflight: PASS react-native-keychain is a direct dependency — the JS keychain seams stay backed by the package
+Native release preflight: PASS react-native-keychain autolinking — `react-native config` lists it
+Native release preflight: PASS iOS Health usage strings — both Health keys present in ios/MindPattern/Info.plist
+Native release preflight: PASS Android allowBackup — android:allowBackup="false" is set on <application>
+Native release preflight: PASS Android FLAG_SECURE — MainActivity sets FLAG_SECURE (no app-switcher snapshots)
+Native release preflight: PASS Android adjustResize — activity sets android:windowSoftInputMode="adjustResize"
+Native release preflight: PASS iOS HealthKit entitlement — declared and signed by both target configurations
+Native release preflight: PASS iOS State-of-Mind bridge — all three contract methods present, iOS-18-gated, write-only, included in target sources
+Native release preflight: PASS Android release signing — release signs from android/keystore.properties; the taskGraph guard refuses release demands without it
+Native release preflight: PASS Android R8 minification — release shrinks via R8; obfuscation deliberately off
+Native release preflight: PASS Android network security config — system CAs only, cleartext banned outside loopback, referenced by the manifest
+Native release preflight: PASS iOS snapshot shield — native willResignActive cover closes the app-switcher snapshot race the JS overlay can lose
+Native release preflight: PASS git keystore hygiene — no *.jks|*.keystore|*.p12|*.pfx|*.mobileprovision or keystore.properties outside the debug/example allowlist is tracked
+Native release preflight: PASS native/JS launcher registration — MindPattern
+Native release preflight: PASS Metro static native crypto resolution
+Native release preflight: PASS Face ID usage declaration
+Native release preflight: PASS iOS bundled privacy manifest
+Native release preflight: PASS iOS populated app icons
+Native release preflight: PASS iOS product bundle identity
+Native release preflight: PASS HealthKit category header/factory/finite valence contract
+Native release preflight passed: all 21 checks green.

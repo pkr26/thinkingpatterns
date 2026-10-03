@@ -1,0 +1,34 @@
+import { beforeEach, expect, it, vi } from "vitest";
+import storage from "./helpers/storageMock";
+import { eraseDeletedAccountLocals, retryPendingAccountErasures } from "../src/accountErasure";
+import { __resetLocalKeyLifecycleForTests } from "../src/localRekey";
+import { emptySafetyPlan, saveSafetyPlan } from "../src/safetyPlan";
+import { savePendingMeasure } from "../src/pendingMeasure";
+import { setSecureStoreBackend } from "../src/secureStore";
+import { journalDraftScope, newJournalDraft, saveJournalDraft } from "../src/journalDraft";
+vi.mock("../src/nativeFeatures", () => ({ cancelDailyReminder: vi.fn(async () => true), cancelMeasureReminder: vi.fn(async () => true) }));
+const user = "deleted-owner";
+beforeEach(() => { __resetLocalKeyLifecycleForTests(); storage.__reset(); setSecureStoreBackend(null); });
+it("attempts every cleanup after one fails, retains an encrypted job, and retries on restart", async () => {
+  const key = Buffer.alloc(32, 5);
+  await saveSafetyPlan(key, user, { ...emptySafetyPlan(), warningSigns: "Private warning" });
+  await savePendingMeasure(key, user, { kind: "phq9", clientMeasureId: "one", picks: Array(9).fill(0), date: "2026-10-03" });
+  const draftScope = await journalDraftScope(user);
+  await saveJournalDraft(key, draftScope, { ...newJournalDraft(), revision: 1, text: "Private journal draft" });
+  const original = storage.multiRemove;
+  const fail = vi.spyOn(storage, "multiRemove").mockImplementation(async slots => {
+    if (slots.includes(`@mindpattern/safety_plan_${user}`)) throw new Error("transient disk error");
+    return original(slots);
+  });
+  const failures = await eraseDeletedAccountLocals(user, "private-account-name");
+  expect(failures).toContain("safety plan");
+  expect(await storage.getItem(`@mindpattern/pending_measure_${user}`)).toBeNull();
+  expect(await storage.getItem(draftScope.slot)).toBeNull();
+  const jobs = (await storage.getAllKeys()).filter(k => k.startsWith("@mindpattern/erasure.v1."));
+  expect(jobs).toHaveLength(1);
+  expect(await storage.getItem(jobs[0]!)).not.toContain("private-account-name");
+  fail.mockRestore(); setSecureStoreBackend(null);
+  await retryPendingAccountErasures();
+  expect(await storage.getItem(`@mindpattern/safety_plan_${user}`)).toBeNull();
+  expect((await storage.getAllKeys()).some(k => k.startsWith("@mindpattern/erasure.v1."))).toBe(false);
+});

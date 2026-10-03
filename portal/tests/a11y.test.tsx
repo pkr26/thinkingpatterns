@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { axe, toHaveNoViolations } from "jest-axe";
+import { Field } from "../src/ui";
 
 expect.extend(toHaveNoViolations as unknown as Parameters<typeof expect.extend>[0]);
 
@@ -224,4 +225,15 @@ describe("per-view axe scans (audit H-9c, delivered 2026-09-22)", () => {
     );
     expect(await axe(container)).toHaveNoViolations();
   });
+});
+
+it("password inputs retain their exact field label independently of the reveal button", async () => {
+ const container = await mount(<Field label="Password" value="" onChange={()=>{}} type="password" reveal />);
+ const input = container.querySelector("input")!;
+ expect([...input.labels!].map(label=>label.textContent)).toEqual(["Password"]);
+ expect(input.labels![0]!.querySelector("button")).toBeNull();
+ await clickButton(container,"Show password");
+ expect(input.type).toBe("text");
+ expect([...input.labels!].map(label=>label.textContent)).toEqual(["Password"]);
+ expect(await axe(container)).toHaveNoViolations();
 });

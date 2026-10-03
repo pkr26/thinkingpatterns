@@ -80,7 +80,7 @@ describe("EntryView", () => {
   it("offline: parks the entry in the encrypted queue and says so", async () => {
     stubFetch(() => jsonResponse({ detail: "unmatched" }, { status: 404 }));
     // navigator.onLine === false drives the offline branch.
-    vi.stubGlobal("navigator", { onLine: false });
+    vi.stubGlobal("navigator", { onLine: false, locks:navigator.locks });
     const onSaved = vi.fn();
     const root = await render(<EntryView onSaved={onSaved} />);
     await typeArea(root, "How was today?", "Written on a plane.");

@@ -36,6 +36,7 @@
  */
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { useColorScheme } from "react-native";
+import { useLocale } from "./strings";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 /** User theme preference (2026-09-17): "system" follows the OS, "dark" and
@@ -189,6 +190,7 @@ export const lightTheme: Theme = {
  *  value). Screens render WITHOUT a provider in tests: the context default
  *  ("system") reproduces the old behavior exactly. */
 export function useTheme(): Theme {
+  useLocale();
   const scheme = useColorScheme();
   const mode = useContext(ThemeModeContext);
   if (mode === "dark") return darkTheme;

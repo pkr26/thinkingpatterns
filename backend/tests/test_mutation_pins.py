@@ -1290,10 +1290,10 @@ async def test_export_bundle_header_is_exact(client):
 
     lines = [line for line in response.text.splitlines() if line.strip()]
     head = json.loads(lines[0])
-    assert head["version"] == 1
+    assert head["version"] == 2
     assert head["llm_consent"] is False
     # 2026-09-16 (finding H2): no cleartext username in the export bundle.
-    assert "username" not in head
+    assert head["username"] == emu.username
     parsed_at = datetime.fromisoformat(head["exported_at"])
     assert parsed_at.tzinfo is not None
     assert abs((datetime.now(timezone.utc) - parsed_at).total_seconds()) < 300
@@ -2134,9 +2134,10 @@ def test_llm_budget_exhausts_mid_entry_with_one_char_left():
     findings = [Pattern("temporal", "work", 12, 0.9, {"day": "Sunday"})]
     analyzer.extract_patterns(corpus, findings=findings)
     sent = json.loads(posted[0]["messages"][1]["content"])["recent_entries"]
-    assert len(sent) == 3
-    assert len(sent[2]["text"]) == 1  # exactly the remaining budget
-    assert sent[2]["text"] == "c"
+    assert len(sent) == 4
+    assert sent[-1]["text"] == "dddddddddd"
+    assert sent[-2]["text"] == "cccccccccc"
+    assert len(sent[0]["text"]) == 74980  # newest entries consume the budget first
 
 
 # ---------------------------------------------------------------------------

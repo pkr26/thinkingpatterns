@@ -8,9 +8,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
 import { Alert, TouchableOpacity } from "react-native";
 
-vi.mock("../../src/api/client", async () => {
+vi.mock("../../src/api/client", async (importOriginal) => {
+  const actualApi = await importOriginal<typeof import("../../src/api/client")>();
   const { makeApiMock, ApiError } = await import("../helpers/apiMock");
-  return { ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
+  return { ...actualApi, ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
 });
 
 vi.mock("../../src/crypto/MindPatternCrypto", async (importOriginal) => {
@@ -281,7 +282,7 @@ describe("registration", () => {
     );
     const wrappedB64 = (vi.mocked(api.register).mock.calls[0] as unknown[])[4] as string;
     expect(Buffer.from(wrappedB64, "base64")).toHaveLength(60);
-    expect(api.setSession).toHaveBeenCalledWith("tok", "user-1", "alice");
+    expect(api.setSession).toHaveBeenCalledWith("tok", "user-1", "alice", { stillCurrent: expect.any(Function) });
     expect(vault.isUnlocked()).toBe(true);
     expect(markLoggedIn).toHaveBeenCalledTimes(1);
     expect(refreshActiveDays).toHaveBeenCalledTimes(1);
@@ -382,12 +383,12 @@ describe("login", () => {
     expect(deriveKeysAsync).toHaveBeenCalledWith("correct horse", Buffer.from(SALT_B64, "base64"));
     const expectedAuthKey = Buffer.from(`correct horse|${SALT_B64}`.padEnd(32, "\0")).toString("base64");
     expect(api.login).toHaveBeenCalledWith("alice", expectedAuthKey);
-    expect(api.setSession).toHaveBeenCalledWith("tok", "user-1", "alice");
+    expect(api.setSession).toHaveBeenCalledWith("tok", "user-1", "alice", { stillCurrent: expect.any(Function) });
     expect(vault.isUnlocked()).toBe(true);
     expect(markLoggedIn).toHaveBeenCalledTimes(1);
   });
 
-  it("tolerates an empty user_id in the login response (vault binding is best-effort)", async () => {
+  it("refuses an empty verified owner instead of adopting unbound keys", async () => {
     // A server that verifies the password but returns a blank id must not
     // block the unlock — the vault simply records no account binding.
     vi.mocked(api.login).mockResolvedValue({ token: "tok", user_id: "" } as never);
@@ -396,9 +397,9 @@ describe("login", () => {
     await typeInto(root, "password", "correct horse");
     await pressLabel(root, "Sign in");
     await flush();
-    expect(vault.isUnlocked()).toBe(true);
-    expect(markLoggedIn).toHaveBeenCalledTimes(1);
-    expect(Alert.alert).not.toHaveBeenCalled();
+    expect(vault.isUnlocked()).toBe(false);
+    expect(markLoggedIn).not.toHaveBeenCalled();
+    expect(Alert.alert).toHaveBeenCalledWith("Sign in failed", "The signed-in account changed before key adoption.");
   });
 
   it("unlocks via the keyboard submit action too", async () => {
@@ -589,10 +590,10 @@ describe("registration honesty (audit fix)", () => {
   it("shows the no-reset warning only in register mode", async () => {
     const root = await render(<LoginScreen />);
     await flush();
-    expect(textOf(root)).not.toContain("There is no password reset.");
+    expect(textOf(root)).not.toContain("An enrolled recovery kit");
     await pressLabel(root, "New here? Create an account");
     expect(textOf(root)).toContain(
-      "There is no password reset. If you forget this password, no one — including us — can recover your journal.",
+      "An enrolled recovery kit can reset a forgotten password.",
     );
   });
 
@@ -618,7 +619,7 @@ describe("registration honesty (audit fix)", () => {
     // …and a gate at submit.
     await pressLabel(root, "Create account");
     await flush();
-    expect(Alert.alert).toHaveBeenCalledWith("Passwords don't match", expect.stringContaining("no reset"));
+    expect(Alert.alert).toHaveBeenCalledWith("Passwords don't match", expect.stringContaining("recovery kit"));
     expect(api.register).not.toHaveBeenCalled();
     // Fixing the typo clears the hint.
     await typeInto(root, "confirm password", "Correct horse!");

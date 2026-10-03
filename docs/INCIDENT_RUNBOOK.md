@@ -290,17 +290,15 @@ compose stack are all lost):
      [ -f "$f.hmac" ] && { NEWEST=$(basename "$f"); break; }
    done
    [ -n "$NEWEST" ] || { echo "no authenticated mindpattern-*.dump.enc (+ .hmac) in /srv/restore" >&2; exit 1; }
-   docker run --rm -v /srv/restore:/restore -e BACKUP_KEY \
-     --entrypoint mindpattern-backup-mac "$BACKUP_IMAGE" verify "/restore/$NEWEST"
+   set -o pipefail
    docker run --rm -i -v /srv/restore:/restore -e BACKUP_KEY \
-     --entrypoint openssl "$BACKUP_IMAGE" enc -d -aes-256-cbc -pbkdf2 \
-     -iter 600000 -pass env:BACKUP_KEY -in "/restore/$NEWEST" \
+     --entrypoint mindpattern-backup-mac "$BACKUP_IMAGE" decrypt "/restore/$NEWEST" \
      | docker compose --env-file "$SECRETS_ENV" \
      -f "$APP_DIR/docker-compose.yml" \
      exec -T db pg_restore -U "${POSTGRES_USER:-mindpattern}" -d "${POSTGRES_DB:-mindpattern}" --clean --if-exists
    ```
-   (`-iter 600000` must match the encryptor exactly, or decryption fails
-   closed; `BACKUP_IMAGE` is the validated `@sha256` reference from the
+   (The helper authenticates before emitting plaintext and uses the same
+   600,000-iteration KDF and secret resolver as the encryptor; `BACKUP_IMAGE` is the validated `@sha256` reference from the
    release env asset.)
 5. `compose up -d --wait` — the api entrypoint runs `alembic upgrade head`
    — then verify `curl http://127.0.0.1:8000/readyz` before serving

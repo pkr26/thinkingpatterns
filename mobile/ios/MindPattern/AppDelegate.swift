@@ -67,6 +67,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
       object: nil
     )
 
+    captureStateChanged()
     return true
   }
 
@@ -82,7 +83,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     // solid cover must never hint at content underneath).
     shield.backgroundColor = UIColor(red: 0.11, green: 0.14, blue: 0.19, alpha: 1.0)
     shield.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-    shield.isAccessibilityElement = false
+    shield.isAccessibilityElement = true
+    shield.accessibilityLabel = "Fathom privacy screen"
+    shield.accessibilityViewIsModal = true
     window.addSubview(shield)
     snapshotShield = shield
   }
@@ -90,6 +93,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
   @objc private func hideSnapshotShield() {
     snapshotShield?.removeFromSuperview()
     snapshotShield = nil
+    captureStateChanged()
   }
 
   // S-7: the recording cover is INDEPENDENT of the transition shield so
@@ -101,7 +105,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
       let shield = UIView(frame: window.bounds)
       shield.backgroundColor = UIColor(red: 0.11, green: 0.14, blue: 0.19, alpha: 1.0)
       shield.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-      shield.isAccessibilityElement = false
+      shield.isAccessibilityElement = true
+    shield.accessibilityLabel = "Fathom privacy screen"
+    shield.accessibilityViewIsModal = true
       window.addSubview(shield)
       captureShield = shield
     } else {

@@ -1,3 +1,6 @@
+import "fake-indexeddb/auto";
+await import("../../src/strings").then(module => module.loadFullCatalogs());
+
 /** React 19 requires an explicit act() environment outside jsdom;
  *  without it every act() warns and update flushing is unreliable. */
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -46,4 +49,16 @@ if (typeof (globalThis as { window?: unknown }).window === "undefined") {
       sessionStorage: makeStorage(sessionMem),
     },
   });
+}
+
+// Origin-wide serialized Web Locks emulator for the node renderer. Browser
+// capability-failure suites explicitly remove it and assert failed commits.
+if (!(globalThis.navigator as Navigator | undefined)?.locks) {
+ const lockChains = new Map<string,Promise<unknown>>();
+ const locks={request:<T,>(name:string,run:()=>Promise<T>):Promise<T>=>{
+   const result=(lockChains.get(name) ?? Promise.resolve()).then(run,run);
+   lockChains.set(name,result.catch(()=>undefined));return result;
+ }};
+ if (!globalThis.navigator) Object.defineProperty(globalThis,"navigator",{configurable:true,value:{}});
+ Object.defineProperty(globalThis.navigator,"locks",{configurable:true,value:locks});
 }

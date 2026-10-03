@@ -1,0 +1,11 @@
+PASS exact restored users: 2 rows
+PASS exact restored entries: 1 rows
+PASS exact restored therapist_notes: 1 rows
+PASS exact restored therapist_note_revisions: 1 rows
+PASS exact restored audio_attachments: 1 rows
+PASS exact restored audio_deletions: 0 rows
+PASS exact restored alembic_version: 1 rows
+PASS restored entries: ciphertext authenticates and plaintext matches synthetic fixture
+PASS restored therapist_notes: ciphertext authenticates and plaintext matches synthetic fixture
+PASS restored therapist_note_revisions: ciphertext authenticates and plaintext matches synthetic fixture
+PASS latest helper Docker encrypt+single-secret HMAC+private snapshot decrypt+PostgreSQL restore

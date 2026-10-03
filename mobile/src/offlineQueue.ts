@@ -8,6 +8,7 @@
  * expose another account's metadata. Scope is now a storage mechanism, not
  * a convention.
  */
+import { captureOpaqueLocalWritePermit, assertLocalWritePermit, commitLocalWrite, type LocalWritePermit } from "./localWriteGuard";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { api, ApiError, canonicalOrigin, getBaseUrl, OriginPinnedError } from "./api/client";
 import { buildAad, decrypt, encrypt } from "./crypto/envelope";
@@ -385,10 +386,12 @@ export async function rejectedEntryCount(userId?: string): Promise<number> {
   return (await rejectedEntries(userId)).length;
 }
 
-export async function enqueue(item: QueuedEntry): Promise<void> {
+export async function enqueue(item: QueuedEntry, source?: LocalWritePermit): Promise<void> {
+  const permit = captureOpaqueLocalWritePermit(item.userId, source);
   await migrateUnscopedLegacyData();
   const scope = await scopeFor(item.userId);
   return serialized(async () => {
+    assertLocalWritePermit(permit);
     const generation = queueGeneration;
     const queue = await readItems(scope.queue, scope, generation);
     if (wipedSince(generation)) throw new QueueAbandonedError();
@@ -402,7 +405,7 @@ export async function enqueue(item: QueuedEntry): Promise<void> {
     // bytes of the value too.
     if (serializedBytes(candidate) > MAX_QUEUE_BYTES) throw new QueueFullError("over 1 MB of pending entries");
     if (wipedSince(generation)) throw new QueueAbandonedError();
-    await writeItems(scope.queue, candidate);
+    await commitLocalWrite(permit, () => writeItems(scope.queue, candidate));
   });
 }
 
@@ -749,4 +752,39 @@ export async function rewrapQueue(userId: string, oldKey: Buffer, newKey: Buffer
 export async function hasLegacyQueueRecovery(): Promise<boolean> {
   await migrateUnscopedLegacyData();
   return (await AsyncStorage.getItem(LEGACY_RECOVERY_KEY)) !== null;
+}
+
+/** Parent ids still queued or rejected. Audio children wait until these
+ * records are acknowledged, even when a foreground flush is throttled. */
+export async function pendingEntryIds(userId: string): Promise<string[]> {
+  await migrateUnscopedLegacyData();
+  const scope = await scopeFor(userId);
+  return serialized(async () => {
+    const entries = await readItems(scope.queue, scope, queueGeneration);
+    const rejected = await readItems(scope.rejected, scope, queueGeneration);
+    return [...entries, ...rejected].map(item => item.clientEntryId);
+  });
+}
+
+/** Durable rotation preparation leaves live records untouched until the
+ * credential commits. Authentication failure blocks retirement of the old key. */
+export async function prepareQueueRekey(userId: string, oldKey: Buffer, newKey: Buffer): Promise<Array<{ key: string; before: string; after: string }>> {
+  const scope = await scopeFor(userId);
+  return serialized(async () => {
+    const changes: Array<{ key: string; before: string; after: string }> = [];
+    for (const key of [scope.queue, scope.rejected]) {
+      const before = await AsyncStorage.getItem(key);
+      if (before === null) continue;
+      const items = parseItems(before);
+      if (!items) throw new Error("Retained entries require repair before rotation");
+      const next: QueuedEntry[] = [];
+      for (const item of items) {
+        const blobB64 = await rewrapEntryBlob(item, oldKey, newKey);
+        if (!blobB64) throw new Error("A retained entry did not authenticate before rotation");
+        next.push({ ...item, blobB64 });
+      }
+      changes.push({ key, before, after: serializeItems(next) });
+    }
+    return changes;
+  });
 }

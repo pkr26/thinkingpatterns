@@ -8,8 +8,9 @@ revision reproduces exactly what ``init_models`` creates, so:
   directly — no alembic round-trip in the 250+-test hot loop;
 - production upgrade path: ``alembic upgrade head`` (see
   backend/alembic/README.md);
-- databases created before migrations existed: adopt with
-  ``alembic stamp head`` once, then ``alembic upgrade head`` thereafter.
+- databases created before migrations existed: independently establish the
+  matching historical revision before stamping that revision, then upgrade.
+  Stamping today's head does not apply missing schema changes.
 
 After any change to app/models.py, generate the next revision with
 ``alembic revision --autogenerate`` and review it before committing —
@@ -34,7 +35,7 @@ from .models import Base
 
 # Keep readiness independent of Alembic's CLI/runtime import path. Update
 # this with the newest single Alembic head whenever a revision is added.
-SCHEMA_HEAD = "a3f7c1d9b5e2"
+SCHEMA_HEAD = "d6a0c4e8b213"
 
 
 def rowcount(result: Any) -> int:

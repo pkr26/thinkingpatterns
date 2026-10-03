@@ -1,0 +1,25 @@
+DEPRECATED: The legacy builder is deprecated and will be removed in a future release.
+            Install the buildx component to build images with BuildKit:
+            https://docs.docker.com/go/buildx/
+
+Sending build context to Docker daemon  15.36kB
+Step 1/6 : FROM postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+ ---> 721873c34ceb
+Step 2/6 : USER root
+ ---> Using cache
+ ---> 7c77c72e29c1
+Step 3/6 : RUN apk add --no-cache openssl python3
+ ---> Using cache
+ ---> b4c5dac05053
+Step 4/6 : COPY backup_mac.py /usr/local/bin/mindpattern-backup-mac
+ ---> 7d1a21ddcab9
+Step 5/6 : RUN chmod 0755 /usr/local/bin/mindpattern-backup-mac     && mkdir -p /backups     && chown postgres:postgres /backups
+ ---> Running in 80fd4b7a2de6
+ ---> Removed intermediate container 80fd4b7a2de6
+ ---> 11229002d1ad
+Step 6/6 : USER postgres
+ ---> Running in 5a439b7297c9
+ ---> Removed intermediate container 5a439b7297c9
+ ---> 5cd7ac8c9b1c
+Successfully built 5cd7ac8c9b1c
+Successfully tagged fathom-remediation-backup:20261003

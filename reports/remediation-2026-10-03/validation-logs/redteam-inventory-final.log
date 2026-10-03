@@ -1,0 +1,2 @@
+PASS all 11 campaigns / 108 expected verdicts; final native source mobile refresh included
+{'BLOCKED': 92, 'INFO': 10, 'PARTIAL': 2, 'FINDING': 4}

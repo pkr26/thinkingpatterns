@@ -150,8 +150,6 @@ def test_en_base_lexicon_tables_are_frozen(table: str):
     )
 
 
-
-
 # Per-module public constant digests (the tuning/limit/contract
 # constants every module freezes at import — same rationale as the brain
 # digest above; see the module docstring).
@@ -163,16 +161,16 @@ MODULE_CONSTANTS_DIGESTS = {
     "app.api.auth": "dea2dad00a5d2e89",
     "app.api.consents": "56d1e99f08354d12",
     "app.api.entries": "f403b709ff5593f1",
-    "app.api.insights": "0b24fef1df806433",
+    "app.api.insights": "2990cd8f956f1590",
     "app.api.measures": "98bb90af47e23b76",
     "app.api.meta": "9d50564dc770fd71",
     "app.api.therapist": "852d2358d408b105",
     "app.cache": "9cafcda6da25d7e1",
     "app.config": "48fce0698f78bffb",
-    "app.db": "4e1b99481ae593d1",
+    "app.db": "192aed742e551116",
     "app.deps": "eef3badf33769d80",
     "app.locks": "37856db1c6d2e319",
-    "app.main": "aab681431909bcc3",
+    "app.main": "ed49aa18c9b3c027",
     "app.metrics": "10aefb028623642d",
     "app.middleware": "27babfd5745e9b0b",
     "app.schemas": "20fbb6883918e31c",
@@ -193,7 +191,6 @@ MODULE_CONSTANTS_DIGESTS = {
     "app.services.threshold": "a320cefdf99c2cb0",
     "app.singleprocess": "18badaef13fb0023",
 }
-
 
 
 def _module_constants(module: object) -> dict[str, object]:
@@ -227,7 +224,9 @@ def test_module_constants_are_frozen(module_name):
     unpinned (a limit could move ±1, a header name could drift, without
     any test failing). Deliberate changes regenerate via:
     PYTHONPATH=. python tests/test_mutation_pins_2026_09_30.py"""
-    assert MODULE_CONSTANTS_DIGESTS_AT_IMPORT[module_name] == MODULE_CONSTANTS_DIGESTS[module_name], (
+    assert (
+        MODULE_CONSTANTS_DIGESTS_AT_IMPORT[module_name] == MODULE_CONSTANTS_DIGESTS[module_name]
+    ), (
         f"{module_name}'s module-level constants changed — if deliberate, "
         "regenerate MODULE_CONSTANTS_DIGESTS with "
         "PYTHONPATH=. python tests/test_mutation_pins_2026_09_30.py"
@@ -237,11 +236,16 @@ def test_module_constants_are_frozen(module_name):
 if __name__ == "__main__":
     print(f'BRAIN_TUNING_DIGEST = "{_digest(_brain_tuning_contract())}"')
     for name, _ in sorted(ES_TABLE_DIGESTS.items()):
-        print(f'    "{name}": ("{_digest(getattr(lexicon_es, name))}", {len(getattr(lexicon_es, name))}),')
+        print(
+            f'    "{name}": ("{_digest(getattr(lexicon_es, name))}", {len(getattr(lexicon_es, name))}),'
+        )
     for name in sorted(EN_BASE_DIGESTS):
-        print(f'    "{name}": ("{_digest(getattr(lexicon_en, name))}", {len(getattr(lexicon_en, name))}),')
+        print(
+            f'    "{name}": ("{_digest(getattr(lexicon_en, name))}", {len(getattr(lexicon_en, name))}),'
+        )
     print("MODULE_CONSTANTS_DIGESTS = {")
     import importlib
+
     for mod in sorted(MODULE_CONSTANTS_DIGESTS):
         m = importlib.import_module(mod)
         print(f'    "{mod}": "{_digest(_module_constants(m))}",')
@@ -261,8 +265,10 @@ def test_llm_private_data_contract_is_frozen():
     from app.services import llm as llm_mod
 
     contract = {
-        _n: getattr(llm_mod, _n) for _n in dir(llm_mod)
-        if _n.startswith("_") and _n.isupper()
+        _n: getattr(llm_mod, _n)
+        for _n in dir(llm_mod)
+        if _n.startswith("_")
+        and _n.isupper()
         and isinstance(
             getattr(llm_mod, _n),
             (str, tuple, frozenset, set, list, dict, _re.Pattern, int, float, bool),
@@ -277,6 +283,7 @@ def test_llm_private_data_contract_is_frozen():
         "LLM_PRIVATE_CONTRACT_DIGEST deliberately "
         "via PYTHONPATH=. python tests/test_mutation_pins_2026_09_30.py"
     )
+
 
 # Private (leading-underscore) frozen data tables — prompts, bound maps,
 # allowlists, template strings — snapshotted at collection time like the
@@ -303,9 +310,14 @@ PRIVATE_TABLE_DIGESTS_AT_IMPORT = {}
 for _m in PRIVATE_TABLE_DIGESTS:
     _mod = _il.import_module(_m)
     _tables = {
-        _n: getattr(_mod, _n) for _n in dir(_mod)
-        if _n.startswith("_") and _n.isupper()
-        and isinstance(getattr(_mod, _n), (str, tuple, frozenset, set, list, dict, re.Pattern, int, float, bool))
+        _n: getattr(_mod, _n)
+        for _n in dir(_mod)
+        if _n.startswith("_")
+        and _n.isupper()
+        and isinstance(
+            getattr(_mod, _n),
+            (str, tuple, frozenset, set, list, dict, re.Pattern, int, float, bool),
+        )
     }
     PRIVATE_TABLE_DIGESTS_AT_IMPORT[_m] = _digest(_tables)
 

@@ -106,6 +106,8 @@ export function buttonByLabel(root: ReactTestRenderer, label: string): boolean {
  *  up to the owning label instead of assuming the direct parent. */
 export async function typeInto(root: ReactTestRenderer, labelText: string, value: string): Promise<void> {
   const field = root.root.findAllByType("input").find((n) => {
+    const explicit = root.root.findAllByType("label").find(label => label.props.htmlFor === n.props.id && textOfNode(label).includes(labelText));
+    if (explicit) return true;
     let label = n.parent;
     while (label && label.type !== "label") label = label.parent;
     return label !== null && textOfNode(label).includes(labelText);

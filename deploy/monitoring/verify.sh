@@ -62,7 +62,7 @@ if [ "$PRODUCTION" -eq 1 ]; then
       if [[ "$image_ref" =~ ^\$\{[A-Za-z0-9_]+:\? ]] && [[ "$image_ref" != *':-'* ]]; then
         # required-env form (${VAR:?message}) — no mutable default to pin
         :
-      elif [[ "$image_ref" =~ @sha256:[a-f0-9]{12,}$ ]]; then
+      elif [[ "$image_ref" =~ @sha256:[a-f0-9]{64}[[:space:]]*$ ]]; then
         :
       else
         fail "--production: $compose_file serves a mutable image ref: $image_ref (pin its digest; see the file's pinning notes)"
@@ -114,6 +114,11 @@ if command -v promtool >/dev/null 2>&1; then
     note "promtool check rules alerts.yml: OK"
   else
     fail "promtool check rules alerts.yml"
+  fi
+  if promtool test rules alert-tests.yml; then
+    note "promtool alert fault scenarios: OK"
+  else
+    fail "promtool alert fault scenarios"
   fi
 else
   note "promtool not on PATH — skipping semantic validation (YAML syntax + structure still checked below)"

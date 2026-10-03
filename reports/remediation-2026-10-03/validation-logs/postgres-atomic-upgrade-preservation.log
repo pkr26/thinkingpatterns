@@ -1,0 +1,1 @@
+PASS: previous-head upgrade to d6a0c4e8b213 preserves exact journal, current note, revision and audio metadata; ciphertext authenticates; custody defaults and deletion outbox are correct

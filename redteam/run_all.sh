@@ -2,7 +2,7 @@
 # Red-team campaign runner — every audit, in order, results to redteam/results/.
 # Usage: bash redteam/run_all.sh
 set -uo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")" || exit 1
 PY=../.venv/bin/python
 NODEBIN=../.tools/node/bin
 
@@ -15,12 +15,12 @@ rm -f results/*.json
 # runner printed the summary even when a campaign had just died, and a
 # non-zero exit vanished into the scroll. `run`-style harnesses write an
 # ERROR verdict on internal failure, but an import/collection crash never
-# gets that far — the WARN lines below are the only trace.
+# gets that far. Retain every exit status and reject incomplete results.
 declare -a FAILED=()
 run_campaign() {
   if ! "$@"; then
-    FAILED+=("$1")
-    echo "WARN: campaign $1 exited non-zero" >&2
+    FAILED+=("$*")
+    echo "WARN: campaign $* exited non-zero" >&2
   fi
 }
 
@@ -55,16 +55,8 @@ fi
 
 echo
 echo "== verdict summary =="
-"$PY" - <<'EOF'
-import json
-from pathlib import Path
-rows = []
-for f in sorted(Path("results").glob("*.json")):
-    rows += json.loads(f.read_text())
-from collections import Counter
-c = Counter(r["status"] for r in rows)
-print(f"{len(rows)} verdicts: " + ", ".join(f"{k}={v}" for k, v in sorted(c.items())))
-for r in rows:
-    if r["status"] == "FINDING":
-        print(f"  FINDING {r['id']}")
-EOF
+summary_rc=0
+"$PY" validate_results.py results || summary_rc=$?
+if [ "${#FAILED[@]}" -gt 0 ] || [ "$summary_rc" -ne 0 ]; then
+  exit 1
+fi

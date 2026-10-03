@@ -33,6 +33,7 @@ import pytest
 from sqlalchemy import select
 
 from app import deps as deps_module
+from app.api._custody import require_password_retry_therapist
 from app.api import insights as insights_api
 from app.models import Base, Measure, Entry
 from app.security import crypto
@@ -255,7 +256,6 @@ class TestRekeyMidTransactionAtomicity:
         monkeypatch.setattr(insights_api, "_rekey_blob_batch", explode)
         old_verifier = emu.auth_key_b64
         old_key = emu.data_key
-        old_password, old_salt = emu.password, emu.salt
         emu.derive_new_generation("pw-rotated-99")
         old_token = await emu.open_processing_session_for(client, old_key)
         new_token = await emu.open_processing_session_for(client, emu.data_key)
@@ -270,6 +270,7 @@ class TestRekeyMidTransactionAtomicity:
                 "X-New-Processing-Token": new_token,
                 "X-Account-Verifier": old_verifier,
             },
+            json=emu.rekey_payload(),
         )
         assert response.status_code == 500
         assert response.json()["code"] == "internal_error"
@@ -319,10 +320,20 @@ class TestRekeyMidTransactionAtomicity:
                 "X-New-Processing-Token": new_token2,
                 "X-Account-Verifier": old_verifier,
             },
+            json=emu.rekey_payload(),
         )
         assert response.status_code == 200, response.text
         counts = response.json()
-        assert counts == {"entries": 2, "insights": 0, "measures": 1}
+        assert counts == {
+            "entries": 2,
+            "insights": 0,
+            "measures": 1,
+            "audio": 0,
+            "recovery_invalidated": False,
+            "credential_rotated": True,
+            "operation_id": emu.rekey_payload()["operation_id"],
+            "consents_rewrapped": 0,
+        }
         async with app.state.sessionmaker() as session:
             journal2 = (
                 await session.execute(
@@ -336,10 +347,13 @@ class TestRekeyMidTransactionAtomicity:
         for mid, blob in final["measures"].items():
             crypto.decrypt(emu.data_key, blob, crypto.build_aad("measure", emu.user_id, mid))
 
-        # And the account is fully usable under the OLD credential while the
-        # DATA now decrypts under the new key — the exact state a client that
-        # finished its rotation retry expects.
-        emu.derive_new_generation(old_password, old_salt)
+        # Credential and ciphertext commit together. The previous proof is
+        # retired; fresh login opens the new generation after the retry.
+        assert (
+            await client.post(
+                "/api/auth/login", json={"username": emu.username, "verifier": old_verifier}
+            )
+        ).status_code == 401
         await emu.login(client)
         fetched = await client.get("/api/entries/e-1", headers=emu.headers)
         assert fetched.status_code == 200, fetched.text
@@ -391,6 +405,8 @@ class TestServerBlindnessAtRest:
 
 
 WALLS = {
+    deps_module.require_rekey_retry_user: "user",
+    require_password_retry_therapist: "therapist",
     deps_module.require_regular_user: "user",
     deps_module.require_therapist: "therapist",
     deps_module.require_user: "any",
@@ -522,17 +538,10 @@ class TestRotationKillsOldBearers:
         await emu.login(client)  # a second live session (token B)
         token_b = emu.token
 
+        old_data_key = emu.data_key
         emu.derive_new_generation("new-password-2")
-        response = await client.put(
-            "/api/account/credential",
-            headers={"Authorization": f"Bearer {token_b}"},
-            json={
-                "verifier": old_verifier,
-                "new_salt": emu.salt_b64,
-                "new_verifier": emu.auth_key_b64,
-            },
-        )
-        assert response.status_code == 204, response.text
+        rotated = await emu.rekey(client, old_data_key, emu.data_key, verifier=old_verifier)
+        assert rotated["credential_rotated"] is True
 
         # BOTH pre-rotation bearers are dead (the epoch bump is global,
         # not per-session): the stolen-old-device leg of the journey.

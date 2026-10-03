@@ -31,6 +31,10 @@ const memoryBackend = (): KvBackend => {
     async removeItem(k) {
       map.delete(k);
     },
+    async compareAndSet(k,before,after){
+      if((map.get(k)??null)!==before)return false;
+      map.set(k,after);return true;
+    },
   };
 };
 
@@ -311,7 +315,7 @@ describe("SettingsView", () => {
     expect(onLockdown).not.toHaveBeenCalled();
   });
 
-  it("rotation runs rekey → rewrap → credential (epoch death disclosed)", async () => {
+  it("rotation commits rekey + sharing wraps + credential atomically (epoch death disclosed)", async () => {
     const order: string[] = [];
     stubFetch((url, init) => {
       if (url.endsWith("/meta")) return jsonResponse({ version: "1", api_version: "v1", unlock_days: 30, llm_available: false, sharing_available: true, sharing_disclosure_version: "v2" });
@@ -323,7 +327,9 @@ describe("SettingsView", () => {
       }
       if (url.endsWith("/processing/rekey")) {
         order.push("rekey");
-        return new Response(null, { status: 204 });
+        const body=JSON.parse(String(init.body));
+        expect(Array.isArray(body.consent_wraps)).toBe(true);
+        return jsonResponse({credential_rotated:true,operation_id:body.operation_id});
       }
       if (url.endsWith("/consents") && init.method === "GET") return jsonResponse([]);
       if (url.endsWith("/account/credential")) {
@@ -339,7 +345,7 @@ describe("SettingsView", () => {
     await typeInto(root, "Confirm new password", "a-brand-new-passcode-1");
     await press(root, "Change password");
     await settle(60, 5);
-    expect(order).toEqual(["session", "session", "rekey", "credential"]);
+    expect(order).toEqual(["session", "session", "rekey"]);
     expect(onLockdown).toHaveBeenCalledTimes(1);
     expect(onLockdown.mock.calls[0]![0]).toContain("mobile app");
   });

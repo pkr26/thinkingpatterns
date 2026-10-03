@@ -38,11 +38,15 @@ import base64
 import binascii
 import json
 import math
+import hashlib
+import hmac
+import os
 import re
 import time
 from dataclasses import replace
+from contextlib import AsyncExitStack
 from datetime import date as date_type, datetime, timedelta, timezone
-from typing import NamedTuple
+from typing import NamedTuple, cast
 
 import anyio.to_thread
 from fastapi import APIRouter, Depends, Header, Request, Body
@@ -51,13 +55,28 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..cache import make_rate_limiter
-from ..deps import ApiError, get_session, require_regular_user
-from ..locks import UserLocks, lifecycle_locks
+from ..deps import (
+    ensure_no_rekey,
+    ApiError,
+    get_session,
+    require_regular_user,
+    require_rekey_retry_user,
+)
+from ..locks import (
+    UserLocks,
+    lifecycle_locks,
+    sharing_locks,
+    sharing_patient_lock_key,
+    sharing_therapist_lock_key,
+)
 from ..models import (
     KIND_BRAIN,
     KIND_PATTERNS,
     KIND_QUESTION,
     Consent,
+    KEY_SCHEME_V2,
+    AudioAttachment,
+    AudioDeletion,
     Entry,
     Insight,
     Measure,
@@ -75,6 +94,7 @@ from ..schemas import (
     QuestionResponse,
     RecomputeResponse,
     RekeyResponse,
+    RekeyRequest,
 )
 from ..security import crypto, sharing
 from ..security.crypto import TamperError
@@ -456,7 +476,82 @@ def _rekey_blob_batch(
 # every stage and the already-new probe makes that idempotent.
 
 
-async def _load_or_create_rekey_journal(session: AsyncSession, user_id: str) -> RekeyJournal:
+async def _preflight_legacy_rotation(
+    session: AsyncSession, user_id: str, old_key: bytearray, new_key: bytearray, settings
+) -> None:
+    """Authenticate every legacy generation before binding an unbound journal.
+
+    No row/object is changed here. A third key or unavailable object refuses
+    adoption, so a repair cannot add another generation to unknown custody.
+    """
+    from .account import _authenticate_blob_only
+    from ..services.audio_store import store_for_object
+
+    for model in (Entry, Insight, Measure, AudioAttachment):
+        cursor = None
+        while True:
+            query = (
+                select(model)
+                .where(model.user_id == user_id)
+                .order_by(model.id)
+                .limit(REKEY_BATCH_ROWS)
+            )
+            if cursor is not None:
+                query = query.where(model.id > cursor)
+            rows = cast(
+                list[Entry | Insight | Measure | AudioAttachment],
+                list((await session.scalars(query)).all()),
+            )
+            await session.commit()
+            if not rows:
+                break
+            cursor = rows[-1].id
+            for row in rows:
+                aad: bytes | tuple[bytes, ...]
+                if isinstance(row, Entry):
+                    aad = crypto.entry_aad_candidates(
+                        user_id, row.client_entry_id, row.content_version
+                    )
+                    blob = bytes(row.blob)
+                elif isinstance(row, Insight):
+                    aad = (
+                        crypto.build_aad("question", user_id, row.for_date.isoformat())
+                        if row.kind == "question" and row.for_date is not None
+                        else crypto.build_aad("insights", user_id, row.kind)
+                    )
+                    blob = bytes(row.blob)
+                elif isinstance(row, Measure):
+                    aad = crypto.build_aad("measure", user_id, row.client_measure_id)
+                    blob = bytes(row.blob)
+                else:
+                    assert isinstance(row, AudioAttachment)
+                    store = store_for_object(settings, row)
+                    blob = await store.get(row.storage_key, max_bytes=settings.audio_max_body_bytes)
+                    aad = crypto.build_aad(
+                        "audio", user_id, row.client_entry_id, str(row.content_version)
+                    )
+                if not await anyio.to_thread.run_sync(
+                    _authenticate_blob_only, old_key, blob, aad
+                ) and not await anyio.to_thread.run_sync(
+                    _authenticate_blob_only, new_key, blob, aad
+                ):
+                    raise ApiError(
+                        status_code=400,
+                        detail="legacy interrupted rotation contains an unknown key generation; no further rows changed",
+                        code="rekey_key_mismatch",
+                    )
+
+
+async def _load_or_create_rekey_journal(
+    session: AsyncSession,
+    user_id: str,
+    *,
+    body: RekeyRequest,
+    digest: str,
+    old_key: bytearray,
+    new_key: bytearray,
+    settings,
+) -> RekeyJournal:
     """The account's resumable rekey progress row (created on first run)."""
     journal = (
         (
@@ -471,11 +566,90 @@ async def _load_or_create_rekey_journal(session: AsyncSession, user_id: str) -> 
         .first()
     )
     if journal is not None:
+        if journal.operation_id is None:
+            await _preflight_legacy_rotation(session, user_id, old_key, new_key, settings)
+            journal.operation_id = body.operation_id
+            journal.request_digest = digest
+            journal.old_key_fingerprint = hashlib.sha256(old_key).hexdigest()
+            journal.new_key_fingerprint = hashlib.sha256(new_key).hexdigest()
+            await session.commit()
+        old_fingerprint = hashlib.sha256(old_key).hexdigest()
+        new_fingerprint = hashlib.sha256(new_key).hexdigest()
+        if (
+            journal.operation_id != body.operation_id
+            or journal.request_digest != digest
+            or journal.old_key_fingerprint != old_fingerprint
+            or journal.new_key_fingerprint != new_fingerprint
+        ):
+            raise ApiError(
+                status_code=409,
+                detail="resume the original operation with the same credentials and keys",
+                code="rekey_operation_conflict",
+            )
         return journal
-    journal = RekeyJournal(user_id=user_id, stage="entries")
+    journal = RekeyJournal(
+        user_id=user_id,
+        stage="entries",
+        operation_id=body.operation_id,
+        request_digest=digest,
+        old_key_fingerprint=hashlib.sha256(old_key).hexdigest(),
+        new_key_fingerprint=hashlib.sha256(new_key).hexdigest(),
+    )
     session.add(journal)
     await session.commit()
     return journal
+
+
+def _rekey_insight_batch(
+    old_key: bytearray, new_key: bytearray, rows: list, user_id: str
+) -> tuple[list[dict], int]:
+    rewritten = []
+    already_new = 0
+    for row_id, kind, for_date, blob, seq in rows:
+        aad = (
+            crypto.build_aad("question", user_id, for_date.isoformat())
+            if kind == "question" and for_date is not None
+            else crypto.build_aad("insights", user_id, kind)
+        )
+        try:
+            plain = SecureBuffer(_rekey_decrypt(old_key, bytes(blob), aad))
+        except TamperError:
+            try:
+                probe = SecureBuffer(_rekey_decrypt(new_key, bytes(blob), aad))
+                probe.zeroize()
+            except TamperError:
+                raise _RekeyMismatch() from None
+            already_new += 1
+            continue
+        try:
+            next_seq = int(seq)
+            payload = bytes(plain.data)
+            if kind in (KIND_BRAIN, KIND_PATTERNS):
+                if next_seq >= 2**53 - 1:
+                    raise ApiError(
+                        status_code=503,
+                        detail="analysis generation exhausted",
+                        code="service_unavailable",
+                    )
+                next_seq += 1
+                try:
+                    value = json.loads(payload)
+                    if not isinstance(value, dict):
+                        raise ValueError("not an object")
+                except (ValueError, UnicodeError):
+                    raise ApiError(
+                        status_code=409,
+                        detail="stored analysis cannot be migrated safely",
+                        code="conflict",
+                    ) from None
+                value["state_seq"] = next_seq
+                payload = json.dumps(value, separators=(",", ":")).encode()
+            rewritten.append(
+                {"id": row_id, "blob": crypto.encrypt(new_key, payload, aad), "state_seq": next_seq}
+            )
+        finally:
+            plain.zeroize()
+    return rewritten, already_new
 
 
 @router.post(
@@ -489,45 +663,39 @@ async def _load_or_create_rekey_journal(session: AsyncSession, user_id: str) -> 
 )
 async def rekey(
     request: Request,
-    user: User = Depends(require_regular_user),
+    body: RekeyRequest | None = Body(default=None),
+    user: User = Depends(require_rekey_retry_user),
     x_processing_token: str | None = Header(default=None),
     x_new_processing_token: str | None = Header(default=None),
     x_account_verifier: str | None = Header(default=None),
 ):
-    """Re-encrypt the account's stored ciphertext under a new data key.
+    """Rotate every encrypted store and the login credential as one operation.
 
-    Body-less by design: the two processing-session tokens carry the keys
-    (each opened via POST /processing/sessions and owner-bound), and the
-    OLD password proof gates the operation — a stolen bearer must not be
-    able to re-encrypt a victim's journal under attacker-chosen keys (an
-    availability/integrity attack), and an attacker holding only a phished
-    verifier has no bearer to spend here.
-
-    2026-09-26 audit item 11 — journaled batches, crash-safe resume: each
-    batch of rows is decrypted/re-encrypted in a worker thread and
-    committed in its own SHORT transaction together with the progress
-    journal (stage + cursor + running counts), so no pooled connection is
-    pinned across CPU work. An interrupted run leaves a resumable journal;
-    the retry (the client re-opens both processing sessions — the tokens
-    are single-use) re-walks the whole corpus and skips rows already
-    under the new key via the already-new probe (2026-09-28 audit H-1:
-    resume used to skip whole stages by the journal's stage marker, which
-    missed rows written under the old key after the interrupted run —
-    ids are random hex, so a stored cursor cannot bound them — and
-    finalized "successfully" over undecryptable rows; the stage marker is
-    observability only now, and every run's counts describe THAT run).
-    A row authenticating under NEITHER key is the genuine mismatch:
-    400 ``rekey_key_mismatch``, the journal is retained for a correct-key
-    retry, and already-committed batches stay rekeyed (each batch is
-    all-or-nothing; the response counts every row now under the new key).
-    A journal left by an ABANDONED rotation under different keys fails the
-    probe loudly (rekey_key_mismatch) instead of silently skipping — the
-    operator resolution is to complete that rotation with its own keys.
-    Caseload summaries are untouched (they are wrapped to therapists'
-    PUBLIC keys, not the data key); consent wrapped keys are the client's
-    to re-wrap afterwards.
+    Persist the exact request body, old verifier proof, and both keys. Short
+    committed batches are resumable; their journal binds operation, credential
+    payload and key pair, and fences other writers. Finalization atomically
+    swaps credentials, optional v2 envelope, all active consent wraps, epochs,
+    revisions and recovery invalidation. Exact committed retries return the
+    durable original response before consuming processing tokens; the previous
+    signed epoch authorizes that response only. Legacy unbound journals undergo
+    full bounded old-or-new-key authentication before adoption.
     """
     from .account import _require_verifier
+    from .auth import (
+        AUTH_KEY_SIZE,
+        SALT_BYTES,
+        auth_work_slot,
+        _auth_limiter,
+        hash_verifier_off_loop,
+    )
+    from ._audit import append_access_log
+    from ..security import envelope
+    from ..security.kdf import (
+        KDF_PARAMS_MIN_PBKDF2_ITERATIONS,
+        KdfParamsError,
+        validate_kdf_params,
+        canonical_kdf_params_json,
+    )
 
     key_store = request.app.state.key_store
     sessionmaker = request.app.state.sessionmaker
@@ -539,6 +707,101 @@ async def rekey(
             detail="account verifier required (X-Account-Verifier header)",
             code="validation_error",
         )
+    if body is None:
+        raise ApiError(
+            status_code=409,
+            detail="upgrade the client to atomically rotate keys and credentials",
+            code="upgrade_required",
+        )
+    digest = hashlib.sha256(
+        json.dumps(
+            {"payload": body.model_dump(), "old_verifier": verifier},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    expected_epoch = request.state.mindpattern_token_epoch
+    async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
+        async with sessionmaker() as retry_session:
+            fresh = await retry_session.get(User, user.id, populate_existing=True)
+            if fresh is None or not fresh.is_active:
+                raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+            jti = request.state.mindpattern_token_jti
+            if isinstance(
+                jti, str
+            ) and await request.app.state.token_revocations.is_revoked_checked(retry_session, jti):
+                raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+            if fresh.rekey_operation_id == body.operation_id:
+                if (
+                    fresh.rekey_operation_epoch == fresh.token_epoch
+                    and expected_epoch in (fresh.token_epoch, fresh.token_epoch - 1)
+                    and hmac.compare_digest(fresh.rekey_operation_digest or "", digest)
+                    and fresh.rekey_operation_result
+                ):
+                    return RekeyResponse.model_validate_json(fresh.rekey_operation_result)
+                raise ApiError(
+                    status_code=409,
+                    detail="operation identifier already used",
+                    code="rekey_operation_conflict",
+                )
+            if fresh.token_epoch != expected_epoch:
+                raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+    try:
+        salt = base64.b64decode(body.new_salt, validate=True)
+        auth_key = base64.b64decode(body.new_verifier, validate=True)
+    except (ValueError, binascii.Error):
+        raise ApiError(
+            status_code=422, detail="invalid credential encoding", code="validation_error"
+        ) from None
+    if len(salt) != SALT_BYTES or len(auth_key) != AUTH_KEY_SIZE:
+        raise ApiError(status_code=422, detail="invalid credential size", code="validation_error")
+    wrapped_data_key = None
+    params_json = None
+    if user.key_scheme == KEY_SCHEME_V2:
+        if body.new_wrapped_data_key is None or body.new_kdf_params is None:
+            raise ApiError(
+                status_code=422,
+                detail="v2 rotation requires the new envelope and KDF parameters",
+                code="validation_error",
+            )
+        wrapped_data_key = _decode_b64(body.new_wrapped_data_key, "new_wrapped_data_key")
+        if len(wrapped_data_key) != envelope.WRAPPED_DATA_KEY_BYTES:
+            raise ApiError(
+                status_code=422, detail="invalid data key envelope size", code="validation_error"
+            )
+        try:
+            params_json = canonical_kdf_params_json(
+                validate_kdf_params(
+                    body.new_kdf_params, min_pbkdf2_iterations=KDF_PARAMS_MIN_PBKDF2_ITERATIONS
+                )
+            )
+        except KdfParamsError as exc:
+            raise ApiError(status_code=422, detail=str(exc), code="validation_error") from None
+    elif body.new_wrapped_data_key is not None or body.new_kdf_params is not None:
+        raise ApiError(
+            status_code=422,
+            detail="v1 rotation cannot install a v2 envelope",
+            code="validation_error",
+        )
+    wraps = {}
+    for item in body.consent_wraps:
+        if item.consent_id in wraps:
+            raise ApiError(
+                status_code=422, detail="duplicate consent identifier", code="validation_error"
+            )
+        try:
+            sharing.validate_public_key_b64(item.ephemeral_pub)
+            sharing.validate_public_key_b64(item.therapist_wrap_pub_key)
+        except sharing.SharingError:
+            raise ApiError(
+                status_code=422, detail="invalid sharing key", code="validation_error"
+            ) from None
+        blob = _decode_b64(item.wrapped_key, "wrapped_key")
+        if len(blob) != envelope.WRAPPED_DATA_KEY_BYTES:
+            raise ApiError(
+                status_code=422, detail="invalid consent envelope size", code="validation_error"
+            )
+        wraps[item.consent_id] = (item, blob)
     # Old-password proof BEFORE consuming the session tokens: a failed proof
     # must not burn the client's uploaded keys. M-B1 (2026-09-26): the proof
     # runs against a freshly re-read row (short read transaction — this
@@ -547,6 +810,14 @@ async def rekey(
     # _rekey_fresh_user epoch check (below) fences the rest.
     async with sessionmaker() as verify_session:
         await _require_verifier(user, verifier, request, verify_session)
+    server_salt = os.urandom(16)
+    async with auth_work_slot(request):
+        verifier_hash = await hash_verifier_off_loop(
+            auth_key,
+            server_salt,
+            limiter=_auth_limiter(request),
+            n=request.app.state.settings.scrypt_n,
+        )
 
     if not x_processing_token or not x_new_processing_token:
         raise ApiError(
@@ -572,12 +843,27 @@ async def rekey(
             code="processing_session_invalid",
         ) from None
 
-    expected_epoch = user.token_epoch
     lifecycle_guard = lifecycle_locks.hold(f"llm-lifecycle:{user.id}")
     lifecycle_entered = False
+    sharing_guards = AsyncExitStack()
     try:
         await lifecycle_guard.__aenter__()
         lifecycle_entered = True
+        async with sessionmaker() as grant_session:
+            grant_rows = (
+                await grant_session.execute(
+                    select(Consent.id, Consent.therapist_id).where(
+                        Consent.user_id == user.id, Consent.status == "active"
+                    )
+                )
+            ).all()
+        for therapist_id in sorted({row.therapist_id for row in grant_rows}):
+            await sharing_guards.enter_async_context(
+                sharing_locks.hold(sharing_therapist_lock_key(therapist_id))
+            )
+        await sharing_guards.enter_async_context(
+            sharing_locks.hold(sharing_patient_lock_key(user.id))
+        )
         # Entry writes take (lifecycle, entries); recomputes take (lifecycle,
         # recompute). Rekey takes all three so a rotation linearizes against
         # every path that could observe either key generation — and HOLDS
@@ -589,7 +875,67 @@ async def rekey(
                 # create) the resumable journal in its own short transaction.
                 async with sessionmaker() as session:
                     fresh_user = await _rekey_fresh_user(session, user.id, expected_epoch)
-                    journal = await _load_or_create_rekey_journal(session, user.id)
+                    if isinstance(
+                        jti, str
+                    ) and await request.app.state.token_revocations.is_revoked_checked(
+                        session, jti
+                    ):
+                        raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+                    if hmac.compare_digest(old_key, new_key):
+                        raise ApiError(
+                            status_code=422,
+                            detail="a corpus rotation requires a different new data key",
+                            code="validation_error",
+                        )
+                    owned_ids = set(
+                        (
+                            await session.scalars(
+                                select(Consent.id).where(Consent.user_id == user.id)
+                            )
+                        ).all()
+                    )
+                    pending_rotation = await session.scalar(
+                        select(RekeyJournal).where(RekeyJournal.user_id == user.id).limit(1)
+                    )
+                    bound_resume = (
+                        pending_rotation is not None
+                        and pending_rotation.operation_id == body.operation_id
+                        and hmac.compare_digest(pending_rotation.request_digest or "", digest)
+                    )
+                    active = (
+                        await session.execute(
+                            select(Consent, User.wrap_pub_key)
+                            .join(User, Consent.therapist_id == User.id)
+                            .where(Consent.user_id == user.id, Consent.status == "active")
+                        )
+                    ).all()
+                    if (
+                        not {row[0].id for row in active}.issubset(wraps)
+                        or (not bound_resume and not set(wraps).issubset(owned_ids))
+                        or not {row[0].therapist_id for row in active}.issubset(
+                            {row.therapist_id for row in grant_rows}
+                        )
+                    ):
+                        raise ApiError(
+                            status_code=409,
+                            detail="active sharing changed; rebuild the atomic rotation",
+                            code="conflict",
+                        )
+                    if any(wraps[row[0].id][0].therapist_wrap_pub_key != row[1] for row in active):
+                        raise ApiError(
+                            status_code=409,
+                            detail="therapist sharing key changed; rebuild the atomic rotation",
+                            code="conflict",
+                        )
+                    journal = await _load_or_create_rekey_journal(
+                        session,
+                        user.id,
+                        body=body,
+                        digest=digest,
+                        old_key=old_key,
+                        new_key=new_key,
+                        settings=request.app.state.settings,
+                    )
                 journal_id = journal.id
                 # 2026-09-28 audit (H-1): a resumed run RE-WALKS every stage
                 # from the beginning instead of skipping "completed" ones.
@@ -612,6 +958,7 @@ async def rekey(
                 entries_done = 0
                 insights_done = 0
                 measures_done = 0
+                audio_done = 0
 
                 # --- entries: id-keyset batches, CPU in a worker thread ---
                 while True:
@@ -672,38 +1019,26 @@ async def rekey(
                 async with sessionmaker() as session:
                     insight_rows = (
                         await session.execute(
-                            select(Insight.id, Insight.kind, Insight.for_date, Insight.blob).where(
-                                Insight.user_id == fresh_user.id
-                            )
+                            select(
+                                Insight.id,
+                                Insight.kind,
+                                Insight.for_date,
+                                Insight.blob,
+                                Insight.state_seq,
+                            ).where(Insight.user_id == fresh_user.id)
                         )
                     ).all()
-                aad_by_id = {
-                    row_id: (
-                        crypto.build_aad("question", fresh_user.id, for_date.isoformat())
-                        if kind == "question" and for_date is not None
-                        else crypto.build_aad("insights", fresh_user.id, kind)
-                    )
-                    for row_id, kind, for_date, _blob in insight_rows
-                }
-                plain_rows = [(row_id, bytes(blob)) for row_id, _k, _d, blob in insight_rows]
+                plain_rows = list(insight_rows)
                 if plain_rows:
                     reencrypted, already_new = await anyio.to_thread.run_sync(
-                        lambda: _rekey_blob_batch(
-                            old_key,
-                            new_key,
-                            plain_rows,
-                            lambda row_id: aad_by_id[row_id],
-                        )
+                        lambda: _rekey_insight_batch(old_key, new_key, plain_rows, fresh_user.id)
                     )
                     insights_done += len(reencrypted) + already_new
                     async with sessionmaker() as session:
                         if reencrypted:
                             await session.execute(
                                 update(Insight),
-                                [
-                                    {"id": row_id, "blob": new_blob}
-                                    for row_id, new_blob in reencrypted
-                                ],
+                                reencrypted,
                             )
                         await session.execute(
                             update(RekeyJournal)
@@ -768,6 +1103,75 @@ async def rekey(
                         )
                         await session.commit()
 
+                # Audio objects use copy-on-write. An interrupted run can open
+                # either key; the pointer swap and old-object tombstone commit
+                # together, and the newly put object has a crash-cleanup lease.
+                from ..services import audio_store as audio_storage
+
+                settings = request.app.state.settings
+                audio_cursor = None
+                while True:
+                    async with sessionmaker() as session:
+                        audio_query = (
+                            select(AudioAttachment)
+                            .where(AudioAttachment.user_id == fresh_user.id)
+                            .order_by(AudioAttachment.id)
+                            .limit(REKEY_BATCH_ROWS)
+                        )
+                        if audio_cursor is not None:
+                            audio_query = audio_query.where(AudioAttachment.id > audio_cursor)
+                        attachments = list((await session.scalars(audio_query)).all())
+                    if not attachments:
+                        break
+                    audio_cursor = attachments[-1].id
+                    for attachment in attachments:
+                        store = audio_storage.store_for_object(settings, attachment)
+                        blob = await store.get(
+                            attachment.storage_key, max_bytes=settings.audio_max_body_bytes
+                        )
+                        aad = crypto.build_aad(
+                            "audio",
+                            fresh_user.id,
+                            attachment.client_entry_id,
+                            str(attachment.content_version),
+                        )
+                        reencrypted, _already_new = await anyio.to_thread.run_sync(
+                            lambda: _rekey_blob_batch(
+                                old_key, new_key, [(attachment.id, blob)], lambda _id: aad
+                            )
+                        )
+                        audio_done += 1
+                        if not reencrypted:
+                            continue
+                        key = audio_storage.new_storage_key(fresh_user.id)
+                        locator = audio_storage.storage_locator(store)
+                        async with sessionmaker() as session:
+                            pending = AudioDeletion(
+                                id=new_id(),
+                                backend=store.backend,
+                                storage_key=key,
+                                storage_locator=locator,
+                                not_before=utcnow() + timedelta(hours=1),
+                            )
+                            session.add(pending)
+                            await session.commit()
+                            await store.put(key, reencrypted[0][1])
+                            current = await session.get(
+                                AudioAttachment, attachment.id, populate_existing=True
+                            )
+                            if current is None or current.storage_key != attachment.storage_key:
+                                raise ApiError(
+                                    status_code=409,
+                                    detail="audio changed during rekey",
+                                    code="conflict",
+                                )
+                            audio_storage.enqueue_audio_delete(session, current, store=store)
+                            current.storage_key = key
+                            current.storage_locator = locator
+                            current.size_bytes = len(reencrypted[0][1])
+                            await session.delete(pending)
+                            await session.commit()
+
                 # --- finalize: revision bumps + journal retirement ----------
                 # 2026-09-21 audit A-1 (kept): every entry blob rewritten
                 # without advancing entries_revision let a client mid-
@@ -781,6 +1185,49 @@ async def rekey(
                 # the marker never moved".
                 async with sessionmaker() as session:
                     final_user = await _rekey_fresh_user(session, user.id, expected_epoch)
+                    recovery_invalidated = final_user.recovery_verifier is not None
+                    final_user.recovery_salt = None
+                    final_user.recovery_verifier = None
+                    final_user.recovery_wrapped_data_key = None
+                    final_user.recovery_set_at = None
+                    final_user.recovery_scheme = None
+                    final_user.salt = base64.b64encode(salt).decode("ascii")
+                    final_user.scrypt_salt = server_salt
+                    final_user.verifier = verifier_hash
+                    if wrapped_data_key is not None:
+                        final_user.wrapped_data_key = wrapped_data_key
+                        final_user.kdf_params = params_json
+                    final_user.token_epoch += 1
+                    result = RekeyResponse(
+                        entries=entries_done,
+                        insights=insights_done,
+                        measures=measures_done,
+                        audio=audio_done,
+                        recovery_invalidated=recovery_invalidated,
+                        operation_id=body.operation_id,
+                        consents_rewrapped=len(active),
+                    )
+                    final_user.rekey_operation_id = body.operation_id
+                    final_user.rekey_operation_digest = digest
+                    final_user.rekey_operation_epoch = final_user.token_epoch
+                    final_user.rekey_operation_result = result.model_dump_json()
+                    for consent_id, (item, blob) in wraps.items():
+                        await session.execute(
+                            update(Consent)
+                            .where(
+                                Consent.id == consent_id,
+                                Consent.user_id == final_user.id,
+                                Consent.status == "active",
+                            )
+                            .values(ephemeral_pub=item.ephemeral_pub, wrapped_key=blob)
+                        )
+                    await append_access_log(
+                        session,
+                        actor_id=final_user.id,
+                        actor_role=final_user.role,
+                        user_id=final_user.id,
+                        action="corpus_credential_rotated",
+                    )
                     await _increment_entries_revision(session, final_user)
                     await _increment_measures_revision(session, final_user)
                     await session.execute(delete(RekeyJournal).where(RekeyJournal.id == journal_id))
@@ -794,7 +1241,8 @@ async def rekey(
                                 code="account_deleted",
                             ) from None
                         raise
-        return RekeyResponse(entries=entries_done, insights=insights_done, measures=measures_done)
+                    key_store.destroy_all_for_owner(final_user.id)
+        return result
     except _RekeyMismatch:
         raise ApiError(
             status_code=400,
@@ -808,6 +1256,7 @@ async def rekey(
     finally:
         zeroize(old_key)
         zeroize(new_key)
+        await sharing_guards.aclose()
         if lifecycle_entered:
             await lifecycle_guard.__aexit__(None, None, None)
 
@@ -1005,17 +1454,15 @@ def _chosen_pattern_pid(
     """
     from ..services import questions as question_engine
 
-    # Mirror build_pool EXACTLY: top-5 by feedback rank FIRST, sensitive
-    # and muted patterns skipped AFTER the slice. Filtering before the
-    # slice admits different patterns into the pool and misattributes taps
-    # to the wrong pattern whenever a skipped pattern ranks in the top 5.
-    pool_patterns = [
-        p
-        for p in sorted(patterns, key=question_engine.feedback_rank)[
-            : question_engine.MAX_PATTERN_QUESTIONS
-        ]
-        if not question_engine.pattern_is_sensitive(p) and not question_engine.pattern_is_muted(p)
-    ]
+    pool_patterns = sorted(
+        [
+            p
+            for p in patterns
+            if not question_engine.pattern_is_sensitive(p)
+            and not question_engine.pattern_is_muted(p)
+        ],
+        key=question_engine.feedback_rank,
+    )[: question_engine.MAX_PATTERN_QUESTIONS]
     rendered: list[str] = []
     owners: list[str | None] = []
     for p in pool_patterns:
@@ -1352,6 +1799,7 @@ async def recompute(
                     # corpus and, with consent, dispatching plaintext to
                     # the LLM — after the logout's key purge had returned.
                     raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+                await ensure_no_rekey(session, user.id)
                 # Re-read the threshold inputs and re-evaluate the phase
                 # INSIDE the fence (2026-09-20 audit fix M-11): the phase
                 # was fixed outside the lock, so entries deleted between
@@ -1380,7 +1828,6 @@ async def recompute(
                 # immediately before the analysis path is constructed. A
                 # previously accepted policy becomes inert if the operator
                 # changes provider/endpoint/model/retention terms.
-                llm_consent_current = llm.consent_is_current(fresh_user, settings)
                 rows = await _load_rows(
                     session,
                     user.id,
@@ -1452,7 +1899,9 @@ async def recompute(
                     if prior
                     else None
                 )
-            enricher = llm.get_enricher(settings, llm_consent=llm_consent_current)
+            # Provider narratives have no validated semantic safety boundary.
+            # Deterministic observations remain; no journal egress for narration.
+            enricher = None
 
             def make_analyze_fn(with_state: bool, with_feedback: bool):
                 # A factory, not a plain closure: the tamper-retry below passes
@@ -1967,7 +2416,10 @@ async def local_recompute(
     # fail the write closed instead of letting a retired session overwrite
     # the stored brain state and patterns.
     expected_epoch = user.token_epoch
-    async with _recompute_locks.hold(f"insights:{user.id}"):
+    async with (
+        lifecycle_locks.hold(f"llm-lifecycle:{user.id}"),
+        _recompute_locks.hold(f"insights:{user.id}"),
+    ):
         fresh_user = (
             (
                 await session.execute(
@@ -1981,6 +2433,17 @@ async def local_recompute(
             raise ApiError(status_code=404, detail="account not found", code="not_found")
         if fresh_user.token_epoch != expected_epoch:
             raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+        if (
+            await session.scalar(
+                select(RekeyJournal.id).where(RekeyJournal.user_id == user.id).limit(1)
+            )
+            is not None
+        ):
+            raise ApiError(
+                status_code=409,
+                detail="complete the pending key rotation before analysis",
+                code="rekey_in_progress",
+            )
         prior = await _latest_insight(session, fresh_user.id, "brain")
         prior_seq = prior.state_seq if prior is not None else 0
         if prior_seq != body.base_state_seq:

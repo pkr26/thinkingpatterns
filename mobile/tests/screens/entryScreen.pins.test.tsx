@@ -22,9 +22,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
 import { Alert, Text } from "react-native";
 
-vi.mock("../../src/api/client", async () => {
+vi.mock("../../src/api/client", async (importOriginal) => {
+  const actualApi = await importOriginal<typeof import("../../src/api/client")>();
   const { makeApiMock, ApiError } = await import("../helpers/apiMock");
-  return { ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
+  return { ...actualApi, ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
 });
 
 vi.mock("../../src/crypto/MindPatternCrypto", async (importOriginal) => {
@@ -53,6 +54,9 @@ vi.mock("../../src/moodLog", async (importOriginal) => {
 });
 
 vi.mock("../../src/offlineQueue", () => ({
+  prepareQueueRekey: vi.fn(async () => []),
+  pendingEntryIds: vi.fn(async () => []),
+  abortInFlightFlush: vi.fn(),
   QueueFullError,
   QueueAbandonedError,
   enqueue: vi.fn(async () => {}),
@@ -99,7 +103,7 @@ beforeEach(async () => {
   nav.navigate.mockClear();
   touchActivity.mockClear();
   vault.lock();
-  vault.unlock({ ...keys, masterKey: Buffer.alloc(32) });
+  vault.unlock({ ...keys, masterKey: Buffer.alloc(32) }, "user-1");
   sessionState = { activeDays: 0, unlockDays: 30, touchActivity };
   storage.__reset();
   vi.mocked(localDateISO).mockReturnValue("2026-09-04");

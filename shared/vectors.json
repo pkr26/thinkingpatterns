@@ -260,6 +260,15 @@
    "parts": [
     "entry",
     "caf\u00e9",
+    "e\u0301clair-1"
+   ],
+   "aad_b64": "WyJlbnRyeSIsImNhZlx1MDBlOSIsImVcdTAzMDFjbGFpci0xIl0="
+  },
+  {
+   "name": "combining-nfc",
+   "parts": [
+    "entry",
+    "caf\u00e9",
     "\u00e9clair-1"
    ],
    "aad_b64": "WyJlbnRyeSIsImNhZlx1MDBlOSIsIlx1MDBlOWNsYWlyLTEiXQ=="

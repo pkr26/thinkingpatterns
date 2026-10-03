@@ -573,3 +573,30 @@ describe("App", () => {
     expect(textOf(root)).toContain("Session expired — please sign in again.");
   });
 });
+
+it("opens a deep chart URL only after authenticated accessible-patient resolution and follows browser history", async () => {
+  const patient = { user_id: "route-patient", username: "routeperson", status: "active" as const, granted_at: "2026-09-01T00:00:00Z", revoked_at:null,ephemeral_pub:"E".repeat(124),wrapped_key:"W==" };
+  const lookup = vi.mocked(api.patients); lookup.mockResolvedValue([patient]);
+  window.location.hash = "#/patient/route-patient";
+  const root = await login(); await flush(8);
+  expect(textOf(root)).toContain("routeperson");
+  window.location.hash = "#/patients";
+  await act(async()=>{window.dispatchEvent(new Event("popstate"));});await flush(5);
+  expect(textOf(root)).toContain("Patients — Dr. Portal");
+  window.location.hash = "#/patient/route-patient";
+  await act(async()=>{window.dispatchEvent(new Event("popstate"));});await flush(8);
+  expect(textOf(root)).toContain("routeperson");
+  await act(async()=>root.unmount());window.location.hash="";lookup.mockResolvedValue([]);
+});
+
+it("rejects a chart route absent from this account and retains the patient list after a lookup failure", async () => {
+  const lookup = vi.mocked(api.patients); lookup.mockResolvedValue([]);
+  window.location.hash = "#/patient/not-shared";
+  const root = await login();await flush(8);
+  expect(textOf(root)).toContain("Patients — Dr. Portal");
+  expect(textOf(root)).not.toContain("Notes (private to you)");
+  lookup.mockRejectedValue(new Error("route lookup offline"));
+  await act(async()=>{window.dispatchEvent(new Event("hashchange"));});await flush(8);
+  expect(textOf(root)).toContain("Patients — Dr. Portal");
+  await act(async()=>root.unmount());window.location.hash="";lookup.mockResolvedValue([]);
+});

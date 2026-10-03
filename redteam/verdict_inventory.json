@@ -1,0 +1,132 @@
+{
+  "a_crypto": [
+    "A1.single-use",
+    "A1.owner-bind",
+    "A1.ttl",
+    "A1.abandoned-session",
+    "A1.theft-owner-bind",
+    "A1.memory-remnants",
+    "A4.library-floor",
+    "A4.server-cannot-verify",
+    "A5.nonce-seam",
+    "A5.nonce-birthday",
+    "A5.key-rotation-paths",
+    "A6.corpus-generated"
+  ],
+  "b_auth": [
+    "B1.verifier-replay",
+    "B1.verifier-enables-llm-egress",
+    "B1.wrong-verifier-rejected",
+    "B1.hostile-tokens",
+    "B1.token-type-confusion",
+    "B1.epoch-both-mounts",
+    "B2.ipv6-aggregation",
+    "B2.xff-direct-origin",
+    "B2.eviction-flood",
+    "B2.fixed-window-boundary",
+    "B2.victim-lockout",
+    "B3.registration-oracle",
+    "B3.salt-decoys",
+    "B3.login-timing",
+    "B3.username-recycling"
+  ],
+  "c1_multiworker": [
+    "C1.server-boot",
+    "C1.rate-limit-fragmentation",
+    "C1.quota-race",
+    "C1.keystore-fragmentation"
+  ],
+  "c_api": [
+    "C2.scrypt-amplification",
+    "C2.deep-json",
+    "C2.oversized-body",
+    "C2.entry-quota",
+    "C2.meta-unauthenticated",
+    "C3.date-backdating",
+    "C3.threshold-inflation",
+    "C3.entry-recycling",
+    "C3.mood-shift-phi-1",
+    "C3.insight-idempotency",
+    "C3.wrong-key-recompute",
+    "C3.hostile-inner-payload",
+    "C3.cross-mount-rate-buckets"
+  ],
+  "d_llm": [
+    "D1.planted-vocab-injection",
+    "D1.spelled-url",
+    "D1.sub-3-char-token-gap",
+    "D1.structural-defenses",
+    "D1.case-table",
+    "D2.consent-gate",
+    "D2.plaintext-egress",
+    "D2.missing-generation-limits",
+    "D2.endpoint-to-card-injection",
+    "D2.slow-endpoint-key-lifetime"
+  ],
+  "e2_brain": [
+    "E2.trend-manufactured-temporal",
+    "E2.boilerplate-topic",
+    "E2.pure-noise-surfacing",
+    "E2.constant-mood-crash",
+    "E2.near-constant-mood-crash",
+    "E2.disguised-crisis-recurrence",
+    "E2.max-corpus-timing",
+    "E2.non-latin-corpus"
+  ],
+  "e_crisis": [
+    "E1.python-suppress-bypass",
+    "E1.python-dialog-bypass",
+    "E1.python-false-positives",
+    "E1.bypass-to-question-quote",
+    "E3.diagnosis-language",
+    "E3.llm-kind-allowlist",
+    "E3.crisis-screen-copy"
+  ],
+  "f_mobile": [
+    "E1.ts-dialog-bypass",
+    "E1.ts-suppress-bypass",
+    "E1.ts-false-positives",
+    "E1.ts-python-parity",
+    "A2.offline-oracle",
+    "A3.device-key-colocation",
+    "A4.ts-kdf-no-floor",
+    "A6.cross-platform-parity",
+    "F1.draft-survives-lock",
+    "F2.detail-sanitizer",
+    "F2.http-key-shipment"
+  ],
+  "g_infra": [
+    "G1.backup-profile-config",
+    "G1.dump-contents",
+    "G2.pip-audit",
+    "G2.npm-audit",
+    "G2.lockfile-hashes",
+    "G2.actions-pinning",
+    "G2.mutation-gate",
+    "G3.prod-default-secret",
+    "G3.prod-short-secret",
+    "G3.prod-sqlite",
+    "G3.prod-http-llm-url",
+    "G3.typo-env-fails-closed",
+    "G3.staging-valid-boots-under-prod-gates",
+    "G3.tracked-secrets",
+    "G3.dockerignore-db"
+  ],
+  "g_voice": [
+    "G-VOICE.V-1-flag-off",
+    "G-VOICE.V-2-consent",
+    "G-VOICE.V-4-caps",
+    "G-VOICE.V-5-rate",
+    "G-VOICE.V-7-idor",
+    "G-VOICE.V-8-therapist-gate",
+    "G-VOICE.V-11-translation-consent",
+    "G-VOICE.V-12-retry",
+    "G-VOICE.V-9-lazy-expiry"
+  ],
+  "h_privacy": [
+    "H1.metadata-inference",
+    "H2.export-cleartext-fields",
+    "H2.export-auth-scoped",
+    "H3.erasure-live-db"
+  ]
+}

@@ -177,28 +177,18 @@ echo "==> newest backup: $FILE"
 echo "==> authenticating then decrypting $FILE (to /dev/null in backup image)"
 "${COMPOSE[@]}" --profile backups run --rm -T "${BACKUP_RUN_ARGS[@]}" \
   -e FILE="$FILE" -e SRC_DIR="$SRC_DIR" --entrypoint sh backup -ceu '
-    mindpattern-backup-mac verify "$SRC_DIR/$FILE"
-    # Key source mirrors the compose backup entrypoint (2026-09-28 audit):
-    # mounted secret file first, env var only as the dev-overlay fallback.
-    if [ -s "$BACKUP_KEY_FILE" ]; then
-      backup_pass="file:$BACKUP_KEY_FILE"
-    elif [ -n "$BACKUP_KEY" ]; then
-      backup_pass="env:BACKUP_KEY"
-    else
-      echo "no BACKUP_KEY file or env value — cannot decrypt" >&2
-      exit 1
-    fi
-    openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass "$backup_pass" \
-      < "$SRC_DIR/$FILE" > /dev/null
+    mindpattern-backup-mac decrypt "$SRC_DIR/$FILE" > /dev/null
   ' || { echo "DECRYPTION FAILED — is the backup service key mounted correctly?" >&2; exit 1; }
 
 echo "==> proving the authentication tag rejects ciphertext tampering"
 "${COMPOSE[@]}" --profile backups run --rm -T "${BACKUP_RUN_ARGS[@]}" \
   -e FILE="$FILE" -e SRC_DIR="$SRC_DIR" --entrypoint sh backup -ceu '
-    cp "$SRC_DIR/$FILE" /tmp/tampered.dump.enc
-    cp "$SRC_DIR/$FILE.hmac" /tmp/tampered.dump.enc.hmac
-    printf x >> /tmp/tampered.dump.enc
-    if mindpattern-backup-mac verify /tmp/tampered.dump.enc; then
+    TAMPER_DIR=$(mktemp -d "$SRC_DIR/.rehearse-tamper.XXXXXX")
+    trap "rm -rf \"$TAMPER_DIR\"" EXIT
+    cp "$SRC_DIR/$FILE" "$TAMPER_DIR/tampered.dump.enc"
+    cp "$SRC_DIR/$FILE.hmac" "$TAMPER_DIR/tampered.dump.enc.hmac"
+    printf x >> "$TAMPER_DIR/tampered.dump.enc"
+    if mindpattern-backup-mac verify "$TAMPER_DIR/tampered.dump.enc"; then
       echo "tampered backup unexpectedly verified" >&2
       exit 1
     fi
@@ -233,19 +223,7 @@ fi
 # decryption fails closed.
 "${COMPOSE[@]}" --profile backups run --rm -T "${BACKUP_RUN_ARGS[@]}" \
   -e FILE="$FILE" -e SRC_DIR="$SRC_DIR" --entrypoint sh backup -ceu '
-    mindpattern-backup-mac verify "$SRC_DIR/$FILE"
-    # Key source mirrors the compose backup entrypoint (2026-09-28 audit):
-    # mounted secret file first, env var only as the dev-overlay fallback.
-    if [ -s "$BACKUP_KEY_FILE" ]; then
-      backup_pass="file:$BACKUP_KEY_FILE"
-    elif [ -n "$BACKUP_KEY" ]; then
-      backup_pass="env:BACKUP_KEY"
-    else
-      echo "no BACKUP_KEY file or env value — cannot decrypt" >&2
-      exit 1
-    fi
-    openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass "$backup_pass" \
-      < "$SRC_DIR/$FILE"
+    mindpattern-backup-mac decrypt "$SRC_DIR/$FILE"
   ' | docker exec -i "db-$SUFFIX" pg_restore -U postgres -d postgres --no-owner >/dev/null
 
 echo "==> asserting the restored schema and reporting snapshot row counts"

@@ -56,13 +56,14 @@ describe("endpoint surface", () => {
 
   it("rekey carries both processing tokens plus the account verifier", async () => {
     const mock = stubFetch(() => new Response(null, { status: 204 }));
-    await api.rekeyStoredData("old", "new", "ver");
+    await api.rekeyStoredData("old", "new", "ver", { operation_id: "11111111-1111-4111-8111-111111111111", new_salt: "salt", new_verifier: "new-verifier" });
     const [url, init] = lastCall(mock);
     expect(url).toBe(`${ORIGIN}/api/v1/processing/rekey`);
     const headers = init.headers as Record<string, string>;
     expect(headers["X-Processing-Token"]).toBe("old");
     expect(headers["X-New-Processing-Token"]).toBe("new");
     expect(headers["X-Account-Verifier"]).toBe("ver");
+    expect(JSON.parse(String(init.body))).toMatchObject({ operation_id: "11111111-1111-4111-8111-111111111111", new_salt: "salt", new_verifier: "new-verifier" });
   });
 
   it("account lifecycle: llm-consent, delete (verifier in the header), credential rotation", async () => {

@@ -16,7 +16,7 @@
  * crisis resources open as an overlay dialog. The view state machine,
  * session funnels, and privacy posture are untouched.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { api, clearSession, setSessionExpiredHandler } from "./api/client";
 import { abortInFlightFlush, flushQueueOnReconnect } from "./offlineQueue";
 import { preserveActiveDraft } from "./entryDraft";
@@ -26,23 +26,27 @@ import { useBfcacheGuard, useHiddenTabLock, useIdleLock, type LockReason } from 
 import { subscribeTabLockdown } from "./tabLockdown";
 import { sweepLegacyCrisisStamps } from "./crisisDialog";
 import { isOnline, localStore, onWindowEvent } from "./platform";
-import { AppFrame, BottomNav, Card, ErrorBanner, MoreMenu, NavTabs, Note, ToastHost, type IconName, type NavItem, type ToastItem } from "./ui";
+import { AppFrame, BottomNav, Button, Card, ErrorBanner, MoreMenu, NavTabs, Note, ToastHost, type IconName, type NavItem, type ToastItem } from "./ui";
 import { CrisisCard } from "./crisis";
 import { LoginView } from "./views/LoginView";
 import { hasSeenOnboarding, markOnboardingSeen, Onboarding } from "./views/Onboarding";
 import { Privacy } from "./views/Privacy";
-import { EntryView } from "./views/Entry";
-import { HistoryView } from "./views/History";
-import { PatternsView } from "./views/Patterns";
-import { QuestionView } from "./views/Question";
-import { MeasuresView } from "./views/Measures";
-import { SafetyPlanView } from "./views/SafetyPlan";
-import { ShareView } from "./views/Share";
-import { SettingsView } from "./views/Settings";
+const EntryView = lazy(() => import("./views/Entry").then(module => ({ default: module.EntryView })));
+const HistoryView = lazy(() => import("./views/History").then(module => ({ default: module.HistoryView })));
+const PatternsView = lazy(() => import("./views/Patterns").then(module => ({ default: module.PatternsView })));
+const QuestionView = lazy(() => import("./views/Question").then(module => ({ default: module.QuestionView })));
+const MeasuresView = lazy(() => import("./views/Measures").then(module => ({ default: module.MeasuresView })));
+const SafetyPlanView = lazy(() => import("./views/SafetyPlan").then(module => ({ default: module.SafetyPlanView })));
+const ShareView = lazy(() => import("./views/Share").then(module => ({ default: module.ShareView })));
+const SettingsView = lazy(() => import("./views/Settings").then(module => ({ default: module.SettingsView })));
 import { vault } from "./vault";
 import { reconcile, type ReconcileOutcome } from "./sync";
-import { subscribeLanguage, t } from "./strings";
+import { loadFullCatalogs, subscribeLanguage, t } from "./strings";
 import { ViewBoundary } from "./ErrorBoundary";
+import { readBrowserView, writeBrowserView } from "./browserRoute";
+import { hasLocalRotation, resumeLocalRotation } from "./localRotation";
+import { confirmLocalErasure, pendingLocalErasures, resumeConfirmedErasures, type ErasureTombstone } from "./localErasure";
+import { kv } from "./kvstore";
 
 type View =
   | { kind: "booting" }
@@ -111,6 +115,18 @@ export function App(): React.JSX.Element {
   const [errorNote, setErrorNote] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const nextToastId = useRef(0);
+  const adoptionGeneration = useRef(0);
+  const [erasures,setErasures] = useState<ErasureTombstone[]>([]);
+  const [erasureError,setErasureError] = useState("");
+  const retryErasure = async (): Promise<void> => {
+    try { setErasures(await resumeConfirmedErasures()); setErasureError(""); }
+    catch (error) {
+      setErasureError(error instanceof Error ? error.message : t("app.erasureIncomplete"));
+      try { setErasures(await pendingLocalErasures()); } catch { /* Keep the visible storage failure. */ }
+    }
+  };
+  useEffect(() => { void retryErasure(); }, []);
+  useEffect(() => () => { adoptionGeneration.current += 1; }, []);
 
   const notify = useCallback((message: string, tone: ToastItem["tone"] = "ok"): void => {
     const id = (nextToastId.current += 1);
@@ -133,6 +149,7 @@ export function App(): React.JSX.Element {
   }, []);
 
   const lockDown = useCallback((notice: string | null): void => {
+    adoptionGeneration.current += 1;
     // FIRST, seal the in-progress journal draft under the data key while it
     // still exists (audit 2026-09-26, MEDIUM user-data-loss): the hidden-
     // tab/idle locks unmount the editor, and the draft used to die with it.
@@ -172,6 +189,20 @@ export function App(): React.JSX.Element {
   // share/settings, leaving keys in memory with no idle lock there).
   const inApp = PRIMARY_KINDS.has(view.kind) || MORE_KINDS.has(view.kind);
   const sessionActive = inApp || view.kind === "onboarding" || view.kind === "privacy";
+  useEffect(() => {
+    if (inApp) writeBrowserView(view.kind);
+  }, [inApp, view.kind]);
+  useEffect(() => {
+    if (!inApp) return;
+    const followHistory = (): void => {
+      void preserveActiveDraft().catch(() => undefined);
+      void preserveSafetyPlan().catch(() => undefined);
+      setView({ kind: readBrowserView() as View["kind"] });
+    };
+    const offPop = onWindowEvent("popstate", followHistory);
+    const offHash = onWindowEvent("hashchange", followHistory);
+    return () => { offPop(); offHash(); };
+  }, [inApp]);
   const onLock = useCallback((reason: LockReason) => lockDown(noticeFor(reason)), [lockDown]);
   useIdleLock(sessionActive, onLock);
   useBfcacheGuard(sessionActive, onLock);
@@ -238,7 +269,30 @@ export function App(): React.JSX.Element {
     };
   }, [sessionActive, onReconcile]);
 
-  const onLoginSuccess = useCallback((success: { userId: string; username: string }) => {
+  const onLoginSuccess = useCallback(async (success: { userId: string; username: string }) => {
+    const attempt = ++adoptionGeneration.current;
+    const current = (): boolean => attempt === adoptionGeneration.current && vault.isUnlocked() && vault.ownerUserId() === success.userId;
+    if (!current()) return;
+    const keyCopy = new Uint8Array(vault.get().dataKey);
+    try {
+      await loadFullCatalogs();
+      if (!current()) return;
+      const pendingMigration = await hasLocalRotation(success.userId);
+      if (!current()) return;
+      if (pendingMigration) {
+        const envelope = await api.keyEnvelope();
+        if (!current()) return;
+        await resumeLocalRotation(success.userId,keyCopy,envelope.salt);
+      }
+      if(!current())return;
+      await kv.adoptVerifiedWriteGeneration(success.userId,keyCopy,current);
+    } catch (error) {
+      if (!current()) return;
+      setErrorNote(error instanceof Error ? error.message : "Local key migration needs recovery. Your encrypted originals are retained.");
+      setView({kind:"settings"});
+      return;
+    } finally { keyCopy.fill(0); }
+    if (!current()) return;
     setUsername(success.username);
     // Sign-in is an honest moment to drain anything this browser parked
     // earlier (D-9 keeps ciphertext across sign-out) — one entry point of
@@ -253,7 +307,7 @@ export function App(): React.JSX.Element {
       void adoptLegacyPlaintextMutes(vault.get().dataKey, success.userId).catch(() => undefined);
     }
     if (hasSeenOnboarding(success.userId, localStore.get)) {
-      setView({ kind: "today" });
+      setView({ kind: readBrowserView() as View["kind"] });
     } else {
       setView({ kind: "onboarding" });
     }
@@ -262,7 +316,7 @@ export function App(): React.JSX.Element {
   const onOnboardingDone = useCallback(() => {
     const userId = vault.ownerUserId();
     if (userId) markOnboardingSeen(userId, localStore.set);
-    setView({ kind: "today" });
+    setView({ kind: readBrowserView() as View["kind"] });
   }, []);
 
   const signOut = useCallback(() => {
@@ -309,6 +363,14 @@ export function App(): React.JSX.Element {
 
   return (
     <AppFrame title="Fathom" onCrisis={() => setCrisisOpen(true)}>
+      {(erasures.length > 0 || erasureError) && <Card title={t("app.erasureTitle")}>
+        <Note>{t("app.erasureExplanation")}</Note><ErrorBanner message={erasureError} />
+        <Button label={t("app.erasureRetry")} onPress={() => void retryErasure()} />
+        {erasures.filter(row=>!row.remoteConfirmed).map(row => <div key={row.owner}>
+          <Note>{t("app.erasureUnconfirmed",{account:row.owner})}</Note>
+          <Button danger label={t("app.erasureConfirm")} onPress={() => { void confirmLocalErasure(row.owner).then(retryErasure).catch(error=>setErasureError(error instanceof Error ? error.message : t("app.erasureIncomplete"))); }} />
+        </div>)}
+      </Card>}
       {view.kind === "booting" ? (
         <div className="view-enter">
           <Card>
@@ -345,6 +407,7 @@ export function App(): React.JSX.Element {
               showing the calm panel. Keyed by view so navigating away from
               a crashed view recovers without a reload. */}
           <ViewBoundary resetKey={view.kind}>
+          <Suspense fallback={<Note role="status">{t("common.loading")}</Note>}>
           {view.kind === "today" ? (
             <EntryView onSaved={onSaved} onCrisis={() => setCrisisOpen(true)} />
           ) : view.kind === "patterns" ? (
@@ -362,6 +425,7 @@ export function App(): React.JSX.Element {
           ) : (
             <HistoryView />
           )}
+          </Suspense>
           </ViewBoundary>
           {username && <Note tone="muted">{t("app.signedInAs", { name: username })}</Note>}
         </div>

@@ -34,6 +34,18 @@
 useDefault = true
 
 [[allowlists]]
+# The deterministic audio encryption key is a published interoperability
+# fixture used by backend/mobile/web/portal tests. Exempt only that exact
+# value in its exact fixture file. Historical versions use the same value.
+# The authoritative full-history scan enforces both conditions; the pinned
+# no-git scanner has the path-condition limitation documented below.
+description = "exact published audio interoperability fixture key"
+condition = "and"
+paths = ['''(^|[/\\])shared/audio_vectors\.json$''']
+regexTarget = "secret"
+regexes = ['''^ESIzRFVmd4iZqrvM3e7/ECEyQ1RldoeYqbrL3O3\+DyA=$''']
+
+[[allowlists]]
 description = "published crypto test vectors (cross-platform pins)"
 paths = [
   '''shared/(vectors|interop_fixtures)\.json''',

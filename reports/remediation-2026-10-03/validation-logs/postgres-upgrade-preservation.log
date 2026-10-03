@@ -1,0 +1,1 @@
+PASS: previous-head upgrade preserves exact journal, current note, revision and audio metadata; ciphertext authenticates; custody defaults and deletion outbox are correct

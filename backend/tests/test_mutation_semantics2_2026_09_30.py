@@ -92,7 +92,12 @@ def test_cors_method_surface_and_limiter_budgets():
     app = create_app(s)
     cors = [mw for mw in app.user_middleware if mw.cls is CORSMiddleware][0]
     assert cors.kwargs["allow_methods"] == [
-        "GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS",
+        "GET",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE",
+        "OPTIONS",
     ]
     # capacity budgets: the expensive recompute and auth admission are
     # bounded at 4 concurrent each; exports at pool capacity minus one
@@ -104,10 +109,18 @@ def test_cors_method_surface_and_limiter_budgets():
 
 def test_export_limiter_follows_pool_capacity():
     """The formula, at its clamps: capacity-1 bounded to [1, 2]."""
-    assert create_app(_dev_settings(db_pool_size=1, db_max_overflow=0)).state \
-        .export_limiter.total_tokens == 1  # 1+0-1 = 0 -> clamped to 1
-    assert create_app(_dev_settings(db_pool_size=50, db_max_overflow=50)).state \
-        .export_limiter.total_tokens == 2  # 99 -> clamped to 2
+    assert (
+        create_app(
+            _dev_settings(db_pool_size=1, db_max_overflow=0)
+        ).state.export_limiter.total_tokens
+        == 1
+    )  # 1+0-1 = 0 -> clamped to 1
+    assert (
+        create_app(
+            _dev_settings(db_pool_size=50, db_max_overflow=50)
+        ).state.export_limiter.total_tokens
+        == 2
+    )  # 99 -> clamped to 2
 
 
 # -- LLM token-budget formula ------------------------------------------------
@@ -117,9 +130,9 @@ def test_export_limiter_follows_pool_capacity():
 @pytest.mark.parametrize(
     ("text_len", "expected"),
     [
-        (1, 512),        # floor: len//2+256 under 512
-        (1000, 756),     # len//2 + 256 in range
-        (100_000, 4096), # ceiling (input bounded, tokens clamped)
+        (1, 512),  # floor: len//2+256 under 512
+        (1000, 756),  # len//2 + 256 in range
+        (100_000, 4096),  # ceiling (input bounded, tokens clamped)
     ],
 )
 async def test_translation_token_budget_formula(monkeypatch, text_len, expected):
@@ -135,7 +148,11 @@ async def test_translation_token_budget_formula(monkeypatch, text_len, expected)
 
         def _post(self, payload):
             captured.update(payload)
-            return {"choices": [{"message": {"content": "Translated transcript."}}]}
+            return {
+                "choices": [
+                    {"finish_reason": "stop", "message": {"content": "Translated transcript."}}
+                ]
+            }
 
     # translate_to_english imports LLMAnalyzer from .llm at CALL time —
     # patch it at the source module
@@ -156,8 +173,8 @@ async def test_translation_token_budget_formula(monkeypatch, text_len, expected)
 @pytest.mark.parametrize(
     ("token", "message"),
     [
-        ("not-a-token", "malformed token"),   # wrong structure (dots)
-        ("a.b", "bad signature"),             # parseable structure, bad sig
+        ("not-a-token", "malformed token"),  # wrong structure (dots)
+        ("a.b", "bad signature"),  # parseable structure, bad sig
     ],
 )
 def test_verify_token_malformed_inputs(token, message):
@@ -180,9 +197,11 @@ def test_verify_token_signed_but_malformed_payload():
     header = base64.urlsafe_b64encode(b'{"alg":"HS256"}').rstrip(b"=").decode()
     payload = base64.urlsafe_b64encode(b"not-json").rstrip(b"=").decode()
     signing_input = f"{header}.{payload}".encode()
-    sig = base64.urlsafe_b64encode(
-        hmac.new(secret.encode(), signing_input, hashlib.sha256).digest()
-    ).rstrip(b"=").decode()
+    sig = (
+        base64.urlsafe_b64encode(hmac.new(secret.encode(), signing_input, hashlib.sha256).digest())
+        .rstrip(b"=")
+        .decode()
+    )
     with pytest.raises(TokenError, match=r"^malformed payload$"):
         verify_token(f"{header}.{payload}.{sig}", secret)
 
@@ -204,6 +223,5 @@ async def test_validation_detail_assembly():
     body = r.json()
     assert body["code"] == "validation_error"
     assert body["detail"] == (
-        "username: String should match pattern '^[a-zA-Z0-9_.-]{3,64}$'; "
-        "verifier: Field required"
+        "username: String should match pattern '^[a-zA-Z0-9_.-]{3,64}$'; verifier: Field required"
     )

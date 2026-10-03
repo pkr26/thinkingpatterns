@@ -83,6 +83,24 @@ jobs:
         # No --cov-fail-under here: coverage is gated in the `backend` job;
         # this job's signal is "the suite passes under Postgres semantics".
         run: python -m pytest tests/
+      - name: Preserve legacy ciphertext through the production migration path
+        working-directory: backend
+        env:
+          REMEDIATION_UPGRADE_DB_URL: postgresql+asyncpg://postgres:ci-postgres-password@localhost:5432/ci_upgrade_test
+        run: |
+          python - <<'PY'
+          import asyncio
+          import asyncpg
+          async def create():
+              conn = await asyncpg.connect('postgresql://postgres:ci-postgres-password@localhost:5432/postgres')
+              try:
+                  await conn.execute('CREATE DATABASE ci_upgrade_test')
+              finally:
+                  await conn.close()
+          asyncio.run(create())
+          PY
+          MINDPATTERN_DB_URL="$REMEDIATION_UPGRADE_DB_URL" python -m alembic upgrade a3f7c1d9b5e2
+          python ../tools/verify-postgres-upgrade.py
 
   mobile:
     runs-on: ubuntu-latest
@@ -97,6 +115,9 @@ jobs:
       - name: Install dependencies
         working-directory: mobile
         run: npm ci
+      - name: Verify exact dependency security backports and attack regressions
+        working-directory: mobile
+        run: node tools/verify_dependency_patches.mjs
       - name: Typecheck
         working-directory: mobile
         run: npx tsc --noEmit
@@ -106,6 +127,31 @@ jobs:
       - name: Mobile dependency audit
         working-directory: mobile
         run: npm audit --audit-level=moderate
+
+  android-build:
+    # A static preflight cannot detect Expo/Gradle/C++ incompatibilities.
+    # Compile from npm ci on every change; signing stays a release input.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Install exact dependencies and verified native compatibility patches
+        working-directory: mobile
+        run: npm ci
+      - name: Install the committed Android SDK toolchain
+        run: |
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            'platforms;android-37' 'build-tools;37.0.0' \
+            'ndk;27.1.12297006' 'cmake;3.22.1'
+      - name: Compile Android application and native modules
+        working-directory: mobile/android
+        run: ./gradlew :app:assembleDebug --no-daemon --max-workers=2 -PreactNativeArchitectures=arm64-v8a,x86_64
 
   native-release-preflight:
     # mobile/tools/verify_native_release.mjs is the fail-closed gate for the
@@ -421,8 +467,7 @@ jobs:
           # failed verifier/decryptor cannot be masked by pg_restore.
           docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile backups exec -T backup sh -ceu '
             set -- /backups/mindpattern-*.dump.enc
-            mindpattern-backup-mac verify "$1"
-            openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass file:/run/secrets/backup_key -in "$1"
+            mindpattern-backup-mac decrypt "$1"
           ' | docker exec -i "$restore_name" pg_restore --no-owner -U postgres -d postgres
           docker exec "$restore_name" psql -U postgres -d postgres -tAc \
             "SELECT count(*) FROM users WHERE username = 'backup-restore-probe'" | grep -qx '1'
@@ -468,6 +513,21 @@ jobs:
           reject malformed-line 'this is not an assignment'
           reject duplicate-key "$(printf 'MINDPATTERN_API_IMAGE=ghcr.io/e/a@sha256:%s\nMINDPATTERN_API_IMAGE=ghcr.io/e/b@sha256:%s\n' \
             "$(printf 'a%.0s' {1..64})" "$(printf 'b%.0s' {1..64})")"
+
+  remediation-contracts:
+    # Prove backup key/restore behavior and the quality gates themselves.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+      - name: Check backup and campaign/mutation evidence contracts
+        run: python -m unittest discover -s tools/tests -v
 
   monitoring-verify:
     # deploy/monitoring/verify.sh is the drift gate for the alerting stack

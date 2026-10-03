@@ -1,0 +1,14 @@
+npm notice run mindpattern-mobile@1.0.0 npx
+npm notice run 'vitest' run --config redteam.vitest.config.ts redteam/f_mobile.test.ts --maxWorkers=1
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - import "./vitest.config" without a file extension (redteam.vitest.config.ts:2:18). Add the file extension
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v4.1.11 /Users/pradeepreddy/Desktop/mental_health_application/mobile
+
+
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
+   Start at  12:03:01
+   Duration  643ms (transform 144ms, setup 53ms, import 140ms, tests 392ms, environment 0ms)
+

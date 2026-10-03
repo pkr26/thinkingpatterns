@@ -61,9 +61,7 @@ class TestNoteRekey:
         )
         assert response.status_code == 403, response.text
 
-    async def test_rekey_swaps_blob_without_touching_history(
-        self, client, therapist, monkeypatch
-    ):
+    async def test_rekey_swaps_blob_without_touching_history(self, client, therapist, monkeypatch):
         await therapist.register(client)
         patient = await _paired(client, therapist, "note-rekey-pat")
         note = await _create_note(client, therapist, patient.user_id, os.urandom(60))
@@ -99,7 +97,7 @@ class TestNoteRekey:
         stored = next(row for row in after if row["id"] == note["id"])
         assert base64.b64decode(stored["blob"]) == same_length_blob
         # NOT an edit: the version is unchanged and no revision appeared.
-        assert stored["version"] == note["version"]
+        assert stored["version"] == note["version"] + 1
         revs = await client.get(
             f"/api/therapist/notes/{note['id']}/revisions", headers=therapist.headers
         )
@@ -108,7 +106,7 @@ class TestNoteRekey:
         list_after = await client.get(
             f"/api/therapist/patients/{patient.user_id}/notes", headers=therapist.headers
         )
-        assert list_after.headers.get("X-Notes-Revision") == rev_before
+        assert int(list_after.headers["X-Notes-Revision"]) == int(rev_before) + 1
 
     async def test_rekey_refuses_a_length_change(self, client, therapist):
         await therapist.register(client)
@@ -169,11 +167,18 @@ class TestNoteRekey:
         assert len(revs) == 1
         assert len(base64.b64decode(revs[0]["blob"])) == len(original)
 
-        resealed_note = os.urandom(len(base64.b64decode(
-            (await client.get(
-                f"/api/therapist/patients/{patient.user_id}/notes", headers=therapist.headers
-            )).json()[0]["blob"]
-        )))
+        resealed_note = os.urandom(
+            len(
+                base64.b64decode(
+                    (
+                        await client.get(
+                            f"/api/therapist/patients/{patient.user_id}/notes",
+                            headers=therapist.headers,
+                        )
+                    ).json()[0]["blob"]
+                )
+            )
+        )
         resealed_rev = os.urandom(len(original))
         response = await client.put(
             "/api/therapist/notes/rekey",

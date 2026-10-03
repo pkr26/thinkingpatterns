@@ -1,0 +1,2 @@
+{"area": "web", "atomic_v1_password_change": true, "fresh_login_readable_journal": true, "local_draft_preserved": true, "safety_plan_preserved": true, "page_errors": []}
+{"area": "portal", "atomic_password_change": true, "fresh_login_current_and_revision_readable": true, "patient_rekey_grant_preserved": true, "sharing_identity_rotation_notes_preserved": true, "page_errors": []}

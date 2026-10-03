@@ -30,15 +30,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import json
+import os
 import uuid
 from datetime import timedelta
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import Settings
-from ..models import AudioAttachment, utcnow
+from ..models import AudioAttachment, AudioDeletion, User, new_id, utcnow
+from ..locks import lifecycle_locks
 
 logger = logging.getLogger("mindpattern.audio_store")
 
@@ -149,10 +152,13 @@ class S3AudioStore:
             # turn a fetch into unbounded memory: read one byte past the
             # limit and refuse rather than buffering the object.
             limit = max_bytes if max_bytes is not None else ST_S3_UNCAPPED
-            data = body.read(limit + 1)
-            if len(data) > limit:
-                raise ValueError("object exceeds the fetch size limit")
-            return data
+            try:
+                data = body.read(limit + 1)
+                if len(data) > limit:
+                    raise ValueError("object exceeds the fetch size limit")
+                return data
+            finally:
+                body.close()
 
         try:
             return await asyncio.to_thread(_get)
@@ -192,7 +198,12 @@ class LocalAudioStore:
 
         def _write() -> None:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(blob)
+            temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
+            try:
+                temporary.write_bytes(blob)
+                os.replace(temporary, path)
+            finally:
+                temporary.unlink(missing_ok=True)
 
         try:
             await asyncio.to_thread(_write)
@@ -203,7 +214,8 @@ class LocalAudioStore:
         path = self._path(key)
 
         def _read() -> bytes:
-            data = path.read_bytes()
+            with path.open("rb") as source:
+                data = source.read(max_bytes + 1) if max_bytes is not None else source.read()
             if max_bytes is not None and len(data) > max_bytes:
                 raise ValueError("object exceeds the fetch size limit")
             return data
@@ -212,7 +224,7 @@ class LocalAudioStore:
             return await asyncio.to_thread(_read)
         except FileNotFoundError as exc:
             raise AudioStoreError("object missing") from exc
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             raise AudioStoreError(f"local get failed: {type(exc).__name__}") from exc
 
     async def delete(self, key: str) -> None:
@@ -300,43 +312,145 @@ def get_audio_store_cached(settings: Settings):
     return cached
 
 
-async def sweep_expired_audio(session: AsyncSession, store) -> int:
-    """Delete one batch of expired attachments (objects first, then rows).
+def storage_locator(store) -> str | None:
+    if isinstance(store, LocalAudioStore):
+        value = {"backend": "local", "root": str(store.root)}
+    elif isinstance(store, S3AudioStore):
+        value = {
+            "backend": "s3",
+            "bucket": store.bucket,
+            "region": store.region,
+            "endpoint": store.endpoint,
+        }
+    else:
+        return None  # Test/provider adapters retain their configured store.
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
-    Returns the number swept (0 when the feature/store is unconfigured —
-    the recurring task treats that as a cheap no-op, not an error). Row
-    deletion only happens after its object delete succeeded, so a store
-    outage cannot orphan rows; an orphaned OBJECT (rows removed by the
-    account cascade) is the documented S3-lifecycle backstop's job.
-    """
-    if store is None:
-        return 0
-    now = utcnow()
-    rows = (
-        (
-            await session.execute(
-                select(AudioAttachment)
-                .where(AudioAttachment.expires_at < now)
-                .order_by(AudioAttachment.expires_at.asc())
-                .limit(SWEEP_BATCH)
-            )
-        )
-        .scalars()
-        .all()
+
+def store_for_object(settings: Settings, row):
+    store = get_audio_store_cached(settings)
+    if store is None or store.backend != row.backend:
+        raise AudioStoreError("original audio backend is unavailable")
+    locator = getattr(row, "storage_locator", None)
+    if locator is not None and locator != storage_locator(store):
+        # DB metadata cannot authorize arbitrary local paths or cloud buckets.
+        # Preserve the tombstone/row until the operator restores the original
+        # target or performs an explicitly validated storage migration.
+        raise AudioStoreError("original audio storage target is unavailable")
+    return store
+
+
+async def advance_audio_revision(session: AsyncSession, owner: str) -> None:
+    from ..db import rowcount
+    from ..deps import ApiError
+
+    result = await session.execute(
+        update(User)
+        .where(User.id == owner, User.entries_revision < 2**63 - 1)
+        .values(entries_revision=User.entries_revision + 1)
     )
-    swept = 0
+    if rowcount(result) != 1:
+        raise ApiError(
+            status_code=503,
+            detail="unable to advance attachment revision",
+            code="service_unavailable",
+        )
+
+
+def enqueue_audio_delete(session: AsyncSession, row, *, store=None, not_before=None) -> str:
+    identifier = new_id()
+    if getattr(session, "info", None) is not None:
+        session.info.setdefault("mindpattern_audio_deletions_pending", []).append(identifier)
+    session.add(
+        AudioDeletion(
+            id=identifier,
+            backend=row.backend,
+            storage_key=row.storage_key,
+            storage_locator=getattr(row, "storage_locator", None)
+            or (storage_locator(store) if store is not None else None),
+            not_before=not_before or utcnow(),
+        )
+    )
+    return identifier
+
+
+async def drain_audio_deletions(
+    session: AsyncSession, settings: Settings, *, identifiers=None, limit: int = 50
+) -> int:
+    query = (
+        select(AudioDeletion)
+        .where(AudioDeletion.not_before <= utcnow())
+        .order_by(AudioDeletion.not_before)
+        .limit(limit)
+    )
+    if identifiers is not None:
+        query = query.where(AudioDeletion.id.in_(identifiers))
+    rows = list((await session.scalars(query)).all())
+    await session.commit()  # No pooled transaction across provider I/O.
+    removed = 0
     for row in rows:
         try:
-            await store.delete(row.storage_key)
+            await store_for_object(settings, row).delete(row.storage_key)
         except AudioStoreError:
-            logger.warning(
-                "audio sweep: object delete failed for %s; retrying next cycle",
-                row.id,
+            row.attempts += 1
+            row.not_before = utcnow() + timedelta(seconds=min(3600, 30 * 2 ** min(row.attempts, 7)))
+            logger.warning("audio deletion deferred: tombstone %s", row.id)
+        else:
+            await session.delete(row)
+            removed += 1
+        await session.commit()
+    return removed
+
+
+async def sweep_expired_audio(
+    session: AsyncSession, store, settings: Settings | None = None
+) -> int:
+    """Atomically expire rows and retain retryable object tombstones."""
+    now = utcnow()
+    identifiers = list(
+        (
+            await session.execute(
+                select(AudioAttachment.id, AudioAttachment.user_id)
+                .where(AudioAttachment.expires_at <= now)
+                .order_by(AudioAttachment.expires_at)
+                .limit(SWEEP_BATCH)
             )
-            continue
-        await session.delete(row)
-        swept += 1
-    if swept:
+        ).all()
+    )
+    await session.commit()
+    swept = 0
+    pending_ids = []
+    for identifier, owner in identifiers:
+        async with lifecycle_locks.hold(f"llm-lifecycle:{owner}"):
+            row = await session.get(AudioAttachment, identifier, populate_existing=True)
+            if row is not None and row.expires_at <= utcnow():
+                pending_ids.append(enqueue_audio_delete(session, row, store=store))
+                await session.delete(row)
+                await advance_audio_revision(session, owner)
+                await session.commit()
+                swept += 1
+    if settings is not None:
+        await drain_audio_deletions(session, settings, identifiers=pending_ids)
+    elif store is not None:
+        # Compatibility for direct sweep callers with one explicitly supplied store.
+        rows = list(
+            (
+                await session.scalars(
+                    select(AudioDeletion).where(AudioDeletion.id.in_(pending_ids))
+                )
+            ).all()
+        )
+        for tombstone in rows:
+            if tombstone.backend != store.backend or tombstone.storage_locator not in (
+                None,
+                storage_locator(store),
+            ):
+                continue
+            try:
+                await store.delete(tombstone.storage_key)
+            except AudioStoreError:
+                continue
+            await session.delete(tombstone)
         await session.commit()
     return swept
 

@@ -1,0 +1,9 @@
+n= 21 phi=0.0 reps=1000 alarm=0.025 P(p<=.05)=0.025
+n= 21 phi=0.5 reps=1000 alarm=0.058 P(p<=.05)=0.058
+n= 21 phi=0.8 reps=1000 alarm=0.055 P(p<=.05)=0.055
+n= 40 phi=0.0 reps=1000 alarm=0.019 P(p<=.05)=0.019
+n= 40 phi=0.5 reps=1000 alarm=0.053 P(p<=.05)=0.053
+n= 40 phi=0.8 reps=1000 alarm=0.094 P(p<=.05)=0.067
+n= 90 phi=0.0 reps=1000 alarm=0.004 P(p<=.05)=0.004
+n= 90 phi=0.5 reps=1000 alarm=0.008 P(p<=.05)=0.008
+n= 90 phi=0.8 reps=1000 alarm=0.021 P(p<=.05)=0.021

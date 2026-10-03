@@ -16,8 +16,9 @@ now closed:
   write access could rewrite a whole trail and recompute every link. New
   rows also carry ``entry_mac`` = HMAC-SHA256(secret held OUTSIDE the
   database, "user_id:chain_seq:entry_hash"); the full-rewrite attack now
-  needs the server's MAC key. Pre-column rows keep NULL (legacy,
-  link-verified) and are counted by verification.
+  needs the server's MAC key. A keyed verification rejects NULL seals,
+  including genuine pre-column rows, until an operator independently
+  reviews and seals the legacy snapshot with the offline migration tool.
 * A forward chain cannot detect deletion of its NEWEST rows. When
   ``settings.audit_journal_path`` is set, every committed append also
   writes a line to that append-only file (outside the database) and
@@ -395,8 +396,8 @@ class ChainVerification:
     broken_at_seq: int | None = None
     reason: str | None = None
     # Rows sealed before the MAC column existed (or seeded without a key):
-    # link-verified only. Honest bookkeeping, not an error — they age out
-    # through retention.
+    # counted only by an explicitly unkeyed walk. Keyed verification fails
+    # closed until genuine legacy provenance is independently reviewed.
     legacy_rows: int = 0
 
 
@@ -417,9 +418,9 @@ async def verify_access_log_chain(
 
     Checks, per surviving row: the recomputed entry_hash matches the stored
     seal, prev_hash links to the previous row's seal, and chain_seq is
-    contiguous. When ``mac_key`` is provided, every row carrying an
-    ``entry_mac`` must also verify its keyed seal (rows with NULL macs are
-    counted as legacy and link-verified only). The OLDEST surviving row is
+    contiguous. When ``mac_key`` is provided, every row must carry a valid
+    keyed seal; a NULL seal fails closed. Only an explicitly unkeyed walk
+    counts NULL seals as legacy and checks their links. The OLDEST surviving row is
     the anchor: its prev_hash is accepted whatever it is (retention may
     have pruned the prefix it once pointed at) unless the row claims to be
     the genesis (seq 1) while carrying a prev_hash, or a non-genesis row
@@ -494,6 +495,11 @@ async def verify_access_log_chain(
             return _broken(row.chain_seq, "prev_hash does not link to the previous row's seal")
         if row.entry_mac is None:
             legacy += 1
+            if mac_key is not None:
+                return _broken(
+                    row.chain_seq,
+                    "missing entry_mac (legacy rows require explicit offline review; MAC stripping is not accepted)",
+                )
         elif mac_key is not None:
             expected_mac = compute_entry_mac(mac_key, row.user_id, row.chain_seq, row.entry_hash)
             # 2026-09-28 audit L-2: the keyed comparison gets the same

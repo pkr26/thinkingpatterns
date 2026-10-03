@@ -45,12 +45,23 @@ def test_label_grounded_token_rules():
 def test_clean_narrative_clinical_gate():
     """A calm reframe never contains clinical/advice vocabulary — the
     exact blocked set, word for word."""
-    for term in ("dose", "dosage", "medication", "medications", "meds",
-                 "medicine", "medicines", "pill", "pills", "prescription"):
+    for term in (
+        "dose",
+        "dosage",
+        "medication",
+        "medications",
+        "meds",
+        "medicine",
+        "medicines",
+        "pill",
+        "pills",
+        "prescription",
+    ):
         assert llm._clean_narrative(f"you mentioned your {term} routine") is None, term
-    assert llm._clean_narrative(
-        "Work came up more often than usual this week."
-    ) == "Work came up more often than usual this week."
+    assert (
+        llm._clean_narrative("Work came up more often than usual this week.")
+        == "Work came up more often than usual this week."
+    )
 
 
 def test_sanitize_pattern_recurring_phrase_needs_verbatim():
@@ -124,9 +135,9 @@ def test_grounding_strip_set_is_punctuation_only():
 def test_grounding_exact_short_token_threshold():
     """3-char and 4-char unknown tokens must be CHECKED (not exempt):
     only tokens shorter than 3 skate through."""
-    assert not llm._label_grounded("abc zzq", set())    # 3-char checked
+    assert not llm._label_grounded("abc zzq", set())  # 3-char checked
     assert not llm._label_grounded("abcd zzzq", set())  # 4-char checked
-    assert llm._label_grounded("ab xy", {"zzz"})        # <3 exempt
+    assert llm._label_grounded("ab xy", {"zzz"})  # <3 exempt
 
 
 def test_grounding_continues_past_exempt_tokens():
@@ -147,10 +158,11 @@ def test_narrative_single_signal_gates():
     assert llm._clean_narrative("email foo at example dot com today") is None
     from app.services import crisis
 
-    dialog_only = next(
-        p for p in crisis.DIALOG_TIER_PHRASES
-        if not crisis.matches_suppress(p)
-    ) if hasattr(crisis, "DIALOG_TIER_PHRASES") else "i want to hurt myself"
+    dialog_only = (
+        next(p for p in crisis.DIALOG_TIER_PHRASES if not crisis.matches_suppress(p))
+        if hasattr(crisis, "DIALOG_TIER_PHRASES")
+        else "i want to hurt myself"
+    )
     assert llm._clean_narrative(f"he said {dialog_only}") is None
 
 
@@ -160,8 +172,17 @@ def test_requests_made_counts_every_request():
     analyzer = llm.LLMAnalyzer("http://x", "", "m")
     import json as _json
 
-    content = _json.dumps({"patterns": [{"kind": "temporal", "label": "sleep",
-                            "narrative": "Work came up more often this week."}]})
+    content = _json.dumps(
+        {
+            "patterns": [
+                {
+                    "kind": "temporal",
+                    "label": "sleep",
+                    "narrative": "Work came up more often this week.",
+                }
+            ]
+        }
+    )
     analyzer._post = lambda payload: {"choices": [{"message": {"content": content}}]}
     from app.services.patterns import JournalEntry, Pattern
 
@@ -196,9 +217,17 @@ def test_narration_payload_carries_direction():
     analyzer = llm.LLMAnalyzer("http://x", "", "m")
     captured = {}
 
-    content = _json.dumps({"patterns": [
-        {"kind": "temporal", "label": "sleep",
-         "narrative": "Work came up more often this week."}]})
+    content = _json.dumps(
+        {
+            "patterns": [
+                {
+                    "kind": "temporal",
+                    "label": "sleep",
+                    "narrative": "Work came up more often this week.",
+                }
+            ]
+        }
+    )
 
     def fake_post(payload):
         captured.update(payload)
@@ -222,8 +251,7 @@ def test_sanitize_pattern_copies_direction():
     """sanitize_pattern keeps the finding's direction in the refined
     detail (lower/higher only)."""
     corpus = ["sleep sleep sleep"]
-    item = {"kind": "temporal", "label": "sleep",
-            "detail": {"direction": "lower"}}
+    item = {"kind": "temporal", "label": "sleep", "detail": {"direction": "lower"}}
     got = llm.sanitize_pattern(item, corpus)
     assert got.detail["direction"] == "lower"
 
@@ -251,13 +279,14 @@ def test_size_guard_prose_and_streaming_cap(monkeypatch):
     monkeypatch.setattr(httpx, "AsyncClient", patched)
 
     state["handler"] = lambda request: httpx.Response(
-        200, headers={"content-length": "abc"}, content=b"{}")
+        200, headers={"content-length": "abc"}, content=b"{}"
+    )
     with _pytest.raises(ValueError, match=r"^LLM response has invalid Content-Length$"):
         analyzer._post({})
 
     state["handler"] = lambda request: httpx.Response(
-        200, headers={"content-length": str(llm.LLM_MAX_RESPONSE_BYTES + 1)},
-        content=b"{}")
+        200, headers={"content-length": str(llm.LLM_MAX_RESPONSE_BYTES + 1)}, content=b"{}"
+    )
     with _pytest.raises(LLMResponseTooLarge, match=r"^LLM response exceeds size limit$"):
         analyzer._post({})
 
@@ -266,7 +295,8 @@ def test_size_guard_prose_and_streaming_cap(monkeypatch):
     # the campaign report's residual ledger for the duplicate-site note)
 
     state["handler"] = lambda request: httpx.Response(
-        200, content=bytes([123] * llm.LLM_MAX_RESPONSE_BYTES))
+        200, content=bytes([123] * llm.LLM_MAX_RESPONSE_BYTES)
+    )
     try:
         analyzer._post({})  # exactly-at-cap passes the streaming gate
     except LLMResponseTooLarge:
@@ -304,10 +334,18 @@ def test_narration_skips_unknown_then_processes_known():
     from app.services.patterns import JournalEntry, Pattern
 
     analyzer = llm.LLMAnalyzer("http://x", "", "m")
-    content = _json.dumps({"patterns": [
-        {"kind": "temporal", "label": "never-written", "narrative": "x"},
-        {"kind": "temporal", "label": "sleep",
-         "narrative": "Work came up more often this week."}]})
+    content = _json.dumps(
+        {
+            "patterns": [
+                {"kind": "temporal", "label": "never-written", "narrative": "x"},
+                {
+                    "kind": "temporal",
+                    "label": "sleep",
+                    "narrative": "Work came up more often this week.",
+                },
+            ]
+        }
+    )
     analyzer._post = lambda payload: {"choices": [{"message": {"content": content}}]}
     corpus = [JournalEntry("sleep sleep sleep", _date(2026, 9, 1))]
     refined = analyzer._fetch_patterns(corpus, [Pattern("temporal", "sleep", 2, 0.9, {})])

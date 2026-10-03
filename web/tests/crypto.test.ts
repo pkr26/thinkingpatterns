@@ -255,12 +255,22 @@ describe("entry payload layer", () => {
   const userId = "user-777";
   const entryId = "entry-2026-09-25-a";
 
+  it("retains authenticated additive metadata through an edit without restoring omitted known fields", async () => {
+    const original = {v:3,text:"old text",sentiment:0.2,created_at:"2026-09-25T08:00:00Z",energy:3,tags:["old"],input_mode:"voice",english_text:"old translation",future_metadata:{nested:["retain",{value:7}]}};
+    const blob = await encryptWithFixedNonce(dataKey,new TextEncoder().encode(JSON.stringify(original)),fromBase64(encryptVectors[0]!.nonce),buildAad("entry",userId,entryId,"1"));
+    const authenticated = await decryptEntry(dataKey,userId,entryId,toBase64(blob),1);
+    const edited = await encryptEntry(dataKey,userId,entryId,"edited text",original.created_at,0.4,undefined,2,undefined,authenticated);
+    const payload = await decryptEntry(dataKey,userId,entryId,edited.blobB64,2);
+    expect(payload).toMatchObject({v:1,text:"edited text",sentiment:0.4,created_at:original.created_at,future_metadata:original.future_metadata});
+    for (const key of ["energy","tags","input_mode","english_text"]) expect(payload).not.toHaveProperty(key);
+  });
+
   it("emits the v1 shape byte-compatibly when no structured channels are given", async () => {
-    const { blobB64 } = await encryptEntry(dataKey, userId, entryId, "A calm evening.", "2026-09-25T20:11:00Z", 1.5);
+    const { blobB64 } = await encryptEntry(dataKey, userId, entryId, "A calm evening.", "2026-09-25T20:11:00Z", 0.5);
     const payload = await decryptEntry(dataKey, userId, entryId, blobB64);
     expect(payload.v).toBe(1);
     expect(payload.text).toBe("A calm evening.");
-    expect(payload.sentiment).toBe(1.5);
+    expect(payload.sentiment).toBe(0.5);
     expect(payload.created_at).toBe("2026-09-25T20:11:00Z");
   });
 
@@ -364,4 +374,15 @@ describe("insights + question payload layer", () => {
       "blob failed authentication",
     );
   });
+});
+
+describe("authenticated runtime payload schemas",()=>{
+ const key=new Uint8Array(32).fill(9);
+ it.each([{v:1,text:42},{v:2,text:"text",sentiment:"high"},{v:2,text:"text",sleep:99},{v:3,text:"text",english_text:{secret:"wrong type"}},{v:2,text:"text",tags:[false]}])("refuses malformed entry fields after authentication: %j",async payload=>{
+  const blob=await encryptWithFixedNonce(key,new TextEncoder().encode(JSON.stringify(payload)),new Uint8Array(12),buildAad("entry","schema-user","schema-entry"));await expect(decryptEntry(key,"schema-user","schema-entry",toBase64(blob))).rejects.toThrow();
+ });
+ it("refuses authenticated insights with malformed labels or evidence dates",async()=>{
+  const payload={v:2,state_seq:1,stats:{patterns:[{kind:"topic",label:{invalid:true},confidence:.5,occurrences:1,detail:{}}]}};
+  const blob=await encryptWithFixedNonce(key,new TextEncoder().encode(JSON.stringify(payload)),new Uint8Array(12),buildAad("insights","schema-user","patterns"));await expect(decryptInsights(key,"schema-user",toBase64(blob))).rejects.toThrow("pattern label");
+ });
 });

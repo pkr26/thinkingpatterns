@@ -33,12 +33,12 @@ describe("reconcileInsights funnels", () => {
   it("ok: decrypts, verifies the generation, and reports the phase", async () => {
     stubFetch(async () => jsonResponse({ phase: "insight", active_days: 40, streak: 3, days_remaining: 0, blob: await insightsBlob(7), state_seq: 7 }));
     const outcome = await reconcileInsights();
-    expect(outcome).toEqual({ kind: "ok", phase: "insight", stateSeq: 7 });
+    expect(outcome).toMatchObject({ kind: "ok", phase: "insight", stateSeq: 7, summary: { state_seq: 7 }, payload: { state_seq: 7, v: 2 } });
   });
 
   it("baseline (blob null) reports ok with no generation to guard", async () => {
     stubFetch(() => jsonResponse({ phase: "baseline", active_days: 2, streak: 1, days_remaining: 28, blob: null }));
-    expect(await reconcileInsights()).toEqual({ kind: "ok", phase: "baseline", stateSeq: null });
+    expect(await reconcileInsights()).toMatchObject({ kind: "ok", phase: "baseline", stateSeq: null, summary: { phase: "baseline" }, payload: null });
   });
 
   it("offline surfaces as offline, not error", async () => {

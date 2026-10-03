@@ -176,11 +176,15 @@ export function useRecorder(i18n: {
     teardown();
   }, [teardown]);
 
+  const acquisition = useRef(0);
+  const pendingAcquisition = useRef(false);
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; acquisition.current += 1; pendingAcquisition.current = false; }; }, []);
   const start = useCallback(async (): Promise<void> => {
     // Re-entrancy guard (M-1, audit 2026-09-29): a second press while a
     // recorder or stream is already live would build a SECOND recorder
     // over a second mic hold and orphan the first — bail instead.
-    if (recorderRef.current !== null || streamRef.current !== null) return;
+    if (!alive.current || pendingAcquisition.current || recorderRef.current !== null || streamRef.current !== null) return;
     setError(null);
     const mime = pickRecorderMime();
     if (typeof MediaRecorder === "undefined" || !navigator.mediaDevices?.getUserMedia || mime === null) {
@@ -188,13 +192,17 @@ export function useRecorder(i18n: {
       setError(i18n.unsupported);
       return;
     }
+    const operation = ++acquisition.current;
+    pendingAcquisition.current = true;
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch {
-      setError(i18n.permissionDenied);
+      if (operation === acquisition.current) { pendingAcquisition.current = false; if (alive.current) setError(i18n.permissionDenied); }
       return;
     }
+    if (!alive.current || operation !== acquisition.current) { for (const track of stream.getTracks()) track.stop(); return; }
+    pendingAcquisition.current = false;
     streamRef.current = stream;
     chunksRef.current = [];
     finishingRef.current = false;
@@ -232,7 +240,7 @@ export function useRecorder(i18n: {
       });
       setState("stopped");
     };
-    recorder.start(1000);
+    try { recorder.start(1000); } catch { recorder.onstop = null; teardown(); setError(i18n.failed); return; }
     setState("recording");
     setElapsed(0);
     timerRef.current = window.setInterval(() => {
@@ -266,7 +274,7 @@ export function useRecorder(i18n: {
     } catch {
       // The meter is cosmetic; recording continues without it.
     }
-  }, [finalize, i18n]);
+  }, [finalize, i18n, teardown]);
 
   const stop = useCallback((): void => {
     if (state !== "recording") return;
@@ -274,6 +282,8 @@ export function useRecorder(i18n: {
   }, [finalize, state]);
 
   const reset = useCallback((): void => {
+    acquisition.current += 1;
+    pendingAcquisition.current = false;
     // Discard the live recorder BEFORE the track teardown: detach the
     // event handlers first so neither recorder.stop() nor the track stop's
     // async stop event can resurrect the take this reset just discarded.

@@ -1,0 +1,18 @@
+179 +                 )
+180 +             )
+181 +         )
+182 |         resealed_rev = os.urandom(len(original))
+    |
+
+unformatted: File would be reformatted
+   --> tests/test_recovery_v2_2026_10_01.py:144:71
+    |
+143 |
+    -     async def test_v2_kit_rejects_a_v1_hint_with_the_negotiation_code(
+    -         self, client, recovery_key
+    -     ):
+144 +     async def test_v2_kit_rejects_a_v1_hint_with_the_negotiation_code(self, client, recovery_key):
+145 |         emu = ClientEmulator("rec2-v1hint", "correct horse battery staple")
+    |
+
+10 files would be reformatted, 179 files already formatted

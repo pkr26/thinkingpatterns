@@ -9,10 +9,15 @@ H3 erasure completeness — live DB after account deletion.
 from __future__ import annotations
 
 import base64
-from datetime import date, timedelta
+import hashlib
+import json
+import os
+import uuid
+from datetime import date, datetime, timedelta, timezone
 
 from common import (
     auth_headers,
+    derive_keys,
     direct_insert_entry,
     guard,
     make_app,
@@ -23,6 +28,7 @@ from common import (
     section,
     verdict,
 )
+from export_evidence import inspect_export
 from sqlalchemy import select
 
 
@@ -36,22 +42,24 @@ async def h1_metadata_inference() -> None:
         today = date.today()
         for i in range(120, 0, -1):
             d = today - timedelta(days=i)
-            august_gap = (d.month == 8 and 4 <= d.day <= 18)
+            august_gap = d.month == 8 and 4 <= d.day <= 18
             if august_gap:
                 continue
             if d.weekday() != 6:  # Sundays only
                 continue
             length = 4000 if i % 3 == 0 else 400
-            await direct_insert_entry(app, u["user_id"], u["data_key"],
-                                      "x" * length, d)
+            await direct_insert_entry(app, u["user_id"], u["data_key"], "x" * length, d)
 
         # Operator view: no decryption, just the DB
         from app.models import Entry
 
         rows = []
         async with app.state.sessionmaker() as s:
-            result = await s.execute(select(Entry.entry_date, Entry.blob)
-                                     .where(Entry.user_id == u["user_id"]))
+            result = await s.execute(
+                select(Entry.entry_date, Entry.blob).where(
+                    Entry.user_id == u["user_id"]
+                )
+            )
             rows = result.all()
 
     dates = sorted(d for d, _ in rows)
@@ -59,8 +67,10 @@ async def h1_metadata_inference() -> None:
     weekdays = sorted({d.strftime("%A") for d in dates})
     gaps = [(dates[i + 1] - dates[i]).days for i in range(len(dates) - 1)]
     max_gap = max(gaps, default=0)
-    gap_start = next((dates[i + 1] - timedelta(days=g) for i, g in enumerate(gaps)
-                      if g == max_gap), None)
+    gap_start = next(
+        (dates[i + 1] - timedelta(days=g) for i, g in enumerate(gaps) if g == max_gap),
+        None,
+    )
     long_share = sum(1 for x in sizes if x > 2000) / max(1, len(sizes))
     inference = (
         f"subject journals on {weekdays} exclusively "
@@ -70,37 +80,159 @@ async def h1_metadata_inference() -> None:
         f"religious observance or work schedules, episode timing, and possibly "
         f"severity from SIZE alone, with zero decryption"
     )
-    verdict("H1.metadata-inference", "FINDING",
-            f"operator-view inference from entry_date+length only: {inference}")
+    verdict(
+        "H1.metadata-inference",
+        "FINDING",
+        f"operator-view inference from entry_date+length only: {inference}",
+    )
 
 
 async def h2_export() -> None:
     section("H2: export bundle contents")
     app = await make_app(make_settings())
     async with make_client(app) as client:
-        u = await register_user(client, "h2_user", "pw-h2", iterations=1000)
-        await direct_insert_entry(app, u["user_id"], u["data_key"], "text",
-                                  date.today(), "e-h2-1")
-        r = await client.get("/api/v1/account/export", headers=auth_headers(u["token"]))
-        body = r.text
-        has_username = u["username"] in body
-        has_salt = base64.b64encode(u["salt"]).decode() in body
-        has_cleartext = "text" in body.replace("client_entry_id", "").replace(
-            "entry_date", "") and '"text"' in body
-        # Both computed conditions gate the verdict (2026-09-19 audit,
-        # M-34): an export carrying entry PLAINTEXT is a FINDING even when
-        # the username fix holds — the old gate ignored has_cleartext
-        # entirely, so it could never fire.
-        clean = not has_username and not has_cleartext
-        verdict("H2.export-cleartext-fields", "BLOCKED" if clean else "FINDING",
-                f"export bundle: username-in-cleartext={has_username} (dropped in the "
-                f"2026-09-16 fix), entry-plaintext={'YES' if has_cleartext else 'NO'}, "
-                f"kdf-salt-present={has_salt} (required for any future "
-                f"re-import — a random 16-byte value, not an identifier)")
+        from app.security import crypto, envelope, kdf
+
+        issues = []
+        recovered = []
+        for scheme in ("v1", "v2"):
+            password = f"h2-password-secret-{uuid.uuid4().hex}"
+            journal = f"h2-journal-secret-{uuid.uuid4().hex}"
+            username = f"H2_{scheme}_Binding"
+            # Account names are case-sensitive; canonical means the exact
+            # registered immutable name, never a client-side case fold.
+            canonical = username
+            wrapped = None
+            params = None
+            if scheme == "v1":
+                u = await register_user(client, username, password)
+            else:
+                salt = os.urandom(16)
+                auth_key, _ = derive_keys(password, salt)
+                data_key = os.urandom(32)
+                params = kdf.validate_kdf_params(kdf.KDF_PARAMS_DEFAULT)
+                master = hashlib.pbkdf2_hmac(
+                    "sha256", password.encode(), salt, int(params["iterations"])
+                )
+                wrapped = base64.b64encode(
+                    envelope.wrap_data_key(
+                        data_key,
+                        kek=envelope.envelope_kek(master, salt),
+                        username=canonical,
+                        kdf_params=params,
+                        nonce=os.urandom(12),
+                    )
+                ).decode()
+                registration = await client.post(
+                    "/api/v1/auth/register",
+                    json={
+                        "username": username,
+                        "salt": base64.b64encode(salt).decode(),
+                        "verifier": base64.b64encode(auth_key).decode(),
+                        "wrapped_data_key": wrapped,
+                        "kdf_params": params,
+                    },
+                )
+                registration.raise_for_status()
+                u = {
+                    "username": canonical,
+                    "salt": salt,
+                    "auth_key": auth_key,
+                    "data_key": data_key,
+                    **registration.json(),
+                }
+            entry_id = f"e-h2-{scheme}"
+            await direct_insert_entry(
+                app,
+                u["user_id"],
+                u["data_key"],
+                journal,
+                datetime.now(timezone.utc).date(),
+                entry_id,
+            )
+            response = await client.get(
+                "/api/v1/account/export", headers=auth_headers(u["token"])
+            )
+            response.raise_for_status()
+            bundle = response.json()
+            expected = {
+                "version": 2,
+                "username": canonical,
+                "user_id": u["user_id"],
+                "salt": base64.b64encode(u["salt"]).decode(),
+                "key_scheme": scheme,
+                "wrapped_data_key": wrapped,
+                "kdf_params": params,
+            }
+            case_issues = inspect_export(
+                bundle,
+                expected,
+                {
+                    "journal": journal,
+                    "password": password,
+                    "data key": bytes(u["data_key"]),
+                    "authentication verifier": bytes(u["auth_key"]),
+                },
+            )
+            if not case_issues:
+                try:
+                    salt = base64.b64decode(bundle["salt"], validate=True)
+                    if len(salt) != 16:
+                        raise ValueError("invalid client salt")
+                    if scheme == "v1":
+                        _, recovery_key = derive_keys(password, salt)
+                    else:
+                        recovery_params = kdf.validate_kdf_params(bundle["kdf_params"])
+                        master = hashlib.pbkdf2_hmac(
+                            "sha256",
+                            password.encode(),
+                            salt,
+                            int(recovery_params["iterations"]),
+                        )
+                        recovery_key = envelope.unwrap_data_key(
+                            base64.b64decode(bundle["wrapped_data_key"], validate=True),
+                            kek=envelope.envelope_kek(master, salt),
+                            username=bundle["username"],
+                            kdf_params=recovery_params,
+                        )
+                    row = next(
+                        row
+                        for row in bundle["entries"]
+                        if row["client_entry_id"] == entry_id
+                    )
+                    plaintext = crypto.decrypt(
+                        recovery_key,
+                        base64.b64decode(row["blob"], validate=True),
+                        crypto.entry_aad_v1(bundle["user_id"], entry_id),
+                    )
+                    if json.loads(plaintext)["text"] != journal:
+                        raise ValueError(
+                            "exported ciphertext lost the expected journal"
+                        )
+                    recovered.append(scheme)
+                except (
+                    ValueError,
+                    KeyError,
+                    StopIteration,
+                    crypto.TamperError,
+                ) as error:
+                    case_issues.append(
+                        f"offline recovery failed: {type(error).__name__}"
+                    )
+            issues.extend(f"{scheme}: {issue}" for issue in case_issues)
+        verdict(
+            "H2.export-cleartext-fields",
+            "BLOCKED" if not issues else "FINDING",
+            "canonical username/UUID, version2 and salt are intentional public offline-recovery metadata; "
+            f"password-only export recovery authenticated schemes={recovered}; plaintext journal/password/data-key/verifier leakage or broken recovery={issues or 'NONE'}",
+        )
         # Cross-account enumeration: export is token-scoped
         r2 = await client.get("/api/v1/account/export")
-        verdict("H2.export-auth-scoped", "BLOCKED" if r2.status_code == 401 else "FINDING",
-                f"unauthenticated export: {r2.status_code}")
+        verdict(
+            "H2.export-auth-scoped",
+            "BLOCKED" if r2.status_code == 401 else "FINDING",
+            f"unauthenticated export: {r2.status_code}",
+        )
 
 
 async def h3_erasure() -> None:
@@ -108,25 +240,45 @@ async def h3_erasure() -> None:
     app = await make_app(make_settings())
     async with make_client(app) as client:
         u = await register_user(client, "h3_gone", "pw-h3", iterations=1000)
-        await direct_insert_entry(app, u["user_id"], u["data_key"], "text",
-                                  date.today(), "e-h3-1")
-        r = await client.post("/api/v1/processing/sessions", headers=auth_headers(u["token"]),
-                              json={"data_key": base64.b64encode(
-                                  bytes(u["data_key"])).decode()})
-        r = await client.delete("/api/v1/account", headers={
-            **auth_headers(u["token"]),
-            "X-Account-Verifier": base64.b64encode(u["auth_key"]).decode()})
+        await direct_insert_entry(
+            app, u["user_id"], u["data_key"], "text", date.today(), "e-h3-1"
+        )
+        r = await client.post(
+            "/api/v1/processing/sessions",
+            headers=auth_headers(u["token"]),
+            json={"data_key": base64.b64encode(bytes(u["data_key"])).decode()},
+        )
+        r = await client.delete(
+            "/api/v1/account",
+            headers={
+                **auth_headers(u["token"]),
+                "X-Account-Verifier": base64.b64encode(u["auth_key"]).decode(),
+            },
+        )
         assert r.status_code == 204, r.text
 
         from app.models import Entry, Insight, User
 
         async with app.state.sessionmaker() as s:
-            users = (await s.execute(select(User).where(
-                User.username == "h3_gone"))).scalars().all()
-            entries = (await s.execute(select(Entry).where(
-                Entry.user_id == u["user_id"]))).scalars().all()
-            insights = (await s.execute(select(Insight).where(
-                Insight.user_id == u["user_id"]))).scalars().all()
+            users = (
+                (await s.execute(select(User).where(User.username == "h3_gone")))
+                .scalars()
+                .all()
+            )
+            entries = (
+                (await s.execute(select(Entry).where(Entry.user_id == u["user_id"])))
+                .scalars()
+                .all()
+            )
+            insights = (
+                (
+                    await s.execute(
+                        select(Insight).where(Insight.user_id == u["user_id"])
+                    )
+                )
+                .scalars()
+                .all()
+            )
         # Hard attribute access on purpose (2026-09-28 audit): a getattr
         # default of {} would silently report "0 keys held" forever after a
         # keystore rename — the crash into an ERROR verdict is the honest
@@ -137,12 +289,14 @@ async def h3_erasure() -> None:
         # a FINDING even when every DB row is gone — the old gate printed
         # the count but never let it affect the verdict.
         rows_remain = bool(users or entries or insights)
-        verdict("H3.erasure-live-db",
-                "BLOCKED" if not (rows_remain or keys_held) else "FINDING",
-                f"after DELETE /account: users={len(users)}, entries={len(entries)}, "
-                f"insights={len(insights)} rows remain; in-memory keystore holds "
-                f"{keys_held} keys — live-data erasure is complete and immediate "
-                f"(backups are the residual: see G1)")
+        verdict(
+            "H3.erasure-live-db",
+            "BLOCKED" if not (rows_remain or keys_held) else "FINDING",
+            f"after DELETE /account: users={len(users)}, entries={len(entries)}, "
+            f"insights={len(insights)} rows remain; in-memory keystore holds "
+            f"{keys_held} keys — live-data erasure is complete and immediate "
+            f"(backups are the residual: see G1)",
+        )
 
 
 async def main() -> None:

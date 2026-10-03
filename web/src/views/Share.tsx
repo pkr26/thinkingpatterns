@@ -200,7 +200,7 @@ export function ShareView(): React.JSX.Element {
     <>
       <Card title={t("share.webTitle")}>
         <Note tone="muted">{t("share.webZeroKnowledge")}</Note>
-        <Field label={t("share.webPairingCode")} value={code} onChange={setCode} placeholder={t("share.webPairingPlaceholder")} />
+        <Field label={t("share.webPairingCode")} value={code} onChange={(value) => { setCode(value); setLookup(null); setFingerprintVerified(false); setDisclosureAccepted(false); }} placeholder={t("share.webPairingPlaceholder")} />
         <Button label={busy ? t("settings.working") : t("share.webLookUp")} onPress={() => void doLookup()} disabled={busy} small variant="ghost" />
         {lookup && (
           <>

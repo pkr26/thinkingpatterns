@@ -8,6 +8,8 @@
  * Verdicts are written to ../redteam/results/f_mobile.json for the report.
  */
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi, beforeAll, afterAll } from "vitest";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import nodeCrypto from "node:crypto";
@@ -19,6 +21,8 @@ import { secureStore } from "../src/secureStore";
 import { storeUnlockProof, verifyUnlockProof } from "../src/unlockProof";
 import { detailToMessage, setBaseUrl, api } from "../src/api/client";
 import { stashDraft, peekDraft } from "../src/store";
+import { journalDraftScope, newJournalDraft, saveJournalDraft, loadJournalDraft } from "../src/journalDraft";
+import { vault } from "../src/vault";
 
 const verdicts: Array<{ id: string; status: string; summary: string }> = [];
 function verdict(id: string, status: string, summary: string): void {
@@ -79,29 +83,30 @@ describe("E1-TS: crisis corpus vs the client engine", () => {
         ? `benign texts firing the crisis dialog: ${benignHit.map((r) => r.sample)}`
         : "benign controls correctly silent",
     );
-    // Cross-engine parity: any sample the Python engine catches but TS misses
-    // (or vice versa) would split the cross-platform contract.
-    const pyRows = rows; // dialog/suppress booleans were computed by Python
-    const parityBreaks = rows.filter(
-      (r) => detectCrisisLanguage(r.sample) !== matchesPyDialog(r),
-    );
+    // Read-only fixture observations can be stale or null when the corpus
+    // expands. Run the current Python engine over the SAME samples instead
+    // of mistaking an unpopulated observation for a false result.
+    const python = spawnSync(fileURLToPath(new URL("../../.venv/bin/python", import.meta.url)), ["-c", "import json,sys; from app.services.crisis import matches_dialog,matches_suppress; print(json.dumps([{'dialog':matches_dialog(s),'suppress':matches_suppress(s)} for s in json.load(sys.stdin)]))"], {
+      cwd: fileURLToPath(new URL("../../backend/", import.meta.url)), input: JSON.stringify(rows.map(r => r.sample)), encoding: "utf8", timeout: 30_000,
+    });
+    expect(python.status, python.stderr).toBe(0);
+    const observed = JSON.parse(python.stdout) as Array<{ dialog: boolean; suppress: boolean }>;
+    expect(observed).toHaveLength(rows.length);
+    const parityBreaks = rows.filter((r, index) => {
+      const py = observed[index]!;
+      expect(typeof py.dialog).toBe("boolean"); expect(typeof py.suppress).toBe("boolean");
+      return detectCrisisLanguage(r.sample) !== py.dialog || matchesCrisisSuppress(r.sample) !== py.suppress;
+    });
     verdict(
       "E1.ts-python-parity",
       parityBreaks.length ? "FINDING" : "BLOCKED",
       parityBreaks.length
         ? `${parityBreaks.length} samples behave differently between engines`
-        : "client and server engines agree on every corpus sample (shared regex contract holds)",
+        : `current client and server dialog/suppress engines agree on all ${rows.length} tested corpus samples; untested language/phrasing remains outside this finite check`,
     );
-    expect(true).toBe(true);
+    expect(parityBreaks.map(r => r.sample)).toEqual([]);
   });
 });
-
-// The Python engine's dialog-tier result, embedded in the corpus file? No —
-// recompute parity via the suppress file instead: the JSON we wrote stores
-// python dialog/suppress booleans. Extend the reader above.
-function matchesPyDialog(row: { dialog?: boolean }): boolean {
-  return row.dialog === true;
-}
 
 describe("A2: offline unlock-proof oracle", () => {
   it("is an offline password oracle with state disclosure", async () => {
@@ -125,12 +130,17 @@ describe("A2: offline unlock-proof oracle", () => {
     verdict(
       "A2.offline-oracle",
       found && absent === "absent" ? "FINDING" : "BLOCKED",
-      `offline dictionary attack on a stolen device recovered the password in ` +
+      `a deliberately selected weak fixture password was recovered through the ` +
+        `local password oracle in ` +
         `${candidates.length} guesses (${perGuessMs.toFixed(0)} ms/guess at ${KDF_ITERATIONS} ` +
-        `iters on ONE cpu core; no server round-trip, no throttle beyond PBKDF2 + a 500ms ` +
-        `UI delay that an attacker's script does not honor); verifyUnlockProof('absent') ` +
-        `also tells the attacker whether the oracle is enabled for an account`,
+        `iters on ONE cpu core). This assumes code executing with access to the application's ` +
+        `local ciphertext/proof; it is not a random-password or hardware-keystore bypass. ` +
+        `UI backoff cannot throttle an external offline script. Password-protected envelopes ` +
+        `and authenticated v1 ciphertext inherently allow candidate verification if the ` +
+        `required stored metadata is disclosed; device sealing adds a separate access boundary. ` +
+        `Strong passwords and the pinned KDF remain necessary. 'absent' also discloses local proof presence.`,
     );
+    expect(found).toBe(true); expect(absent).toBe("absent");
   }, 300_000);
 });
 
@@ -209,15 +219,25 @@ describe("A6-TS: AAD canonicalization parity with the Python engine", () => {
 });
 
 describe("F1: at-rest inventory + plaintext draft after lock", () => {
-  it("keeps a readable plaintext draft after vault lock", () => {
-    stashDraft("user-f1", "my most private thought today");
+  it("keeps RAM editor plaintext across a real lock while durable draft storage is encrypted", async () => {
+    const user = "user-f1", text = "my most private thought today", key = Buffer.alloc(32, 12);
+    const recoveryKey = Buffer.from(key), scope = await journalDraftScope(user);
+    await saveJournalDraft(key, scope, { ...newJournalDraft(), revision: 1, text });
+    vault.unlock({ masterKey: Buffer.alloc(32, 10), authKey: Buffer.alloc(32, 11), dataKey: key });
+    stashDraft(user, text); vault.lock();
+    expect(key.equals(Buffer.alloc(32))).toBe(true);
+    expect(await AsyncStorage.getItem(scope.slot)).not.toContain(text);
+    expect((await loadJournalDraft(recoveryKey, scope))?.draft.text).toBe(text);
+    recoveryKey.fill(0);
     const afterLock = peekDraft("user-f1");
     verdict(
       "F1.draft-survives-lock",
       afterLock === "my most private thought today" ? "INFO" : "BLOCKED",
-      `the stashed journal draft is plaintext in the JS heap across vault locks (by ` +
-        `design: a lock must not destroy an unsent draft; wiped on sign-out, iOS-only ` +
-        `app-switcher shield, no Android FLAG_SECURE since no native build exists)`,
+      `The in-process editor/navigation fallback remains plaintext in the JS heap across ` +
+        `vault locks and is wiped on sign-out. Active typed drafts now have encrypted ` +
+        `account/server-bound persistent backups; tested storage contains no draft plaintext. Native projects ` +
+        `now include the iOS switcher/capture shield and Android FLAG_SECURE. Neither ` +
+        `protects a compromised application process from inspecting its JS heap.`,
     );
   });
 });
@@ -254,7 +274,7 @@ describe("F2/F4: hostile-server text + consented HTTP key shipment", () => {
     );
   });
 
-  it("ships the data key over consented plain HTTP", async () => {
+  it("refuses remote plain HTTP even with obsolete consent and a tampered legacy URL slot", async () => {
     const calls: Array<{ url: string; body: unknown }> = [];
     const mock = vi.fn(async (url: string, init: RequestInit) => {
       calls.push({ url: String(url), body: init.body });
@@ -271,21 +291,25 @@ describe("F2/F4: hostile-server text + consented HTTP key shipment", () => {
     });
     vi.stubGlobal("fetch", mock);
     try {
-      await setBaseUrl("http://attacker.example", { allowInsecure: true });
-      await api.openProcessingSession(Buffer.from("k".repeat(32)).toString("base64"));
+      expect(await setBaseUrl("http://attacker.example", { allowInsecure: true })).not.toBeNull();
+      expect(calls).toEqual([]);
+      // Bypass the chooser as an old install/tampered local slot would.
+      await AsyncStorage.setItem("@mindpattern/base_url", "http://attacker.example");
+      await expect(api.openProcessingSession(Buffer.from("k".repeat(32)).toString("base64"))).rejects.toThrow();
     } finally {
       vi.unstubAllGlobals();
     }
-    const shipped = calls.find((c) => c.url.includes("processing/sessions"));
+    const shipped = calls.find((c) => c.url.startsWith("http://attacker.example"));
     const refused = !shipped;
     verdict(
       "F2.http-key-shipment",
       refused ? "BLOCKED" : "FINDING",
       refused
-        ? `openProcessingSession REFUSES a consented plain-HTTP server before any fetch — ` +
-          `the data key now travels over https or loopback only (2026-09-16 fix; ordinary ` +
-          `requests may still use consented http by the BYO-server design)`
+        ? `remote plain HTTP is refused by both URL policy and the sensitive-request ` +
+          `guard, including obsolete consent and a tampered persisted URL; no fetch occurs. ` +
+          `Loopback development traffic is a separate permitted boundary.`
         : `the data key was still POSTed over cleartext http`,
     );
+    expect(calls).toEqual([]);
   });
 });

@@ -1,0 +1,4 @@
+PASS native typed text and four optional details reach encrypted persistence
+PASS real process restart/unlock restores text, mood, energy, sleep, tag and 11/30 progress
+PASS native acknowledged save decrypts in History
+PASS second restart has no acknowledged draft resurrection and authoritative 11/30 progress

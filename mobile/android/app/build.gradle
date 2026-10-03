@@ -161,6 +161,9 @@ android {
 // public debug key. Configuration-time throws would break every other
 // task, so the gate fires only when a release output is actually demanded.
 gradle.taskGraph.whenReady { graph ->
+    if (graph.allTasks.any { it.name.toLowerCase().contains("release") } && !System.getenv("MINDPATTERN_API_ORIGIN")) {
+        throw new GradleException("Release builds require MINDPATTERN_API_ORIGIN for the deployed HTTPS server")
+    }
     if (graph.getAllTasks().any { it.name.contains("Release") && it.project == project }) {
         if (!keystorePropertiesFile.exists()) {
             throw new GradleException(

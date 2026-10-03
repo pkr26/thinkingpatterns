@@ -1,0 +1,3 @@
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.prefix, expected /Users/pradeepreddy/Desktop/mental_health_application/.venv, got /Users/pradeepreddy/Desktop/mental_health_application/backend/../.venv
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.exec_prefix, expected /Users/pradeepreddy/Desktop/mental_health_application/.venv, got /Users/pradeepreddy/Desktop/mental_health_application/backend/../.venv
+All checks passed!

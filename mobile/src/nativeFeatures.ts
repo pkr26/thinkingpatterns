@@ -336,8 +336,8 @@ async function rescheduleMeasureReminderSibling(userId: string): Promise<void> {
   const prefs = await getMeasureReminderPrefs(userId);
   if (!prefs.enabled) return;
   const last = await lastMeasureCompletedOn(userId);
-  if (!measureReminderDue(last, prefs.intervalWeeks, new Date())) return;
-  await scheduleMeasureReminder(nextMeasureReminderFireTime(new Date()));
+  if (last === null) return;
+  await scheduleMeasureReminder(nextMeasureReminderFireTime(new Date(), last, prefs.intervalWeeks));
 }
 
 /**
@@ -442,15 +442,16 @@ const FALLBACK_EVENT_TYPE_PRESS = 1;
  * opens the app on the journal (the daily reminder's behavior all along),
  * which is a degraded nudge, never a broken one.
  */
-export async function startNotificationPressRouting(): Promise<boolean> {
+export async function startNotificationPressRouting(): Promise<(() => void) | null> {
   const { queueNotificationRoute } = await import("./notificationRoute");
   const mod = await probeAsync("@notifee/react-native");
-  if (mod === null || typeof mod !== "object") return false;
+  if (mod === null || typeof mod !== "object") return null;
   const candidate = (mod as { default?: unknown }).default ?? mod;
-  if (typeof candidate !== "object" || candidate === null) return false;
+  if (typeof candidate !== "object" || candidate === null) return null;
   const api = candidate as Partial<NotifeeEventModule>;
-  if (typeof api.onForegroundEvent !== "function") return false;
-  if (typeof api.getInitialNotification !== "function") return false;
+  if (typeof api.onForegroundEvent !== "function") return null;
+  if (typeof api.getInitialNotification !== "function") return null;
+  let disposed = false;
   try {
     const enums = mod as { EventType?: { PRESS?: number } };
     const pressType = enums.EventType?.PRESS ?? FALLBACK_EVENT_TYPE_PRESS;
@@ -458,13 +459,13 @@ export async function startNotificationPressRouting(): Promise<boolean> {
     // it resolves after the navigator has mounted, and the QUEUE is what
     // hands it across, not this promise).
     void api.getInitialNotification().then((initial) => {
-      queueNotificationRoute(initial?.notification?.id);
+      if (!disposed) queueNotificationRoute(initial?.notification?.id);
     }).catch(() => {});
-    api.onForegroundEvent((event) => {
-      if (event.type === pressType) queueNotificationRoute(event.detail?.notification?.id);
+    const unsubscribe = api.onForegroundEvent((event) => {
+      if (!disposed && event.type === pressType) queueNotificationRoute(event.detail?.notification?.id);
     });
-    return true;
+    return () => { disposed = true; unsubscribe(); };
   } catch {
-    return false;
+    return null;
   }
 }

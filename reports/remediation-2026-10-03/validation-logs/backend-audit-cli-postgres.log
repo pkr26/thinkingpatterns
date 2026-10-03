@@ -1,0 +1,2 @@
+PASS real PostgreSQL standalone CLI snapshot + exclusive table lock + guarded attested seal + keyed verification; private evidence permissions verified
+Owned scratch PostgreSQL database removed; full-suite database untouched

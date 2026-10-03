@@ -19,6 +19,9 @@ mobile/.verify-build/
 mobile/.decrypt-build/
 coverage/
 *.log
+# Reviewed synthetic validation evidence accompanies the October 3 reports.
+!reports/audit-2026-10-03/validation-logs/*.log
+!reports/remediation-2026-10-03/validation-logs/*.log
 
 # Local state
 *.db

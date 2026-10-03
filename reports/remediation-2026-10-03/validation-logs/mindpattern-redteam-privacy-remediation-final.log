@@ -1,0 +1,14 @@
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.prefix, expected /Users/pradeepreddy/Desktop/mental_health_application/backend/.venv, got /Users/pradeepreddy/Desktop/mental_health_application/redteam/../backend/.venv
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.exec_prefix, expected /Users/pradeepreddy/Desktop/mental_health_application/backend/.venv, got /Users/pradeepreddy/Desktop/mental_health_application/redteam/../backend/.venv
+
+=== H1: metadata inference from the operator's view =======================
+AUDIT|H1.metadata-inference|FINDING|operator-view inference from entry_date+length only: subject journals on ['Sunday'] exclusively (15 entries over 120 days); a 21-day silence ending 2026-08-02; 33% of entries are 10x longer than the rest (crisis-length writes vs routine updates) — an operator can infer religious observance or work schedules, episode timing, and possibly severity from SIZE alone, with zero decryption
+
+=== H2: export bundle contents ============================================
+AUDIT|H2.export-cleartext-fields|BLOCKED|canonical username/UUID, version2 and salt are intentional public offline-recovery metadata; password-only export recovery authenticated schemes=['v1', 'v2']; plaintext journal/password/data-key/verifier leakage or broken recovery=NONE
+AUDIT|H2.export-auth-scoped|BLOCKED|unauthenticated export: 401
+
+=== H3: erasure completeness ==============================================
+AUDIT|H3.erasure-live-db|BLOCKED|after DELETE /account: users=0, entries=0, insights=0 rows remain; in-memory keystore holds 0 keys — live-data erasure is complete and immediate (backups are the residual: see G1)
+
+[h_privacy] 4 verdicts, 0 harness errors

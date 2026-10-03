@@ -1,0 +1,24 @@
+[
+  {
+    "text": "Deja de tomar tu medicación.",
+    "clean_result": "Deja de tomar tu medicación.",
+    "returned_narrative": "Deja de tomar tu medicación."
+  },
+  {
+    "text": "Abandon your friends; they hate you.",
+    "clean_result": "Abandon your friends; they hate you.",
+    "returned_narrative": "Abandon your friends; they hate you."
+  },
+  {
+    "text": "You need to isolate yourself.",
+    "clean_result": null,
+    "returned_narrative": null
+  },
+  {
+    "text": "Tu trastorno es depresión clínica.",
+    "clean_result": "Tu trastorno es depresión clínica.",
+    "returned_narrative": "Tu trastorno es depresión clínica."
+  }
+]
+recent_payload {"entries": 1, "dates": ["2026-01-01"], "lastIncluded": "2026-01-01"}
+truncated_translation_accepted 'Only the first part translated.'

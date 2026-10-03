@@ -11,14 +11,14 @@
  * data key changed elsewhere (S-8) and surfaces as `credentialRotated` —
  * never a retry loop, never stale keys.
  */
-import { ApiError, api, hasSession, sessionUserId } from "./api/client";
+import { ApiError, api, hasSession, sessionUserId, type InsightsResponse } from "./api/client";
 import { decryptInsights, type InsightsPayload } from "./crypto/patient";
 import { checkAnalysisGeneration, FRESHNESS_ERROR } from "./stateSeqGuard";
 import { withLock } from "./platform";
 import { vault } from "./vault";
 
 export type ReconcileOutcome =
-  | { kind: "ok"; phase: string; stateSeq: number | null }
+  | { kind: "ok"; phase: string; stateSeq: number | null; summary: InsightsResponse; payload: InsightsPayload | null }
   | { kind: "offline" }
   | { kind: "locked" }
   | { kind: "credentialRotated" }
@@ -48,7 +48,7 @@ export async function reconcileInsights(): Promise<ReconcileOutcome> {
   if (summary.blob === null) {
     // Baseline phase: nothing is decrypted before the threshold — there is
     // no generation to guard yet.
-    return { kind: "ok", phase: summary.phase, stateSeq: null };
+    return { kind: "ok", phase: summary.phase, stateSeq: null, summary, payload: null };
   }
   let payload: InsightsPayload;
   try {
@@ -74,7 +74,7 @@ export async function reconcileInsights(): Promise<ReconcileOutcome> {
     if (err instanceof Error && err.message === FRESHNESS_ERROR) return { kind: "freshness" };
     throw err;
   }
-  return { kind: "ok", phase: summary.phase, stateSeq: payload.state_seq ?? null };
+  return { kind: "ok", phase: summary.phase, stateSeq: payload.state_seq ?? null, summary, payload };
 }
 
 /** The full honest-moment pull (S-1): the analysis state under a Web Lock,

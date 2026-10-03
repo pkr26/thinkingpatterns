@@ -7,18 +7,22 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
 import { ScrollView, ActivityIndicator } from "react-native";
 
-vi.mock("../../src/api/client", async () => {
+vi.mock("../../src/api/client", async (importOriginal) => {
+  const actualApi = await importOriginal<typeof import("../../src/api/client")>();
   const { makeApiMock, ApiError } = await import("../helpers/apiMock");
-  return { ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
+  return { ...actualApi, ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
 });
 
 const refreshActiveDays = vi.fn(async () => {});
 // L-59: the screen adopts the already-fetched count instead of re-fetching.
 const applyActiveDays = vi.fn();
+const progressRead = { owner: "user-1", generation: 0, request: 0 };
+const beginProgressRead = vi.fn(async () => progressRead);
+const finishProgressRead = vi.fn();
 const touchActivity = vi.fn();
 vi.mock("../../src/store", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/store")>();
-  return { ...actual, useSession: () => ({ refreshActiveDays, applyActiveDays, unlockDays: 30, touchActivity }) };
+  return { ...actual, useSession: () => ({ refreshActiveDays, applyActiveDays, beginProgressRead, finishProgressRead, unlockDays: 30, touchActivity }) };
 });
 
 const { api } = await import("../../src/api/client");
@@ -172,7 +176,7 @@ describe("InsightsScreen phases", () => {
     // the response this screen already holds, not a second fetch.
     expect(vi.mocked(api.insights)).toHaveBeenCalledTimes(1);
     expect(refreshActiveDays).not.toHaveBeenCalled();
-    expect(applyActiveDays).toHaveBeenCalledWith(12);
+    expect(applyActiveDays).toHaveBeenCalledWith(12, progressRead);
     // Layout container contract.
     const scroll = root.root.findByType(ScrollView);
     expect(scroll.props.contentContainerStyle).toEqual({ padding: 20, gap: 14 });
@@ -251,13 +255,13 @@ describe("InsightsScreen phases", () => {
     const text = textOf(root);
     expect(text).toContain("You've mentioned 'work' 7 times, most often on Sundays.");
     expect(text).toContain("most often on the same days.");
-    expect(text).toContain("read higher on days when 'money' comes up (mood shift of 0.4)");
-    expect(text).toContain("read lower on days when 'family' comes up (mood shift of 0.0)");
+    expect(text).toContain("read lower on days when 'money' comes up (mood shift of 0.4)");
+    expect(text).toContain("Details for this observation are unavailable.");
     expect(text).toContain('The phrase "can\'t sleep" keeps returning — 3 times so far.');
     expect(text).toContain("'unknown' appeared 2 times.");
-    // "strength N%" was renamed to plain "evidence density N%".
-    expect(text).toContain("7 mentions · evidence density 62%");
-    expect(text).toContain("2 mentions · evidence density 10%");
+    // "strength N%" was renamed to plain "observation strength N%".
+    expect(text).toContain("7 mentions · observation strength 62%");
+    expect(text).toContain("2 mentions · observation strength 10%");
 
     // Kind labels pair with THEIR pattern card (card order: kind label,
     // evidence-state chip, then the describe text).
@@ -268,7 +272,7 @@ describe("InsightsScreen phases", () => {
       return texts[index + 2];
     };
     expect(byKind("TIMING")).toContain("You've mentioned 'work'");
-    expect(byKind("MOOD LINK")).toContain("read higher on days when 'money'");
+    expect(byKind("MOOD LINK")).toContain("read lower on days when 'money'");
     expect(byKind("REPEATED PHRASE")).toContain('The phrase "can\'t sleep"');
     expect(byKind("PATTERN")).toContain("'unknown' appeared");
     // No baseline copy leaks into the insight phase.
@@ -294,7 +298,7 @@ describe("InsightsScreen phases", () => {
     await flush();
     const text = textOf(root);
     expect(text).toContain("most often on the same days.");
-    expect(text).toContain("read lower on days when 'sleep' comes up (mood shift of 0.0)");
+    expect(text).toContain("Details for this observation are unavailable.");
   });
 
   it("renders the v2 mood-trend kind and lifecycle badges", async () => {
@@ -335,9 +339,9 @@ describe("InsightsScreen phases", () => {
     expect(text).toContain("MOOD TREND");
     // Lifecycle metadata renders as evidence chips + the evidence-density meta line.
     expect(text).toContain("fading");
-    expect(text).toContain("9 mentions · evidence density 62%");
+    expect(text).toContain("9 mentions · observation strength 62%");
     expect(text).toContain("early evidence · new");
-    expect(text).toContain("3 mentions · evidence density 62%");
+    expect(text).toContain("3 mentions · observation strength 62%");
   });
 
   it("insight phase without a blob clears the pattern list", async () => {
@@ -417,7 +421,7 @@ describe("InsightsScreen phases", () => {
     expect(api.insights).toHaveBeenCalledTimes(2);
   });
 
-  it("falls back to the empty user id for AAD when none is stored", async () => {
+  it("refuses to adopt or decrypt an insights response when its account is absent", async () => {
     vi.mocked(api.getUserId).mockResolvedValue(null);
     // Blob is bound to "" as userId then — build it that way.
     const blobForEmptyUser = encrypt(
@@ -433,7 +437,9 @@ describe("InsightsScreen phases", () => {
     } as never);
     const root = await render(<InsightsScreen />);
     await flush();
-    expect(textOf(root)).toContain("You've mentioned 'work'");
+    expect(textOf(root)).not.toContain("You've mentioned 'work'");
+    expect(textOf(root)).toContain("Session damaged");
+    expect(applyActiveDays).not.toHaveBeenCalled();
   });
 
   it("renders every delivered pattern as a card", async () => {
@@ -554,7 +560,7 @@ describe("InsightsScreen evidence view", () => {
     const text = textOf(root);
     expect(text).toContain("Evidence window");
     expect(text).toContain("2026-07-12 → 2026-09-01");
-    expect(text).toContain("63 entries in your analysis window");
+    expect(text).toContain("63 journal entries");
     // Plain-language stat rows (evidence-panel rewrite).
     expect(text).toContain("78% of these mentions fell on Sundays — your baseline for Sundays is 19%");
     expect(text).toContain("your own writing schedule");
@@ -768,9 +774,9 @@ describe("InsightsScreen evidence view", () => {
     const text = textOf(root);
     expect(text).toContain("MOOD TREND");
     expect(text).toContain("Your entries have read higher than your usual baseline lately (a shift of 0.3).");
-    expect(text).toContain("Your entries have read lower than your usual baseline lately (a shift of 0.0).");
+    expect(text).toContain("Details for this observation are unavailable. Refresh your observations to see the evidence.");
     expect(text).toContain("The day after 'caffeine' comes up, your entries read higher than usual for you.");
-    expect(text).toContain("0 mentions · evidence density 0%");
+    expect(text).toContain("0 mentions · observation strength 0%");
 
     const { TouchableOpacity } = await import("react-native");
     const expand = async (i: number) => {
@@ -799,9 +805,9 @@ describe("InsightsScreen evidence view", () => {
     expect(textOf(root)).toContain("Evidence window");
     expect(textOf(root)).toContain("? → ?");
 
-    // The temporal card without a base_rate reports a 0% baseline.
+    // Missing baseline remains unknown rather than inventing a measured zero.
     await expand(8);
-    expect(textOf(root)).toContain("50% of these mentions fell on Sundays — your baseline for Sundays is 0%");
+    expect(textOf(root)).toContain("50% of these mentions fell on Sundays — your baseline for Sundays is unavailable");
 
     // The rain card: mood difference in the "higher" direction, and the
     // share/span rows without their optional counts.
@@ -875,7 +881,7 @@ describe("M9: server-controlled values are sanitized before render", () => {
     await flush();
     // Only the well-formed card survives; hostile numbers degrade sanely.
     expect(textOf(root)).toContain("legit theme");
-    expect(textOf(root)).toContain("evidence density 0%"); // non-numeric confidence -> 0, not NaN
+    expect(textOf(root)).toContain("observation strength 0%"); // non-numeric confidence -> 0, not NaN
     expect(textOf(root)).toContain("0 mentions"); // negative occurrences -> 0
     expect(textOf(root)).not.toContain("NaN");
     expect(textOf(root)).not.toContain("bad");
@@ -1063,20 +1069,20 @@ describe("narrative render cap (same discipline as the label)", () => {
       }),
     } as never);
 
-  it("a hostile over-long narrative renders only its first 500 characters", async () => {
+  it("legacy over-long provider narratives are suppressed", async () => {
     withNarrative(`${"n".repeat(600)}`);
     const root = await render(<InsightsScreen />);
     await flush();
     // Exactly the capped run is rendered — never a longer one.
-    expect(allText(root)).toContain("n".repeat(500));
+    expect(allText(root)).not.toContain("n".repeat(500));
     expect(allText(root).some((t) => t.includes("n".repeat(501)))).toBe(false);
   });
 
-  it("a narrative of exactly 500 characters renders whole", async () => {
+  it("legacy provider narratives are suppressed at every size", async () => {
     withNarrative("m".repeat(500));
     const root = await render(<InsightsScreen />);
     await flush();
-    expect(allText(root)).toContain("m".repeat(500));
+    expect(allText(root)).not.toContain("m".repeat(500));
   });
 });
 

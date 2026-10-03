@@ -42,6 +42,7 @@ import {
   type PatternPayload,
 } from "../crypto";
 import { Button, Card, Disclosure, ErrorBanner, Note as NoteText, theme } from "../ui";
+import { usePortalDrafts } from "../noteDrafts";
 import { printPage, randomBytes, visitAnchorStore } from "../platform";
 
 export interface PortalSession {
@@ -53,12 +54,15 @@ export interface PortalSession {
   /** The v2 notes key (identity-derived): every NEW note seals under it and
    *  survives password changes. */
   noteKeyV2: Uint8Array<ArrayBuffer>;
+  historicalNoteKeys?: Uint8Array<ArrayBuffer>[];
+  custodyVersion?: number;
   privateKey: CryptoKey;
   publicKeyB64: string;
 }
 
 interface OpenNote extends Note {
   text: string;
+  unreadable?: boolean;
 }
 
 interface EntryRow {
@@ -77,6 +81,13 @@ interface EntryRow {
 }
 
 const dayOf = (iso: string): string => iso.slice(0, 10);
+
+/** Version is authoritative: create timestamps can differ by microseconds.
+ * Only legacy rows without a version use their timestamps as evidence. */
+function noteWasEdited(note: Note): boolean {
+  if (note.version !== undefined) return Number.isSafeInteger(note.version) && note.version > 1;
+  return note.updated_at > note.created_at;
+}
 
 /** M-8 (audit 2026-09-29): map a playback failure to an honest, VISIBLE
  *  line — the old catch silently zeroized and released, leaving therapists
@@ -114,11 +125,13 @@ function recordingDaysLeft(expiresAt: string): number {
 function useVoicePlayback(unwrapKey: () => Promise<Uint8Array<ArrayBuffer> | null>) {
   const [playingId, setPlayingId] = useState<string | null>(null);
   const urlRef = useRef<string | null>(null);
+  const playbackGeneration = useRef(0);
   const [url, setUrl] = useState<string | null>(null);
   const [failedId, setFailedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const release = useCallback((): void => {
+    playbackGeneration.current += 1;
     if (urlRef.current !== null) {
       URL.revokeObjectURL(urlRef.current);
       urlRef.current = null;
@@ -145,9 +158,12 @@ function useVoicePlayback(unwrapKey: () => Promise<Uint8Array<ArrayBuffer> | nul
         release();
         return;
       }
+      release();
+      const operation = playbackGeneration.current;
       setFailedId(null);
       setError(null);
       const dataKey = await unwrapKey();
+      if (operation !== playbackGeneration.current) { dataKey?.fill(0); return; }
       if (!dataKey) {
         fail(entry.audio.attachment_id, "could not unlock this patient's data key — sign out and back in, then retry");
         return;
@@ -158,13 +174,16 @@ function useVoicePlayback(unwrapKey: () => Promise<Uint8Array<ArrayBuffer> | nul
         const fetched = await api.patientAudio(patientId, entry.audio.attachment_id);
         const plain = await decryptAudio(dataKey, patientId, entry.client_entry_id!, fetched.blob);
         dataKey.fill(0);
-        const objectUrl = URL.createObjectURL(new Blob([plain], { type: fetched.mime_type }));
+        if (operation !== playbackGeneration.current) { plain.fill(0); return; }
+        let objectUrl: string;
+        try { objectUrl = URL.createObjectURL(new Blob([plain], { type: fetched.mime_type })); }
+        finally { plain.fill(0); }
         urlRef.current = objectUrl;
         setUrl(objectUrl);
         setPlayingId(entry.audio.attachment_id);
       } catch (err) {
         dataKey.fill(0);
-        fail(entry.audio.attachment_id, describePlaybackFailure(err));
+        if (operation === playbackGeneration.current) fail(entry.audio.attachment_id, describePlaybackFailure(err));
       }
     },
     [fail, playingId, release, unwrapKey],
@@ -263,7 +282,7 @@ function describePattern(pattern: PatternPayload): string {
     case "recurring_phrase":
       return `The phrase '${pattern.label}' has returned ${pattern.occurrences} times.`;
     case "topic":
-      return `'${pattern.label}' has been taking up more space in the writing.`;
+      return pattern.detail.trend === "rising" ? `'${pattern.label}' has been taking up more space in the writing.` : `'${pattern.label}' is a steady presence in the writing.`;
     case "avoidance":
       return `The day after '${pattern.label}' comes up, the patient tends not to write (${String(pattern.detail.silences ?? "?")} of ${String(pattern.detail.observed ?? "?")} observable such days).`;
     case "cadence":
@@ -307,6 +326,7 @@ function MoodSparkline(props: { points: { date: string; sentiment: number }[] })
   const path = pts.map((p, i) => `${i === 0 ? "M" : "L"}${(i * step).toFixed(1)},${y(p.sentiment).toFixed(1)}`).join(" ");
   const avg = pts.reduce((sum, p) => sum + p.sentiment, 0) / pts.length;
   return (
+    <>
     <svg
       viewBox={`0 0 ${w} ${h}`}
       className="sparkline"
@@ -318,6 +338,11 @@ function MoodSparkline(props: { points: { date: string; sentiment: number }[] })
           theme's sage strong form) — text-grade on every dark surface. */}
       <path d={path} fill="none" stroke={theme.accentBright} strokeWidth={1.6} />
     </svg>
+    <details className="disclosure"><summary>Mood chart data</summary>
+      <table><thead><tr><th scope="col">Date</th><th scope="col">Recorded mood</th></tr></thead>
+      <tbody>{pts.map((row,index) => <tr key={`${row.date}:${index}`}><th scope="row">{row.date}</th><td>{row.sentiment.toFixed(2)}</td></tr>)}</tbody></table>
+    </details>
+    </>
   );
 }
 
@@ -361,10 +386,11 @@ function evidenceRows(pattern: PatternPayload): [string, string][] {
   if (typeof d.first_seen === "string") rows.push(["first seen", dayOf(d.first_seen)]);
   if (typeof d.last_seen === "string") rows.push(["last seen", dayOf(d.last_seen)]);
   rows.push(["mentions", String(pattern.occurrences)]);
-  if (typeof d.sample_days === "number") rows.push(["window entries", String(d.sample_days)]);
+  if (typeof d.sample_entries === "number") rows.push(["sample entries", String(d.sample_entries)]);
+  if (typeof d.sample_days === "number") rows.push([d.sample_entries === undefined ? "legacy sample size (unit unverified)" : "sample days", String(d.sample_days)]);
   if (d.p_value !== undefined) rows.push(["p (corrected)", String(d.p_value)]);
   if (d.cohens_d !== undefined) rows.push(["effect (Cohen's d)", String(d.cohens_d)]);
-  if (typeof d.strength === "number") rows.push(["evidence density", `${Math.round(d.strength * 100)}%`]);
+  if (typeof d.strength === "number") rows.push(["evidence density (heuristic; not diagnostic probability)", `${Math.round(d.strength * 100)}%`]);
   if (Array.isArray(d.evidence_dates)) rows.push(["evidence days", String(d.evidence_dates.length)]);
   return rows;
 }
@@ -432,36 +458,25 @@ function normalizeForMatch(text: string): string {
  *  lowercase, non-alnum runs collapse to one space, edges trimmed) and
  *  mark only the matched spans — every occurrence, not just the first. */
 export function rawMatchSpans(text: string, label: string): Array<readonly [number, number]> {
-  const needle = normalizeForMatch(label);
-  if (needle.length === 0) return [];
-  const hay = normalizeForMatch(text);
-  const spans: Array<readonly [number, number]> = [];
-  let from = 0;
-  for (;;) {
-    const at = hay.indexOf(needle, from);
-    if (at < 0) break;
-    const chars = Array.from(text);
-    let hayIdx = 0;
-    let lastSpace = true; // mirrors normalizeForMatch's collapse/trim
-    let start = -1;
-    let end = -1;
-    for (let i = 0; i < chars.length; i += 1) {
-      const ch = chars[i]!;
-      const folded = ch.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-      const alnum = folded.replace(/[^a-z0-9]/g, "");
-      if (alnum) {
-        if (hayIdx === at && start < 0) start = i;
-        hayIdx += 1;
-        lastSpace = false;
-        if (hayIdx === at + needle.length && end < 0) end = i + 1;
-      } else if (!lastSpace) {
-        hayIdx += 1; // one collapsed separator space
-        lastSpace = true;
-      }
-      if (end >= 0) break;
-    }
-    if (start >= 0 && end >= start) spans.push([start, end]);
-    from = at + needle.length;
+  const needle = normalizeForMatch(label); if (!needle) return [];
+  const normalized: string[] = []; const starts: number[] = []; const ends: number[] = [];
+  let offset = 0; let separatorStart: number | null = null; let separatorEnd = 0;
+  for (const ch of text) {
+    const next = offset + ch.length;
+    const folded = ch.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    const letters = folded.replace(/[^a-z0-9]/g, "");
+    if (folded === "") { if (ends.length) ends[ends.length - 1] = next; }
+    else if (letters) {
+      if (separatorStart !== null && normalized.length) { normalized.push(" "); starts.push(separatorStart); ends.push(separatorEnd); }
+      separatorStart = null;
+      for (const letter of letters) { normalized.push(letter); starts.push(offset); ends.push(next); }
+    } else if (normalized.length) { separatorStart ??= offset; separatorEnd = next; }
+    offset = next;
+  }
+  const hay = normalized.join(""); const spans: Array<readonly [number, number]> = [];
+  for (let from = 0; ; ) {
+    const at = hay.indexOf(needle,from); if (at < 0) break;
+    spans.push([starts[at]!,ends[at + needle.length - 1]!]); from = at + needle.length;
   }
   return spans;
 }
@@ -632,14 +647,10 @@ export function PatientView(props: {
   // general composer, one for the pattern-anchored composer. A single
   // shared buffer used to carry general-patient text into a pattern note
   // (and back), silently mis-anchoring it.
-  const [drafts, setDrafts] = useState<{ general: string; pattern: string }>({
-    general: "",
-    pattern: "",
-  });
-  const draft = selected ? drafts.pattern : drafts.general;
-  const setDraft = (value: string): void => {
-    setDrafts((prev) => (selected ? { ...prev, pattern: value } : { ...prev, general: value }));
-  };
+  const { state: draftState, setState: setDraftState, latest: latestDraft, persist: persistDraft, status: draftStatus, restored: draftReady, restore: restoreDraft } = usePortalDrafts(session.userId, patient.user_id, session.noteKeyV2, [session.noteKey, ...(session.historicalNoteKeys ?? [])]);
+  const scope = selected ? (selected.detail.pattern_pid ?? `${selected.kind}:${selected.label}`) : "general";
+  const draft = draftState.text[scope] ?? "";
+  const setDraft = (value: string): void => { setDraftState(prev => ({ ...prev, text: { ...prev.text, [scope]: value } })); };
   const [busy, setBusy] = useState(false);
   const [newCount, setNewCount] = useState(0);
   const [lastReviewed, setLastReviewed] = useState<string | null>(null);
@@ -664,7 +675,8 @@ export function PatientView(props: {
   const [historyFailed, setHistoryFailed] = useState<Record<string, boolean>>({});
   const [historyBusy, setHistoryBusy] = useState<string | null>(null);
   /** The note being edited (id + textarea buffer). */
-  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  const editing = draftState.editing;
+  const setEditing = (value: { id: string; text: string } | null): void => { setDraftState(prev => ({ ...prev, editing: value })); };
   /** Two-step delete (audit M-23, 2026-09-20): one stray click must never
    *  destroy a clinical note.  The first press only arms the confirm
    *  button for THAT note; the second press performs the DELETE. */
@@ -672,17 +684,14 @@ export function PatientView(props: {
   // Every async decrypt/load carries this generation.  Leaving the patient,
   // signing out, or selecting another pattern makes old plaintext results
   // ineligible to repopulate React state.
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; },[]);
   const loadGeneration = useRef(0);
   const drilldownGeneration = useRef(0);
   /** 2026-09-26 audit round (L): the per-context idempotency key for note
    *  creation — minted on a draft's first save attempt, reused across its
    *  byte-identical retries, cleared on success or either 409 code
    *  ("conflict" / "version_conflict" — see saveNote). */
-  const pendingNoteId = useRef<{ general: string | null; pattern: string | null }>({
-    general: null,
-    pattern: null,
-  });
-
   const load = useCallback(async () => {
     const operation = ++loadGeneration.current;
     setError("");
@@ -694,7 +703,6 @@ export function PatientView(props: {
     setSelected(null);
     setEntries(null);
     setNoteQuery("");
-    setEditing(null);
     setConfirmDeleteId(null);
     setMeasures(null);
     setMeasuresError(null);
@@ -831,9 +839,9 @@ export function PatientView(props: {
       const opened: OpenNote[] = [];
       for (const row of noteRows) {
         try {
-          opened.push({ ...row, text: await decryptNoteAny(session.noteKeyV2, session.noteKey, session.userId, patient.user_id, row.client_note_id, row.blob) });
+          opened.push({ ...row, text: await decryptNoteAny(session.noteKeyV2, session.noteKey, session.userId, patient.user_id, row.client_note_id, row.blob, session.historicalNoteKeys) });
         } catch {
-          opened.push({ ...row, text: "(note could not be decrypted with this account's key)" });
+          opened.push({ ...row, unreadable: true, text: "(note could not be decrypted with this account's key)" });
         }
       }
       if (operation === loadGeneration.current) setNotes(opened);
@@ -933,7 +941,7 @@ export function PatientView(props: {
         try {
           for (const rev of revisions) {
             texts.push(
-              await decryptNoteAny(session.noteKeyV2, session.noteKey, session.userId, patient.user_id, note.client_note_id, rev.blob),
+              await decryptNoteAny(session.noteKeyV2, session.noteKey, session.userId, patient.user_id, note.client_note_id, rev.blob, session.historicalNoteKeys),
             );
           }
         } catch (err) {
@@ -1133,61 +1141,38 @@ export function PatientView(props: {
   };
 
   const saveNote = async () => {
-    if (!draft.trim() || busy) return;
-    setBusy(true);
-    setError("");
-    // 2026-09-26 audit round (L): the client_note_id is allocated on the
-    // FIRST save attempt of the current draft and REUSED across retries of
-    // that draft (the backend contract at app/api/therapist.py — idempotency
-    // on (therapist, client_note_id) for a BYTE-IDENTICAL replay — so a
-    // timeout + user re-press no longer mints a second clinical note). A
-    // retry is byte-identical only when the request never reached the
-    // server; a manual re-press re-encrypts with a FRESH GCM nonce, and the
-    // server answers different bytes under a stored id with 409
-    // version_conflict (commit 7b7337a) — never an in-place rewrite. A
-    // fresh id is therefore minted after a SUCCESSFUL save (the next note
-    // is a new note) or either 409 (the id is burned server-side). The id
-    // is scoped per draft context, like the draft buffers themselves (F-6).
-    const scope = selected ? "pattern" : "general";
-    if (!pendingNoteId.current[scope]) pendingNoteId.current[scope] = newNoteId();
-    const clientNoteId = pendingNoteId.current[scope];
+    if (!draftReady || !draft.trim() || busy) return;
+    const submitted = draft.trim(); const savedScope = scope; const savedPid = selectedPid;
+    setBusy(true); setError("");
     try {
-      const sealed = await encryptNote(
-        session.noteKeyV2,
-        session.userId,
-        patient.user_id,
-        clientNoteId,
-        draft.trim(),
-      );
-      const created = await api.createNote(patient.user_id, {
-        client_note_id: clientNoteId,
-        pattern_pid: selectedPid,
-        blob: sealed.blobB64,
-      });
-      setNotes((prev) => [...prev, { ...created, text: draft.trim() }]);
-      setDraft("");
-      pendingNoteId.current[scope] = null;
+      let pending = latestDraft.current.pending[savedScope];
+      if (!pending || pending.text !== submitted || pending.pattern_pid !== savedPid) {
+        const id = newNoteId();
+        const sealed = await encryptNote(session.noteKeyV2, session.userId, patient.user_id, id, submitted);
+        pending = { client_note_id: id, blob: sealed.blobB64, text: submitted, pattern_pid: savedPid };
+        const snapshot = { ...latestDraft.current, pending: { ...latestDraft.current.pending, [savedScope]: pending } };
+        setDraftState(snapshot);
+        // Preserve the exact ciphertext + operation id BEFORE dispatch. A lost
+        // response or reload retries the same request rather than duplicating a note.
+        await persistDraft(snapshot);
+      }
+      const created = await api.createNote(patient.user_id, { client_note_id: pending.client_note_id, pattern_pid: savedPid, blob: pending.blob, ...(session.custodyVersion === undefined ? {} : { custody_version: session.custodyVersion }) });
+      if (!mounted.current) return;
+      setNotes(prev => [...prev.filter(row => row.id !== created.id), { ...created, text: submitted }]);
+      const current = latestDraft.current;
+      const text = { ...current.text }; if ((text[savedScope] ?? "").trim() === submitted) text[savedScope] = "";
+      const nextPending = { ...current.pending }; delete nextPending[savedScope];
+      const snapshot = { ...current, text, pending: nextPending };
+      setDraftState(snapshot); await persistDraft(snapshot);
     } catch (err) {
-      // Either 409 means the server rejected THIS id: "conflict" (the id
-      // was already used for another patient) or "version_conflict"
-      // (different bytes under the stored note — unavoidable on a manual
-      // retry, since every attempt encrypts with a fresh GCM nonce).
-      // Retrying with a burned id can only fail again, so the next attempt
-      // mints a fresh one; without this the composer would be stuck on an
-      // unsavable draft forever. Any other failure (timeout, offline) KEEPS
-      // the id — that is exactly the byte-identical idempotent-retry case
-      // the backend contract exists for.
-      if (
-        err instanceof ApiError
-        && err.status === 409
-        && (err.code === "conflict" || err.code === "version_conflict")
-      ) {
-        pendingNoteId.current[scope] = null;
+      if (!mounted.current) return;
+      if (err instanceof ApiError && err.status === 409 && (err.code === "conflict" || err.code === "version_conflict")) {
+        const pending = { ...latestDraft.current.pending }; delete pending[savedScope];
+        const snapshot = { ...latestDraft.current,pending }; setDraftState(snapshot); await persistDraft(snapshot).catch(error => setError(error instanceof Error ? error.message : "Draft was not saved locally."));
       }
       setError(err instanceof Error ? err.message : "could not save the note");
-    } finally {
-      setBusy(false);
     }
+    finally { setBusy(false); }
   };
 
   const removeNote = async (note: OpenNote) => {
@@ -1205,7 +1190,8 @@ export function PatientView(props: {
   };
 
   const saveNoteEdit = async (note: OpenNote) => {
-    if (!editing || busy) return;
+    if (!draftReady || !editing || busy || note.unreadable) return;
+    const submitted = { ...editing, text: editing.text.trim() };
     setBusy(true);
     setError("");
     try {
@@ -1214,23 +1200,28 @@ export function PatientView(props: {
         session.userId,
         patient.user_id,
         note.client_note_id,
-        editing.text.trim(),
+        submitted.text,
       );
       // base_version (deep-audit 2026-09-28): the server requires the
       // version this edit was based on; a colleague's edit that landed
       // first answers 409 version_conflict instead of silently
       // overwriting it.
-      const updated = await api.updateNote(note.id, sealed.blobB64, note.version ?? 1);
-      setNotes((prev) => prev.map((n) => (n.id === updated.id ? { ...updated, text: editing.text.trim() } : n)));
-      setEditing(null);
+      const updated = session.custodyVersion === undefined
+        ? await api.updateNote(note.id, sealed.blobB64, note.version ?? 1)
+        : await api.updateNote(note.id, sealed.blobB64, note.version ?? 1, session.custodyVersion);
+      setNotes((prev) => prev.map((n) => (n.id === updated.id ? { ...updated, text: submitted.text } : n)));
+      if (latestDraft.current.editing?.id === submitted.id && latestDraft.current.editing.text.trim() === submitted.text) setEditing(null);
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
-        // Another therapist's edit committed first. Drop this edit and
-        // reload so the winning version is visible; the editor's draft
-        // text stays on screen once for a manual re-apply.
-        setError("this note changed on another device while you edited it — showing the current version; re-apply your changes if still needed");
-        setEditing(null);
-        await load();
+        try {
+          const result = await api.notes(patient.user_id);
+          const latest = result.notes.find(row => row.id === note.id);
+          if (latest) {
+            const text = await decryptNoteAny(session.noteKeyV2, session.noteKey, session.userId, patient.user_id, latest.client_note_id, latest.blob, session.historicalNoteKeys);
+            if (mounted.current) setNotes(prev => prev.map(row => row.id === latest.id ? { ...latest, text } : row));
+          }
+          setError("This note changed on another device. Your draft is preserved. Compare the current saved text below before retrying your edit.");
+        } catch { setError("This note changed on another device. Your draft is preserved, but the current saved version could not be loaded. Retry when connected."); }
         return;
       }
       setError(err instanceof Error ? err.message : "could not save the note edit");
@@ -1553,7 +1544,9 @@ export function PatientView(props: {
           <div key={note.id} className="entry-row">
             {editing?.id === note.id ? (
               <>
+                <NoteText>Current saved text: {note.text}</NoteText>
                 <textarea
+                  maxLength={100_000}
                   value={editing.text}
                   onChange={(e) => setEditing({ id: note.id, text: e.target.value })}
                   placeholder="Editing note…"
@@ -1581,14 +1574,14 @@ export function PatientView(props: {
               {notesOnly && note.pattern_pid && (
                 <span className="note-anchor">on {patternAnchorLabel(note.pattern_pid)}</span>
               )}
-              <Button label="Edit" small onPress={() => { setEditing({ id: note.id, text: note.text }); setConfirmDeleteId(null); }} disabled={busy} />
+              <Button label="Edit" small onPress={() => { setEditing({ id: note.id, text: note.text }); setConfirmDeleteId(null); }} disabled={busy || !draftReady || note.unreadable} />
               {/* Final-verification 2026-09-22: the note edit history used to
                   be reachable ONLY from a button inside this screen's hidden
                   print-only block — invisible on screen, unclickable on
                   paper.  The affordance lives HERE, in the interactive
                   notes card; the printed summary renders whatever history
                   was loaded but never anything clickable. */}
-              {note.updated_at > note.created_at && (
+              {noteWasEdited(note) && (
                 <Button
                   label={
                     historyBusy === note.id
@@ -1691,7 +1684,7 @@ ${tpl}` : tpl)}
                 // LAST element.  `[0]` seeded the draft with the oldest
                 // session's text.  F1: in the notes-only chart the pool is
                 // the WHOLE chart (anchored notes included).
-                const source = chartNotes.at(-1);
+                const source = chartNotes.filter(note => !note.unreadable).at(-1);
                 if (source) setDraft(source.text);
               }}
               className="tpl-chip"
@@ -1702,6 +1695,8 @@ ${tpl}` : tpl)}
         </div>
         <textarea
           value={draft}
+          disabled={!draftReady}
+          maxLength={100_000}
           onChange={(e) => setDraft(e.target.value)}
           placeholder={selected ? "Note about this pattern…" : "Note about this patient…"}
           aria-label={selected ? "New note about this pattern" : "New note about this patient"}
@@ -1709,7 +1704,9 @@ ${tpl}` : tpl)}
           className="textarea"
         />
         <div>
-          <Button label={busy ? "Saving…" : "Save note"} onPress={saveNote} disabled={busy || !draft.trim()} />
+          <NoteText role="status">{draftStatus}</NoteText>
+          {!draftReady && <Button label="Retry restoring encrypted draft" small onPress={() => void restoreDraft()} />}
+          <Button label={busy ? "Saving…" : "Save note"} onPress={saveNote} disabled={busy || !draftReady || !draft.trim()} />
         </div>
         {/* 2026-09-28 audit F5: the full privacy/retention paragraph is one
             click away; the summary line names what matters at a glance. */}
@@ -1783,7 +1780,7 @@ ${tpl}` : tpl)}
               Therapist notes ({selected ? "this pattern" : notesOnly ? "all" : "general"})
             </h2>
             {chartNotes.map((note) => {
-              const edited = note.updated_at > note.created_at;
+              const edited = noteWasEdited(note);
               const priorTexts = history[note.id];
               return (
                 <div key={note.id} className="print-note">

@@ -22,6 +22,7 @@
  * SNAPSHOTS the key bytes into a private copy at call time, works from the
  * copy, and zeroizes the copy in finally.
  */
+import { captureLocalWritePermit, assertLocalWritePermit, commitLocalWrite, type LocalWritePermit } from "./localRekey";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { buildAad, decrypt, encrypt } from "./crypto/envelope";
 import { zeroize } from "./crypto/kdf";
@@ -105,7 +106,7 @@ function sanitize(raw: unknown): MoodDay[] {
  * Read the log. The returned flag says whether the stored bytes were the
  * legacy plaintext format (so the caller re-writes them encrypted).
  */
-async function read(dataKey: Buffer, userId: string): Promise<{ days: MoodDay[]; legacy: boolean }> {
+async function read(dataKey: Buffer, userId: string, permit: LocalWritePermit): Promise<{ days: MoodDay[]; legacy: boolean }> {
   const raw = await AsyncStorage.getItem(key(userId));
   // Stryker disable next-line BooleanLiteral: the legacy flag is dead output — no caller reads it (all destructures take only days)
   if (!raw) return { days: [], legacy: false };
@@ -115,7 +116,7 @@ async function read(dataKey: Buffer, userId: string): Promise<{ days: MoodDay[];
     // on disk forever — re-write the parsed days encrypted right away.
     try {
       const days = sanitize(JSON.parse(raw));
-      await write(dataKey, userId, days);
+      await write(dataKey, userId, days, permit);
       // Stryker disable next-line BooleanLiteral: the legacy flag is dead output — no caller reads it
       return { days, legacy: true };
     // Stryker disable next-line BlockStatement: with the catch emptied, a corrupt legacy blob falls through to the decrypt path, which also fails and returns the same empty days
@@ -139,14 +140,14 @@ async function read(dataKey: Buffer, userId: string): Promise<{ days: MoodDay[];
   }
 }
 
-async function write(dataKey: Buffer, userId: string, days: MoodDay[]): Promise<void> {
+async function write(dataKey: Buffer, userId: string, days: MoodDay[], permit: LocalWritePermit): Promise<void> {
   const blob = encrypt(
     dataKey,
     // Stryker disable next-line StringLiteral: Buffer.from(str, "") is Node's UTF-8 default — the mutated encoding produces identical bytes (verified: no throw, same buffer)
     Buffer.from(JSON.stringify(days.slice(-MAX_DAYS)), "utf8"),
     buildAad("moodlog", userId),
   );
-  await AsyncStorage.setItem(key(userId), blob.toString("base64"));
+  await commitLocalWrite(permit, () => AsyncStorage.setItem(key(userId), blob.toString("base64")));
 }
 
 /** Upsert one day's mood (latest value wins for the same date). The
@@ -161,10 +162,12 @@ export async function recordMood(
 ): Promise<void> {
   // Snapshot the key NOW, at call time — NOT inside the serialized block,
   // which may run much later (or after a lock zeroized the shared buffer).
+  const permit = captureLocalWritePermit(userId, dataKey);
   const keyCopy = Buffer.from(dataKey);
   try {
     await serialized(async () => {
-      const { days } = await read(keyCopy, userId);
+      assertLocalWritePermit(permit);
+      const { days } = await read(keyCopy, userId, permit);
       const clean = Math.max(-1, Math.min(1, value));
       const existing = days.findIndex((d) => d.date === date);
       const prior = existing >= 0 ? days[existing] : undefined;
@@ -177,7 +180,7 @@ export async function recordMood(
       const day: MoodDay = cleanEnergy === undefined ? { date, value: clean } : { date, value: clean, energy: cleanEnergy };
       if (existing >= 0) days[existing] = day;
       else days.push(day);
-      await write(keyCopy, userId, days);
+      await write(keyCopy, userId, days, permit);
     });
   // Stryker disable next-line BlockStatement: the finally block only zeroizes the private key copy (memory hygiene, unobservable after return)
   } finally {
@@ -190,9 +193,10 @@ export async function recordMood(
  *  writers (M-35): see the logMutex comment — read() migrates legacy
  *  bytes, which is a write. */
 export async function recentMoods(dataKey: Buffer, userId: string, days = 30): Promise<MoodDay[]> {
+  const permit = captureLocalWritePermit(userId, dataKey);
   const keyCopy = Buffer.from(dataKey);
   try {
-    const readResult = await serialized(() => read(keyCopy, userId));
+    const readResult = await serialized(() => { assertLocalWritePermit(permit); return read(keyCopy, userId, permit); });
     return readResult.days.slice(-days);
   // Stryker disable next-line BlockStatement: the finally block only zeroizes the private key copy (memory hygiene, unobservable after return)
   } finally {
@@ -204,9 +208,10 @@ export async function recentMoods(dataKey: Buffer, userId: string, days = 30): P
 /** Consecutive writing days ending today (yesterday counts, with grace).
  *  Serialized with the writers for the same reason as recentMoods. */
 export async function localStreak(dataKey: Buffer, userId: string, today = todayIso()): Promise<number> {
+  const permit = captureLocalWritePermit(userId, dataKey);
   const keyCopy = Buffer.from(dataKey);
   try {
-    const { days } = await serialized(() => read(keyCopy, userId));
+    const { days } = await serialized(() => { assertLocalWritePermit(permit); return read(keyCopy, userId, permit); });
     // Stryker disable next-line ConditionalExpression: with the guard skipped, an empty days array leaves cursor null and the !cursor guard below returns the same 0
     if (days.length === 0) return 0;
     const set = new Set(days.map((d) => d.date));
@@ -234,13 +239,15 @@ export async function localStreak(dataKey: Buffer, userId: string, today = today
 export async function removeMoodDay(dataKey: Buffer, userId: string, date: string): Promise<void> {
   // Snapshot the key NOW, at call time — the serialized block may run
   // after a lock zeroized the vault's shared buffer (recordMood's rule).
+  const permit = captureLocalWritePermit(userId, dataKey);
   const keyCopy = Buffer.from(dataKey);
   try {
     await serialized(async () => {
-      const { days } = await read(keyCopy, userId);
+      assertLocalWritePermit(permit);
+      const { days } = await read(keyCopy, userId, permit);
       const next = days.filter((d) => d.date !== date);
       if (next.length === days.length) return; // absent already: no write
-      await write(keyCopy, userId, next);
+      await write(keyCopy, userId, next, permit);
     });
   // Stryker disable next-line BlockStatement: the finally block only zeroizes the private key copy (memory hygiene, unobservable after return)
   } finally {

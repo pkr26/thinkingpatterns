@@ -26,14 +26,20 @@ databases work the same way with `sqlite+aiosqlite:///./mindpattern.db`.
 
 ## Adopt a database created before migrations existed
 
-Its schema already matches the initial revision (create_all built it), so
-record that without re-running DDL:
+Preserve a verified backup and compare the actual schema and data with the
+historical revisions first. If it matches the initial revision exactly,
+record that specific revision without re-running its DDL:
 
 ```sh
-MINDPATTERN_DB_URL=... ../.venv/bin/alembic stamp head
+MINDPATTERN_DB_URL=... ../.venv/bin/alembic stamp 73031d06d71b
+MINDPATTERN_DB_URL=... ../.venv/bin/alembic upgrade head
 ```
 
-Then future `alembic upgrade head` runs apply only real changes.
+If the database includes some later changes, independently establish the exact
+matching revision before stamping it. Do not guess or stamp today's head:
+`stamp` records a revision and applies no DDL or data migrations. Rehearse the
+upgrade on the preserved backup and verify ciphertext, revisions, constraints,
+and journal heads before upgrading the live database.
 
 ## Add a new migration after changing app/models.py
 
@@ -59,7 +65,8 @@ autogenerate against a fully-migrated database must produce an empty diff.
   `statement_timeout=300s` make a blocked migration fail (the orchestrator
   retries the boot) instead of hanging forever. SQLite takes neither —
   single-writer file databases don't need it.
-- A database adopted via `alembic stamp head` while head was the initial
-  revision must be re-stamped: `stamp` only records "current", it does not
-  apply later revisions — run `alembic upgrade head` to pick up
-  `e930dbc4f001` (insights unique constraint) and beyond.
+- A database stamped while the initial revision was head already records
+  that historical revision. Run `alembic upgrade head` to apply subsequent
+  revisions; no re-stamp is needed. A database incorrectly stamped with a
+  newer revision requires schema reconciliation from a verified backup
+  before any corrective stamp or upgrade.

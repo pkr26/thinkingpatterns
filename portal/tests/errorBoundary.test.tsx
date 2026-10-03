@@ -22,7 +22,7 @@ describe("ErrorBoundary (top level)", () => {
     );
     const text = textOf(root);
     expect(text).toContain("Something went wrong");
-    expect(text).toContain("Reloading usually fixes it");
+    expect(text).toContain("Saved records stay encrypted");
     expect(text).not.toContain("render exploded");
   });
 });

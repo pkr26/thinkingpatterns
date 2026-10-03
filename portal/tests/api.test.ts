@@ -764,3 +764,19 @@ describe("FE-1 (pentest 2026-09-29): error-banner sanitizer (web/mobile parity)"
     expect((err as ApiError).message).not.toContain("http");
   });
 });
+
+describe("bounded native bodies",()=>{
+ it("accepts an acknowledged 204 even when an alternate fetch exposes an empty stream",async()=>{
+  setSession("tok","http://localhost:5173");const cancelled=vi.fn();
+  const response=new Response(new ReadableStream({cancel:cancelled}));Object.defineProperty(response,"status",{value:204});
+  vi.stubGlobal("fetch",vi.fn(async()=>response));
+  await expect(api.changePasswordAtomic({verifier:"old",operation_id:"id",expected_custody_version:0,custody_version:1,new_salt:"salt",new_verifier:"new",wrap_pub_key:"pub",wrap_key_blob:"private",notes_keyring_blob:"notes"})).resolves.toBeNull();
+  expect(cancelled).toHaveBeenCalledTimes(1);
+ });
+ it("refuses an oversized native response before JSON parsing",async()=>{
+  setSession("tok","http://localhost:5173");vi.stubGlobal("fetch",vi.fn(async()=>new Response(new Uint8Array(17*1024*1024))));await expect(api.me()).rejects.toThrow("safe size limit");
+ });
+ it("clearing a session interrupts a native body that ignores fetch cancellation",async()=>{
+  setSession("tok","http://localhost:5173");vi.stubGlobal("fetch",vi.fn(async()=>new Response(new ReadableStream({pull:()=>new Promise(()=>{})}))));const pending=api.me();const rejected=expect(pending).rejects.toThrow("session ended");await Promise.resolve();await Promise.resolve();clearSession();await rejected;
+ });
+});

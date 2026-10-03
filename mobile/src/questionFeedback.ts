@@ -15,6 +15,7 @@
  * recompute runs, a mute is optimistic client state only — the pattern
  * reappears if the queue is lost, which is the honest failure direction.
  */
+import { captureLocalWritePermit, captureOpaqueLocalWritePermit, assertLocalWritePermit, commitLocalWrite, type LocalWritePermit } from "./localRekey";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { buildAad, encrypt, decrypt } from "./crypto/envelope";
 import { zeroize } from "./crypto/kdf";
@@ -85,11 +86,13 @@ export async function recordPatternMute(
 }
 
 async function appendEvent(dataKey: Buffer, userId: string, event: FeedbackEvent): Promise<void> {
+  const permit = captureLocalWritePermit(userId, dataKey);
   const keyCopy = Buffer.from(dataKey);
   try {
     // Serialized (M-35): same-frame taps must not read the same pending
     // list and overwrite each other's event.
     await serialized(async () => {
+      assertLocalWritePermit(permit);
       const pending = await readPending(keyCopy, userId);
       pending.push(event);
       const blob = encrypt(
@@ -97,7 +100,7 @@ async function appendEvent(dataKey: Buffer, userId: string, event: FeedbackEvent
         Buffer.from(JSON.stringify(pending.slice(-MAX_PENDING)), "utf8"),
         buildAad("feedback-local", userId),
       );
-      await AsyncStorage.setItem(key(userId), blob.toString("base64"));
+      await commitLocalWrite(permit, () => AsyncStorage.setItem(key(userId), blob.toString("base64")));
     });
   } finally {
     zeroize(keyCopy);
@@ -146,6 +149,8 @@ export async function buildFeedbackBlob(
 }
 
 /** Clear after a successful recompute (the server consumed the taps). */
-export async function clearFeedback(userId: string): Promise<void> {
-  await AsyncStorage.removeItem(key(userId));
+export async function clearFeedback(userId: string, source?: LocalWritePermit): Promise<void> {
+  const permit = captureOpaqueLocalWritePermit(userId, source);
+  await commitLocalWrite(permit, () => AsyncStorage.removeItem(key(userId)));
 }
+export async function eraseFeedback(userId: string): Promise<void> { await AsyncStorage.removeItem(key(userId)); }

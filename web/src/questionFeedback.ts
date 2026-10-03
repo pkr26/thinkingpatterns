@@ -10,7 +10,7 @@
  */
 import { buildAad } from "./crypto/aad";
 import { decrypt, encrypt, fromBase64, toBase64, zeroize, type Bytes } from "./crypto/core";
-import { kv } from "./kvstore";
+import { kv,type WritePermit } from "./kvstore";
 
 const key = (userId: string): string => `mindpattern.feedback.${userId}`;
 const MAX_PENDING = 64;
@@ -65,12 +65,13 @@ async function readPending(dataKey: Bytes, userId: string): Promise<FeedbackEven
  *  feedback queue under the incoming data key instead of clearing it.
  *  A failure propagates so the rotation falls back to the old clear. */
 export async function rewrapFeedback(oldKey: Bytes, newKey: Bytes, userId: string): Promise<void> {
+  const permit=await kv.captureWritePermit(userId,newKey);
   const pending = await readPending(oldKey, userId);
   if (pending.length === 0) return;
   let payload: Uint8Array<ArrayBuffer> | null = new TextEncoder().encode(JSON.stringify(pending.slice(-MAX_PENDING)));
   try {
     const blob = await encrypt(newKey, payload, buildAad("feedback-local", userId));
-    await kv.setItem(key(userId), toBase64(blob));
+    await kv.setItem(key(userId), toBase64(blob),permit);
   } finally {
     zeroize(payload);
     payload = null;
@@ -91,13 +92,14 @@ async function appendEvent(dataKey: Bytes, userId: string, event: FeedbackEvent)
   const keyCopy = new Uint8Array(new ArrayBuffer(dataKey.length));
   keyCopy.set(dataKey);
   try {
+    const permit=await kv.captureWritePermit(userId,keyCopy);
     await serialized(async () => {
       const pending = await readPending(keyCopy, userId);
       pending.push(event);
       let payload: Uint8Array<ArrayBuffer> | null = new TextEncoder().encode(JSON.stringify(pending.slice(-MAX_PENDING)));
       try {
         const blob = await encrypt(keyCopy, payload, buildAad("feedback-local", userId));
-        await kv.setItem(key(userId), toBase64(blob));
+        await kv.setItem(key(userId), toBase64(blob),permit);
       } finally {
         zeroize(payload);
         payload = null;
@@ -142,6 +144,6 @@ export async function buildFeedbackBlob(dataKey: Bytes, userId: string): Promise
 }
 
 /** Clear after a successful recompute (the server consumed the taps). */
-export async function clearFeedback(userId: string): Promise<void> {
-  await kv.removeItem(key(userId));
+export async function clearFeedback(userId: string,permit?:WritePermit): Promise<void> {
+  await kv.removeItem(key(userId),permit);
 }

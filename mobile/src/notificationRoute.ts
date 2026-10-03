@@ -28,13 +28,18 @@ export function screenForNotificationId(id: unknown): string | null {
 
 /** The queued destination, consumed once at main-flow entry. */
 let pendingScreen: string | null = null;
+const listeners = new Set<() => void>();
+export function notifyNavigationReady(): void { if (pendingScreen) for (const listener of listeners) listener(); }
+export function subscribeNotificationRoutes(listener: () => void): () => void {
+  listeners.add(listener); return () => { listeners.delete(listener); };
+}
 
 /** Queue the destination a tapped notification should open. Idempotent:
  *  a second tap before the app opens REPLACES the first (the most recent
  *  user intent wins). Unknown ids are ignored, never routed. */
 export function queueNotificationRoute(notificationId: unknown): void {
   const screen = screenForNotificationId(notificationId);
-  if (screen !== null) pendingScreen = screen;
+  if (screen !== null) { pendingScreen = screen; for (const listener of listeners) listener(); }
 }
 
 /** True when a tapped notification is waiting to route (test/observer seam). */

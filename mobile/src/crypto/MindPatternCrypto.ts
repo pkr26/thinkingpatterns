@@ -34,6 +34,8 @@ export interface EntryPayload {
   english_text?: string | null;
 }
 
+const ENTRY_FIELDS = new Set(["v", "text", "sentiment", "created_at", "energy", "sleep", "tags", "tod", "input_mode", "transcript_lang", "english_text"]);
+
 /** The local-hour bucket for the entry payload's optional time-of-day
  *  channel: 05-11 morning, 12-16 afternoon, 17-22 evening, else night.
  *  Pure and total so tests pin the boundaries. */
@@ -85,6 +87,9 @@ export function encryptEntry(
     transcriptLang?: string;
     englishText: string | null;
   },
+  /** Preserve opaque additive fields from an authenticated existing row.
+   * Known fields always come from the explicit edit arguments above. */
+  originalPayload?: EntryPayload,
 ): { blobB64: string } {
   // Payload v2 (2026-09-17): optional structured channels ride alongside
   // the text. A caller passing none emits the v1 shape byte-for-byte, so
@@ -116,14 +121,17 @@ export function encryptEntry(
       }
     : base;
   // Stryker disable StringLiteral
-const plaintext = Buffer.from(JSON.stringify(payload), "utf8");
+  const extras = originalPayload ? Object.fromEntries(Object.entries(originalPayload).filter(([field]) => !ENTRY_FIELDS.has(field))) : {};
+const plaintext = Buffer.from(JSON.stringify({ ...extras, ...payload }), "utf8");
   // Stryker restore StringLiteral
   const aad =
     contentVersion !== undefined && Number.isSafeInteger(contentVersion) && contentVersion >= 1
       ? buildAad("entry", userId, clientEntryId, String(contentVersion))
       : buildAad("entry", userId, clientEntryId);
-  const blob = encrypt(keys.dataKey, plaintext, aad);
-  return { blobB64: blob.toString("base64") };
+  try {
+    const blob = encrypt(keys.dataKey, plaintext, aad);
+    return { blobB64: blob.toString("base64") };
+  } finally { plaintext.fill(0); }
 }
 
 /** The only entry payload schema versions this client understands (v2

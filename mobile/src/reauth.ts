@@ -11,6 +11,7 @@ import { api, ApiError } from "./api/client";
 import { deriveKeysAsync } from "./crypto/MindPatternCrypto";
 import { zeroize } from "./crypto/kdf";
 import { vault } from "./vault";
+import { localWriteScopeEpoch } from "./localWriteGuard";
 
 /** Constant-time equality for equal-length secret buffers. */
 function keysEqual(a: Buffer, b: Buffer): boolean {
@@ -53,52 +54,61 @@ export type ReauthResult =
  * callers render as "cannot verify your password offline right now" —
  * never "Wrong password").
  */
-export async function verifyPasswordForVault(password: string): Promise<ReauthResult> {
+export async function verifyPasswordForVault(password: string, options?: { saltB64: string }): Promise<ReauthResult> {
   if (!password) return { ok: false, reason: "wrong-password" };
-  if (!vault.isUnlocked()) return { ok: false, reason: "locked" };
-  const username = await api.getUsername();
-  if (!username) return { ok: false, reason: "no-account" };
-
-  let saltB64: string | null = await api.getCachedSalt(username);
-  if (!saltB64) {
-    try {
-      const { salt } = await api.saltFor(username);
-      saltB64 = salt;
-      await api.cacheSalt(username, salt);
-    } catch {
-      return { ok: false, reason: "offline" };
+  if (!vault.canReauthenticate()) return { ok: false, reason: "locked" };
+  // Capture the original vault before any account, salt or KDF await.
+  // A late proof may never authenticate or mutate a replacement session.
+  const epoch = localWriteScopeEpoch(), owner = vault.ownerUserId(), original = vault.get();
+  const current = () => {
+    if (epoch !== localWriteScopeEpoch() || owner !== vault.ownerUserId() || !vault.canReauthenticate()) return false;
+    const now = vault.get();
+    return now.dataKey === original.dataKey && now.authKey === original.authKey;
+  };
+  let derived: Awaited<ReturnType<typeof deriveKeysAsync>> | null = null;
+  try {
+    const username = await api.getUsername();
+    if (!current()) return { ok: false, reason: "locked" };
+    if (!username) return { ok: false, reason: "no-account" };
+    let saltB64: string | null = options?.saltB64 ?? await api.getCachedSalt(username);
+    if (!current()) return { ok: false, reason: "locked" };
+    if (!saltB64) {
+      try {
+        const { salt } = await api.saltFor(username);
+        if (!current()) return { ok: false, reason: "locked" };
+        saltB64 = salt;
+        await api.cacheSalt(username, salt);
+        if (!current()) return { ok: false, reason: "locked" };
+      } catch {
+        return { ok: false, reason: current() ? "offline" : "locked" };
+      }
     }
-  }
-  if (!saltB64) return { ok: false, reason: "offline" };
-
-  // Async derivation: the sync path freezes the JS thread ~100-400ms.
-  const derived = await deriveKeysAsync(password, Buffer.from(saltB64, "base64"));
-  const session = vault.get();
-  if (!session.authKeyKnown) {
-    try {
-      await api.login(username, derived.authKey.toString("base64"));
-      const verifierB64 = derived.authKey.toString("base64");
-      vault.adoptAuthKey(derived.authKey); // the session owns the real key from here
-      zeroize(derived.masterKey, derived.dataKey);
-      return { ok: true, verifierB64 };
-    } catch (err) {
-      zeroize(derived.masterKey, derived.authKey, derived.dataKey);
-      // A definitive wrong-verifier rejection is never an offline case
-      // (same rule as UnlockScreen); anything else means the password is
-      // simply UNVERIFIED right now — never "wrong".
-      if (err instanceof ApiError && err.status === 401) return { ok: false, reason: "wrong-password" };
-      return { ok: false, reason: "offline" };
+    if (!saltB64) return { ok: false, reason: "offline" };
+    derived = await deriveKeysAsync(password, Buffer.from(saltB64, "base64"));
+    if (!current()) return { ok: false, reason: "locked" };
+    if (!original.authKeyKnown) {
+      try {
+        const result = await api.login(username, derived.authKey.toString("base64"));
+        if (!current()) return { ok: false, reason: "locked" };
+        if (owner !== null && result.user_id !== owner) return { ok: false, reason: "locked" };
+        const verifierB64 = derived.authKey.toString("base64");
+        // The vault owns a separate copy; finally always wipes the derivation.
+        vault.adoptAuthKey(Buffer.from(derived.authKey));
+        return { ok: true, verifierB64 };
+      } catch (err) {
+        if (!current()) return { ok: false, reason: "locked" };
+        if (err instanceof ApiError && err.status === 401) return { ok: false, reason: "wrong-password" };
+        return { ok: false, reason: "offline" };
+      }
     }
+    if (!keysEqual(derived.authKey, original.authKey)) {
+      await delayLocalMismatch();
+      return { ok: false, reason: current() ? "wrong-password" : "locked" };
+    }
+    return { ok: true, verifierB64: derived.authKey.toString("base64") };
+  } finally {
+    if (derived) zeroize(derived.masterKey, derived.authKey, derived.dataKey);
   }
-  const matches = keysEqual(derived.authKey, session.authKey);
-  if (!matches) {
-    zeroize(derived.masterKey, derived.authKey, derived.dataKey);
-    await delayLocalMismatch();
-    return { ok: false, reason: "wrong-password" };
-  }
-  const verifierB64 = derived.authKey.toString("base64");
-  zeroize(derived.masterKey, derived.dataKey);
-  return { ok: true, verifierB64 };
 }
 
 /**

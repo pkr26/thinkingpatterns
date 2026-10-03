@@ -1,0 +1,106 @@
+npm notice run mindpattern-mobile@1.0.0 test
+npm notice run vitest run --coverage
+
+ RUN  v4.1.11 /Users/pradeepreddy/Desktop/mental_health_application/mobile
+      Coverage enabled with v8
+
+Failed to parse file:///Users/pradeepreddy/Desktop/mental_health_application/mobile/src/brain/PORT.md. Excluding it from coverage.
+ Error [RolldownError]: Parse failed with 1 error:
+Invalid Character ` `
+1: # The on-device brain port — tracked plan (Phase 3)
+    ^
+2: 
+3: Goal: run the ENTIRE deterministic analysis on the phone so the data key
+    at error (file:///Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/rolldown/dist/shared/logs-DmYCAKcW.mjs:159:24)
+    at normalizeParseError (file:///Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/rolldown/dist/parse-ast-index.mjs:25:9)
+    at wrap (file:///Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/rolldown/dist/parse-ast-index.mjs:5:39)
+    at parseAstAsync (file:///Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/rolldown/dist/parse-ast-index.mjs:54:9)
+    at V8CoverageProvider.remapCoverage (file:///Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/@vitest/coverage-v8/dist/provider.js:133:10)
+    at file:///Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/@vitest/coverage-v8/dist/provider.js:119:23
+    at async Promise.all (index 0)
+    at V8CoverageProvider.getCoverageMapForUncoveredFiles (file:///Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/@vitest/coverage-v8/dist/provider.js:109:4)
+    at V8CoverageProvider.generateCoverage (file:///Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/@vitest/coverage-v8/dist/provider.js:56:29)
+    at file:///Users/pradeepreddy/Desktop/mental_health_application/mobile/node_modules/vitest/dist/chunks/cli-api.CnMVyzaz.js:13671:23 {
+  code: 'PARSE_ERROR',
+  id: undefined,
+  pos: 1
+}
+
+ Test Files  96 passed | 1 skipped (97)
+      Tests  2099 passed | 1 skipped (2100)
+   Start at  06:21:45
+   Duration  4.56s (transform 7.23s, setup 2.47s, import 10.88s, tests 24.18s, environment 5ms)
+
+ % Coverage report from v8
+-------------------|---------|----------|---------|---------|-------------------
+File               | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+-------------------|---------|----------|---------|---------|-------------------
+All files          |    91.5 |     86.1 |      85 |      94 |                   
+ src               |   93.63 |    85.85 |   88.68 |   95.63 |                   
+  audioQueue.ts    |   87.77 |    68.75 |   88.23 |    94.8 | 127,137,202,207   
+  ...tricUnlock.ts |   96.66 |      100 |     100 |      96 | 82                
+  crisisDetect.ts  |     100 |    99.18 |     100 |     100 | 397               
+  entryVersions.ts |   89.21 |    81.39 |     100 |    92.3 | 55-64,116         
+  ...opeUpgrade.ts |   88.23 |    64.81 |   33.33 |   89.79 | ...13,127,155,166 
+  haptics.ts       |   94.73 |      100 |     100 |   94.11 | 33                
+  healthkit.ts     |   86.66 |    67.64 |     100 |   89.04 | 91,174-183        
+  keyScheme.ts     |   85.71 |    83.01 |   85.71 |   91.37 | ...61,173-174,220 
+  languagePref.ts  |   91.66 |      100 |     100 |    90.9 | 27                
+  ...eReminders.ts |   98.57 |      100 |   93.75 |   98.11 | 142               
+  moodLog.ts       |   98.97 |    87.23 |     100 |   98.78 | 96                
+  ...veFeatures.ts |   76.08 |    61.11 |   68.18 |   81.19 | ...05,315,446-468 
+  navigation.tsx   |      90 |    89.18 |      80 |   95.65 | 160-161           
+  offlineQueue.ts  |   95.96 |     90.4 |   95.52 |   98.92 | 185,464,467       
+  onboarding.ts    |     100 |      100 |   81.81 |     100 |                   
+  ...ingMeasure.ts |   91.66 |    93.54 |     100 |   96.42 | 66                
+  promptChips.ts   |     100 |    83.33 |     100 |     100 | 87                
+  ...onFeedback.ts |   97.87 |     92.3 |   93.75 |     100 | 61                
+  recoveryFlow.ts  |   93.02 |    66.66 |      50 |   97.56 | 46                
+  reminderSync.ts  |    87.5 |      100 |     100 |   85.71 | 53,80             
+  rotation.ts      |   92.26 |    78.51 |      36 |   94.41 | ...90,436,570,650 
+  safetyPlan.ts    |   93.54 |    83.33 |     100 |     100 | 74-77             
+  secureStore.ts   |   98.43 |    97.22 |    92.3 |     100 | 57                
+  stateSeqGuard.ts |   97.72 |      100 |    87.5 |   97.72 | 75                
+  store.tsx        |   91.37 |    88.52 |   69.04 |   91.08 | 151-159,258-259   
+  strings.ts       |   93.75 |    81.81 |     100 |   93.33 | 44                
+  theme.tsx        |    86.2 |    76.92 |   72.72 |    92.3 | 210,215           
+  ...holdNotice.ts |    90.9 |      100 |     100 |      90 | 33                
+  unlockBackoff.ts |     100 |    83.33 |     100 |     100 | 47                
+ src/api           |   90.23 |    89.74 |   82.82 |   92.23 |                   
+  client.ts        |   90.23 |    89.74 |   82.82 |   92.23 | ...1531,1583-1628 
+ src/audio         |    93.4 |    70.83 |     100 |   94.31 |                   
+  playback.ts      |   91.66 |       50 |     100 |     100 | 35                
+  recorder.ts      |   93.67 |    72.72 |     100 |    93.5 | 136-137,149-154   
+ src/brain         |   93.07 |    86.57 |   88.88 |    97.8 |                   
+  sentiment.ts     |   97.64 |    91.73 |     100 |     100 | ...89,316,321,357 
+  stats.ts         |      80 |    64.28 |   66.66 |    90.9 | 93-96             
+ src/components    |     100 |    94.23 |     100 |     100 |                   
+  BottomNav.tsx    |     100 |    95.23 |     100 |     100 | 138               
+  MoodCalendar.tsx |     100 |    86.84 |     100 |     100 | 30,127,132-134    
+ src/crypto        |   93.64 |    89.28 |     100 |   99.03 |                   
+  ...ternCrypto.ts |   97.72 |    98.03 |     100 |     100 | 170               
+  keyEnvelope.ts   |   75.51 |       70 |     100 |   97.22 | 186               
+  recovery.ts      |   96.55 |      100 |     100 |   96.55 | 60                
+  sharing.ts       |   97.14 |    85.71 |     100 |     100 | 112-119           
+ src/screens       |    89.1 |    85.01 |   79.03 |   91.92 |                   
+  CrisisScreen.tsx |   95.65 |      100 |   91.66 |   95.65 | 177               
+  EntryScreen.tsx  |   87.73 |    82.73 |      80 |   90.52 | ...42-743,865-873 
+  ...oryScreen.tsx |    90.9 |    84.95 |   84.11 |   95.42 | ...1232,1304-1306 
+  ...htsScreen.tsx |   87.29 |    82.84 |   95.83 |   88.08 | ...59,462,465-474 
+  LoginScreen.tsx  |   98.54 |    98.52 |   71.42 |   99.12 | 453               
+  ...resScreen.tsx |    88.5 |    84.61 |   65.11 |   92.85 | ...32,423,498-499 
+  ...ingScreen.tsx |     100 |      100 |      90 |     100 |                   
+  ...ionScreen.tsx |   97.72 |    95.83 |   90.47 |   98.36 | 113-114           
+  ...eryScreen.tsx |   97.67 |    86.36 |     100 |     100 | 49,101-180        
+  ...lanScreen.tsx |   86.45 |       60 |   86.36 |   92.68 | ...10,127-129,222 
+  ...ngsScreen.tsx |   77.55 |    74.64 |   60.19 |   80.83 | ...-840,1022-1082 
+  ...areScreen.tsx |   95.65 |    94.87 |   93.75 |   97.47 | 161,331-341       
+  UnlockScreen.tsx |   97.24 |     91.3 |   68.75 |   99.21 | 204               
+-------------------|---------|----------|---------|---------|-------------------
+
+=============================== Coverage summary ===============================
+Statements   : 91.5% ( 5581/6099 )
+Branches     : 86.1% ( 3465/4024 )
+Functions    : 85% ( 1049/1234 )
+Lines        : 94% ( 4984/5302 )
+================================================================================

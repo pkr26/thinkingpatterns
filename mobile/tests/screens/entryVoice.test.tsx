@@ -9,9 +9,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
 import { Alert, TextInput } from "react-native";
 
-vi.mock("../../src/api/client", async () => {
+vi.mock("../../src/api/client", async (importOriginal) => {
+  const actualApi = await importOriginal<typeof import("../../src/api/client")>();
   const { makeApiMock, ApiError } = await import("../helpers/apiMock");
-  return { ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
+  return { ...actualApi, ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
 });
 
 class QueueFullError extends Error {
@@ -35,6 +36,9 @@ vi.mock("../../src/moodLog", async (importOriginal) => {
 });
 vi.mock("../../src/healthkit", () => ({ mirrorMoodCheckIn: vi.fn(async () => false) }));
 vi.mock("../../src/offlineQueue", () => ({
+  prepareQueueRekey: vi.fn(async () => []),
+  pendingEntryIds: vi.fn(async () => []),
+  abortInFlightFlush: vi.fn(),
   QueueFullError,
   QueueAbandonedError,
   enqueue: vi.fn(async () => {}),
@@ -155,6 +159,7 @@ describe("EntryScreen voice flow", () => {
       expect.any(String),
       "audio/m4a",
       4, // the recorder's honest 4200 ms
+      "http://localhost:8000", // origin-pinned outbox upload
     );
   });
 
@@ -173,4 +178,16 @@ describe("EntryScreen voice flow", () => {
     expect(fs.__hasFile(TAKE_URI)).toBe(false);
     expect(api.createEntry).not.toHaveBeenCalled();
   });
+});
+
+
+it("a full retained-recording queue stops before text commit and keeps the current take", async () => {
+  const { enqueueAudio, MAX_AUDIO_QUEUE_ITEMS } = await import("../../src/audioQueue");
+  for (let i = 0; i < MAX_AUDIO_QUEUE_ITEMS; i++) await enqueueAudio({ userId: "user-1", clientEntryId: `old-${i}`, blobB64: "encrypted-copy", mime: "audio/m4a", durationSeconds: 4 });
+  vi.mocked(api.transcribeAudio).mockResolvedValue({ language: "en", language_raw: "en", original_text: "My words remain", english_text: null } as never);
+  const root = await render(<EntryScreen navigation={nav} />); await recordAndStop(root);
+  await pressLabel(root, "Save"); await flush();
+  expect(api.createEntry).not.toHaveBeenCalled();
+  expect((inputByPlaceholder(root, "What's going on today?").props as {value: string}).value).toBe("My words remain");
+  expect(fs.__hasFile(TAKE_URI)).toBe(true);
 });

@@ -1,9 +1,16 @@
-# IRB-reviewed usability study protocol (Phase 3, 2026-09-21)
+# Draft usability study protocol for institutional review
+
+Status as of October 3, 2026: proposed protocol; no institutional approval,
+registration, recruitment, clinical review or completed study is recorded.
+Risk classification, screening/referral procedures, investigator roles,
+retention, consent and recruitment require the reviewing institution's
+determination before study execution. The engineering validation plan is
+in [VALIDATION_TO_90.md](VALIDATION_TO_90.md).
 
 Purpose: convert the PsyberGuide self-assessment (docs/
 PSYBERGUIDE_SELF_ASSESSMENT.md) into publishable, IRB-reviewed evidence.
-This document is the protocol draft an IRB reviews; it is written for a
-minimal-risk, no-PHI behavioral study of the app AS SHIPPED.
+This document is a submission draft. Its proposed privacy controls do not
+establish a minimal-risk classification or a legal no-PHI determination.
 
 ## 1. Design
 
@@ -89,7 +96,8 @@ minimal-risk, no-PHI behavioral study of the app AS SHIPPED.
 
 ## 7. Conversion path to published claims
 
-Passing the benchmarks licenses claims of exactly this shape: "In a
+If approved and completed, the measured results could support a bounded
+description of exactly this shape: "In a
 4-week single-arm usability study (N=30), participants rated the app
 X (SUS) and Y% correctly described the app's pattern cards as
 observations rather than diagnoses." No efficacy claims, no clinical

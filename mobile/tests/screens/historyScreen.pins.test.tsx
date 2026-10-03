@@ -36,9 +36,10 @@ import {
   TextInput,
 } from "react-native";
 
-vi.mock("../../src/api/client", async () => {
+vi.mock("../../src/api/client", async (importOriginal) => {
+  const actualApi = await importOriginal<typeof import("../../src/api/client")>();
   const { makeApiMock, ApiError, ENTRY_PAGE_BYTES } = await import("../helpers/apiMock");
-  return { ApiError, api: makeApiMock(), ENTRY_PAGE_BYTES };
+  return { ...actualApi, ApiError, api: makeApiMock(), ENTRY_PAGE_BYTES };
 });
 
 const touchActivity = vi.fn();

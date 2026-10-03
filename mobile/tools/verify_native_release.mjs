@@ -300,7 +300,7 @@ if (!iosExists) {
     "RCT_EXPORT_METHOD(saveStateOfMind",
     "RCTPromiseResolveBlock",
     "@available(iOS 18.0, *)",
-    "stateOfMindWithDate:kind:valence:labels:associations:",
+    "stateOfMindWithDate:kind:valence:labels:associations:metadata:",
     "HKStateOfMindKindDailyMood",
     "[HKObjectType stateOfMindType]",
     "saveObject:withCompletion:",
@@ -315,7 +315,7 @@ if (!iosExists) {
     inSources = false;
   }
   if (missingBits.length === 0 && inSources) {
-    pass("iOS State-of-Mind bridge", "all three contract methods present, iOS-18-gated, write-only, compiled in");
+    pass("iOS State-of-Mind bridge", "all three contract methods present, iOS-18-gated, write-only, included in target sources");
   } else {
     fail(
       "iOS State-of-Mind bridge",
@@ -492,6 +492,38 @@ if (tracked.status !== 0) {
     );
   }
 }
+
+// Static contracts are release prerequisites, not device execution evidence.
+try {
+  const js = readFileSync("index.js", "utf8");
+  const android = readFileSync("android/app/src/main/java/com/mindpattern/MainActivity.kt", "utf8");
+  const ios = readFileSync(APP_DELEGATE_PATH, "utf8");
+  const registration = js.match(/registerComponent\(["']([^"']+)["']/)?.[1];
+  const androidName = android.match(/getMainComponentName\(\)[^=]*=\s*["']([^"']+)["']/)?.[1];
+  const iosName = ios.match(/withModuleName:\s*["']([^"']+)["']/)?.[1];
+  if (registration && registration === androidName && registration === iosName) pass("native/JS launcher registration", registration);
+  else fail("native/JS launcher registration", "index.js, MainActivity and AppDelegate must name the same registered root");
+  const nativeEngine = readFileSync("src/crypto/engine.native.ts", "utf8");
+  if (/import\s+QuickCrypto\s+from\s+["']react-native-quick-crypto["']/.test(nativeEngine) && !/require\s*\(|["']node:crypto["']/.test(nativeEngine)) pass("Metro static native crypto resolution");
+  else fail("Metro static native crypto resolution", "native crypto must statically import the linked backend and must not fall back to Node");
+  const plist = readFileSync("ios/MindPattern/Info.plist", "utf8");
+  if (plist.includes("NSFaceIDUsageDescription")) pass("Face ID usage declaration"); else fail("Face ID usage declaration", "missing NSFaceIDUsageDescription");
+  const pbx = readFileSync("ios/MindPattern.xcodeproj/project.pbxproj", "utf8");
+  const resources = pbx.match(/Begin PBXResourcesBuildPhase section[\s\S]*?End PBXResourcesBuildPhase section/)?.[0] ?? "";
+  if (resources.includes("PrivacyInfo.xcprivacy in Resources")) pass("iOS bundled privacy manifest"); else fail("iOS bundled privacy manifest", "PrivacyInfo.xcprivacy must be in the app Resources phase");
+  const iconsDir = "ios/MindPattern/Images.xcassets/AppIcon.appiconset";
+  const icons = JSON.parse(readFileSync(`${iconsDir}/Contents.json`, "utf8"));
+  if (icons.images.length > 0 && icons.images.every(x => x.filename && existsSync(`${iconsDir}/${x.filename}`))) pass("iOS populated app icons"); else fail("iOS populated app icons", "every declared icon must have a real image");
+  if (!pbx.includes("org.reactjs.native.example")) pass("iOS product bundle identity"); else fail("iOS product bundle identity", "React Native template bundle id must be replaced");
+  const bridge = readFileSync(BRIDGE_PATH, "utf8");
+  if (bridge.includes('#import "RCTAppleHealthKit.h"') && /associations:nil\s+metadata:nil/.test(bridge) && bridge.includes("!isfinite(valence)")) pass("HealthKit category header/factory/finite valence contract"); else fail("HealthKit category header/factory/finite valence contract", "complete superclass import, metadata selector and finite continuous valence are required");
+  if (process.argv.includes("--release")) {
+    const origin = process.env.MINDPATTERN_API_ORIGIN;
+    const parsed = origin ? new URL(origin) : null;
+    if (parsed && parsed.protocol === "https:" && !parsed.username && !parsed.password && parsed.pathname === "/" && !parsed.search && !parsed.hash && !/\.(example|test|invalid)(?:\.|$)/.test(parsed.hostname) && !["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname)) pass("configured production API origin");
+    else fail("configured production API origin", "set MINDPATTERN_API_ORIGIN to the deployed HTTPS origin; placeholder/dev origins cannot be released");
+  }
+} catch (error) { fail("extended native launch/resource contracts", error.message); }
 
 // --- verdict ---------------------------------------------------------------
 if (failed > 0) {

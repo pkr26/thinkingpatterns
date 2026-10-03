@@ -8,10 +8,17 @@
  *  handler is absent by design), and field lookups still require the
  *  control to be wrapped by its <label>. */
 import { act } from "react";
+import { afterEach } from "vitest";
 import RTR from "react-test-renderer";
 import type { ReactTestInstance } from "react-test-renderer";
 
 type ReactTestRenderer = ReturnType<typeof RTR.create>;
+
+const mountedRoots = new Set<ReactTestRenderer>();
+afterEach(async () => {
+  await act(async () => { for (const root of mountedRoots) root.unmount(); });
+  mountedRoots.clear();
+});
 
 type NodeWithChildren = { children: unknown[] };
 
@@ -20,6 +27,7 @@ export async function render(ui: React.ReactElement): Promise<ReactTestRenderer>
   await act(async () => {
     root = RTR.create(ui);
   });
+  mountedRoots.add(root);
   return root;
 }
 

@@ -33,6 +33,7 @@ import { recordPatternMute } from "../questionFeedback";
 import { t as tr, dateLocaleTag } from "../strings";
 
 interface PatternDetail {
+  sample_entries?: number;
   day?: string;
   day_fraction?: number;
   base_rate?: number;
@@ -222,6 +223,12 @@ export function effectSizeWords(d: number): string {
   return tr("insights.effect.large");
 }
 
+/** Older encrypted cards can omit direction. The signed measurement is
+ * still authoritative in that case, including when a stale value is unknown. */
+function measuredDirection(direction: unknown, amount: number): "lower" | "higher" {
+  return direction === "lower" || direction === "higher" ? direction : amount < 0 ? "lower" : "higher";
+}
+
 /** The plain-language rows of the evidence panel, in reading order. One
  *  sentence per stat; the raw numbers live in technicalRows(). */
 function evidenceRows(p: PatternCard): [string, string][] {
@@ -229,24 +236,24 @@ function evidenceRows(p: PatternCard): [string, string][] {
   const rows: [string, string][] = [];
   rows.push([tr("insights.ev.window"), tr("insights.ev.windowValue", { from: d.first_seen ?? "?", to: d.last_seen ?? "?" })]);
   if (typeof d.sample_days === "number") {
-    rows.push([tr("insights.ev.basedOn"), tr("insights.ev.basedOnValue", { count: d.sample_days })]);
+    rows.push([tr("insights.ev.basedOn"), tr(typeof d.sample_entries === "number" ? "insights.ev.basedOnValue" : "insights.ev.basedOnEntries", { count: d.sample_days })]);
+    if (typeof d.sample_entries === "number") rows.push([tr("insights.ev.entries"), tr("insights.ev.basedOnEntries", { count: d.sample_entries })]);
   }
   if (typeof d.day === "string" && typeof d.day_fraction === "number") {
-    const base = typeof d.base_rate === "number" ? d.base_rate : 0;
     rows.push([
       tr("insights.ev.concentration"),
       tr("insights.ev.concentrationValue", {
         share: fmt(d.day_fraction * 100, 0),
         day: localWeekday(d.day),
-        baseline: fmt(base * 100, 0),
+        baseline: typeof d.base_rate === "number" ? `${fmt(d.base_rate * 100, 0)}%` : tr("insights.ev.unavailable"),
       }),
     ]);
   }
   if (typeof d.mood_delta === "number") {
     rows.push([
       tr("insights.ev.moodDiff"),
-      tr("insights.ev.moodDiffValue", {
-        direction: tr(d.direction === "lower" ? "insights.words.lower" : "insights.words.higher"),
+      d.mood_delta === 0 ? tr("insights.desc.noDifference") : tr("insights.ev.moodDiffValue", {
+        direction: tr(`insights.words.${measuredDirection(d.direction, d.mood_delta)}`),
         amount: fmt(Math.abs(d.mood_delta)),
       }),
     ]);
@@ -280,7 +287,7 @@ function evidenceRows(p: PatternCard): [string, string][] {
   if (typeof d.entropy_recent === "number") {
     rows.push([
       tr("insights.ev.activityVariety"),
-      tr("insights.ev.activityVarietyValue", {
+      d.direction !== "narrowed" && d.direction !== "widened" ? tr("insights.desc.unavailable") : tr("insights.ev.activityVarietyValue", {
         direction: tr(d.direction === "narrowed" ? "insights.words.narrowed" : "insights.words.widened"),
         recent: fmt(d.entropy_recent, 1),
         earlier: fmt(d.entropy_earlier, 1),
@@ -314,7 +321,7 @@ function evidenceRows(p: PatternCard): [string, string][] {
   if (typeof d.shift === "number") {
     rows.push([
       tr("insights.ev.shift"),
-      tr("insights.ev.shiftValue", { sign: d.direction === "lower" ? "−" : "+", amount: fmt(Math.abs(d.shift)), baseline: fmt(d.baseline) }),
+      d.shift === 0 ? tr("insights.desc.noDifference") : tr("insights.ev.shiftValue", { sign: measuredDirection(d.direction, d.shift) === "lower" ? "−" : "+", amount: fmt(Math.abs(d.shift)), baseline: fmt(d.baseline) }),
     ]);
   }
   if (typeof d.silences === "number") {
@@ -323,7 +330,7 @@ function evidenceRows(p: PatternCard): [string, string][] {
       tr("insights.ev.silentDaysValue", {
         silences: d.silences,
         observed: d.observed ?? "?",
-        rate: fmt((d.base_rate ?? 0) * 100, 0),
+        rate: typeof d.base_rate === "number" ? `${fmt(d.base_rate * 100, 0)}%` : tr("insights.ev.unavailable"),
       }),
     ]);
   }
@@ -374,13 +381,46 @@ function technicalRows(p: PatternCard): [string, string][] {
 }
 
 function describe(p: PatternCard): string {
+  if (p.detail?.channel === "sleep_quality") {
+    if (p.kind === "link") {
+      const direction = tr(p.detail?.direction === "higher" ? "insights.words.higher" : "insights.words.lower");
+      return tr("insights.desc.sleepLink", { direction });
+    }
+    if (p.kind === "mood_correlation") {
+      const direction = tr(p.detail?.direction === "higher" ? "insights.words.higher" : "insights.words.lower");
+      return tr("insights.desc.sleepCorrelation", { direction });
+    }
+    if (p.kind === "temporal") {
+      return tr("insights.desc.sleepTemporal", {
+        day: p.detail?.day !== undefined ? localWeekday(p.detail.day) : tr("insights.desc.certainDay"),
+      });
+    }
+  }
+  if (p.detail?.source === "tag") {
+    if (p.kind === "mood_correlation") {
+      const direction = tr(p.detail?.direction === "higher" ? "insights.words.higher" : "insights.words.lower");
+      return tr("insights.desc.tagCorrelation", { label: themeLabel(p.label), direction });
+    }
+    if (p.kind === "link") {
+      const direction = tr(p.detail?.direction === "higher" ? "insights.words.higher" : "insights.words.lower");
+      return tr("insights.desc.tagLink", { label: themeLabel(p.label), direction });
+    }
+    if (p.kind === "temporal") {
+      return tr("insights.desc.tagTemporal", {
+        label: themeLabel(p.label),
+        day: p.detail?.day !== undefined ? localWeekday(p.detail.day) : tr("insights.desc.certainDay"),
+      });
+    }
+  }
   if (p.kind === "temporal") {
     const day = p.detail?.day !== undefined ? localWeekday(p.detail.day) : tr("insights.desc.sameDay");
     return tr("insights.desc.temporal", { label: themeLabel(p.label), count: p.occurrences, day });
   }
   if (p.kind === "mood_correlation") {
-    const delta = p.detail?.mood_delta ?? 0;
-    const direction = tr(p.detail?.direction ?? (delta < 0 ? "insights.words.higher" : "insights.words.lower"));
+    if (typeof p.detail?.mood_delta !== "number") return tr("insights.desc.unavailable");
+    const delta = p.detail.mood_delta;
+    if (delta === 0) return tr("insights.desc.noDifference");
+    const direction = tr(`insights.words.${measuredDirection(p.detail.direction, delta)}`);
     return tr("insights.desc.moodCorrelation", {
       label: themeLabel(p.label),
       direction,
@@ -388,6 +428,7 @@ function describe(p: PatternCard): string {
     });
   }
   if (p.kind === "link") {
+    if (p.detail?.direction !== "higher" && p.detail?.direction !== "lower") return tr("insights.desc.unavailable");
     const direction = tr(p.detail?.direction === "higher" ? "insights.words.higher" : "insights.words.lower");
     return tr("insights.desc.link", { label: themeLabel(p.label), direction });
   }
@@ -410,6 +451,7 @@ function describe(p: PatternCard): string {
     return tr("insights.desc.senseMaking");
   }
   if (p.kind === "activity_diversity") {
+    if (p.detail?.direction !== "narrowed" && p.detail?.direction !== "widened") return tr("insights.desc.unavailable");
     return tr(
       p.detail?.direction === "narrowed" ? "insights.desc.activityNarrowed" : "insights.desc.activityWidened",
     );
@@ -434,24 +476,11 @@ function describe(p: PatternCard): string {
     return tr("insights.desc.topicSteady", { label: p.label, share: shareTxt });
   }
   if (p.kind === "mood_shift") {
-    const direction = tr(p.detail?.direction === "higher" ? "insights.words.higher" : "insights.words.lower");
-    const shift = Math.abs(p.detail?.shift ?? 0);
+    if (typeof p.detail?.shift !== "number") return tr("insights.desc.unavailable");
+    if (p.detail.shift === 0) return tr("insights.desc.noDifference");
+    const direction = tr(`insights.words.${measuredDirection(p.detail.direction, p.detail.shift)}`);
+    const shift = Math.abs(p.detail.shift);
     return tr("insights.desc.moodShift", { direction, shift: shift.toFixed(1) });
-  }
-  if (p.detail?.channel === "sleep_quality") {
-    if (p.kind === "link") {
-      const direction = tr(p.detail?.direction === "higher" ? "insights.words.higher" : "insights.words.lower");
-      return tr("insights.desc.sleepLink", { direction });
-    }
-    if (p.kind === "mood_correlation") {
-      const direction = tr(p.detail?.direction === "higher" ? "insights.words.higher" : "insights.words.lower");
-      return tr("insights.desc.sleepCorrelation", { direction });
-    }
-    if (p.kind === "temporal") {
-      return tr("insights.desc.sleepTemporal", {
-        day: p.detail?.day !== undefined ? localWeekday(p.detail.day) : tr("insights.desc.certainDay"),
-      });
-    }
   }
   if (p.kind === "avoidance") {
     const share = typeof p.detail?.share === "number" ? Math.round(p.detail.share * 100) : null;
@@ -460,22 +489,6 @@ function describe(p: PatternCard): string {
   }
   if (p.kind === "cadence") {
     return tr("insights.desc.cadence");
-  }
-  if (p.detail?.source === "tag") {
-    if (p.kind === "mood_correlation") {
-      const direction = tr(p.detail?.direction === "higher" ? "insights.words.higher" : "insights.words.lower");
-      return tr("insights.desc.tagCorrelation", { label: themeLabel(p.label), direction });
-    }
-    if (p.kind === "link") {
-      const direction = tr(p.detail?.direction === "higher" ? "insights.words.higher" : "insights.words.lower");
-      return tr("insights.desc.tagLink", { label: themeLabel(p.label), direction });
-    }
-    if (p.kind === "temporal") {
-      return tr("insights.desc.tagTemporal", {
-        label: themeLabel(p.label),
-        day: p.detail?.day !== undefined ? localWeekday(p.detail.day) : tr("insights.desc.certainDay"),
-      });
-    }
   }
   return tr("insights.desc.fallback", { label: p.label, count: p.occurrences });
 }
@@ -559,10 +572,19 @@ function sanitizePatterns(raw: unknown): PatternCard[] {
     const confidence = typeof p.confidence === "number" && Number.isFinite(p.confidence)
       ? Math.min(1, Math.max(0, p.confidence))
       : 0;
-    const detail = (p.detail ?? undefined) as PatternDetail | undefined;
-    // Same render cap as the label: the narrative is one calm sentence —
-    // a hostile blob must not push unbounded text into the card.
-    if (typeof detail?.narrative === "string") detail.narrative = detail.narrative.slice(0, MAX_LABEL_CHARS);
+    let detail: PatternDetail | undefined;
+    if (typeof p.detail === "object" && p.detail !== null && !Array.isArray(p.detail)) {
+      const validated: Record<string, unknown> = {};
+      const stringFields = new Set(["day", "direction", "pattern_state", "first_seen", "last_seen", "trend", "pattern_pid", "source", "channel"]);
+      const booleanFields = new Set(["is_new", "sensitive", "presence", "muted"]);
+      for (const [key, value] of Object.entries(p.detail)) {
+        if (key === "narrative") continue; // Includes unsafe old cached provider output.
+        if (stringFields.has(key) && typeof value === "string") validated[key] = value.slice(0, 128);
+        else if (booleanFields.has(key) && typeof value === "boolean") validated[key] = value;
+        else if (typeof value === "number" && Number.isFinite(value)) validated[key] = value;
+      }
+      detail = validated as PatternDetail;
+    }
     cards.push({
       // Stryker disable next-line MethodExpression: kind is only compared for equality against known kinds far below 64 chars; truncation cannot change an outcome.
       kind: p.kind.slice(0, 64),
@@ -588,7 +610,7 @@ const MUTE_NOTE_MS = 2_600;
 
 export function InsightsScreen({ navigation }: { navigation?: any }): React.JSX.Element {
   const t = useTheme();
-  const { applyActiveDays, unlockDays, touchActivity } = useSession();
+  const { applyActiveDays, beginProgressRead, finishProgressRead, unlockDays, touchActivity } = useSession();
   const [phase, setPhase] = useState<string>("loading");
   const [remaining, setRemaining] = useState(0);
   const [patterns, setPatterns] = useState<PatternCard[]>([]);
@@ -673,11 +695,18 @@ export function InsightsScreen({ navigation }: { navigation?: any }): React.JSX.
 
   const load = useCallback(async () => {
     const epoch = ++loadEpochRef.current;
+    let progressRead: Awaited<ReturnType<typeof beginProgressRead>> = null;
     setBusy(true);
     setError(null);
     try {
+      progressRead = await beginProgressRead();
+      if (epoch !== loadEpochRef.current) return;
+      if (!progressRead) throw new Error(tr("common.sessionDamagedTitle"));
       const summary = await api.insights();
       if (epoch !== loadEpochRef.current) return;
+      const currentOwner = await api.getUserId();
+      if (epoch !== loadEpochRef.current) return;
+      if (currentOwner !== progressRead.owner) throw new Error(tr("common.sessionDamagedTitle"));
       // A hostile server must not be able to drive the UI into an unknown
       // branch: only the two real phases are accepted.
       if (summary.phase !== "baseline" && summary.phase !== "insight") {
@@ -689,7 +718,7 @@ export function InsightsScreen({ navigation }: { navigation?: any }): React.JSX.
       // The active-days counter applies from THIS response (audit L-59):
       // refreshActiveDays() here issued a second GET /insights per load —
       // double latency and double rate budget for data already in hand.
-      applyActiveDays(summary.active_days);
+      applyActiveDays(summary.active_days, progressRead);
       // Baseline-phase value is device-local: streak + mood trend, no
       // server involvement. The log is encrypted under the data key —
       // only reachable on this screen while the vault is unlocked.
@@ -732,13 +761,15 @@ export function InsightsScreen({ navigation }: { navigation?: any }): React.JSX.
       // A superseded load's failure is not the screen's failure.
       if (epoch === loadEpochRef.current) setError(requestFailureCopy(err));
     } finally {
+      if (progressRead) finishProgressRead(progressRead);
       if (epoch === loadEpochRef.current) setBusy(false);
     }
   }, // Stryker disable next-line ArrayDeclaration: constant deps are equivalent under the test seam (the mocked applyActiveDays has a stable identity); in production the dependency keeps the callback honest.
-     [applyActiveDays]);
+     [applyActiveDays, beginProgressRead, finishProgressRead]);
 
   React.useEffect(() => {
     load();
+    return () => { loadEpochRef.current++; };
   }, // Stryker disable next-line ArrayDeclaration: constant deps under the stable test seam described above.
      [load]);
 
@@ -763,7 +794,7 @@ export function InsightsScreen({ navigation }: { navigation?: any }): React.JSX.
           <GhostButton label={tr("common.tryAgain")} onPress={load} accessibilityLabel={tr("insights.tryAgainA11y")} />
         </View>
       )}
-      {phase === "loading" && <ActivityIndicator color={t.colors.primaryBright} />}
+      {phase === "loading" && !error && <ActivityIndicator color={t.colors.primaryBright} />}
       {phase === "baseline" && (
         <View style={cardStyles.card}>
           <Text style={cardStyles.cardTitle}>
@@ -849,12 +880,10 @@ export function InsightsScreen({ navigation }: { navigation?: any }): React.JSX.
                 {p.detail?.is_new ? tr("insights.newFlag") : ""}
               </Text>
             </View>
-            <Text style={[cardStyles.cardBody, presence && { color: t.colors.muted }]}>{p.describe}</Text>
-            {typeof p.detail?.narrative === "string" && p.detail.narrative.length > 0 && (
-              <Text style={[styles.narrative, { color: t.colors.muted }]}>{p.detail.narrative}</Text>
-            )}
+            <Text style={[cardStyles.cardBody, presence && { color: t.colors.muted }]}>{describe(p)}</Text>
             <Text style={cardStyles.meta}>
               {tr("insights.meta", { count: p.occurrences, density: (p.confidence * 100).toFixed(0) })}
+              {"\n"}{tr("insights.strengthNote")}
             </Text>
             <TouchableOpacity
               onPress={() => setExpanded(isOpen ? null : key)}

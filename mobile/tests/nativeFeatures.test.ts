@@ -310,7 +310,7 @@ describe("fallback cancel-all restores the SIBLING reminder (P3, 2026-09-27)", (
     }
   });
 
-  it("cancelDailyReminder(userId) skips the restore when the cadence is not yet due (fresh completion)", async () => {
+  it("cancelDailyReminder(userId) restores the next future cadence after a fresh completion", async () => {
     const restore = await withoutPerIdCancel();
     try {
       await setMeasureReminderEnabled("user-1", true);
@@ -318,7 +318,9 @@ describe("fallback cancel-all restores the SIBLING reminder (P3, 2026-09-27)", (
       createTriggerNotification.mockClear();
       expect(await cancelDailyReminder("user-1")).toBe(true);
       expect(cancelAllNotifications).toHaveBeenCalledTimes(1);
-      expect(createTriggerNotification).not.toHaveBeenCalled();
+      expect(createTriggerNotification).toHaveBeenCalledTimes(1);
+      const trigger = createTriggerNotification.mock.calls[0]![1] as { timestamp: number };
+      expect(trigger.timestamp).toBeGreaterThan(Date.now() + 27 * 86_400_000);
     } finally {
       restore();
     }

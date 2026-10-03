@@ -1,0 +1,52 @@
+[
+  {
+    "id": "D1.planted-vocab-injection",
+    "status": "BLOCKED",
+    "summary": "planted-vocabulary phone labels ('call five five five zero one three four') are now REJECTED by the spelled-contact/number-word-run rules (2026-09-16 fix): the two-stage injection no longer reaches cards even when the entries plant the vocabulary"
+  },
+  {
+    "id": "D1.spelled-url",
+    "status": "BLOCKED",
+    "summary": "'visit evil dot com often' is now rejected (spelled-domain rule, 2026-09-16 fix)"
+  },
+  {
+    "id": "D1.sub-3-char-token-gap",
+    "status": "BLOCKED",
+    "summary": "hyphen-joined label tokens ('wo-rk') are rejected: the label's whitespace tokenizer keeps the fragment whole while the corpus tokenizer splits on it, so it can never be corpus-grounded \u2014 tiny-token stitching no longer smuggles fragments into labels (the surviving space-separated form is bounded by the 80-char cap and grounding of the remaining words)"
+  },
+  {
+    "id": "D1.structural-defenses",
+    "status": "BLOCKED",
+    "summary": "digit phones, ungrounded vocab, injection imperatives, bad kinds, oversize labels all dropped; occurrences 1e30 clamped=True; NaN confidence defaulted to 0.5; bad detail keys dropped (verified above)"
+  },
+  {
+    "id": "D1.case-table",
+    "status": "BLOCKED",
+    "summary": "all 16 sanitizer case-table rows behaved as their recorded expectations (blocked or survived)"
+  },
+  {
+    "id": "D2.consent-gate",
+    "status": "BLOCKED",
+    "summary": "successful deterministic consent-OFF recompute: 0 provider requests (expected 0)"
+  },
+  {
+    "id": "D2.plaintext-egress",
+    "status": "BLOCKED",
+    "summary": "successful deterministic consent-ON recompute: 0 provider requests; narration-only dispatch is disabled, so historic consent does not disclose the corpus"
+  },
+  {
+    "id": "D2.missing-generation-limits",
+    "status": "INFO",
+    "summary": "recompute performs no provider generation; translation request limits/completion checks are covered separately by backend STT tests"
+  },
+  {
+    "id": "D2.endpoint-to-card-injection",
+    "status": "BLOCKED",
+    "summary": "rogue provider marker in stored encrypted insight=False; provider requests=0; checked a never-seeded marker rather than ordinary corpus vocabulary"
+  },
+  {
+    "id": "D2.slow-endpoint-key-lifetime",
+    "status": "BLOCKED",
+    "summary": "configured provider delay=4.0s; successful deterministic recompute=0.020s; provider dispatched=False; no provider-controlled plaintext lifetime on recompute"
+  }
+]

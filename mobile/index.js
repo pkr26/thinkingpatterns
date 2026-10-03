@@ -20,4 +20,4 @@ require("./installPolyfills.cjs"); // installs global Buffer/crypto (H-3)
 const { AppRegistry } = require("react-native");
 const App = require("./App").default;
 
-AppRegistry.registerComponent("Fathom", () => App);
+AppRegistry.registerComponent("MindPattern", () => App);

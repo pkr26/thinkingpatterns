@@ -1,0 +1,10 @@
+drift: aquasec/trivy:0.61.0@sha256:6967db29ce52: current
+drift: grafana/grafana:12.0.0@sha256:263cbefd5d9b: current
+drift: postgres:16-alpine@sha256:721873c34ceb: current
+drift: prom/alertmanager:v0.28.0@sha256:d5155cfac40a: current
+drift: prom/blackbox-exporter:v0.25.0@sha256:b04a9fef4fa0: current
+drift: prom/node-exporter:v1.9.1@sha256:d00a542e409e: current
+drift: prom/prometheus:v3.4.1@sha256:9abc6cf6aea7: current
+drift: python:3.14-slim@sha256:51dafde81dbd: tag moved (registry 0741d101873c12ab927e6f8653feb8862b9bd58771177acb1b885b95141f91b4); pin is 7d old (within the 90d window)
+drift: rclone/rclone:1.69.1@sha256:600f51856285: current
+drift: ALL CHECKS PASSED

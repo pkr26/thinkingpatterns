@@ -12,9 +12,10 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import React from "react";
 import { Alert, BackHandler } from "react-native";
 
-vi.mock("../../src/api/client", async () => {
+vi.mock("../../src/api/client", async (importOriginal) => {
+  const actualApi = await importOriginal<typeof import("../../src/api/client")>();
   const { makeApiMock, ApiError, ENTRY_PAGE_BYTES } = await import("../helpers/apiMock");
-  return { ApiError, api: makeApiMock(), ENTRY_PAGE_BYTES };
+  return { ...actualApi, ApiError, api: makeApiMock(), ENTRY_PAGE_BYTES };
 });
 
 const touchActivity = vi.fn();
@@ -732,6 +733,21 @@ describe("HistoryScreen edit (atomic replacement)", () => {
     expect(payload.sleep).toBe(2);
     expect(payload.tags).toEqual(["work", "family"]);
     await act(async () => root.unmount());
+  });
+
+  it("preserves additive metadata and the historical energy scale while editing only words", async () => {
+    const id = "metadata-preservation";
+    const original = { v: 2, text: "Metadata words", sentiment: -0.25, created_at: "2026-09-03T05:43:21.000Z", energy: 3, sleep: 2, tags: ["work"], tod: "night", extension: { private_note: "opaque metadata", scores: [1, 2, 3] }, nullable_extension: null };
+    vi.mocked(api.listEntries).mockResolvedValue([{ ...entryRow(id, original.text, "2026-09-03"), blob: encrypt(dataKey, Buffer.from(JSON.stringify(original)), buildAad("entry", "user-1", id)).toString("base64") }] as never);
+    const root = await render(<HistoryScreen navigation={nav} />);
+    await flush();
+    const editor = await openEditor(root, original.text);
+    await act(async () => { editor.props.onChangeText("Only the words changed"); });
+    await pressLabel(root, "Save changes");
+    await flush();
+    const [savedId, savedBlob] = vi.mocked(api.updateEntry).mock.calls.at(-1)!;
+    const edited = decryptEntry({ dataKey }, "user-1", savedId, savedBlob, 1);
+    expect(edited).toEqual({ ...original, text: "Only the words changed" });
   });
 
   it("malformed structured values degrade to absent at decrypt time — never a payload the server would reject", async () => {

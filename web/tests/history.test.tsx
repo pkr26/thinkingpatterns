@@ -4,7 +4,9 @@
  *  shipping one. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HistoryView } from "../src/views/History";
-import { encryptEntry } from "../src/crypto/patient";
+import { decryptEntry, encryptEntry } from "../src/crypto/patient";
+import { encrypt, toBase64 } from "../src/crypto/core";
+import { buildAad } from "../src/crypto/aad";
 import { observeEntryVersions, resetEntryVersionMirrors } from "../src/entryVersions";
 import { setKvBackendForTests, type KvBackend } from "../src/kvstore";
 import { vault } from "../src/vault";
@@ -70,6 +72,22 @@ afterEach(() => {
 });
 
 describe("HistoryView", () => {
+  it("an edit round trip preserves nested additive metadata, original writing time and historical energy", async () => {
+    const original = {v:2,text:"original journal",sentiment:0.2,created_at:"2026-09-25T08:12:34-07:00",energy:3,tod:"morning",future_metadata:{nested:["retain",{value:7}]}};
+    const blob = toBase64(await encrypt(DATA_KEY,new TextEncoder().encode(JSON.stringify(original)),buildAad("entry",USER,"metadata-entry","1")));
+    const rows = [{id:"row-metadata",client_entry_id:"metadata-entry",blob,entry_date:"2026-09-25",received_at:"2026-09-25T16:00:00Z",content_version:1}];
+    let saved: {blob:string;content_version:number}|undefined;
+    stubFetch((url,init) => {
+      if(url.startsWith(`${ORIGIN}/api/v1/entries?`))return !url.includes("offset=0")?entriesResponse([]):entriesResponse(rows);
+      if(url.endsWith("/entries/metadata-entry") && init.method==="PUT") {saved=JSON.parse(String(init.body));return jsonResponse({});}
+      return jsonResponse({detail:"unmatched"},{status:404});
+    });
+    const root = await render(<HistoryView />);await settle(40,4);await press(root,"Edit");await typeArea(root,"Your entry","edited journal");await press(root,"Save edit");
+    await vi.waitFor(() => expect(saved).toBeDefined());
+    const edited = await decryptEntry(DATA_KEY,USER,"metadata-entry",saved!.blob,saved!.content_version);
+    expect(edited).toMatchObject({...original,text:"edited journal"});
+    expect(saved!.content_version).toBe(2);
+  });
   it("lists decrypted entries with dates and mood reads", async () => {
     const rows = [
       await encryptedRow({ id: "e-a", date: "2026-09-24", text: "A calm walk by the river", sentiment: 0.6, version: 1 }),
@@ -257,7 +275,7 @@ describe("HistoryView windowed rendering + Map mapping (audit 2026-09-26 LOW)", 
     const total = 35;
     const rows: Record<string, unknown>[] = [];
     for (let n = 1; n <= total; n += 1) {
-      rows.push(await encryptedRow({ id: `e-${n}`, date: `2026-09-${String(n).padStart(2, "0")}`, text: `windowed entry number ${n}`, sentiment: 0, version: 1 }));
+      rows.push(await encryptedRow({ id: `e-${n}`, date: `2026-09-${String((n - 1) % 28 + 1).padStart(2, "0")}`, text: `windowed entry number ${n}`, sentiment: 0, version: 1 }));
     }
     stubFetch((url) => (!url.includes("offset=0") ? entriesResponse([]) : entriesResponse(rows)));
     const root = await render(<HistoryView />);

@@ -178,10 +178,8 @@ describe("2026-09-29 follow-up: password reveal toggle (F10)", () => {
     // FIRST child (the field__label span) for an exact comparison.
     const inputWithFieldLabel = (labelText: string) =>
       root.root.findAllByType("input").find((n) => {
-        let lbl = n.parent;
-        while (lbl && lbl.type !== "label") lbl = lbl.parent;
-        const first = lbl && Array.isArray(lbl.children) ? lbl.children[0] : null;
-        return first ? textOfNode(first) === labelText : false;
+        const label = root.root.findAllByType("label").find(node => node.props.htmlFor === n.props.id);
+        return label ? textOfNode(label) === labelText : false;
       })!;
     const mainPw = inputWithFieldLabel("Password")!;
     const repeatPw = inputWithFieldLabel("Repeat password")!;

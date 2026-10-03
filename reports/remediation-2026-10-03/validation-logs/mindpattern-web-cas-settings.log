@@ -1,0 +1,11 @@
+npm notice run mindpattern-web@0.1.0 npx
+npm notice run 'vitest' run tests/settings.test.tsx
+
+ RUN  v5.0.2 /Users/pradeepreddy/Desktop/mental_health_application/web
+
+
+ Test Files  1 passed (1)
+      Tests  28 passed (28)
+   Start at  10:12:54
+   Duration  23.70s (tests 99%, transform 1%)
+

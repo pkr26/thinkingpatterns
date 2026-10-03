@@ -552,11 +552,8 @@ def build_pool(patterns: Sequence[Pattern], language: str = "en") -> list[str]:
     """
     generic = GENERIC_QUESTIONS_ES if language == "es" else GENERIC_QUESTIONS
     pool: list[str] = []
-    for pattern in sorted(patterns, key=feedback_rank)[:MAX_PATTERN_QUESTIONS]:
-        if pattern_is_muted(pattern):
-            continue
-        if pattern_is_sensitive(pattern):
-            continue
+    eligible = [p for p in patterns if not pattern_is_muted(p) and not pattern_is_sensitive(p)]
+    for pattern in sorted(eligible, key=feedback_rank)[:MAX_PATTERN_QUESTIONS]:
         pool.extend(render_pattern_questions(pattern, language))
     pool.extend(generic)
     # Belt and braces: no rendered question may quote crisis content even

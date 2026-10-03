@@ -130,7 +130,30 @@ async def test_rekey_resume_rekeys_rows_written_after_the_interrupted_run():
 
         # Post-crash write under the OLD key: the rotation never completed,
         # so the client is still journaling under the current data key.
-        await emu.create_entry(http, "written after the crash", TODAY, "e-r3")
+        response = await http.post(
+            "/api/entries",
+            headers=emu.headers,
+            json={
+                "client_entry_id": "e-r3",
+                "entry_date": TODAY.isoformat(),
+                "blob": emu.encrypt_entry("written after the crash", TODAY, "e-r3"),
+            },
+        )
+        assert response.status_code == 409 and response.json()["code"] == "rekey_in_progress"
+        # Recreate a genuine historical legacy write directly: upgraded API
+        # admission now fences it, but existing installations still need repair.
+        async with http._transport.app.state.sessionmaker() as session:
+            session.add(
+                insights_module.Entry(
+                    user_id=emu.user_id,
+                    client_entry_id="e-r3",
+                    entry_date=TODAY,
+                    blob=base64.b64decode(
+                        emu.encrypt_entry("written after the crash", TODAY, "e-r3")
+                    ),
+                )
+            )
+            await session.commit()
 
         new_key = crypto.generate_key()
         counts = await emu.rekey(http, old_key=emu.data_key, new_key=new_key)

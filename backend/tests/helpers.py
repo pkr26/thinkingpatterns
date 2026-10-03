@@ -11,6 +11,7 @@ import base64
 import hashlib
 import json
 import os
+import uuid
 from datetime import date
 
 from httpx import AsyncClient
@@ -286,6 +287,29 @@ class ClientEmulator:
         """POST /processing/rekey — re-encrypt every stored blob old→new."""
         old_token = await self.open_processing_session_for(client, old_key)
         new_token = await self.open_processing_session_for(client, new_key)
+        payload = self.rekey_payload()
+        from app.security import sharing
+
+        consents = await client.get("/api/consents", headers=self.headers)
+        if consents.status_code == 200 and not payload.get("consent_wraps"):
+            payload["consent_wraps"] = []
+            for grant in consents.json():
+                if grant["status"] != "active":
+                    continue
+                ephemeral, wrapped = sharing.wrap_data_key(
+                    new_key,
+                    grant["therapist_wrap_pub_key"],
+                    self.user_id or "",
+                    grant["therapist_id"],
+                )
+                payload["consent_wraps"].append(
+                    {
+                        "consent_id": grant["id"],
+                        "therapist_wrap_pub_key": grant["therapist_wrap_pub_key"],
+                        "ephemeral_pub": ephemeral,
+                        "wrapped_key": wrapped,
+                    }
+                )
         response = await client.post(
             "/api/processing/rekey",
             headers={
@@ -294,9 +318,24 @@ class ClientEmulator:
                 "X-New-Processing-Token": new_token,
                 "X-Account-Verifier": verifier or self.auth_key_b64,
             },
+            json=payload,
         )
         assert response.status_code == 200, response.text
+        await self.login(client)
+        self._rekey_payload = None
         return response.json()
+
+    def rekey_payload(self) -> dict:
+        """Reuse the same credential transaction across interrupted attempts."""
+        existing = getattr(self, "_rekey_payload", None)
+        if existing is None:
+            existing = {
+                "operation_id": str(uuid.uuid4()),
+                "new_salt": self.salt_b64,
+                "new_verifier": self.auth_key_b64,
+            }
+            self._rekey_payload = existing
+        return existing
 
     async def rotate_credential(
         self,

@@ -176,12 +176,14 @@ async function fetchWithTimeout(
   sessionSignal?: AbortSignal,
 ): Promise<Response> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  const abortForSessionEnd = (): void => controller.abort();
+  let timer: ReturnType<typeof setTimeout>;
+  const cleanup = (): void => { clearTimeout(timer); sessionSignal?.removeEventListener("abort", abortForSessionEnd); };
+  const abortForSessionEnd = (): void => { controller.abort(); cleanup(); };
+  timer = setTimeout(() => { controller.abort(); cleanup(); }, REQUEST_TIMEOUT_MS);
   if (sessionSignal?.aborted) controller.abort();
   else sessionSignal?.addEventListener("abort", abortForSessionEnd, { once: true });
   try {
-    const response = await fetch(url, {
+    let response = await fetch(url, {
       ...init,
       // Credentials are supplied only in Authorization, never ambient
       // cookies.  Refusing redirects means a 30x cannot forward that bearer
@@ -205,17 +207,45 @@ async function fetchWithTimeout(
         throw new ApiError(0, "server returned an invalid response origin");
       }
     }
+    // 204 is already complete. Some proxy/alternate fetch responses expose
+    // an empty stream here; Response forbids constructing a body with 204.
+    // Never turn an acknowledged atomic commit into a transport failure.
+    if (response.status === 204) {
+      void response.body?.cancel().catch(() => undefined);
+      cleanup();
+      return response;
+    }
+    if (response instanceof Response && response.body) response = guardResponseStream(response,controller,cleanup,16 * 1024 * 1024);
+    for (const method of ["text", "json", "arrayBuffer", "blob", "formData"] as const) {
+      const original = response[method]?.bind(response);
+      if (!original) continue;
+      Object.defineProperty(response, method, { configurable: true, value: async () => {
+        try {
+          // Race consumption against abort even for alternate fetch implementations that ignore its signal.
+          const value = await new Promise<unknown>((resolve, reject) => {
+            const onAbort = (): void => reject(new ApiError(0, sessionSignal?.aborted ? "session ended" : "request timed out while reading response"));
+            if (controller.signal.aborted) { onAbort(); return; }
+            controller.signal.addEventListener("abort", onAbort, { once: true });
+            Promise.resolve(original()).then(resolve, reject).finally(() => controller.signal.removeEventListener("abort", onAbort));
+          });
+          if (controller.signal.aborted) throw new ApiError(0, "session ended or response timed out");
+          return value;
+        } finally { cleanup(); }
+      } });
+    }
+    if (response.status === 204 || response.body === null) {
+      // Mocks may omit body while still implementing json/text. Native empty bodies need no deadline.
+      if (response instanceof Response && response.body === null) cleanup();
+    }
     return response;
   } catch (err) {
+    cleanup();
     if (err instanceof ApiError) throw err;
     if (err instanceof Error && err.name === "AbortError") {
       if (sessionSignal?.aborted) throw new ApiError(0, "session ended");
       throw new ApiError(0, `request timed out after ${REQUEST_TIMEOUT_MS / 1000}s`);
     }
     throw err;
-  } finally {
-    clearTimeout(timer);
-    sessionSignal?.removeEventListener("abort", abortForSessionEnd);
   }
 }
 
@@ -272,7 +302,8 @@ async function requestWithResponse<T>(
     unauthorizedHandler?.();
   }
   if (response.status === 204) return { data: null as T, headers: response.headers };
-  const data = (await response.json().catch(() => ({}))) as { detail?: unknown; code?: unknown };
+  const data = (await response.json().catch(err => { if (!response.ok && err instanceof SyntaxError) return {}; throw err; })) as { detail?: unknown; code?: unknown };
+  if (session !== activeSession) throw new ApiError(0, "session ended");
   if (!response.ok) {
     throw new ApiError(
       response.status,
@@ -308,7 +339,7 @@ async function authRequest<T>(
     if (err instanceof ApiError) throw err;
     throw new ApiError(0, "server unreachable — check your connection");
   }
-  const data = (await response.json().catch(() => ({}))) as { detail?: unknown; code?: unknown };
+  const data = (await response.json().catch(err => { if (err instanceof SyntaxError) return {}; throw err; })) as { detail?: unknown; code?: unknown };
   if (!response.ok) {
     throw new ApiError(
       response.status,
@@ -401,7 +432,7 @@ export const auth = {
       return null;
     }
     if (response.status === 204) return null;
-    await response.json().catch(() => ({}));
+    await response.json().catch(err => { if (err instanceof SyntaxError) return {}; throw err; });
     return null;
   },
 };
@@ -409,6 +440,8 @@ export const auth = {
 // --- authenticated therapist endpoints (backend schemas) ----------------------
 
 export interface TherapistMe {
+  notes_keyring_blob?: string | null;
+  custody_version?: number;
   username: string;
   display_name: string;
   wrap_pub_key: string;
@@ -712,7 +745,7 @@ export const api = {
       throw new ApiError(0, "server unreachable — check your connection");
     }
     if (response.status === 204) return null;
-    const data = (await response.json().catch(() => ({}))) as { detail?: unknown; code?: unknown };
+    const data = (await response.json().catch(err => { if (err instanceof SyntaxError) return {}; throw err; })) as { detail?: unknown; code?: unknown };
     if (!response.ok) {
       throw new ApiError(
         response.status,
@@ -723,6 +756,10 @@ export const api = {
     return null;
   },
   me: () => request<TherapistMe>("GET", "/therapist/me"),
+  installNotesCustody: (payload: { verifier: string; operation_id: string; expected_custody_version: number; custody_version: number; notes_keyring_blob: string }) =>
+    request<null>("PUT", "/therapist/custody", payload),
+  changePasswordAtomic: (payload: { verifier: string; operation_id: string; expected_custody_version: number; custody_version: number; new_salt: string; new_verifier: string; wrap_pub_key: string; wrap_key_blob: string; notes_keyring_blob: string }) =>
+    request<null>("PUT", "/therapist/password", payload),
   /** The newest 100 of this therapist's own audited actions (B-4). */
   accessLog: () => request<AccessLogRow[]>("GET", "/therapist/access-log?limit=100"),
   patients: () => request<Patient[]>("GET", "/therapist/patients"),
@@ -882,7 +919,7 @@ export const api = {
       ),
     };
   },
-  createNote: (userId: string, payload: { client_note_id: string; pattern_pid?: string | null; blob: string }) =>
+  createNote: (userId: string, payload: { client_note_id: string; pattern_pid?: string | null; blob: string; custody_version?: number }) =>
     request<Note>("POST", `/therapist/patients/${encodeURIComponent(userId)}/notes`, payload),
   noteRevisions: (noteId: string) =>
     request<NoteRevision[]>("GET", `/therapist/notes/${encodeURIComponent(noteId)}/revisions`),
@@ -904,17 +941,19 @@ export const api = {
       base_version: number;
       revision_blobs: Array<{ revision_id: string; blob: string }>;
     }>,
+    custodyVersion?: number,
   ) =>
     request<null>(
       "PUT",
       "/therapist/notes/rekey",
-      { items },
+      { items, ...(custodyVersion === undefined ? {} : { custody_version: custodyVersion }) },
       { "X-Account-Verifier": verifierB64 },
     ),
-  updateNote: (noteId: string, blob: string, baseVersion: number) =>
+  updateNote: (noteId: string, blob: string, baseVersion: number, custodyVersion?: number) =>
     request<Note>("PATCH", `/therapist/notes/${encodeURIComponent(noteId)}`, {
       blob,
       base_version: baseVersion,
+      ...(custodyVersion === undefined ? {} : { custody_version: custodyVersion }),
     }),
   deleteNote: (noteId: string) => request<null>("DELETE", `/therapist/notes/${encodeURIComponent(noteId)}`),
   newPairingCode: () => request<{ code: string; expires_in: number }>("POST", "/therapist/pairing-codes"),
@@ -958,11 +997,11 @@ export const api = {
    *  while both passwords are derivable, THEN rotateCredential), the
    *  recovery form undoes that window, and the compromise rotation
    *  publishes a genuinely fresh keypair. */
-  rotateWrapKey: (verifierB64: string, wrapPubKeyB64: string, wrapKeyBlobB64: string) =>
+  rotateWrapKey: (verifierB64: string, wrapPubKeyB64: string, wrapKeyBlobB64: string, expectedCustodyVersion?: number) =>
     request<null>(
       "PUT",
       "/therapist/wrap-key",
-      { wrap_pub_key: wrapPubKeyB64, wrap_key_blob: wrapKeyBlobB64 },
+      { wrap_pub_key: wrapPubKeyB64, wrap_key_blob: wrapKeyBlobB64, ...(expectedCustodyVersion === undefined ? {} : { expected_custody_version: expectedCustodyVersion }) },
       { "X-Account-Verifier": verifierB64 },
     ),
   /** Optional therapist TOTP (2026-09-21 audit C-2/F-4, delivered
@@ -989,3 +1028,30 @@ export const api = {
   totpDisable: (verifierB64: string, code: string) =>
     request<null>("POST", "/account/totp/disable", { verifier: verifierB64, code }),
 };
+
+/** Fence every stream read, including callers consuming Response.body directly. */
+function guardResponseStream(response: Response, controller: AbortController, cleanup: () => void, maxBytes: number): Response {
+  if (!response.body) return response;
+  const reader = response.body.getReader(); let received = 0; let finished = false;
+  const stream = new ReadableStream<Uint8Array>({
+    start(target) {
+      const abort = () => { if (!finished) { finished = true; target.error(new ApiError(0,"session ended or response timed out")); void reader.cancel().catch(() => undefined); cleanup(); } };
+      if (controller.signal.aborted) abort(); else controller.signal.addEventListener("abort",abort,{once:true});
+    },
+    async pull(target) {
+      if (finished) return;
+      try {
+        const row = await reader.read();
+        if (finished || controller.signal.aborted) return;
+        if (row.done) { finished = true; target.close(); cleanup(); return; }
+        received += row.value.byteLength;
+        if (received > maxBytes) throw new ApiError(0,"Server response exceeded this client's safe size limit.");
+        target.enqueue(row.value);
+      } catch (err) { if (!finished) { finished = true; target.error(err); void reader.cancel().catch(() => undefined); cleanup(); } }
+    },
+    cancel(reason) { finished = true; cleanup(); return reader.cancel(reason); },
+  });
+  const guarded = new Response(stream,{ status:response.status,statusText:response.statusText,headers:response.headers });
+  Object.defineProperty(guarded,"url",{value:response.url});
+  return guarded;
+}

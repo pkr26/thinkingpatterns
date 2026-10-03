@@ -17,7 +17,7 @@
  */
 import { buildAad } from "./crypto/aad";
 import { decrypt, encrypt, fromBase64, toBase64, zeroize, type Bytes } from "./crypto/core";
-import { kv } from "./kvstore";
+import { kv,type WritePermit } from "./kvstore";
 import { localDateISO } from "./dates";
 
 export interface MoodDay {
@@ -80,11 +80,11 @@ async function read(dataKey: Bytes, userId: string): Promise<MoodDay[]> {
   }
 }
 
-async function write(dataKey: Bytes, userId: string, days: MoodDay[]): Promise<void> {
+async function write(dataKey: Bytes, userId: string, days: MoodDay[],permit:WritePermit): Promise<void> {
   const payload = new TextEncoder().encode(JSON.stringify(days.slice(-MAX_DAYS)));
   try {
     const blob = await encrypt(dataKey, payload, buildAad("moodlog", userId));
-    await kv.setItem(key(userId), toBase64(blob));
+    await kv.setItem(key(userId), toBase64(blob),permit);
   } finally {
     zeroize(payload);
   }
@@ -96,9 +96,10 @@ async function write(dataKey: Bytes, userId: string, days: MoodDay[]): Promise<v
  *  change. Full-fidelity via the private read/write (recentMoods slices).
  *  A failure propagates so the rotation falls back to the old clear. */
 export async function rewrapMoodLog(oldKey: Bytes, newKey: Bytes, userId: string): Promise<void> {
+  const permit=await kv.captureWritePermit(userId,newKey);
   const days = await read(oldKey, userId);
   if (days.length === 0) return;
-  await write(newKey, userId, days);
+  await write(newKey, userId, days,permit);
 }
 
 /** Record (or same-day replace) one mood value, optionally with energy. */
@@ -112,6 +113,7 @@ export async function recordMood(
   const keyCopy = new Uint8Array(new ArrayBuffer(dataKey.length));
   keyCopy.set(dataKey);
   try {
+    const permit=await kv.captureWritePermit(userId,keyCopy);
     await serialized(async () => {
       const { days } = { days: await read(keyCopy, userId) };
       const clean = Math.max(-1, Math.min(1, value));
@@ -126,7 +128,7 @@ export async function recordMood(
       const day: MoodDay = cleanEnergy === undefined ? { date, value: clean } : { date, value: clean, energy: cleanEnergy };
       if (existing >= 0) days[existing] = day;
       else days.push(day);
-      await write(keyCopy, userId, days);
+      await write(keyCopy, userId, days,permit);
     });
   } finally {
     zeroize(keyCopy);
@@ -172,10 +174,11 @@ export async function removeMoodDay(dataKey: Bytes, userId: string, date: string
   const keyCopy = new Uint8Array(new ArrayBuffer(dataKey.length));
   keyCopy.set(dataKey);
   try {
+    const permit=await kv.captureWritePermit(userId,keyCopy);
     await serialized(async () => {
       const days = await read(keyCopy, userId);
       const next = days.filter((d) => d.date !== date);
-      if (next.length !== days.length) await write(keyCopy, userId, next);
+      if (next.length !== days.length) await write(keyCopy, userId, next,permit);
     });
   } finally {
     zeroize(keyCopy);

@@ -37,7 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..cache import make_rate_limiter
 from ..db import rowcount as db_rowcount
-from ..deps import ApiError, get_session, require_regular_user
+from ..deps import ensure_no_rekey, ApiError, get_session, require_regular_user
 from ..locks import UserLocks, lifecycle_locks
 from ..models import Measure, User
 from ..schemas import MeasureCreate, MeasureDeleteResponse, MeasureOut
@@ -190,6 +190,7 @@ async def _fresh_active_measure_user(
     fresh = await session.get(User, user_id, populate_existing=True)
     if fresh is None or not fresh.is_active or fresh.token_epoch != expected_epoch:
         raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+    await ensure_no_rekey(session, user_id)
     return fresh
 
 

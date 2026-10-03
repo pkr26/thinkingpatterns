@@ -1,0 +1,39 @@
+........................................................................ [  3%]
+........................................................................ [  7%]
+...................................s.................................... [ 10%]
+........................................................................ [ 14%]
+........................................................................ [ 18%]
+........................................................................ [ 21%]
+........................................................................ [ 25%]
+........................................................................ [ 29%]
+........................................................................ [ 32%]
+........................................................................ [ 36%]
+........................................................................ [ 40%]
+........................................................................ [ 43%]
+........................................................................ [ 47%]
+........................................................................ [ 51%]
+........................................................................ [ 54%]
+........................................................................ [ 58%]
+........................................................................ [ 61%]
+........................................................................ [ 65%]
+........................................................................ [ 69%]
+........................................................................ [ 72%]
+........................................................................ [ 76%]
+........................................................................ [ 80%]
+........................................................................ [ 83%]
+................s....................................................... [ 87%]
+........................................................................ [ 91%]
+........................................................................ [ 94%]
+........................................................................ [ 98%]
+...............................                                          [100%]
+=============================== warnings summary ===============================
+tests/test_coverage_gaps.py::test_delete_account_for_deactivated_account_is_404
+  /Users/pradeepreddy/Desktop/mental_health_application/backend/.venv/lib/python3.14/site-packages/asyncpg/connection.py:392: SAWarning: The garbage collector is trying to clean up non-checked-in connection <AdaptedConnection <asyncpg.connection.Connection object at 0x137b6c7d0>>, which will be terminated.  Please ensure that SQLAlchemy pooled connections are returned to the pool explicitly, either by calling ``close()`` or by using appropriate context managers to manage their lifecycle.
+    async def _get_statement(
+
+tests/test_mutation_round4_pins.py::test_wrap_key_rotation_refuses_deactivated_accounts
+  /Users/pradeepreddy/Desktop/mental_health_application/backend/tests/conftest.py:137: SAWarning: The garbage collector is trying to clean up non-checked-in connection <AdaptedConnection <asyncpg.connection.Connection object at 0x1506965d0>>, which will be terminated.  Please ensure that SQLAlchemy pooled connections are returned to the pool explicitly, either by calling ``close()`` or by using appropriate context managers to manage their lifecycle.
+    await conn.execute(table.delete())
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1973 passed, 2 skipped, 2 warnings in 574.07s (0:09:34)

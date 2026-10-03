@@ -1,0 +1,11 @@
+npm notice run mindpattern-mobile@1.0.0 npx
+npm notice run 'vitest' run tests/localWriteGeneration.test.ts
+
+ RUN  v4.1.11 /Users/pradeepreddy/Desktop/mental_health_application/mobile
+
+
+ Test Files  1 passed (1)
+      Tests  29 passed (29)
+   Start at  12:02:31
+   Duration  266ms (transform 137ms, setup 59ms, import 122ms, tests 26ms, environment 0ms)
+

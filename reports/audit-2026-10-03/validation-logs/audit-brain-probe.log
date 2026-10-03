@@ -1,0 +1,28 @@
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.prefix, expected /Users/pradeepreddy/Desktop/mental_health_application/.venv, got /Users/pradeepreddy/Desktop/mental_health_application/backend/../.venv
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.exec_prefix, expected /Users/pradeepreddy/Desktop/mental_health_application/.venv, got /Users/pradeepreddy/Desktop/mental_health_application/backend/../.venv
+entries: 60  active days: 60
+
+=== STORED PATTERNS (final run 2026-09-04) ===
+  [SURFACED] fading    link               'family'                                         occ=10 lower delta=0.254 p=0.004182
+  [SURFACED] emerging  mood_correlation   'work'                                           occ=18 lower delta=0.272 p=0.001234
+  [SURFACED] emerging  mood_shift         'recent mood'                                    occ=5
+  [SURFACED] emerging  rumination         'big deadline pressure at work again boss email' occ=10
+  [SURFACED] emerging  rumination         "i can't sleep my mind won't stop i am so tired" occ=7
+  [SURFACED] emerging  recurring_phrase   'visited the family mom and dad were there'      occ=12
+  [SURFACED] emerging  rumination         'hard shift at work another late meeting and a ' occ=8
+  [hidden  ] candidate temporal           'family'                                         occ=12
+  [SURFACED] emerging  temporal           'work'                                           occ=18
+  [SURFACED] emerging  topic              'guitar'                                         occ=11
+
+=== VERDICT vs ground truth (surfaced-only, item 13) ===
+  PASS  A temporal:work (Sundays, surfaced)
+  PASS  A mood_correlation:work lower (within-weekday, surfaced)
+  PASS  B rumination (THE sleep cluster, surfaced)
+  PASS  C mood_shift:lower (surfaced)
+  PASS  D topic:guitar (rising, varied phrasing, surfaced)
+  PASS  E link:family lower (surfaced)
+  PASS  F inertia (mixed corpus, surfaced)
+  PASS  G instability (mixed corpus, surfaced)
+  PASS  H no confound/false associations
+  PASS  I tag-less genuine tie surfaces (text-scored mood path)
+  PASS  J tag-less lexical overlap alone mints nothing (tautology broken)

@@ -10,9 +10,11 @@
  * identities every render used to refire those effects — double fetch and
  * double decrypt per mount.
  */
+import { retryPendingAccountErasures } from "./accountErasure";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
 import { api, setOriginChangeHandler, setUnauthorizedHandler } from "./api/client";
+import { localWriteScopeEpoch } from "./localWriteGuard";
 import { vault } from "./vault";
 import { clearUnlockProof } from "./unlockProof";
 import { clearRecomputeStamp } from "./brainSync";
@@ -24,6 +26,7 @@ import { clearLastMeasureDate, clearMeasureReminderPrefs } from "./measureRemind
 import { disableBiometricUnlock } from "./biometricUnlock";
 import { cancelDailyReminder, cancelMeasureReminder } from "./nativeFeatures";
 import { loadHapticsSetting } from "./haptics";
+import type { JournalDraft } from "./journalDraft";
 
 /** A 401-forced lock unmounts the Entry screen mid-draft; the plaintext
  *  waits here (memory-only, account-bound) so re-unlocking restores it for
@@ -31,15 +34,26 @@ import { loadHapticsSetting } from "./haptics";
  *  must not destroy an unsent draft — and is wiped only on sign-out /
  *  account switch / account deletion (all of which run signOut). A
  *  different account on the same device never sees it. */
-let stashedDraft: { userId: string; text: string } | null = null;
+let stashedDraft: { userId: string; text: string; journal?: JournalDraft; origin?: string } | null = null;
 /** Sign-out and origin changes intentionally unmount the editor. Its cleanup
  * must not re-stash plaintext after we just wiped it. A normal 401 lock still
  * permits a draft restore after the same account re-unlocks. */
 let mayStashDraft = true;
 
 /** Stash an in-progress draft before a vault lock unmounts the editor. */
-export function stashDraft(userId: string, text: string): void {
-  if (mayStashDraft) stashedDraft = { userId, text };
+export function stashDraft(userId: string, text: string, journal?: JournalDraft, origin?: string): void {
+  if (mayStashDraft) stashedDraft = { userId, text, journal: journal ? { ...journal, tags: [...journal.tags] } : undefined, origin };
+}
+/** Complete in-process editor fallback; Question's text-only bridge keeps
+ * its existing semantics. Never import a fallback from another server. */
+export function peekStashedJournalDraft(userId: string, origin: string): JournalDraft | null {
+  const record = stashedDraft;
+  return record?.userId === userId && record.origin === origin && record.journal
+    ? { ...record.journal, tags: [...record.journal.tags] } : null;
+}
+export function clearStashedJournalDraft(userId: string, origin: string, editorId: string, revision: number): void {
+  const draft = peekStashedJournalDraft(userId, origin);
+  if (draft && draft.editorId === editorId && draft.revision <= revision) stashedDraft = null;
 }
 
 /** True when a draft is stashed for THIS account (does not consume it). */
@@ -56,8 +70,8 @@ export function peekDraft(userId: string): string | null {
 /** Consumes the stash ONLY for the account it was written under — the
  *  account check succeeds BEFORE the stash is nulled, so a mismatched (or
  *  failed) restore attempt does not silently drop the draft. */
-export function takeStashedDraft(userId: string): string | null {
-  if (stashedDraft && stashedDraft.userId === userId) {
+export function takeStashedDraft(userId: string, origin?: string): string | null {
+  if (stashedDraft && stashedDraft.userId === userId && (origin === undefined || stashedDraft.origin === undefined || stashedDraft.origin === origin)) {
     const { text } = stashedDraft;
     stashedDraft = null;
     return text;
@@ -85,11 +99,15 @@ function sanitizeUnlockDays(value: unknown): number | null {
   return value;
 }
 
+export interface ProgressRead { owner: string; generation: number; request: number }
 interface SessionState {
   authStatus: AuthStatus;
   /** True only while the key vault holds this session's derived keys. */
   unlocked: boolean;
   activeDays: number;
+  /** Zero is meaningful only after a valid authoritative server response. */
+  activeDaysKnown: boolean;
+  activeDaysLoading: boolean;
   unlockDays: number;
   markLoggedIn: () => void;
   setUnlockDays: (days: number) => void;
@@ -101,7 +119,9 @@ interface SessionState {
    *  round-trip: the Insights screen already holds that response, and
    *  issuing a second GET per load doubled latency and rate budget
    *  (audit L-59). Server value, sanitized like refreshActiveDays does. */
-  applyActiveDays: (days: unknown) => void;
+  beginProgressRead: () => Promise<ProgressRead | null>;
+  finishProgressRead: (read: ProgressRead) => void;
+  applyActiveDays: (days: unknown, read: ProgressRead) => void;
   signOut: () => Promise<void>;
 }
 
@@ -109,19 +129,29 @@ const SessionContext = createContext<SessionState>({
   authStatus: "loading",
   unlocked: false,
   activeDays: 0,
+  activeDaysKnown: false,
+  activeDaysLoading: false,
   unlockDays: 30,
   markLoggedIn: () => {},
   setUnlockDays: () => {},
   touchActivity: () => {},
   refreshActiveDays: async () => {},
   applyActiveDays: () => {},
+  beginProgressRead: async () => null,
+  finishProgressRead: () => {},
   signOut: async () => {},
 });
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [authStatus, setAuthStatus] = useState<AuthStatus>("loading");
   const [unlocked, setUnlocked] = useState(vault.isUnlocked());
+  const lastProgressResume = useRef({ auth: "loading" as AuthStatus, unlocked: false });
   const [activeDays, setActiveDays] = useState(0);
+  const [activeDaysKnown, setActiveDaysKnown] = useState(false);
+  const [activeDaysLoading, setActiveDaysLoading] = useState(false);
+  const progressOwner = useRef<string | null>(null);
+  const accountGeneration = useRef(0);
+  const progressRequest = useRef(0);
   const [unlockDays, setUnlockDays] = useState(30);
 
   /** (Re)arm the inactivity lock: drop any pending timer and start a fresh
@@ -139,6 +169,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
+    const bootGeneration = accountGeneration.current, bootScope = localWriteScopeEpoch();
+    const ownsBootAccount = () => !cancelled && bootGeneration === accountGeneration.current && bootScope === localWriteScopeEpoch();
     // Any authenticated 401 (entry save, insights fetch, question fetch,
     // queue flush — not just the Entry screen) locks the vault app-wide;
     // the client invokes this hook before the ApiError reaches the caller.
@@ -148,6 +180,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     // erased disk credentials before invoking this hook; lock memory and
     // suppress editor-unmount draft persistence before the new URL lands.
     setOriginChangeHandler(() => {
+      accountGeneration.current++;
       abortInFlightFlush();
       // 2026-10-01 audit H1: an in-flight AUDIO flush must stop too — its
       // rows are origin-pinned and would otherwise refuse item-by-item.
@@ -157,16 +190,18 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       vault.lock();
       setAuthStatus("loggedOut");
       setActiveDays(0);
+      progressOwner.current = null; setActiveDaysKnown(false); setActiveDaysLoading(false);
     });
     api.isLoggedIn().then((logged) => {
       // Stryker disable next-line ConditionalExpression: React 18 made setState on an unmounted component a silent no-op, so skipping the cancelled guard is unobservable
-      if (!cancelled) setAuthStatus(logged ? "loggedIn" : "loggedOut");
+      if (ownsBootAccount()) setAuthStatus(logged ? "loggedIn" : "loggedOut");
     });
     // Audit fix 19 (2026-09-21): the haptics preference loads at session
     // start, not on the first Settings visit — the module defaults to
     // enabled, so a stored "off" (the sensory-anxiety setting) pulsed after
     // every cold start until Settings happened to be opened.
     void loadHapticsSetting();
+    void retryPendingAccountErasures().catch(() => {});
     // Local-reminder reconciliation (2026-09-19), once per session start:
     // align the native schedule with the stored per-account preference —
     // disabled/absent cancels any stale schedule, enabled reschedules.
@@ -176,6 +211,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     api
       .getUserId()
       .then((userId) => {
+        if (!ownsBootAccount()) return;
         if (userId) void syncReminderSchedule(userId);
         // The MBC check-in nudge rides the same session-start
         // reconciliation (2026-09-27): opt-in + cadence decide, and a
@@ -189,7 +225,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       .then((m) => {
         // Stryker disable next-line OptionalChaining: with a nullish m the mutant's TypeError lands in the .catch(() => {}) below and keeps the same 30-day default
         const days = sanitizeUnlockDays(m?.unlock_days);
-        if (!cancelled && days !== null) setUnlockDays(days);
+        if (!cancelled && bootScope === localWriteScopeEpoch() && days !== null) setUnlockDays(days);
       })
       .catch(() => {}); // offline / old server: keep the 30-day default
     // Cold restart: the bearer token survives on disk but the key vault
@@ -210,8 +246,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         // offline queue (and, since wave 2 2026-09-30, the kept-recording
         // queue). Ciphertext-only uploads — a locked vault is fine — and
         // flushQueueOnReconnect throttles foreground/background flaps.
-        void flushQueueOnReconnect();
-        void flushAudioQueue().catch(() => {});
+        void flushQueueOnReconnect().then(() => flushAudioQueue()).catch(() => {});
         // E-10 (2026-09-21): an always-open app used to keep a stale
         // activeDays count across midnight (it refreshed only at
         // login/unlock and on insights loads). Foregrounding re-reads the
@@ -220,6 +255,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       }
     });
     return () => {
+      accountGeneration.current++;
       // Stryker disable next-line BooleanLiteral: React 18 treats a post-unmount setState as a silent no-op, so never marking cancelled is unobservable
       cancelled = true;
       setUnauthorizedHandler(null);
@@ -233,6 +269,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
      [touchActivity]);
 
   const markLoggedIn = useCallback((): void => {
+    accountGeneration.current++;
     mayStashDraft = true;
     setAuthStatus("loggedIn");
   },
@@ -240,89 +277,117 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   []);
 
   const refreshActiveDays = useCallback(async (): Promise<void> => {
+    const generation = accountGeneration.current;
+    const request = ++progressRequest.current;
+    setActiveDaysLoading(true);
     try {
+      const owner = await api.getUserId();
+      if (generation !== accountGeneration.current || request !== progressRequest.current) return;
+      if (!owner) { progressOwner.current = null; setActiveDays(0); setActiveDaysKnown(false); return; }
+      if (progressOwner.current !== null && progressOwner.current !== owner) {
+        setActiveDays(0); setActiveDaysKnown(false);
+      }
+      progressOwner.current = owner;
       const insights = await api.insights();
+      const currentOwner = await api.getUserId();
+      if (generation !== accountGeneration.current || request !== progressRequest.current || currentOwner !== owner) return;
       // Stryker disable next-line LogicalOperator,OptionalChaining: Number.isFinite never coerces, so X || isFinite(X) agrees with X && isFinite(X) on every input; and with a nullish insights the mutant's TypeError is caught below, keeping the last value like the optional chain does
-      if (typeof insights?.active_days === "number" && Number.isFinite(insights.active_days)) {
-        setActiveDays(insights.active_days);
+      if (typeof insights?.active_days === "number" && Number.isFinite(insights.active_days) && insights.active_days >= 0) {
+        setActiveDays(Math.min(3650, Math.floor(insights.active_days)));
+        setActiveDaysKnown(true);
       }
     } catch {
       // offline / not yet computed — keep last known value
+    } finally {
+      if (generation === accountGeneration.current && request === progressRequest.current) setActiveDaysLoading(false);
     }
   }, // Stryker disable next-line ArrayDeclaration: a string-literal element is reference-stable, so React's Object.is dep comparison never sees a change — identical to []
      []);
 
-  /** The L-59 half of refreshActiveDays: adopt an already-fetched count.
-   *  Server-controlled input gets the same type/range refusal as above. */
-  const applyActiveDays = useCallback((days: unknown): void => {
+  // A saved bearer may boot directly to Unlock. The provider owns progress
+  // hydration, so a gate unmount or a missed foreground event cannot leave
+  // a manufactured zero after a verified unlock. No data key is sent here.
+  useEffect(() => {
+    const previous = lastProgressResume.current;
+    lastProgressResume.current = { auth: authStatus, unlocked };
+    if (authStatus === "loggedIn" && (previous.auth !== "loggedIn" || (unlocked && !previous.unlocked))) void refreshActiveDays();
+  }, [authStatus, unlocked, refreshActiveDays]);
+
+  /** Capture ownership and ordering before a screen fetches metadata. */
+  const beginProgressRead = useCallback(async (): Promise<ProgressRead | null> => {
+    const generation = accountGeneration.current, request = ++progressRequest.current;
+    setActiveDaysLoading(true);
+    let read: ProgressRead | null = null;
+    try {
+      const owner = await api.getUserId();
+      if (generation !== accountGeneration.current || request !== progressRequest.current) return null;
+      if (!owner) { progressOwner.current = null; setActiveDays(0); setActiveDaysKnown(false); return null; }
+      if (progressOwner.current !== null && progressOwner.current !== owner) { setActiveDays(0); setActiveDaysKnown(false); }
+      progressOwner.current = owner;
+      read = { owner, generation, request }; return read;
+    } catch { return null; }
+    finally { if (!read && generation === accountGeneration.current && request === progressRequest.current) setActiveDaysLoading(false); }
+  }, []);
+  const finishProgressRead = useCallback((read: ProgressRead): void => {
+    if (read.generation === accountGeneration.current && read.request === progressRequest.current && read.owner === progressOwner.current) setActiveDaysLoading(false);
+  }, []);
+  /** Adopt only the response belonging to the captured account/request.
+   * Server-controlled values still receive the same type/range refusal. */
+  const applyActiveDays = useCallback((days: unknown, read: ProgressRead): void => {
+    if (!read || read.generation !== accountGeneration.current || read.request !== progressRequest.current || read.owner !== progressOwner.current) return;
     if (typeof days !== "number" || !Number.isFinite(days) || days < 0) return;
+    progressRequest.current++;
     setActiveDays(Math.min(3650, Math.floor(days)));
+    setActiveDaysKnown(true); setActiveDaysLoading(false);
   }, // Stryker disable next-line ArrayDeclaration: a string-literal element is reference-stable, so React's Object.is dep comparison never sees a change — identical to []
      []);
 
   const signOut = useCallback(async (): Promise<void> => {
-    // Coordinate with any in-flight queue flush FIRST: the uploads below
-    // (logout revocation + session clear) turn its pending requests into
-    // 401s, and that self-inflicted 401 must REQUEUE the current user's
-    // items — not move them to the rejected store (see abortInFlightFlush).
-    abortInFlightFlush();
-    // Best-effort per-device sign-out (2026-09-26: the server revokes THIS
-    // bearer's jti — other devices' sessions stay valid; the account-wide
-    // epoch bump now happens only on credential rotation / deletion);
-    // local cleanup proceeds regardless of connectivity.
-    try {
-      await api.logout();
-    } catch {
-      // offline: the token also dies at natural expiry
-    }
-    // The stashed draft is plaintext in the JS heap: it must not outlive
-    // the session it belongs to (shared-device confidentiality).
+    const generation = ++accountGeneration.current;
+    const scope = localWriteScopeEpoch();
+    const knownOwner = vault.ownerUserId();
+    const isCurrent = () => generation === accountGeneration.current && scope === localWriteScopeEpoch();
+    progressOwner.current = null; setActiveDaysKnown(false); setActiveDaysLoading(false); setActiveDays(0);
+    // Plaintext is removed immediately, before a possibly offline logout.
+    // An old editor's unmount may not re-stash it into the closed session.
     mayStashDraft = false;
     stashedDraft = null;
+    abortInFlightFlush();
+    abortInFlightAudioFlush();
     vault.lock();
-    // Local account hygiene (shared-device confidentiality): the cached
-    // KDF salt, the offline-unlock proof and the recompute stamp are what
-    // let a LATER user of this device interact with the previous account's
-    // credentials — they are wiped here. The offline queue is deliberately
-    // KEPT: its entries are ciphertext, account-bound by mechanism
-    // (flushQueue skips foreign userIds), and wiping them would destroy
-    // the signed-out user's unsynced entries. Only full account deletion
-    // (SettingsScreen) clears the queue.
-    const userId = await api.getUserId();
-    const username = await api.getUsername();
-    if (userId) {
-      await clearRecomputeStamp(userId).catch(() => {});
-      await clearUnlockProof(userId).catch(() => {});
-      await clearCrisisDialogStamp(userId).catch(() => {});
-      // Re-audit 2026-09-27 (L): the measure-cadence stamp and the measure
-      // reminder prefs are per-account traces like the crisis-dialog stamp
-      // above — on a shared device they must not outlive the session they
-      // belonged to (who signs in next should not inherit the previous
-      // user's cadence clock or nudge settings).
-      await clearLastMeasureDate(userId).catch(() => {});
-      await clearMeasureReminderPrefs(userId).catch(() => {});
-      // M-19 (2026-09-20 audit): the biometric data-key wrap must not
-      // outlive the session it belonged to — sign-out hygiene is exactly
-      // what biometricUnlock.ts documents for this call. Currently inert
-      // security-wise (unwrapping needs a live session + matching userId),
-      // but the sealed key sitting in the Keychain indefinitely after
-      // sign-out on a shared device contradicts that module's contract.
-      // Best-effort: a Keychain failure must not fail the sign-out.
-      await disableBiometricUnlock(userId).catch(() => {});
-    }
-    // M-19: the daily reminder is device-global, so it is cancelled with or
-    // without a resolvable account id — the shared-device user must not be
-    // nudged by a signed-out session (account deletion already did this).
-    // The measure check-in nudge (2026-09-27) rides the same hygiene.
-    await cancelDailyReminder().catch(() => {});
-    await cancelMeasureReminder().catch(() => {});
-    // The cached key envelope (v2 offline-unlock material) is account
-    // material like the salt — wiped with the session.
-    if (username) await api.clearCachedKeyEnvelope(username).catch(() => {});
-    if (username) await api.clearCachedSalt(username).catch(() => {});
-    await api.clearSession();
     setAuthStatus("loggedOut");
-    setActiveDays(0);
+    // Snapshot the original credential identity before network revocation.
+    // A replacement login/origin invalidates this entire continuation.
+    const [resolvedOwner, username] = await Promise.all([api.getUserId().catch(() => null), api.getUsername().catch(() => null)]);
+    if (!isCurrent()) return;
+    const userId = resolvedOwner ?? knownOwner;
+    try { await api.logout(); } catch { /* offline: the old token expires naturally */ }
+    if (!isCurrent()) return;
+    // Retain unsynced ciphertext. Only the original account's local proof,
+    // preference and device reminder traces are sign-out cleanup targets.
+    const clean = async (operation: () => Promise<unknown>): Promise<boolean> => {
+      if (!isCurrent()) return false;
+      await operation().catch(() => {});
+      return isCurrent();
+    };
+    if (userId) {
+      if (!(await clean(() => clearRecomputeStamp(userId)))) return;
+      if (!(await clean(() => clearUnlockProof(userId)))) return;
+      if (!(await clean(() => clearCrisisDialogStamp(userId)))) return;
+      if (!(await clean(() => clearLastMeasureDate(userId)))) return;
+      if (!(await clean(() => clearMeasureReminderPrefs(userId)))) return;
+      if (!(await clean(() => disableBiometricUnlock(userId)))) return;
+    }
+    if (!(await clean(cancelDailyReminder))) return;
+    if (!(await clean(cancelMeasureReminder))) return;
+    if (username) {
+      if (!(await clean(() => api.clearCachedKeyEnvelope(username)))) return;
+      if (!(await clean(() => api.clearCachedSalt(username)))) return;
+    }
+    if (!isCurrent()) return;
+    // clearSession itself serializes credential mutation and rejects if a
+    // newer account/origin takes ownership while its native writes await.
+    await api.clearSession();
   }, // Stryker disable next-line ArrayDeclaration: a string-literal element is reference-stable, so React's Object.is dep comparison never sees a change — identical to []
      []);
 
@@ -333,15 +398,19 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       authStatus,
       unlocked,
       activeDays,
+      activeDaysKnown,
+      activeDaysLoading,
       unlockDays,
       markLoggedIn,
       setUnlockDays,
       touchActivity,
       refreshActiveDays,
       applyActiveDays,
+      beginProgressRead,
+      finishProgressRead,
       signOut,
     }),
-    [authStatus, unlocked, activeDays, unlockDays, markLoggedIn, touchActivity, refreshActiveDays, applyActiveDays, signOut],
+    [authStatus, unlocked, activeDays, activeDaysKnown, activeDaysLoading, unlockDays, markLoggedIn, touchActivity, refreshActiveDays, applyActiveDays, beginProgressRead, finishProgressRead, signOut],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

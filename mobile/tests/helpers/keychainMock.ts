@@ -28,6 +28,12 @@ export const ACCESS_CONTROL = {
   BIOMETRY_CURRENT_SET: "BiometryCurrentSet",
 } as const;
 
+export async function hasGenericPassword(options?: { service?: string }): Promise<boolean> {
+  if (failReads) throw new Error("keychain unavailable");
+  return credentials.has(options?.service ?? "");
+}
+export function __getReadCount(): number { return getCalls.length; }
+
 export async function getSupportedBiometryType(): Promise<string | null> {
   return biometryType;
 }

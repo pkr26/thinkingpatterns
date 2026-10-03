@@ -187,7 +187,13 @@ export function measureReminderDue(
  * an invitation). Local-time semantics throughout, the nextReminderFireTime
  * discipline: a slot already past rolls to tomorrow.
  */
-export function nextMeasureReminderFireTime(now: Date): Date {
+export function nextMeasureReminderFireTime(now: Date, lastCompletedISO?: string | null, intervalWeeks = DEFAULT_MEASURE_INTERVAL_WEEKS): Date {
+  if (lastCompletedISO && /^\d{4}-\d{2}-\d{2}$/.test(lastCompletedISO) && MEASURE_INTERVAL_WEEKS.includes(intervalWeeks)) {
+    const due = localMidnight(lastCompletedISO);
+    due.setDate(due.getDate() + intervalWeeks * 7);
+    due.setHours(20, 0, 0, 0);
+    if (due.getTime() > now.getTime()) return due;
+  }
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 20, 0, 0, 0);
   if (today.getTime() > now.getTime()) return today;
   return new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 20, 0, 0, 0);

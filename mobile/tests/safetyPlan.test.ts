@@ -85,10 +85,12 @@ describe("safetyPlan: encrypted round-trip", () => {
 });
 
 describe("safetyPlan: hostile and oversized records", () => {
-  it("a field over the 4000-character bound reads as absent", async () => {
+  it("a legacy plan above the new write bound remains readable for repair", async () => {
     const hostile = JSON.stringify({ ...emptySafetyPlan(), copingStrategies: "x".repeat(4001) });
     await seedSlot(USER, dataKey, hostile);
-    expect(await loadSafetyPlan(dataKey, USER)).toBeNull();
+    expect((await loadSafetyPlan(dataKey, USER))?.copingStrategies).toHaveLength(4001);
+    await expect(saveSafetyPlan(dataKey, USER, { ...emptySafetyPlan(), copingStrategies: "x".repeat(4001) })).rejects.toThrow("4000");
+    expect((await loadSafetyPlan(dataKey, USER))?.copingStrategies).toHaveLength(4001);
   });
 
   it("a field of exactly 4000 characters is accepted (the inclusive bound)", async () => {

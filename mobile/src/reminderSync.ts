@@ -20,10 +20,10 @@
  * (see its own header below).
  */
 import { getReminderPrefs } from "./reminders";
+import { assertAccountActive } from "./localRekey";
 import {
   getMeasureReminderPrefs,
   lastMeasureCompletedOn,
-  measureReminderDue,
   nextMeasureReminderFireTime,
 } from "./measureReminders";
 import {
@@ -43,6 +43,7 @@ export async function syncReminderSchedule(userId: string): Promise<boolean> {
     // below re-establishes the preference's own schedule.
     await migrateOrphanedReminderNotifications(userId);
     const prefs = await getReminderPrefs(userId);
+    assertAccountActive(userId);
     // independent audit 2026-09-27 (P3): the userId rides the cancel so a
     // fallback cancel-all can re-schedule the surviving measure nudge.
     if (!prefs.enabled) return await cancelDailyReminder(userId);
@@ -56,10 +57,9 @@ export async function syncReminderSchedule(userId: string): Promise<boolean> {
 
 /**
  * Reconcile the measure check-in nudge (2026-09-27): opt-in AND cadence
- * decide. Scheduled only when the last completed measure is older than
- * the chosen interval (2/4/8 weeks, from the local cadence stamp);
- * cancelled whenever the opt-in is off OR the cadence is not yet due —
- * a fresh completion must kill any nudge scheduled before it landed.
+ * decide. The last completion plus the chosen interval determines the
+ * next local-evening nudge; a fresh completion replaces an older schedule
+ * with its new future date. Disabled or unknown cadence is cancelled.
  * Same call points as the daily sync: preference changes (Settings) and
  * once on session start (store.tsx), plus the Measures screen's success
  * path. The return reports whether a nudge is SCHEDULED right now (false
@@ -68,14 +68,16 @@ export async function syncReminderSchedule(userId: string): Promise<boolean> {
 export async function syncMeasureReminderSchedule(userId: string): Promise<boolean> {
   try {
     const prefs = await getMeasureReminderPrefs(userId);
+    assertAccountActive(userId);
     // independent audit 2026-09-27 (P3): the userId rides the cancels so a
     // fallback cancel-all can re-schedule the surviving daily reminder.
     if (!prefs.enabled) return await cancelMeasureReminder(userId);
     const last = await lastMeasureCompletedOn(userId);
-    if (!measureReminderDue(last, prefs.intervalWeeks, new Date())) {
+    assertAccountActive(userId);
+    if (last === null) {
       return await cancelMeasureReminder(userId);
     }
-    return await scheduleMeasureReminder(nextMeasureReminderFireTime(new Date()));
+    return await scheduleMeasureReminder(nextMeasureReminderFireTime(new Date(), last, prefs.intervalWeeks));
   } catch {
     return false;
   }

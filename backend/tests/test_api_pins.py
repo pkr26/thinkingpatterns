@@ -515,7 +515,7 @@ async def test_enricher_branch_keeps_muted_cards_behind_the_cap(client, monkeypa
         json={"feedback_blob": base64.b64encode(feedback).decode("ascii")},
     )
     assert recompute.status_code == 200, recompute.text
-    assert recompute.json()["analyzer"] == "llm"
+    assert recompute.json()["analyzer"] == "brain"
 
     payload = await emu.decrypt_insights(client)
     stored = payload["stats"]["patterns"]
@@ -552,6 +552,10 @@ async def test_recompute_rechecks_phase_inside_the_fence(monkeypatch):
     executed: list[str] = []
 
     class _Session:
+        async def scalar(self, statement):
+            assert "rekey_journal" in str(statement)
+            return None
+
         async def get(self, _model, _user_id, *, populate_existing=False):
             return _user("m11-user", epoch=1)
 
@@ -700,6 +704,10 @@ class _QuotaBoundarySession:
     def __init__(self, user: User):
         self.user = user
 
+    async def scalar(self, statement):
+        assert "rekey_journal" in str(statement)
+        return None
+
     async def get(self, _model, _user_id, *, populate_existing=False):
         return self.user
 
@@ -791,6 +799,9 @@ class _FkCommitSession:
         self.rolled_back = False
         self.added = []
 
+    async def get(self, model, identifier, **kwargs):
+        return _user(identifier, epoch=1)
+
     async def execute(self, statement):
         self.executions += 1
         text = str(statement).lower()
@@ -802,7 +813,7 @@ class _FkCommitSession:
             # 2026-09-26 audit item 16: the chained audit append reads the
             # patient's chain head before inserting — an empty chain here.
             return SimpleNamespace(first=lambda: None)
-        if self.executions == 2:  # duplicate pre-check
+        if "therapist_notes" in text and "count" not in text:  # duplicate pre-check
             return SimpleNamespace(scalars=lambda: SimpleNamespace(first=lambda: None))
         if "count" in text:  # note quota (live + revision aggregate)
             return SimpleNamespace(one=lambda: (0, 0, 0, 0))

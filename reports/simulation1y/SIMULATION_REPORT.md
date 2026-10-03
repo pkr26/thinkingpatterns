@@ -1,4 +1,14 @@
-# 1-Year, 13-User (10 Typed + 3 Voice), Every-Endpoint E2E Simulation — 2026-09-29
+# 1-Year, 13-User (10 Typed + 3 Voice), Scoped E2E Simulation — 2026-09-29
+
+**Scope clarification — October 3, 2026:** the results below describe the
+September 29 run, not the current API. Recovery/kit administration,
+clinician note rekey and note deletion were not exercised. Providers were
+synthetic. Daily lifecycle replay reused the same engine; the live server
+performed a final recompute per persona. At-rest checks sampled 200 entry,
+up to 100 insight and up to 100 measure blobs, with nine fixed plaintext
+probes. Rate limiting required a 429 within 241 attempts, not exactly on
+attempt 241. These are integration diagnostics, not clinical validation.
+
 
 **Result: 366/366 checks passed** (`run_voice.log`, `results.json`; the
 campaign exits non-zero on any failure). Wall time 4.9 min for 8,629
@@ -11,7 +21,7 @@ synced through the real server over real HTTP, encrypted with the real
 client crypto stack (real 600k-iteration PBKDF2, HKDF auth/data keys,
 AES-256-GCM with the exact AAD contracts of the mobile/web apps) — now
 covering **thirteen personas** (ten typed, three who journal by VOICE
-and by text), every route the backend mounts, and the full voice
+and by text), the routes listed below, and the voice
 surface against two in-process fake providers (OpenAI-compatible STT
 and chat-completions endpoints) that the campaign script itself serves,
 so the server's real `services/stt.py` / `services/llm.py` clients make
@@ -177,13 +187,13 @@ translation → payload-v3 entry (`input_mode=voice`, `transcript_lang`,
   OBJECTS from the store — and the account's directory — not just the
   rows (M2)**.
 - **17 storage at rest** — 13 tables inspected (incl.
-  `audio_attachments`, 52 live rows); every entry/insight/measure blob
-  fails the structural plaintext test; the raw DB file and WAL contain
+  `audio_attachments`, 52 live rows); the sampled entry/insight/measure blobs
+  fail the structural plaintext test; the raw DB file and WAL contain
   none of 9 journal/note/voice probes (Spanish + French + the
   synthetic-audio marker); **every object in the local audio store is
   opaque ciphertext — no take plaintext on disk**.
-- **18 rate limiting** — the default ops bucket trips at exactly the
-  241st burst request with Retry-After.
+- **18 rate limiting** — the default ops bucket returns 429 with
+  Retry-After within 241 burst attempts.
 
 ## Honest observations (not failures)
 

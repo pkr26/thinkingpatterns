@@ -21,8 +21,10 @@
  * offline queue's rejected store (never destroyed); a "Recovered entries"
  * row appears when any exist and requeues them in one tap.
  */
-import React, { useEffect, useState } from "react";
-import { Alert, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { audioQueueStatus, retryAudioQueue, listSavedAudio, exportSavedAudio, removeSavedAudio } from "../audioQueue";
+import { eraseDeletedAccountLocals } from "../accountErasure";
+import React, { useEffect, useRef, useState } from "react";
+import { Alert, AppState, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { api, getBaseUrl, parseServerUrl, setBaseUrl } from "../api/client";
 import { ThemeMode, themeStorageKey, useSetThemeMode } from "../theme";
 import { hapticsEnabled, loadHapticsSetting, setHapticsEnabled } from "../haptics";
@@ -31,7 +33,7 @@ import { getReminderPrefs, setReminderEnabled, setReminderTime, clearReminderPre
 import { readLanguageChoice, writeLanguageChoice, type LanguageChoice } from "../languagePref";
 import {
   generateRecoveryKey,
-  recoveryKeyToB64,
+  recoveryKitText,
   recoveryVerifierKeyV2,
   sealDataKeyForRecoveryV2,
 } from "../crypto/recovery";
@@ -59,6 +61,7 @@ import {
   hasBiometricUnlock,
 } from "../biometricUnlock";
 import { vault } from "../vault";
+import { localWriteScopeEpoch } from "../localWriteGuard";
 import { useSession } from "../store";
 import { verifyPasswordForVault, isVerificationFailedError, isSessionExpiredError } from "../reauth";
 import { rotatePassword } from "../rotation";
@@ -80,7 +83,7 @@ import { clearThresholdNotice } from "../thresholdNotice";
 import { useTheme } from "../theme";
 import { PrimaryButton, GhostButton, CrisisHelpButton } from "../components/buttons";
 import { requestFailureCopy, calmFallbackCopy } from "../components/errors";
-import { t as tr } from "../strings";
+import { t as tr, dateLocaleTag } from "../strings";
 
 /** The React Native build-time constant: babel.config.cjs inlines this
  *  identifier as the package.json version at bundle time, and the vitest
@@ -96,7 +99,7 @@ const APP_VERSION: string = __APP_VERSION__;
  *  module load (the app locale is resolved once at startup).
  *  2026-09-26 audit (i18n guard): startup-fixed locale — these module-load
  *  tr() lookups MUST be revisited if runtime language switching ever ships. */
-const REMINDER_PRESETS: readonly { label: string; hour: number; minute: number }[] = [
+const reminderPresets = (): readonly { label: string; hour: number; minute: number }[] => [
   { label: tr("settings.reminderMorning"), hour: 9, minute: 0 },
   { label: tr("settings.reminderMidday"), hour: 12, minute: 0 },
   { label: tr("settings.reminderEvening"), hour: 20, minute: 0 },
@@ -109,6 +112,8 @@ type PendingAction =
   // change demands the typed password, never the bare bearer.
   | { kind: "voice"; enabled: boolean }
   | { kind: "delete" }
+  | { kind: "recovery-create" }
+  | { kind: "recovery-remove" }
   // M-4 (2026-09-20): enabling the biometric wrap persists the data key in
   // the Keychain indefinitely — the same standing as grant/delete, so it
   // takes the same typed-password card instead of one confirm tap.
@@ -118,6 +123,8 @@ type PendingAction =
   // typed-password card.
   | { kind: "upgrade" }
   | null;
+
+type SensitiveOwnership = { scope: number; owner: string | null; sensitive: number };
 
 export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.Element {
   const t = useTheme();
@@ -162,6 +169,14 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
   // = unknown (unreachable server / old server) — neither card claims
   // anything it cannot prove.
   const [keyScheme, setKeyScheme] = useState<KeyScheme | null>(null);
+  const captureSensitiveOwnership = (): SensitiveOwnership => ({ scope: localWriteScopeEpoch(), owner: vault.ownerUserId(), sensitive: sensitiveEpoch.current });
+  const ownsSensitiveScope = (operation: SensitiveOwnership) => operation.scope === localWriteScopeEpoch() && operation.sensitive === sensitiveEpoch.current;
+  const assertSensitiveOwnership = (operation: SensitiveOwnership, requireVault = true) => {
+    if (!ownsSensitiveScope(operation) || !operation.owner || (requireVault && (!vault.canReauthenticate() || vault.ownerUserId() !== operation.owner))) {
+      throw new Error(tr("common.sessionDamagedTitle"));
+    }
+  };
+
 
   React.useEffect(() => {
     // Audit 2026-09-28 (INFO): a storage failure in getBaseUrl left an
@@ -288,10 +303,13 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
     // done: the flow concluded (success or unrecoverable) — clear the card.
     // retry: the password itself was rejected — the card STAYS UP, the fix
     // is one corrected password away.
-    const done = () => { setBusy(false); setPending(null); setPassword(""); };
-    const retry = () => { setBusy(false); setPassword(""); };
+    const operation = captureSensitiveOwnership();
+    const done = () => { if (ownsSensitiveScope(operation)) { setBusy(false); setPending(null); setPassword(""); } };
+    const retry = () => { if (ownsSensitiveScope(operation)) { setBusy(false); setPassword(""); } };
     try {
+      assertSensitiveOwnership(operation);
       const reauth = await verifyPasswordForVault(password);
+      assertSensitiveOwnership(operation);
       if (!reauth.ok) {
         const messages = {
           locked: tr("common.reauthLocked"),
@@ -305,9 +323,11 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       }
       if (pending.kind === "llm") {
         const result = await api.setLlmConsent(pending.enabled, reauth.verifierB64);
+        assertSensitiveOwnership(operation);
         setLlmEnabled(result.enabled);
       } else if (pending.kind === "voice") {
         const result = await api.setVoiceConsent(pending.enabled, reauth.verifierB64);
+        assertSensitiveOwnership(operation);
         setVoiceEnabled(result.enabled);
         // A fresh consent was just given under the CURRENT policy.
         setVoiceStale(false);
@@ -324,22 +344,29 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
           retry();
           return;
         }
+        assertSensitiveOwnership(operation);
+        if (userId !== operation.owner) throw new Error(tr("common.sessionDamagedTitle"));
         await enableBiometricWrap(userId);
+      } else if (pending.kind === "recovery-create") {
+        await createRecoveryKit(reauth.verifierB64, operation);
+      } else if (pending.kind === "recovery-remove") {
+        await removeRecoveryKit(reauth.verifierB64, operation);
       } else if (pending.kind === "upgrade") {
         // Audit 2026-09-28 (LOW): runUpgrade returns true when the typed
         // password was rejected server-side and the card must STAY UP for a
         // corrected retry — the same retry contract the verifier-rejection
         // paths honor. done() unconditionally cleared it, so a wrong
         // password dismissed the card instead of waiting for the fix.
-        if (await runUpgrade(password, reauth.verifierB64)) {
+        if (await runUpgrade(password, reauth.verifierB64, operation)) {
           retry();
           return;
         }
       } else {
-        await deleteAccountOnServer(reauth.verifierB64);
+        await deleteAccountOnServer(reauth.verifierB64, operation);
       }
       done();
     } catch (err) {
+      if (!ownsSensitiveScope(operation)) return;
       if (isVerificationFailedError(err)) {
         // 403: the verifier itself was rejected — the typed password no
         // longer matches. NOT a session death: stay on the card for a retry.
@@ -358,68 +385,29 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
     }
   };
 
-  const deleteAccountOnServer = async (verifierB64: string) => {
+  const deleteAccountOnServer = async (verifierB64: string, operation: SensitiveOwnership) => {
     try {
-      const userId = await api.getUserId();
-      const username = await api.getUsername();
+      assertSensitiveOwnership(operation);
+      const origin = await getBaseUrl(); assertSensitiveOwnership(operation);
+      const userId = await api.getUserId(); assertSensitiveOwnership(operation);
+      const username = await api.getUsername(); assertSensitiveOwnership(operation);
+      if (userId !== operation.owner) throw new Error(tr("common.sessionDamagedTitle"));
       await api.deleteAccount(verifierB64);
+      assertSensitiveOwnership(operation);
       vault.lock();
-      // Local cleanup is attempted in full, but a failure here must NOT be
-      // reported as a failed delete (the server data is already gone and a
-      // retry can never work) — the user is told the truth instead.
-      try {
-        const { clearQueue } = await import("../offlineQueue");
-        const { clearAudioQueue } = await import("../audioQueue");
-        const { clearMoodLog } = await import("../moodLog");
-        const { clearRecomputeStamp } = await import("../brainSync");
-        const { clearUnlockProof } = await import("../unlockProof");
-        if (userId) await clearQueue(userId);
-        if (userId) await clearAudioQueue(userId); // kept takes are erasure-bound too
-        if (userId) {
-          await clearMoodLog(userId);
-          await clearRecomputeStamp(userId);
-          await clearUnlockProof(userId);
-          await clearKeyShipConsent(userId); // the consent flag dies with its account
-          await clearOnboardingSeen(userId); // so does the onboarding acknowledgment
-          await clearCrisisDialogStamp(userId); // and the dialog-throttle stamp
-          await clearFeedback(userId); // and the pending question-feedback taps
-          await clearThresholdNotice(userId); // and the one-time threshold card stamp
-          await clearReminderPrefs(userId); // and the reminder opt-in
-          await clearMeasureReminderPrefs(userId); // and the check-in opt-in
-          await clearLastMeasureDate(userId); // and the cadence stamp
-          await clearMoodMirrorPref(userId); // and the Health mirror opt-in
-          await clearSafetyPlan(userId); // and the encrypted local safety plan
-          await disableBiometricUnlock(userId); // and the biometric data-key wrap
-          await cancelDailyReminder().catch(() => {}); // a deleted account must not be nudged
-          await cancelMeasureReminder().catch(() => {}); // on either schedule
-          // Audit 2026-09-28 (LOW): three per-account locals the purge used
-          // to miss — the pending-measure draft (data-key-sealed, useless
-          // under the deleted account), the entry-version rollback marks,
-          // and the stateSeq/analysis-generation marks. A leftover mark
-          // would judge a RECREATED account's honest early generations as
-          // rolled-back/tampered.
-          const { clearPendingMeasure } = await import("../pendingMeasure");
-          await clearPendingMeasure(userId);
-          const { forgetAllEntryVersions } = await import("../entryVersions");
-          await forgetAllEntryVersions(userId);
-          const { forgetAnalysisGeneration } = await import("../stateSeqGuard");
-          await forgetAnalysisGeneration(userId);
-        }
-        if (username) {
-          await api.clearCachedSalt(username);
-          await api.clearCachedKeyEnvelope(username);
-          // 2026-10-01 audit LOW: the per-username unlock-backoff counter
-          // survived deletion (a recreated same-name account inherited the
-          // old account's escalating lockout delays).
-          const { clearUnlockFailures } = await import("../unlockBackoff");
-          await clearUnlockFailures(username);
-        }
-      } catch {
-        // Reported in the success dialog below.
-      }
-      await signOut(); // revokes tokens, clears the session
-      Alert.alert(tr("settings.deletedTitle"), tr("settings.deletedBody"));
+      let failures: string[] = [];
+      if (userId) failures = await eraseDeletedAccountLocals(userId, username, { origin, preserveSession: true }).catch(() => ["device cleanup"]);
+      // Native local cleanup may await while a replacement login begins.
+      // Only the original API scope may be signed out by this continuation.
+      if (operation.scope !== localWriteScopeEpoch()) return;
+      await signOut().catch(async () => {
+        failures.push("session cleanup");
+        if (operation.scope === localWriteScopeEpoch()) await api.clearSession().catch(() => {});
+      });
+      Alert.alert(tr("settings.deletedTitle"), tr("settings.deletedBody") +
+        (failures.length ? `\n\n${tr("settings.localCleanupIncomplete")}` : ""));
     } catch (err) {
+      if (operation.scope !== localWriteScopeEpoch()) return;
       // A VERIFIER rejection (403) must RETHROW to the outer handler so the
       // password card STAYS UP for one corrected retry (audit L-62: this
       // inner catch used to swallow it, clearing the card only on the
@@ -473,7 +461,9 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
     touchActivity();
     const userId = await api.getUserId().catch(() => null);
     if (!userId) return;
-    await setReminderTime(userId, hour, minute).catch(() => {});
+    try { await setReminderTime(userId, hour, minute); } catch {
+      Alert.alert(tr("settings.reminderSaveFailedTitle"), tr("settings.reminderSaveFailedBody")); return;
+    }
     setReminderTimeState({ hour, minute });
     void syncReminderSchedule(userId).catch(() => {});
   };
@@ -500,7 +490,9 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
     touchActivity();
     const userId = await api.getUserId().catch(() => null);
     if (!userId) return;
-    await setMeasureReminderInterval(userId, weeks).catch(() => {});
+    try { await setMeasureReminderInterval(userId, weeks); } catch {
+      Alert.alert(tr("settings.reminderSaveFailedTitle"), tr("settings.reminderSaveFailedBody")); return;
+    }
     setMeasureIntervalState(weeks);
     void syncMeasureReminderSchedule(userId).catch(() => {});
   };
@@ -589,15 +581,21 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       return;
     }
     setBusy(true);
+    const operation = captureSensitiveOwnership();
     try {
-      const userId = await api.getUserId().catch(() => null);
-      const username = await api.getUsername().catch(() => null);
+      assertSensitiveOwnership(operation);
+      const userId = await api.getUserId().catch(() => null); assertSensitiveOwnership(operation);
+      const username = await api.getUsername().catch(() => null); assertSensitiveOwnership(operation);
+      if (userId && userId !== operation.owner) throw new Error(tr("common.sessionDamagedTitle"));
       if (!userId || !username) {
         Alert.alert(tr("common.reauthNoAccount"));
         return;
       }
       const outcome = await rotatePassword({ username, userId, oldPassword: rotateCurrentPassword, newPassword });
+      if (!outcome.ok && !ownsSensitiveScope(operation)) return;
       if (outcome.ok) {
+        const completionScope = outcome.sessionScope ?? operation.scope;
+        if (completionScope !== localWriteScopeEpoch()) return;
         const rewrapNote =
           outcome.scheme === "v2"
             ? "" // v2 keeps every grant under the unchanged data key — nothing to report
@@ -612,8 +610,8 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         // session so the next unlock goes through the NEW password's login.
         Alert.alert(
           tr("settings.rotateSuccessTitle"),
-          `${outcome.scheme === "v2" ? tr("settings.rotateSuccessBodyV2") : tr("settings.rotateSuccessBody")}${rewrapNote}`,
-          [{ text: tr("common.ok"), onPress: () => void signOut() }],
+          `${outcome.scheme === "v2" ? tr("settings.rotateSuccessBodyV2") : tr("settings.rotateSuccessBody")}${rewrapNote}${outcome.scheme === "v1" ? "\n\n" + tr("settings.rotationRecoveryReset") : ""}`,
+          [{ text: tr("common.ok"), onPress: () => { if (completionScope === localWriteScopeEpoch()) void signOut(); } }],
         );
         // v2: the vault kept the SAME (still-correct) data key and adopted
         // the new auth key — but the change-password copy signs out anyway:
@@ -635,6 +633,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         );
       }
     } catch (err) {
+      if (!ownsSensitiveScope(operation)) return;
       // 2026-09-26 audit M-M5: an unexpected throw (anything outside the
       // typed RotationOutcome surface) used to escape as an unhandled
       // rejection while the finally cleared the fields — no feedback at all.
@@ -652,14 +651,17 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
    *  passed reauth. Returns true when the password card should STAY UP for
    *  a corrected retry (the typed password was rejected server-side);
    *  false when the flow concluded either way. */
-  const runUpgrade = async (password: string, verifierB64: string): Promise<boolean> => {
-    const userId = await api.getUserId().catch(() => null);
-    const username = await api.getUsername().catch(() => null);
+  const runUpgrade = async (password: string, verifierB64: string, operation: SensitiveOwnership): Promise<boolean> => {
+    assertSensitiveOwnership(operation);
+    const userId = await api.getUserId().catch(() => null); assertSensitiveOwnership(operation);
+    const username = await api.getUsername().catch(() => null); assertSensitiveOwnership(operation);
+    if (userId && userId !== operation.owner) throw new Error(tr("common.sessionDamagedTitle"));
     if (!userId || !username) {
       Alert.alert(tr("common.reauthNoAccount"));
       return true;
     }
     const outcome = await upgradeKeyProtection({ username, userId, password, verifierB64 });
+    assertSensitiveOwnership(operation);
     if (outcome.ok) {
       setKeyScheme("v2");
       Alert.alert(
@@ -718,27 +720,31 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
   const [themeMode, setThemeModeState] = useState<ThemeMode>("system");
   // 2026-09-29 deep audit (P2): the in-app language override — a bilingual
   // user on an English-locale device gets the app in their language.
+  const [audioStatus, setAudioStatus] = useState({ total: 0, needsAttention: 0 });
+  const [savedAudio, setSavedAudio] = useState<Awaited<ReturnType<typeof listSavedAudio>>>([]);
+  const refreshSavedAudio = async () => {
+    const owner = await api.getUserId();
+    setAudioStatus(await audioQueueStatus(owner ?? undefined));
+    setSavedAudio(owner ? await listSavedAudio(owner) : []);
+  };
+  useEffect(() => { void refreshSavedAudio().catch(() => {}); }, []);
   const [language, setLanguageState] = useState<LanguageChoice>("device");
 
-  /** Wave 3: create/replace the recovery kit. The key is generated ON
-   *  DEVICE, sealed around the CURRENT data key, and uploaded with the
-   *  session's auth-key verifier (a biometric session cannot do this — its
-   *  auth-key slot holds placeholder zeros; the user is told to sign in
-   *  with the password first). */
-  const createRecoveryKit = async (): Promise<void> => {
-    if (busy) return;
+  /** Create/replace a recovery kit after fresh password verification.
+   * The raw recovery key is generated on device and is never uploaded. */
+  const createRecoveryKit = async (verifierB64: string, operation: SensitiveOwnership): Promise<void> => {
+    const operationEpoch = sensitiveEpoch.current;
     touchActivity();
     try {
-      const userId = await api.getUserId();
-      const username = await api.getUsername();
+      assertSensitiveOwnership(operation);
+      const userId = await api.getUserId(); assertSensitiveOwnership(operation);
+      const username = await api.getUsername(); assertSensitiveOwnership(operation);
+      if (userId !== operation.owner) throw new Error(tr("common.sessionDamagedTitle"));
       if (!userId || !username || !vault.isUnlocked()) throw new Error("session");
       const keys = vault.get();
-      if (!keys.authKeyKnown) {
-        Alert.alert(tr("settings.recoveryTitle"), tr("settings.recoveryNeedsPassword"));
-        return;
-      }
       setBusy(true);
       const recoveryKey = generateRecoveryKey();
+      try {
       // 2026-10-01 audit C1: v2 — seal under the never-sent seal label and
       // transmit ONLY the domain-separated verifier (the raw key used to
       // be sent as the verifier, and it WAS the seal-KEK input: a server
@@ -747,7 +753,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       const verifierKey = recoveryVerifierKeyV2(recoveryKey);
       try {
         await api.setupRecoveryKit(
-          keys.authKey.toString("base64"),
+          verifierB64,
           verifierKey.toString("base64"),
           sealed.toString("base64"),
           "v2",
@@ -755,32 +761,33 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       } finally {
         verifierKey.fill(0);
       }
+      assertSensitiveOwnership(operation);
       setRecoveryEnabled(true);
-      setRecoveryKeyShown(recoveryKeyToB64(recoveryKey));
+      if (sensitiveEpoch.current === operationEpoch) setRecoveryKeyShown(recoveryKitText(recoveryKey));
+      recoveryKey.fill(0);
       const status = await api.recoveryStatus().catch(() => null);
-      if (status) setRecoverySetAt(status.set_at);
+      if (status && ownsSensitiveScope(operation)) setRecoverySetAt(status.set_at);
+      } finally { recoveryKey.fill(0); }
     } catch {
+      if (!ownsSensitiveScope(operation)) return;
       Alert.alert(tr("settings.recoveryTitle"), tr("settings.recoverySetupFailed"));
     } finally {
       setBusy(false);
     }
   };
 
-  const removeRecoveryKit = async (): Promise<void> => {
-    if (busy) return;
+  const removeRecoveryKit = async (verifierB64: string, operation: SensitiveOwnership): Promise<void> => {
     touchActivity();
     try {
+      assertSensitiveOwnership(operation);
       if (!vault.isUnlocked()) throw new Error("session");
-      const keys = vault.get();
-      if (!keys.authKeyKnown) {
-        Alert.alert(tr("settings.recoveryTitle"), tr("settings.recoveryNeedsPassword"));
-        return;
-      }
       setBusy(true);
-      await api.removeRecoveryKit(keys.authKey.toString("base64"));
+      await api.removeRecoveryKit(verifierB64);
+      assertSensitiveOwnership(operation);
       setRecoveryEnabled(false);
       setRecoverySetAt(null);
     } catch {
+      if (!ownsSensitiveScope(operation)) return;
       Alert.alert(tr("settings.recoveryTitle"), tr("settings.recoveryRemoveFailed"));
     } finally {
       setBusy(false);
@@ -791,6 +798,13 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
   const [recoveryEnabled, setRecoveryEnabled] = useState<boolean | null>(null);
   const [recoverySetAt, setRecoverySetAt] = useState<string | null>(null);
   const [recoveryKeyShown, setRecoveryKeyShown] = useState<string | null>(null);
+  const sensitiveEpoch = useRef(0);
+  useEffect(() => {
+    const clearSensitive = () => { sensitiveEpoch.current++; setRecoveryKeyShown(null); setPassword(""); setPending(null); };
+    const sub = AppState.addEventListener("change", state => { if (state !== "active") clearSensitive(); });
+    const blur = typeof navigation.addListener === "function" ? navigation.addListener("blur", clearSensitive) : undefined;
+    return () => { sensitiveEpoch.current++; sub.remove(); blur?.(); };
+  }, [navigation]);
   const [haptics, setHaptics] = useState(true);
   const [reminders] = useState(reminderCapability());
   // The HealthKit State of Mind seam capability — probed once, sync, the
@@ -956,6 +970,8 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
           <Text style={[styles.reauthTitle, { color: t.colors.text }]}>
             {pending.kind === "delete"
               ? tr("settings.reauthDeleteTitle")
+              : pending.kind === "recovery-create" || pending.kind === "recovery-remove"
+                ? tr("settings.reauthRecoveryTitle")
               : pending.kind === "bio"
                 ? tr("settings.reauthBioTitle")
                 : pending.kind === "upgrade"
@@ -1042,6 +1058,34 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       {/* Recovery kit (wave 3, 2026-09-30): the honest escape hatch from a
           forgotten password — opt-in, on-device key generation, shown
           exactly once. */}
+      {audioStatus.total > 0 && <View style={{ gap: 8 }}>
+        <Text style={{ color: t.colors.body }}>{tr("settings.savedAudioQueue", { count: audioStatus.total, attention: audioStatus.needsAttention })}</Text>
+        <GhostButton label={tr("settings.retryAudio")} disabled={busy} onPress={() => {
+          void (async () => {
+            setBusy(true);
+            try { const owner = await api.getUserId(); if (owner) await retryAudioQueue(owner); await refreshSavedAudio(); }
+            catch { Alert.alert(tr("settings.couldNotRetryTitle"), tr("settings.couldNotRetryBody")); }
+            finally { setBusy(false); }
+          })();
+        }} />
+        {savedAudio.map((item, index) => <View key={item.id} style={{ gap: 4 }}>
+          <Text style={{ color: t.colors.body }}>{tr("settings.savedAudioItem", { number: index + 1, date: item.queuedAt ? new Date(item.queuedAt).toLocaleDateString(dateLocaleTag()) : tr("settings.recordingDateUnavailable") })}</Text>
+          {item.needsAttention && <Text style={{ color: t.colors.muted }}>{tr("settings.audioNeedsAttention")}</Text>}
+          <GhostButton label={tr("settings.exportAudio", { number: index + 1 })} disabled={busy} onPress={() => {
+            void (async () => { setBusy(true); try { const owner = await api.getUserId(); if (owner) await exportSavedAudio(owner, item.id); }
+              catch (err) { Alert.alert(tr("settings.exportFailedTitle"), requestFailureCopy(err)); } finally { setBusy(false); } })();
+          }} />
+          <GhostButton label={tr("settings.removeAudio", { number: index + 1 })} disabled={busy} onPress={() => {
+            Alert.alert(tr("settings.removeAudioTitle"), tr("settings.removeAudioBody"), [
+              { text: tr("common.cancel"), style: "cancel" },
+              { text: tr("settings.removeAudioConfirm"), style: "destructive", onPress: () => {
+                void (async () => { setBusy(true); try { const owner = await api.getUserId(); if (owner) await removeSavedAudio(owner, item.id, item.revision); await refreshSavedAudio(); }
+                  catch (err) { Alert.alert(tr("settings.couldNotRetryTitle"), requestFailureCopy(err)); } finally { setBusy(false); } })();
+              } },
+            ]);
+          }} />
+        </View>)}
+      </View>}
       <Text style={themed.label}>{tr("settings.recoveryTitle")}</Text>
       <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg, gap: 8 }]}>
         <Text style={themed.rowText}>
@@ -1073,13 +1117,19 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
           <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
             <GhostButton
               label={recoveryEnabled ? tr("settings.recoveryReplace") : tr("settings.recoveryCreate")}
-              onPress={() => void createRecoveryKit()}
+              onPress={() => {
+                if (recoveryEnabled) Alert.alert(tr("settings.recoveryTitle"), tr("settings.recoveryReplaceWarning"), [
+                  { text: tr("common.cancel"), style: "cancel" },
+                  { text: tr("settings.recoveryReplace"), onPress: () => setPending({ kind: "recovery-create" }) },
+                ]);
+                else setPending({ kind: "recovery-create" });
+              }}
               disabled={busy}
             />
             {recoveryEnabled === true && (
               <GhostButton
                 label={tr("settings.recoveryRemove")}
-                onPress={() => void removeRecoveryKit()}
+                onPress={() => setPending({ kind: "recovery-remove" })}
                 disabled={busy}
               />
             )}
@@ -1158,10 +1208,10 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         {reminderOn && (
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }} accessibilityLabel={tr("settings.reminderTimeA11y")}>
             {[
-              ...REMINDER_PRESETS,
+              ...reminderPresets(),
               // A stored custom time (never one of the presets) shows as
               // its own chip so the current choice is always visible.
-              ...((REMINDER_PRESETS.some((p) => p.hour === reminderTime.hour && p.minute === reminderTime.minute)
+              ...((reminderPresets().some((p) => p.hour === reminderTime.hour && p.minute === reminderTime.minute)
                 ? []
                 : [
                     {

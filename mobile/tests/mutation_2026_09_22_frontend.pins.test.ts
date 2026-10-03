@@ -306,7 +306,7 @@ vi.mock("../src/api/client", async (importOriginal) => {
       // own suite (tests/rotationV2.test.ts).
       keyEnvelope: vi.fn(async () => ({ key_scheme: "v1", salt: "U0FMVFNLQVM=", kdf_params: null, wrapped_data_key: null })),
       openProcessingSession: vi.fn(async (keyB64: string) => ({ session_token: `tok-${keyB64.slice(0, 4)}` })),
-      rekeyStoredData: vi.fn(async () => ({ entries: 3, insights: 1, measures: 2 })),
+      rekeyStoredData: vi.fn(async (_old: string, _next: string, _proof: string, body: { operation_id: string }) => ({ entries: 3, insights: 1, measures: 2, credential_rotated: true, operation_id: body.operation_id })),
       listEntriesPage: vi.fn(async () => ({ entries: [] })),
       listConsents: vi.fn(async () => []),
       rewrapConsent: vi.fn(async () => undefined),
@@ -336,7 +336,10 @@ vi.mock("../src/crypto/sharing", () => ({
 }));
 vi.mock("../src/questionFeedback", () => ({ clearFeedback: vi.fn(async () => undefined) }));
 vi.mock("../src/unlockProof", () => ({ clearUnlockProof: vi.fn(async () => undefined) }));
-vi.mock("../src/vault", () => ({ vault: { lock: vi.fn() } }));
+vi.mock("../src/vault", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/vault")>();
+  return { vault: { ...actual.vault, lock: vi.fn(() => actual.vault.lock()) } };
+});
 vi.mock("../src/biometricUnlock", () => ({ disableBiometricUnlock: vi.fn(async () => undefined) }));
 
 const { api, ApiError } = await import("../src/api/client");
@@ -348,7 +351,7 @@ const { rotatePassword } = await import("../src/rotation");
 describe("mutation pins 2026-09-22: password rotation stages", () => {
   const input = { username: "alice", userId: "uid-1", oldPassword: "old-password-x", newPassword: "new-password-y" };
 
-  beforeEach(() => {
+  beforeEach(async () => {
     // clearAllMocks only clears call history; implementations set by earlier
     // tests survive it. Reset and re-default every seam this suite overrides.
     vi.clearAllMocks();
@@ -356,7 +359,7 @@ describe("mutation pins 2026-09-22: password rotation stages", () => {
     mockedApi.saltFor.mockReset().mockResolvedValue({ salt: "U0FMVFNLQVM=" });
     mockedApi.cacheSalt.mockReset().mockResolvedValue(undefined);
     mockedApi.openProcessingSession.mockReset().mockImplementation(async (keyB64: string) => ({ session_token: `tok-${keyB64.slice(0, 4)}` }));
-    mockedApi.rekeyStoredData.mockReset().mockResolvedValue({ entries: 3, insights: 1, measures: 2 });
+    mockedApi.rekeyStoredData.mockReset().mockImplementation(async (_old, _next, _proof, body) => ({ entries: 3, insights: 1, measures: 2, credential_rotated: true, operation_id: body.operation_id }));
     mockedApi.listEntriesPage.mockReset().mockResolvedValue({ entries: [] });
     mockedApi.listConsents.mockReset().mockResolvedValue([]);
     mockedApi.rewrapConsent.mockReset().mockResolvedValue(undefined);
@@ -371,6 +374,12 @@ describe("mutation pins 2026-09-22: password rotation stages", () => {
     mockedCrypto.decryptEntry.mockReset();
     resetEntryVersionMirrors();
     storage.__reset();
+    (await import("../src/localRekey")).__resetLocalKeyLifecycleForTests();
+    (await import("../src/vault")).vault.unlock({
+      masterKey: Buffer.alloc(32, 0),
+      authKey: Buffer.alloc(32, 1),
+      dataKey: Buffer.alloc(32, input.oldPassword.length),
+    }, input.userId);
   });
 
   it("a wrong old password fails at the verify stage with the honest reason", async () => {
@@ -390,7 +399,7 @@ describe("mutation pins 2026-09-22: password rotation stages", () => {
     await expect(rotatePassword(input)).resolves.toEqual({ ok: false, stage: "verify", reason: "offline" });
   });
 
-  it("rekey_key_mismatch with a readable journal finishes the rotation", async () => {
+  it("a readable sample cannot override an atomic corpus mismatch", async () => {
     mockedApi.rekeyStoredData.mockRejectedValue(Object.assign(
       new ApiError(409, "already rekeyed"), { code: "rekey_key_mismatch" }));
     mockedCrypto.decryptEntry.mockImplementation(() => Buffer.from("ok"));
@@ -398,11 +407,12 @@ describe("mutation pins 2026-09-22: password rotation stages", () => {
       entries: [{ clientEntryId: "e1", blob: "blob", contentVersion: 1 }],
     } as never);
     const outcome = await rotatePassword(input);
-    expect(outcome).toMatchObject({ ok: true, counts: { entries: 0, insights: 0, measures: 0 }, rewrapped: 0 });
-    expect(mockedApi.rotateCredential).toHaveBeenCalledTimes(1); // finished the ladder
+    expect(outcome).toMatchObject({ ok: false, stage: "rekey", reason: "server" });
+    expect(mockedApi.listEntriesPage).not.toHaveBeenCalled();
+    expect(mockedApi.rotateCredential).not.toHaveBeenCalled();
   });
 
-  it("rekey_key_mismatch with an unreadable journal reports already-rotated-unverifiable", async () => {
+  it("an unreadable sample cannot start a separate credential commit", async () => {
     mockedApi.rekeyStoredData.mockRejectedValue(Object.assign(
       new ApiError(409, "already rekeyed"), { code: "rekey_key_mismatch" }));
     mockedCrypto.decryptEntry.mockImplementation(() => { throw new Error("not under this key"); });
@@ -411,8 +421,8 @@ describe("mutation pins 2026-09-22: password rotation stages", () => {
     } as never);
     const outcome = await rotatePassword(input);
     expect(outcome).toMatchObject({
-      ok: false, stage: "rekey", reason: "already-rotated-unverifiable",
-      detail: expect.stringContaining("rotated to a different new password"),
+      ok: false, stage: "rekey", reason: "server",
+      detail: "already rekeyed",
     });
     expect(mockedApi.rotateCredential).not.toHaveBeenCalled();
   });
@@ -420,32 +430,43 @@ describe("mutation pins 2026-09-22: password rotation stages", () => {
   it("a 403 from the rekey step maps to wrong-password; other API errors to server", async () => {
     mockedApi.rekeyStoredData.mockRejectedValue(new ApiError(403, "verifier rejected"));
     await expect(rotatePassword(input)).resolves.toMatchObject({ ok: false, stage: "rekey", reason: "wrong-password" });
+    (await import("../src/vault")).vault.unlock({ masterKey: Buffer.alloc(32, 0), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, input.oldPassword.length) }, input.userId, { writeSuspended: true });
     mockedApi.rekeyStoredData.mockRejectedValue(new ApiError(500, "boom"));
     await expect(rotatePassword(input)).resolves.toMatchObject({ ok: false, stage: "rekey", reason: "server" });
+    (await import("../src/vault")).vault.unlock({ masterKey: Buffer.alloc(32, 0), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, input.oldPassword.length) }, input.userId, { writeSuspended: true });
     mockedApi.rekeyStoredData.mockRejectedValue(new Error("offline"));
     await expect(rotatePassword(input)).resolves.toMatchObject({ ok: false, stage: "rekey", reason: "offline" });
   });
 
-  it("a failed credential rotation locks the vault and reports the stage", async () => {
+  it("a failed atomic credential transaction locks the vault and reports the stage", async () => {
     const { vault } = await import("../src/vault");
-    mockedApi.rotateCredential.mockRejectedValue(new ApiError(503, "busy"));
-    await expect(rotatePassword(input)).resolves.toMatchObject({ ok: false, stage: "credential", reason: "server" });
+    mockedApi.rekeyStoredData.mockRejectedValue(new ApiError(503, "busy"));
+    await expect(rotatePassword(input)).resolves.toMatchObject({ ok: false, stage: "rekey", reason: "server" });
+    expect(mockedApi.rotateCredential).not.toHaveBeenCalled();
     expect(vault.lock).toHaveBeenCalled();
   });
 
-  it("a happy rotation rewraps every active consent and skips the inactive/keyless", async () => {
+  it("an active keyless grant blocks the atomic transaction before credentials change", async () => {
+    mockedApi.listConsents.mockResolvedValue([
+      { id: "c3", status: "active", therapist_wrap_pub_key: null, therapist_id: "t3", display_name: "Dr. Three", username: "dr3" },
+    ] as never);
+    await expect(rotatePassword(input)).resolves.toMatchObject({ ok: false, stage: "rewrap", detail: expect.stringContaining("no current public key") });
+    expect(mockedApi.rekeyStoredData).not.toHaveBeenCalled();
+    expect(mockedApi.rotateCredential).not.toHaveBeenCalled();
+  });
+
+  it("commits every active grant in the credential transaction and excludes revoked grants", async () => {
     mockedApi.listConsents.mockResolvedValue([
       { id: "c1", status: "active", therapist_wrap_pub_key: "PUB", therapist_id: "t1", display_name: "Dr. One", username: "dr1" },
       { id: "c2", status: "revoked", therapist_wrap_pub_key: "PUB", therapist_id: "t2", display_name: "Dr. Two", username: "dr2" },
-      { id: "c3", status: "active", therapist_wrap_pub_key: null, therapist_id: "t3", display_name: "Dr. Three", username: "dr3" },
       { id: "c4", status: "active", therapist_wrap_pub_key: "PUB", therapist_id: "t4", display_name: "", username: "dr4" },
     ] as never);
-    mockedApi.rewrapConsent.mockRejectedValue(new Error("one grant failed"));
     const outcome = await rotatePassword(input);
-    expect(outcome).toMatchObject({ ok: true, rewrapped: 0 });
-    if (outcome.ok) {
-      expect(outcome.rewrapFailures).toEqual(["Dr. One", "dr4"]); // c2/c3 never attempted
-    }
-    expect(mockedApi.rewrapConsent).toHaveBeenCalledTimes(2);
+    expect(outcome).toMatchObject({ ok: true, counts: { entries: 3, insights: 1, measures: 2 }, rewrapped: 2, rewrapFailures: [] });
+    const request = mockedApi.rekeyStoredData.mock.calls[0]![3];
+    expect(request.consent_wraps.map(wrap => wrap.consent_id)).toEqual(["c1", "c4"]);
+    expect(request.operation_id).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(mockedApi.rotateCredential).not.toHaveBeenCalled();
+    expect(mockedApi.rewrapConsent).not.toHaveBeenCalled();
   });
 });

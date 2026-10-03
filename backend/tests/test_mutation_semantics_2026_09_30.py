@@ -59,7 +59,9 @@ def test_int_env_contract(monkeypatch):
     monkeypatch.setenv("MINDPATTERN_TEST_INT", "  42 ")
     assert _int_env("MINDPATTERN_TEST_INT", 7) == 42
     monkeypatch.setenv("MINDPATTERN_TEST_INT", "8O000")  # letter O, not zero
-    with pytest.raises(ValueError, match=r"^environment variable MINDPATTERN_TEST_INT='8O000' is not an integer$"):
+    with pytest.raises(
+        ValueError, match=r"^environment variable MINDPATTERN_TEST_INT='8O000' is not an integer$"
+    ):
         _int_env("MINDPATTERN_TEST_INT", 7)
     monkeypatch.setenv("MINDPATTERN_TEST_INT", "  ")
     assert _int_env("MINDPATTERN_TEST_INT", 7) == 7
@@ -71,7 +73,9 @@ def test_float_env_contract(monkeypatch):
     monkeypatch.setenv("MINDPATTERN_TEST_FLOAT", " 0.25 ")
     assert _float_env("MINDPATTERN_TEST_FLOAT", 1.5) == 0.25
     monkeypatch.setenv("MINDPATTERN_TEST_FLOAT", "fast")
-    with pytest.raises(ValueError, match=r"^environment variable MINDPATTERN_TEST_FLOAT='fast' is not a number$"):
+    with pytest.raises(
+        ValueError, match=r"^environment variable MINDPATTERN_TEST_FLOAT='fast' is not a number$"
+    ):
         _float_env("MINDPATTERN_TEST_FLOAT", 1.5)
 
 
@@ -103,7 +107,10 @@ def test_secret_env_named_file_must_be_readable(monkeypatch):
     """A half-mounted secret fails closed — never a silent default."""
     monkeypatch.delenv("MINDPATTERN_TEST_SECRET", raising=False)
     monkeypatch.setenv("MINDPATTERN_TEST_SECRET_FILE", "/nonexistent/secret.txt")
-    with pytest.raises(RuntimeError, match=r"^environment variable MINDPATTERN_TEST_SECRET_FILE='/nonexistent/secret.txt' could not be read: "):
+    with pytest.raises(
+        RuntimeError,
+        match=r"^environment variable MINDPATTERN_TEST_SECRET_FILE='/nonexistent/secret.txt' could not be read: ",
+    ):
         _secret_env("MINDPATTERN_TEST_SECRET", "default-value")
 
 
