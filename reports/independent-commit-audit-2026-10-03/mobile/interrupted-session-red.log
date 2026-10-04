@@ -1,0 +1,58 @@
+npm notice run mindpattern-mobile@1.0.0 npx
+npm notice run 'vitest' run tests/queueOwnership.test.ts --maxWorkers=2
+
+ RUN  v4.1.11 /Users/pradeepreddy/Desktop/mental_health_application/mobile
+
+ ❯ tests/queueOwnership.test.ts (5 tests | 1 failed) 15ms
+   × an interrupted replacement login cannot leave an old owner paired with the replacement bearer after restart 10ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/queueOwnership.test.ts > an interrupted replacement login cannot leave an old owner paired with the replacement bearer after restart
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      "http://localhost:8000/api/v1/entries",
+      Object {
+        "body": "{"client_entry_id":"saved","blob":"old-account retained ciphertext","entry_date":"2026-10-03","content_version":1}",
+        "headers": Object {
+          "Authorization": "Bearer replacement-account-token",
+          "Content-Type": "application/json",
+        },
+        "method": "POST",
+        "redirect": "error",
+        "signal": AbortSignal {
+          Symbol(kEvents): undefined,
+          Symbol(events.maxEventTargetListeners): 0,
+          Symbol(events.maxEventTargetListenersWarned): false,
+          Symbol(kHandlers): undefined,
+          Symbol(kAborted): false,
+          Symbol(kReason): undefined,
+          Symbol(kComposite): false,
+        },
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ tests/queueOwnership.test.ts:36:21
+     34|   failing.mockRestore(); __resetLocalKeyLifecycleForTests();
+     35|   await flushQueue(USER).catch(() => {});
+     36|   expect(fetch).not.toHaveBeenCalled(); expect(await queueLength(USER)…
+       |                     ^
+     37|   expect(await api.isLoggedIn()).toBe(false);
+     38| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 4 passed (5)
+   Start at  14:45:12
+   Duration  198ms (transform 90ms, setup 55ms, import 69ms, tests 15ms, environment 0ms)
+

@@ -2228,3 +2228,63 @@ it("a stale note edit preserves its draft, displays the winning version, and ret
  expect(root.root.findAllByType('textarea').find(node=>node.props.placeholder==='Editing note…')!.props.value).toBe('my preserved draft');expect(textOf(root)).toContain('current colleague note');
  await press(root,'Save edit');await flush(6);expect(mockedApi.updateNote).toHaveBeenLastCalledWith('conflicted-note','SEALEDNOTE==',5,3);expect(textOf(root)).toContain('my preserved draft');
 });
+
+it("does not dispatch an encrypted note edit after the chart has unmounted", async () => {
+  const note = { id: "retired-note", client_note_id: "retired-client", pattern_pid: null, blob: "old", created_at: "2026-09-16T00:00:00Z", updated_at: "2026-09-16T00:00:00Z", version: 1 };
+  mockedApi.notes.mockResolvedValueOnce({ notes: [note], nextOffset: null });
+  const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+  await flush(6);
+  let release!: (sealed: { clientNoteId: string; blobB64: string }) => void;
+  mockedCrypto.encryptNote.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+  await press(root, "Edit");
+  await typeTextarea(root, "Editing note…", "private pending edit");
+  await press(root, "Save edit");
+  await act(async () => root.unmount());
+  await act(async () => release({ clientNoteId: note.client_note_id, blobB64: "SEALEDNOTE==" }));
+  await flush(4);
+  expect(mockedApi.updateNote).not.toHaveBeenCalled();
+});
+
+it("does not create a note after the chart unmounts during durable draft publication", async () => {
+  const kv = (await import("../src/kvstore")).kv;
+  const originalSet = kv.setItem.bind(kv);
+  let blocked = false;
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+  await flush(6);
+  await typeTextarea(root, "Note about this patient…", "private pending creation");
+  const spy = vi.spyOn(kv, "setItem").mockImplementation(async (key, value) => {
+    if (key.startsWith("portal.draft.")) { blocked = true; await gate; }
+    await originalSet(key, value);
+  });
+  try {
+    await press(root, "Save note");
+    await vi.waitFor(() => expect(blocked).toBe(true));
+    await act(async () => root.unmount());
+    await act(async () => release());
+    await flush(12);
+    expect(mockedApi.createNote).not.toHaveBeenCalled();
+    const { loadPortalDraft } = await import("../src/noteDrafts");
+    const saved = await loadPortalDraft(session.userId, patient.user_id, [session.noteKeyV2]);
+    expect(saved?.text.general).toBe("private pending creation");
+    expect(saved?.pending.general?.blob).toBe("SEALEDNOTE==");
+  } finally { release(); spy.mockRestore(); }
+});
+
+it("preserves the writing without publishing a note if its chart unmounts during encryption", async () => {
+  const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+  await flush(6);
+  let release!: (sealed: { clientNoteId: string; blobB64: string }) => void;
+  mockedCrypto.encryptNote.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+  await typeTextarea(root, "Note about this patient…", "writing interrupted during encryption");
+  await press(root, "Save note");
+  await act(async () => root.unmount());
+  await act(async () => release({ clientNoteId: "retired-create", blobB64: "SEALEDNOTE==" }));
+  await flush(6);
+  expect(mockedApi.createNote).not.toHaveBeenCalled();
+  const { loadPortalDraft } = await import("../src/noteDrafts");
+  const saved = await loadPortalDraft(session.userId, patient.user_id, [session.noteKeyV2]);
+  expect(saved?.text.general).toBe("writing interrupted during encryption");
+  expect(saved?.pending.general).toBeUndefined();
+});

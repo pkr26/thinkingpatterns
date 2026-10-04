@@ -1149,6 +1149,7 @@ export function PatientView(props: {
       if (!pending || pending.text !== submitted || pending.pattern_pid !== savedPid) {
         const id = newNoteId();
         const sealed = await encryptNote(session.noteKeyV2, session.userId, patient.user_id, id, submitted);
+        if (!mounted.current) return;
         pending = { client_note_id: id, blob: sealed.blobB64, text: submitted, pattern_pid: savedPid };
         const snapshot = { ...latestDraft.current, pending: { ...latestDraft.current.pending, [savedScope]: pending } };
         setDraftState(snapshot);
@@ -1156,6 +1157,9 @@ export function PatientView(props: {
         // response or reload retries the same request rather than duplicating a note.
         await persistDraft(snapshot);
       }
+      // A durable draft write can outlive this chart. Do not publish the
+      // retired chart's ciphertext through a replacement session's bearer.
+      if (!mounted.current) return;
       const created = await api.createNote(patient.user_id, { client_note_id: pending.client_note_id, pattern_pid: savedPid, blob: pending.blob, ...(session.custodyVersion === undefined ? {} : { custody_version: session.custodyVersion }) });
       if (!mounted.current) return;
       setNotes(prev => [...prev.filter(row => row.id !== created.id), { ...created, text: submitted }]);
@@ -1172,7 +1176,7 @@ export function PatientView(props: {
       }
       setError(err instanceof Error ? err.message : "could not save the note");
     }
-    finally { setBusy(false); }
+    finally { if (mounted.current) setBusy(false); }
   };
 
   const removeNote = async (note: OpenNote) => {
@@ -1202,6 +1206,10 @@ export function PatientView(props: {
         note.client_note_id,
         submitted.text,
       );
+      // Encryption can outlive sign-out or a chart change. The API seam
+      // captures its session at dispatch, so never send an old chart's
+      // ciphertext using a replacement account's newly acquired bearer.
+      if (!mounted.current) return;
       // base_version (deep-audit 2026-09-28): the server requires the
       // version this edit was based on; a colleague's edit that landed
       // first answers 409 version_conflict instead of silently
@@ -1209,9 +1217,11 @@ export function PatientView(props: {
       const updated = session.custodyVersion === undefined
         ? await api.updateNote(note.id, sealed.blobB64, note.version ?? 1)
         : await api.updateNote(note.id, sealed.blobB64, note.version ?? 1, session.custodyVersion);
+      if (!mounted.current) return;
       setNotes((prev) => prev.map((n) => (n.id === updated.id ? { ...updated, text: submitted.text } : n)));
       if (latestDraft.current.editing?.id === submitted.id && latestDraft.current.editing.text.trim() === submitted.text) setEditing(null);
     } catch (err) {
+      if (!mounted.current) return;
       if (err instanceof ApiError && err.status === 409) {
         try {
           const result = await api.notes(patient.user_id);

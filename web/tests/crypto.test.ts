@@ -330,6 +330,31 @@ describe("entry payload layer", () => {
 });
 
 describe("insights + question payload layer", () => {
+  it.each([
+    { kind: "topic", label: "work", confidence: 0.5, occurrences: 2 },
+    { kind: "topic", label: "work", confidence: null, occurrences: 2, detail: {} },
+    { kind: "topic", label: "work", confidence: 0.5, occurrences: null, detail: {} },
+    { kind: "topic", label: "work", confidence: 0.5, occurrences: 2, detail: { strength: "high" } },
+    { kind: "topic", label: "work", confidence: 0.5, occurrences: 2, detail: { sample_days: -3 } },
+  ])("rejects authenticated patterns that cannot satisfy the rendered schema: %j", async pattern => {
+    const key = new Uint8Array(32).fill(7);
+    const blob = await encryptWithFixedNonce(key, new TextEncoder().encode(JSON.stringify({ v: 2, stats: { patterns: [pattern] } })), new Uint8Array(12), buildAad("insights", "schema-owner", "patterns"));
+    await expect(decryptInsights(key, "schema-owner", toBase64(blob))).rejects.toThrow();
+  });
+
+  it("rejects an authenticated object where a chart date must be text", async () => {
+    const key = new Uint8Array(32).fill(7);
+    const blob = await encryptWithFixedNonce(key, new TextEncoder().encode(JSON.stringify({ v: 2, stats: { patterns: [], first_date: { malformed: true } } })), new Uint8Array(12), buildAad("insights", "schema-owner", "patterns"));
+    await expect(decryptInsights(key, "schema-owner", toBase64(blob))).rejects.toThrow();
+  });
+
+  it("accepts the backend's empty-window stats with nullable dates", async () => {
+    const key = new Uint8Array(32).fill(7);
+    const payload = { v: 2, stats: { patterns: [], total_entries: 0, active_days: 0, first_date: null, last_date: null, avg_sentiment: null } };
+    const blob = await encryptWithFixedNonce(key, new TextEncoder().encode(JSON.stringify(payload)), new Uint8Array(12), buildAad("insights", "schema-owner", "patterns"));
+    await expect(decryptInsights(key, "schema-owner", toBase64(blob))).resolves.toEqual(payload);
+  });
+
   const dataKey = fromBase64(encryptVectors[0]!.data_key);
   const userId = "user-777";
 

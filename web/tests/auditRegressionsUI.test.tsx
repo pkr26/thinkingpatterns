@@ -3,6 +3,7 @@ import { act } from 'react';
 import { EntryView } from '../src/views/Entry';
 import { PatternsView } from '../src/views/Patterns';
 import { SafetyPlanView } from '../src/views/SafetyPlan';
+import { ShareView } from '../src/views/Share';
 import { saveSafetyPlan, EMPTY_SAFETY_PLAN } from '../src/safetyPlan';
 import { kv } from '../src/kvstore';
 import { api } from '../src/api/client';
@@ -11,11 +12,40 @@ import { encrypt,toBase64 } from '../src/crypto/core';
 import { vault } from '../src/vault';
 import { setKvBackendForTests } from '../src/kvstore';
 import { installSession,resetTestState,jsonResponse,stubFetch } from './helpers/api';
-import { render,press,typeArea,settle,textOf } from './helpers/rtr';
+import { render,press,typeArea,typeInto,settle,textOf } from './helpers/rtr';
 function deferred<T>(){let resolve!:(x:T)=>void;let promise=new Promise<T>(r=>resolve=r);return {promise,resolve};}
 beforeEach(()=>{resetTestState();installSession('audit-user');vault.unlock({authKey:new Uint8Array(32).fill(6),dataKey:new Uint8Array(32).fill(6)},'audit-user');});
 afterEach(()=>{vi.unstubAllGlobals();vi.restoreAllMocks();setKvBackendForTests(null);});
 describe('independent UI custody probes',()=>{
+ it('editing a pairing code invalidates a lookup that is still awaiting its response',async()=>{
+  const pending=deferred<Awaited<ReturnType<typeof api.pairingLookup>>>();
+  const lookup=vi.spyOn(api,'pairingLookup').mockImplementationOnce(()=>pending.promise).mockResolvedValue({therapist_id:'new-therapist',display_name:'New Doctor',wrap_pub_key:toBase64(new Uint8Array(91).fill(4))});
+  vi.spyOn(api,'listConsents').mockResolvedValue([]);
+  const root=await render(<ShareView/>);
+  await typeInto(root,'Pairing code','OLD12345');await press(root,'Look up');
+  expect(lookup).toHaveBeenCalledWith('OLD12345');
+  await typeInto(root,'Pairing code','NEW12345');
+  await act(async()=>pending.resolve({therapist_id:'old-therapist',display_name:'Old Doctor',wrap_pub_key:toBase64(new Uint8Array(91).fill(3))}));
+  await settle(20,3);
+  expect(textOf(root)).not.toContain('Old Doctor');
+  expect(root.root.findAllByType('input').filter(node=>node.props.type==='checkbox')).toHaveLength(0);
+  await press(root,'Look up');await settle(20,3);expect(lookup).toHaveBeenLastCalledWith('NEW12345');expect(textOf(root)).toContain('New Doctor');
+  await act(async()=>root.unmount());
+ });
+ it('changing a pairing code during key wrapping stops the unconfirmed grant before dispatch',async()=>{
+  const sharing=await import('../src/crypto/sharing');
+  const pending=deferred<Awaited<ReturnType<typeof sharing.wrapDataKeyForTherapist>>>();
+  const wrap=vi.spyOn(sharing,'wrapDataKeyForTherapist').mockImplementationOnce(()=>pending.promise);
+  const grant=vi.spyOn(api,'grantConsent').mockResolvedValue({id:'unused',therapist_id:'old-therapist',display_name:'Old Doctor',username:'old-doctor',status:'active',granted_at:'2026-10-03T00:00:00Z',revoked_at:null});
+  vi.spyOn(api,'pairingLookup').mockResolvedValue({therapist_id:'old-therapist',display_name:'Old Doctor',wrap_pub_key:toBase64(new Uint8Array(91).fill(3))});
+  vi.spyOn(api,'listConsents').mockResolvedValue([]);
+  const root=await render(<ShareView/>);await typeInto(root,'Pairing code','OLD12345');await press(root,'Look up');await settle(20,3);
+  for(const checkbox of root.root.findAllByType('input').filter(node=>node.props.type==='checkbox'))await act(async()=>checkbox.props.onChange({target:{checked:true}}));
+  await press(root,'Confirm and share');expect(wrap).toHaveBeenCalledTimes(1);
+  await typeInto(root,'Pairing code','NEW12345');
+  await act(async()=>pending.resolve({ephemeralPubB64:'ephemeral',wrappedKeyB64:'wrapped'}));await settle(20,3);
+  expect(grant).not.toHaveBeenCalled();await act(async()=>root.unmount());
+ });
  it('failed safety-plan reads cannot overwrite stored data and a retry preserves typed fields while restoring untouched fields',async()=>{
   await saveSafetyPlan(vault.get().dataKey,'audit-user',{...EMPTY_SAFETY_PLAN,warningSigns:'stored warning',helpers:'stored support contact'});
   const original=await kv.getItem('mindpattern.safetyPlan.audit-user');let fail=true;

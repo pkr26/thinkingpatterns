@@ -2,10 +2,15 @@
  * Presence checks use native metadata APIs; only an explicit unlock reads keys. */
 import * as Keychain from "react-native-keychain";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { captureLocalWritePermit, assertLocalWritePermit, commitLocalWrite, commitLocalErasureWrite, localWriteScopeEpoch } from "./localWriteGuard";
 const SERVICE = "com.mindpattern.biometric-unlock.v1";
 const serviceFor = (userId: string): string => `${SERVICE}.${userId}`;
 const legacyDisabled = (userId: string): string => `@mindpattern/biometric.legacy-disabled.${userId}`;
 const authenticatedLegacyOwners = new Set<string>();
+let mutations: Promise<unknown> = Promise.resolve();
+function serialized<T>(run: () => Promise<T>): Promise<T> {
+  const pending = mutations.then(run, run); mutations = pending.catch(() => {}); return pending;
+}
 async function exists(service: string): Promise<boolean> {
   try { return await Keychain.hasGenericPassword({ service }); } catch { return false; }
 }
@@ -17,23 +22,35 @@ export async function biometricsSupported(): Promise<boolean> {
 }
 export async function enableBiometricUnlock(userId: string, dataKey: Buffer): Promise<void> {
   if (dataKey.length !== 32) throw new Error("Invalid biometric data key");
-  const result = await Keychain.setGenericPassword(userId, dataKey.toString("base64"), {
-    service: serviceFor(userId), accessControl: Keychain.ACCESS_CONTROL.BIOMETRY_CURRENT_SET,
-    accessible: Keychain.ACCESSIBLE.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY,
-  });
-  if (!result) throw new Error("biometric secure storage rejected the data-key wrap");
-  await AsyncStorage.setItem(legacyDisabled(userId), "1");
-  if (authenticatedLegacyOwners.has(userId)) await Keychain.resetGenericPassword({ service: SERVICE });
+  const permit = captureLocalWritePermit(userId, dataKey), encoded = dataKey.toString("base64");
+  // Keychain calls are physical key publications too. Track the entire
+  // admitted mutation so deletion/rotation cannot finish before it drains.
+  await commitLocalWrite(permit, () => serialized(async () => {
+    assertLocalWritePermit(permit);
+    const result = await Keychain.setGenericPassword(userId, encoded, {
+      service: serviceFor(userId), accessControl: Keychain.ACCESS_CONTROL.BIOMETRY_CURRENT_SET,
+      accessible: Keychain.ACCESSIBLE.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY,
+    });
+    if (!result) throw new Error("biometric secure storage rejected the data-key wrap");
+    await AsyncStorage.setItem(legacyDisabled(userId), "1");
+    if (authenticatedLegacyOwners.has(userId)) await Keychain.resetGenericPassword({ service: SERVICE });
+  }));
 }
 export async function disableBiometricUnlock(userId: string): Promise<void> {
   // A legacy slot cannot be attributed without authenticating. Suppress its
   // fallback for this account without reading/deleting another owner's key.
-  await AsyncStorage.setItem(legacyDisabled(userId), "1");
-  await Keychain.resetGenericPassword({ service: serviceFor(userId) });
-  if (authenticatedLegacyOwners.has(userId)) {
-    await Keychain.resetGenericPassword({ service: SERVICE });
-    authenticatedLegacyOwners.delete(userId);
-  }
+  const epoch = localWriteScopeEpoch();
+  // Administrative removal is also used after the account is tombstoned
+  // and while rekey freezes producers, so it does not require an active key.
+  await commitLocalErasureWrite(userId, epoch, () => serialized(async () => {
+    if (epoch !== localWriteScopeEpoch()) throw new Error("The biometric removal belongs to a retired session");
+    await AsyncStorage.setItem(legacyDisabled(userId), "1");
+    await Keychain.resetGenericPassword({ service: serviceFor(userId) });
+    if (authenticatedLegacyOwners.has(userId)) {
+      await Keychain.resetGenericPassword({ service: SERVICE });
+      authenticatedLegacyOwners.delete(userId);
+    }
+  }));
 }
 export async function hasBiometricUnlock(userId: string): Promise<boolean> {
   return (await exists(serviceFor(userId))) || ((await legacyAllowed(userId)) && (await exists(SERVICE)));

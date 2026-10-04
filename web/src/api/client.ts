@@ -232,6 +232,11 @@ export function hasSession(): boolean {
   return session !== null;
 }
 
+/** Async work beyond fetch can fence itself to the session that began it. */
+export function sessionAbortSignal(): AbortSignal | null {
+  return session?.controller.signal ?? null;
+}
+
 export function sessionUserId(): string | null {
   return session?.userId ?? null;
 }

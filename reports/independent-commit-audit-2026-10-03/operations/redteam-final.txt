@@ -1,0 +1,240 @@
+== backend in-process campaigns ==
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.prefix, expected /Users/pradeepreddy/Desktop/mental_health_application/.venv, got /Users/pradeepreddy/Desktop/mental_health_application/redteam/../.venv
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.exec_prefix, expected /Users/pradeepreddy/Desktop/mental_health_application/.venv, got /Users/pradeepreddy/Desktop/mental_health_application/redteam/../.venv
+
+=== A1: processing-session key attacks ====================================
+AUDIT|A1.single-use|BLOCKED|second pop() rejected (atomic single-use holds)
+AUDIT|A1.owner-bind|BLOCKED|pop() with foreign owner rejected
+AUDIT|A1.ttl|BLOCKED|expired session rejected: 403 processing_session_invalid
+AUDIT|A1.abandoned-session|INFO|abandoned session still holds the data key in server RAM until TTL (held=True) — but the operator ceiling is now 300s (2026-09-16 fix), exactly matching the consent copy's 'held in memory for up to 5 minutes'; residual exposure is the disclosed 5-minute window, not an hour
+AUDIT|A1.theft-owner-bind|BLOCKED|stolen session token unusable by another account: 403 processing_session_invalid (thief still needs the victim bearer token too)
+AUDIT|A1.memory-remnants|BLOCKED|post-run GC scan of 20000 tracked container(s) for the plaintext marker: 0 lingering copy-location(s)  (CPython refcounting frees this path promptly; the enclave docstring's honest caveat covers exception paths/analyzer-held refs, not this one)
+
+=== A4: client-KDF downgrade ==============================================
+AUDIT|A4.library-floor|BLOCKED|derive_master_key refuses iterations < 100000 on both platforms and the floor is pinned at the 100k/600k contract (MIN_ITERATIONS=100000, KDF_ITERATIONS=600000)
+AUDIT|A4.server-cannot-verify|PARTIAL|a hand-rolled 1-iteration derivation still registers (201) — the server never sees the password, so client work factors are structurally unverifiable; the floor removes every accidental/honest downgrade path
+
+=== A5: eternal key / nonce / rotation analysis ===========================
+AUDIT|A5.nonce-seam|BLOCKED|production encrypt() signature is ['key', 'plaintext', 'aad'] — no nonce parameter; two identical calls always differ (fresh=True); fixed-nonce output is only reachable via the unmistakably-named encrypt_with_nonce, mirrored in the mobile envelope.ts
+AUDIT|A5.nonce-birthday|BLOCKED|random 96-bit nonces, 10000 entries under one key: P(collision) ≈ 6.31e-22 — negligible within the per-user quota; risk is structural only if the quota is raised or the seam above is used
+AUDIT|A5.key-rotation-paths|BLOCKED|password change PUT /account/password=True, corpus rekey POST /processing/rekey=True, login-credential rotation PUT /account/credential=True: a compromised master secret now has an in-band recovery and a v2 password change no longer costs O(corpus) re-encryption. Both key-swapping endpoints require a possession probe — a live owner-bound X-Processing-Token session whose popped key must AUTHENTICATE stored ciphertext (wrong key: 403 envelope_key_mismatch; guards found in endpoint source: True) — so a stolen bearer alone cannot lock the real user out
+
+=== A6: AAD canonicalization fuzz — generating cross-platform corpus ======
+AUDIT|A6.corpus-generated|INFO|16 edge-case AAD vectors written to redteam/results/corpus/aad_corpus.json (committed redteam/aad_corpus.json stays the read-only fixture the TS side replays); verdict comes from the TS-side comparison (mobile redteam spec)
+
+[a_crypto] 12 verdicts, 0 harness errors
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.prefix, expected /Users/pradeepreddy/Desktop/mental_health_application/.venv, got /Users/pradeepreddy/Desktop/mental_health_application/redteam/../.venv
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.exec_prefix, expected /Users/pradeepreddy/Desktop/mental_health_application/.venv, got /Users/pradeepreddy/Desktop/mental_health_application/redteam/../.venv
+
+=== B1: auth_key replay, verifier replay, token forgery ===================
+AUDIT|B1.verifier-replay|FINDING|old bearer after logout=401 (epoch revocation works), but the captured verifier logs straight back in (200): logout revokes issued bearer sessions, not the underlying password-equivalent auth_key. Atomic password/security reset rotates that credential; until rotation, an intercepted verifier remains a reusable login credential.
+AUDIT|B1.verifier-enables-llm-egress|BLOCKED|captured verifier enables consent (200), but independently unlocked recompute=200, narrative-provider requests=0 (expected successful deterministic brain and zero requests). Translation egress requires its separate consent-bound audio operation; consent alone does not disclose the journal or give an attacker the data key.
+AUDIT|B1.wrong-verifier-rejected|BLOCKED|a WRONG verifier on destructive ops -> {'llm-consent': 403, 'account-delete': 403} (must be flat 403; anything else means re-authentication stopped comparing the proof)
+AUDIT|B1.hostile-tokens|BLOCKED|10 hostile token shapes -> [401] (no crash, flat denials)
+AUDIT|B1.token-type-confusion|BLOCKED|verify_token outcomes with a leaked secret: {'string': 'TokenError', 'negative': 'TokenError', 'huge': 'TokenError', 'nan-str': 'TokenError'} — all rejected as TokenError
+AUDIT|B1.epoch-both-mounts|BLOCKED|pre-logout token on legacy mount /api: 401
+
+=== B2: rate-limit evasion ================================================
+AUDIT|B2.ipv6-aggregation|BLOCKED|50 rotated IPv6 addresses inside one /64 collapse to 1 bucket(s)
+MINDPATTERN_TRUST_PROXY_HEADERS is on: rate-limit identity comes only from X-Forwarded-For received over a direct peer in MINDPATTERN_TRUSTED_PROXY_IPS=. Keep the API unreachable except through that proxy, which must append its observation; do not enable uvicorn --proxy-headers because this middleware needs the raw peer to verify the boundary.
+X-Forwarded-For ignored: MINDPATTERN_TRUST_PROXY_HEADERS is off or the direct peer is outside MINDPATTERN_TRUSTED_PROXY_IPS; rate limiting keys on the direct peer
+AUDIT|B2.xff-direct-origin|BLOCKED|with TRUST_PROXY_HEADERS=1 and direct origin access, 5/20 requests passed a 5/min limit using one spoofed XFF entry per request (deployment-conditional: safe only behind a proxy that always appends its observation)
+AUDIT|B2.eviction-flood|PARTIAL|after 121k attacker hits across 11k keys, victim bucket count=11 (reset=no): eviction is possible but costs ~121k requests to reset ONE near-limit bucket — smallest-count/oldest bias makes flooding strictly worse for the attacker than waiting out the window
+AUDIT|B2.fixed-window-boundary|BLOCKED|window=1s, limit=10: 10 hits at t=100.90 (count 10), 10 more just 0.15s later at t=101.05 resume at count 11 — the count did NOT reset at the old bucket boundary (a fixed window would show 1 here, doubling the limit inside 0.15s): hits age out only when a full window old, so no window-aligned span can exceed the limit
+AUDIT|B2.victim-lockout|BLOCKED|after 30 failed sprays the real user still logs in: 200 (check-then-count-on-failure holds)
+
+=== B3: enumeration, decoys, timing, recycling ============================
+AUDIT|B3.registration-oracle|INFO|re-registering a taken name -> 409 (documented, unavoidable availability oracle; per-username conflict bucket throttles mass harvesting)
+AUDIT|B3.salt-decoys|BLOCKED|real salt stable=True, decoy stable=True, distinct=True — existence not leaked through /auth/salt
+AUDIT|B3.login-timing|BLOCKED|median login latency known=172ms vs unknown=169ms (ratio 1.02, samples 4v4) — equal-CPU scrypt burn keeps them indistinguishable within noise
+AUDIT|B3.username-recycling|BLOCKED|deleted name re-registered; new account sees 0 old entries (no data bleed across account generations)
+
+[b_auth] 15 verdicts, 0 harness errors
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.prefix, expected /Users/pradeepreddy/Desktop/mental_health_application/.venv, got /Users/pradeepreddy/Desktop/mental_health_application/redteam/../.venv
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.exec_prefix, expected /Users/pradeepreddy/Desktop/mental_health_application/.venv, got /Users/pradeepreddy/Desktop/mental_health_application/redteam/../.venv
+
+=== C2: resource exhaustion / DoS =========================================
+AUDIT|C2.scrypt-amplification|BLOCKED|8 concurrent registrations (64MiB scrypt each): [201, 503] (4 x 503 refused, 4 x 201 served), 0.2s wall, RSS 112->626MB (+514MB against the 1024MB documented burst budget) — bounded by the CapacityLimiter(4)+auth rate limits; amplification exists but is capped
+AUDIT|C2.deep-json|BLOCKED|50k-deep nested JSON -> 400 (recursion guard holds)
+AUDIT|C2.oversized-body|BLOCKED|3MiB body -> 413
+AUDIT|C2.entry-quota|BLOCKED|7 creates against a 5-entry quota -> [201, 201, 201, 201, 201, 413, 413]
+AUDIT|C2.meta-unauthenticated|INFO|/meta and /healthz are unauthenticated by design (server facts only, no user data) — verified reachable without a token
+
+=== C3: business-logic abuse ==============================================
+AUDIT|C3.date-backdating|BLOCKED|entry_date offsets -> {'past-2': 422, 'past-1': 201, 'today': 201, 'future-1': 201, 'future-2': 422} (grace is ±1 day)
+AUDIT|C3.threshold-inflation|BLOCKED|40 entries squeezed into a 3-day window: phase=baseline, active_days=2 — distinct-calendar-day counting cannot be inflated through the ±1d grace
+AUDIT|C3.entry-recycling|INFO|delete->recreate same id: 204 then 201 — an account can rewrite its own evidence trail (self-affecting only; no cross-user impact)
+AUDIT|C3.mood-shift-phi-1|BLOCKED|35 identical daily entries -> recompute 200 (None): the phi=1.0 division is now clamped (brain.py min(phi, 0.99), 2026-09-16 fix) — the routine-responder corpus that used to ZeroDivisionError every recompute now completes normally
+AUDIT|C3.insight-idempotency|BLOCKED|two same-day recomputes: 200/200, patterns 0 vs 0 — deterministic brain, stable overwrite
+AUDIT|C3.wrong-key-recompute|BLOCKED|recompute with a wrong data key -> 400 entry_blob_invalid; prior insights intact=True
+AUDIT|C3.hostile-inner-payload|BLOCKED|AEAD-valid payload with NaN-sentiment/year-3000 inner date -> 400 entry_payload_malformed (rejected, not a 500, account not bricked)
+AUDIT|C3.cross-mount-rate-buckets|BLOCKED|alternating /api/v1 and /api mounts against a 5/min salt limit -> [200, 200, 200, 200, 200, 429, 429]
+
+[c_api] 13 verdicts, 0 harness errors
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.prefix, expected /Users/pradeepreddy/Desktop/mental_health_application/.venv, got /Users/pradeepreddy/Desktop/mental_health_application/redteam/../.venv
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.exec_prefix, expected /Users/pradeepreddy/Desktop/mental_health_application/.venv, got /Users/pradeepreddy/Desktop/mental_health_application/redteam/../.venv
+
+=== E1: crisis bypass corpus — Python engine (server suppress tier + dialog tier) 
+AUDIT|E1.python-suppress-bypass|BLOCKED|0/120 crisis samples evade the suppress tier (the tier that keeps text off cards/questions). Bypasses by technique — apostrophe: 0/1; benign-mask-gap: 0/4; concat: 0/2; control-apostrophe: 0/1; control-case: 0/1; control-curly: 0/1; control-plain: 0/3; control-spaces: 0/1; diacritic: 0/1; homoglyph: 0/10; invisible: 0/2; leet-mapped-digit: 0/1; leetspeak: 0/6; letter-doubling: 0/4; method-specific: 0/10; method-specific-es: 0/1; non-english: 0/37; past-tense: 0/2; punct-split: 0/3; residual-split: 0/11; sms-shorthand: 0/2; soft-hyphen: 0/1; space-split: 0/2; trailing-leet: 0/2; unlisted-phrase: 0/9; zero-width: 0/2. Samples: []
+AUDIT|E1.python-dialog-bypass|INFO|2 samples are suppressed-but-no-dialog BY DESIGN (hopelessness phrasing sits in the suppress_extra tier: never quoted on cards/questions, but the conservative dialog tier stays first-person-ideation only): ["i don't see any future for me", 'everyone would be happier if i was gone']
+AUDIT|E1.python-false-positives|BLOCKED|benign controls correctly do not fire
+AUDIT|E1.bypass-to-question-quote|BLOCKED|of 0 bypassing labels fed to question generation, 0 are interpolated verbatim into reflective questions (e.g. []) — the full chain: disguised crisis text in a journal -> pattern card label -> daily question quoting it back
+
+=== E3: regulatory / clinical boundary spot checks ========================
+AUDIT|E3.diagnosis-language|BLOCKED|no diagnosis vocabulary in question templates or the LLM module (remaining grep hits are the prompt instruction 'no advice, no diagnosis' itself and the sanitizer's own forbidden-word blocklist)
+AUDIT|E3.llm-kind-allowlist|BLOCKED|LLM pattern kinds are fixed to ('temporal', 'mood_correlation', 'recurring_phrase', 'mood_shift') — no diagnosis/flag kind exists for a model output to claim
+AUDIT|E3.crisis-screen-copy|BLOCKED|crisis resources screen: {'988 line present': True, 'Crisis Text Line 741741': True, 'emergency guidance': True, 'findahelpline fallback': True, 'no method detail language': True}
+
+[e_crisis] 7 verdicts, 0 harness errors
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.prefix, expected /Users/pradeepreddy/Desktop/mental_health_application/.venv, got /Users/pradeepreddy/Desktop/mental_health_application/redteam/../.venv
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.exec_prefix, expected /Users/pradeepreddy/Desktop/mental_health_application/.venv, got /Users/pradeepreddy/Desktop/mental_health_application/redteam/../.venv
+
+=== E2: adversarial corpora vs brain.update ===============================
+AUDIT|E2.trend-manufactured-temporal|BLOCKED|monotone mood improvement over 120 uniform weekdays: surfaced=['rumination'], temporal claims=0 (within-person detrending + base-rate correction held)
+AUDIT|E2.boilerplate-topic|BLOCKED|identical sentence x120: topics surfaced=0 (anti-boilerplate bars held)
+AUDIT|E2.pure-noise-surfacing|BLOCKED|pseudo-random word salad x120 days: 2 patterns surfaced, kinds=['topic'] — statistical kinds stayed silent on noise (the FDR/effect-size guarantee); the surfaced topic cards are direct-measurement of a 14-word vocabulary recurring by construction
+AUDIT|E2.constant-mood-crash|BLOCKED|120 perfectly identical entries: engine survived
+AUDIT|E2.near-constant-mood-crash|BLOCKED|120 near-identical entries (float-noise sentiments): engine survived
+AUDIT|E2.disguised-crisis-recurrence|BLOCKED|disguised crisis phrase x81 days: quoted-back=True, sensitive flag on the surfaced card=True, bypasses_suppress=False (reported separately — the suppress-tier normalization catch is one layer, not the verdict) — a quoted crisis card WITHOUT the sensitive flag would ruminate the phrase back at a vulnerable user; here the phrase is either not quoted or flagged, and the recurring pattern is still DETECTED (surfaced=['recurring_phrase'])
+AUDIT|E2.max-corpus-timing|BLOCKED|200 entries x 20k chars (engine caps): 0.4s, ok=True
+AUDIT|E2.non-latin-corpus|BLOCKED|CJK-only corpus x61 days: ok=True, surfaced=0 (engine is latin-token-bound: no crash, no false patterns, and no insight value either — noted for E1's non-English gap)
+
+[e2_brain] 8 verdicts, 0 harness errors
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.prefix, expected /Users/pradeepreddy/Desktop/mental_health_application/.venv, got /Users/pradeepreddy/Desktop/mental_health_application/redteam/../.venv
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.exec_prefix, expected /Users/pradeepreddy/Desktop/mental_health_application/.venv, got /Users/pradeepreddy/Desktop/mental_health_application/redteam/../.venv
+
+=== G1: backup vs deletion + dump contents ================================
+AUDIT|G1.backup-profile-config|BLOCKED|compose backup profile: pg_dump=True, 35-day retention=yes, AES-256-CBC/PBKDF2-600k dump encryption with the key REQUIRED via the mounted secret file (env-fallback line=True, BACKUP_KEY_FILE mount=True, secrets: entry=True, shared helper=True, -iter pin=True) — a stolen backup volume is ciphertext at rest and a missing key refuses the dump outright. Residual by design: dumps taken before a deletion still hold the user's rows until retention expires; the README states this as the deletion-and-retention scope
+AUDIT|G1.dump-contents|INFO|what a dump carries (same columns): 0 usernames, 0 entries, 0 distinct dates, blob sizes (None, None, None) — with the 2026-09-16 fix this metadata is only readable by a BACKUP_KEY holder (AES-256-CBC at rest); the residual is the retention-vs-deletion window, not plaintext-on-disk
+
+=== G2: supply chain ======================================================
+AUDIT|G2.pip-audit|BLOCKED|pip-audit on requirements.lock.txt: rc=0, vulnerability lines=0 []
+AUDIT|G2.npm-audit|FINDING|npm audit (mobile): {'info': 0, 'low': 0, 'moderate': 0, 'high': 28, 'critical': 0, 'total': 28}; registry findings remain visible. The pinned postinstall patches and verify_dependency_patches.mjs exercise the two remaining unpublished advisory mitigations; registry metadata does not certify those source patches.
+AUDIT|G2.lockfile-hashes|BLOCKED|requirements.lock.txt: 990/1029 requirement lines carry --hash pins; Docker installs with --no-deps
+AUDIT|G2.actions-pinning|BLOCKED|GitHub Actions refs: 31 uses, unpinned/floating: []
+AUDIT|G2.mutation-gate|INFO|mutation workflow: survivors do not fail the run (True) — quality signal only, documented
+
+=== G3: fail-closed config + repo hygiene =================================
+AUDIT|G3.prod-default-secret|BLOCKED|env=production refused boot (fail-closed RuntimeError), expected=refusal
+AUDIT|G3.prod-short-secret|BLOCKED|env=production refused boot (fail-closed RuntimeError), expected=refusal
+AUDIT|G3.prod-sqlite|BLOCKED|env=production refused boot (fail-closed RuntimeError), expected=refusal
+AUDIT|G3.prod-http-llm-url|BLOCKED|env=production refused boot (fail-closed RuntimeError), expected=refusal
+AUDIT|G3.typo-env-fails-closed|BLOCKED|env=staging  refused boot (fail-closed RuntimeError), expected=refusal
+AUDIT|G3.staging-valid-boots-under-prod-gates|BLOCKED|env=staging booted, expected=boot
+AUDIT|G3.tracked-secrets|BLOCKED|git-tracked secret/db/keystore files: none (+ 1 reviewed RN template shim) (1134 files tracked)
+AUDIT|G3.dockerignore-db|BLOCKED|backend/.dockerignore excludes dev DBs: True (mindpattern.db exists on disk in backend/ and must never enter the image)
+
+[g_infra] 15 verdicts, 0 harness errors
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.prefix, expected /Users/pradeepreddy/Desktop/mental_health_application/.venv, got /Users/pradeepreddy/Desktop/mental_health_application/redteam/../.venv
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.exec_prefix, expected /Users/pradeepreddy/Desktop/mental_health_application/.venv, got /Users/pradeepreddy/Desktop/mental_health_application/redteam/../.venv
+
+=== V-1: flag-off hides every voice surface (patient, therapist, toggle) ==
+AUDIT|G-VOICE.V-1-flag-off|BLOCKED|anonymous=401 anon-toggle=401 patient=404 share-toggle=404 role-wall=403 (want 401/401/404/404/403 — auth and role run before the flag; the flag hides the feature; the M1 remediation covers the therapist route + toggle)
+
+=== V-2: consent wall (none / stale fingerprint) ==========================
+AUDIT|G-VOICE.V-2-consent|BLOCKED|no-consent=403/voice_consent_required consented=200 stale-fingerprint=403 (want 403/voice_consent_required, 200, 403)
+
+=== V-4: route-scoped caps refuse oversized decoded audio / duration ======
+AUDIT|G-VOICE.V-4-caps|BLOCKED|over-cap=413/payload_too_large duration-over-bound=422 (want 413 with a too-large code, 422 — the edge middleware fires first by construction: edge and decoded caps share one knob, the route's decoded check is the backstop if they are ever decoupled)
+
+=== V-5: transcription rate bucket (limit 3, dedicated fresh app) =========
+AUDIT|G-VOICE.V-5-rate|BLOCKED|status sequence=[200, 200, 200, 429, 429, 429] (want 429s once past the 3/h bucket — the third-party spend valve)
+
+=== V-7: cross-user attachment access =====================================
+AUDIT|G-VOICE.V-7-idor|BLOCKED|stranger-get=404 stranger-delete=404 owner-still-reads=200 (want 404/404/200 — flat 404, no oracle)
+
+=== V-8: therapist voice gate (share_voice + per-fetch audit) =============
+AUDIT|G-VOICE.V-8-therapist-gate|BLOCKED|no-grant=403/consent_voice_share_required audit-before-grant=0 granted-fetch=200 audit-rows=1 (want 403/consent_voice_share_required, 0, 200, 1)
+
+=== V-11: translation dispatch requires the CURRENT llm consent (H4) ======
+AUDIT|G-VOICE.V-11-translation-consent|BLOCKED|no-llm-consent english_text=None dispatches=0 after-grant=translated (want null/0/'translated' — a configured LLM must not receive journal text through the voice path without its own current consent)
+
+=== V-12: upstream retry — exactly once on 429, never on 400 ==============
+AUDIT|G-VOICE.V-12-retry|BLOCKED|429: calls=2 result='after retry'; 400: calls=1 raised=True (want 2/'after retry' and 1/True — one bounded retry, never for client errors)
+
+=== V-9 spot: lazy expiry enforces retention on the fetch path ============
+AUDIT|G-VOICE.V-9-lazy-expiry|BLOCKED|expired-fetch=410 rows-left=0 object-gone=True (want 410/0/True — a missed sweep cycle cannot extend retention)
+
+[g_voice] 9 verdicts, 0 harness errors
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.prefix, expected /Users/pradeepreddy/Desktop/mental_health_application/.venv, got /Users/pradeepreddy/Desktop/mental_health_application/redteam/../.venv
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.exec_prefix, expected /Users/pradeepreddy/Desktop/mental_health_application/.venv, got /Users/pradeepreddy/Desktop/mental_health_application/redteam/../.venv
+
+=== H1: metadata inference from the operator's view =======================
+AUDIT|H1.metadata-inference|FINDING|operator-view inference from entry_date+length only: subject journals on ['Sunday'] exclusively (15 entries over 120 days); a 21-day silence ending 2026-08-02; 33% of entries are 10x longer than the rest (crisis-length writes vs routine updates) — an operator can infer religious observance or work schedules, episode timing, and possibly severity from SIZE alone, with zero decryption
+
+=== H2: export bundle contents ============================================
+AUDIT|H2.export-cleartext-fields|BLOCKED|canonical username/UUID, version2 and salt are intentional public offline-recovery metadata; password-only export recovery authenticated schemes=['v1', 'v2']; plaintext journal/password/data-key/verifier leakage or broken recovery=NONE
+AUDIT|H2.export-auth-scoped|BLOCKED|unauthenticated export: 401
+
+=== H3: erasure completeness ==============================================
+AUDIT|H3.erasure-live-db|BLOCKED|after DELETE /account: users=0, entries=0, insights=0 rows remain; in-memory keystore holds 0 keys — live-data erasure is complete and immediate (backups are the residual: see G1)
+
+[h_privacy] 4 verdicts, 0 harness errors
+== fake-LLM egress campaign ==
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.prefix, expected /Users/pradeepreddy/Desktop/mental_health_application/.venv, got /Users/pradeepreddy/Desktop/mental_health_application/redteam/../.venv
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.exec_prefix, expected /Users/pradeepreddy/Desktop/mental_health_application/.venv, got /Users/pradeepreddy/Desktop/mental_health_application/redteam/../.venv
+
+=== D1: LLM output sanitizer attack corpus ================================
+  D1 digit-phone: dropped as intended
+  D1 classic-injection: dropped as intended
+  D1 ungrounded-vocab: dropped as intended
+  D1 planted-word-phone: dropped as intended
+  D1 planted-word-phone-recurring: dropped as intended
+  D1 planted-dot-com-url: dropped as intended
+  D1 planted-dot-com-url-goodkind: dropped as intended
+  D1 hyphen-token-split: dropped as intended
+  D1 echo-own-vocab: survived: kind=mood_shift label='you are worthless' occ=3 conf=0.5 detail={}
+  D1 occurrences-overflow: survived: kind=temporal label='work' occ=100000 conf=0.5 detail={}
+  D1 confidence-nan: survived: kind=temporal label='work' occ=1 conf=0.5 detail={}
+  D1 bad-detail-day: survived: kind=temporal label='work' occ=1 conf=0.5 detail={'mood_delta': 1.0}
+  D1 oversize-label: dropped as intended
+  D1 control-chars: survived: kind=temporal label='wo rk dominates' occ=1 conf=0.5 detail={}
+  D1 not-a-dict: dropped as intended
+  D1 unknown-kind: dropped as intended
+AUDIT|D1.planted-vocab-injection|BLOCKED|planted-vocabulary phone labels ('call five five five zero one three four') are now REJECTED by the spelled-contact/number-word-run rules (2026-09-16 fix): the two-stage injection no longer reaches cards even when the entries plant the vocabulary
+AUDIT|D1.spelled-url|BLOCKED|'visit evil dot com often' is now rejected (spelled-domain rule, 2026-09-16 fix)
+AUDIT|D1.sub-3-char-token-gap|BLOCKED|hyphen-joined label tokens ('wo-rk') are rejected: the label's whitespace tokenizer keeps the fragment whole while the corpus tokenizer splits on it, so it can never be corpus-grounded — tiny-token stitching no longer smuggles fragments into labels (the surviving space-separated form is bounded by the 80-char cap and grounding of the remaining words)
+AUDIT|D1.structural-defenses|BLOCKED|digit phones, ungrounded vocab, injection imperatives, bad kinds, oversize labels all dropped; occurrences 1e30 clamped=True; NaN confidence defaulted to 0.5; bad detail keys dropped (verified above)
+AUDIT|D1.case-table|BLOCKED|all 16 sanitizer case-table rows behaved as their recorded expectations (blocked or survived)
+
+=== D2: deterministic recompute suppresses unvalidated provider narratives 
+AUDIT|D2.consent-gate|BLOCKED|successful deterministic consent-OFF recompute: 0 provider requests (expected 0)
+AUDIT|D2.plaintext-egress|BLOCKED|successful deterministic consent-ON recompute: 0 provider requests; narration-only dispatch is disabled, so historic consent does not disclose the corpus
+AUDIT|D2.missing-generation-limits|INFO|recompute performs no provider generation; translation request limits/completion checks are covered separately by backend STT tests
+AUDIT|D2.endpoint-to-card-injection|BLOCKED|rogue provider marker in stored encrypted insight=False; provider requests=0; checked a never-seeded marker rather than ordinary corpus vocabulary
+AUDIT|D2.slow-endpoint-key-lifetime|BLOCKED|configured provider delay=4.0s; successful deterministic recompute=0.034s; provider dispatched=False; no provider-controlled plaintext lifetime on recompute
+
+[d_llm] 10 verdicts, 0 harness errors
+== live multi-worker campaign (spawns uvicorn --workers 2 on :8971) ==
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.prefix, expected /Users/pradeepreddy/Desktop/mental_health_application/.venv, got /Users/pradeepreddy/Desktop/mental_health_application/redteam/../.venv
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.exec_prefix, expected /Users/pradeepreddy/Desktop/mental_health_application/.venv, got /Users/pradeepreddy/Desktop/mental_health_application/redteam/../.venv
+
+=== C1: multi-worker breakage (uvicorn --workers 2, documented-forbidden) =
+AUDIT|C1.server-boot|BLOCKED|2-worker uvicorn is REFUSED: the deployment lock makes the second worker exit at startup with 'another worker/process is already serving this deployment' (single-process contract is now enforced, not just documented)
+AUDIT|C1.rate-limit-fragmentation|INFO|not exercised: live two-worker target refused startup with the explicit deployment-lock signature; no healthy target exists. Key-required single-use and quota/concurrency behavior are covered independently by backend integration tests.
+AUDIT|C1.quota-race|INFO|not exercised: live two-worker target refused startup with the explicit deployment-lock signature; no healthy target exists. Key-required single-use and quota/concurrency behavior are covered independently by backend integration tests.
+AUDIT|C1.keystore-fragmentation|INFO|not exercised: live two-worker target refused startup with the explicit deployment-lock signature; no healthy target exists. Key-required single-use and quota/concurrency behavior are covered independently by backend integration tests.
+
+[c1_multiworker] 4 verdicts, 0 harness errors
+== mobile campaign (real shipping modules under vitest) ==
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - import "./vitest.config" without a file extension (redteam.vitest.config.ts:2:18). Add the file extension
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v4.1.11 /Users/pradeepreddy/Desktop/mental_health_application/mobile
+
+
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
+   Start at  14:49:18
+   Duration  954ms (transform 172ms, setup 64ms, import 167ms, tests 647ms, environment 0ms)
+
+
+== verdict summary ==
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.prefix, expected /Users/pradeepreddy/Desktop/mental_health_application/.venv, got /Users/pradeepreddy/Desktop/mental_health_application/redteam/../.venv
+<frozen site>:101: RuntimeWarning: Unexpected value in sys.exec_prefix, expected /Users/pradeepreddy/Desktop/mental_health_application/.venv, got /Users/pradeepreddy/Desktop/mental_health_application/redteam/../.venv
+108 verdicts: BLOCKED=89, FINDING=4, INFO=13, PARTIAL=2
+  FINDING B1.verifier-replay
+  FINDING A2.offline-oracle
+  FINDING G2.npm-audit
+  FINDING H1.metadata-inference

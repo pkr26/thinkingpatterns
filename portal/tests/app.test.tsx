@@ -600,3 +600,38 @@ it("rejects a chart route absent from this account and retains the patient list 
   expect(textOf(root)).toContain("Patients — Dr. Portal");
   await act(async()=>root.unmount());window.location.hash="";lookup.mockResolvedValue([]);
 });
+
+it("isolates and restores encrypted drafts when browser history switches directly between patients", async () => {
+  const { savePortalDraft } = await import("../src/noteDrafts");
+  const { typeTextarea } = await import("./helpers/rtr");
+  const crypto = vi.mocked(await import("../src/crypto"));
+  const draftKey = new Uint8Array(32).fill(7);
+  crypto.unlockWrapPrivateKeyWithNotesKey.mockResolvedValueOnce({
+    privateKey: { algorithm: { name: "ECDH" } } as unknown as CryptoKey,
+    noteKeyV2: new Uint8Array(draftKey),
+  });
+  const patients = ["first", "second"].map(id => ({
+    user_id: id, username: `patient-${id}`, status: "revoked",
+    granted_at: "2026-09-01T00:00:00Z", revoked_at: "2026-09-02T00:00:00Z",
+    ephemeral_pub: null, wrapped_key: null,
+  }));
+  const lookup = vi.mocked(api.patients); lookup.mockResolvedValue(patients);
+  await savePortalDraft("therapist-1", "second", draftKey, {
+    text: { general: "Second patient's saved draft" }, editing: null, pending: {},
+  });
+  window.location.hash = "#/patient/first";
+  const root = await login(); await flush(8);
+  try {
+    await typeTextarea(root, "Note about this patient…", "First patient's private draft");
+    window.location.hash = "#/patient/second";
+    await act(async () => { window.dispatchEvent(new Event("popstate")); });
+    await vi.waitFor(() => expect(root.root.findAllByType("textarea")[0]!.props.value).toBe("Second patient's saved draft"));
+    expect(textOf(root)).not.toContain("First patient's private draft");
+    window.location.hash = "#/patient/first";
+    await act(async () => { window.dispatchEvent(new Event("popstate")); });
+    await vi.waitFor(() => expect(root.root.findAllByType("textarea")[0]!.props.value).toBe("First patient's private draft"));
+  } finally {
+    await act(async () => root.unmount());
+    window.location.hash = ""; lookup.mockResolvedValue([]);
+  }
+});

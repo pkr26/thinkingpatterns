@@ -1,0 +1,9 @@
+
+ RUN  v5.0.2 /Users/pradeepreddy/Desktop/mental_health_application/web
+
+
+ Test Files  4 passed (4)
+      Tests  69 passed (69)
+   Start at  14:31:25
+   Duration  3.56s (tests 78%, transform 16%, setup 3%, import 2%)
+

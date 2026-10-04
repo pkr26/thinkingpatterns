@@ -1,0 +1,67 @@
+npm notice run mindpattern-web@0.1.0 npx
+npm notice run 'vitest' run tests/auditRegressionsUI.test.tsx -t pairing code
+
+ RUN  v5.0.2 /Users/pradeepreddy/Desktop/mental_health_application/web
+
+stderr | tests/auditRegressionsUI.test.tsx > independent UI custody probes > editing a pairing code invalidates a lookup that is still awaiting its response
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+
+stderr | tests/auditRegressionsUI.test.tsx > independent UI custody probes > changing a pairing code during key wrapping stops the unconfirmed grant before dispatch
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+
+ ❯ tests/auditRegressionsUI.test.tsx (5 tests | 2 failed | 3 skipped) 209ms
+   ❯ independent UI custody probes (5)
+     × editing a pairing code invalidates a lookup that is still awaiting its response 78ms
+     × changing a pairing code during key wrapping stops the unconfirmed grant before dispatch 131ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/auditRegressionsUI.test.tsx > independent UI custody probes > editing a pairing code invalidates a lookup that is still awaiting its response
+AssertionError: expected 'Pairing code | 8098 3DC2 185C D248 1C…' not to contain 'Old Doctor'
+
+Expected: "Old Doctor"
+Received: "Pairing code | 8098 3DC2 185C D248 1CBC 88FF 63F4 A7DE | Copy fingerprint |  |  | We read the key fingerprint back to each other and it MATCHED. (A substituted key would decrypt nothing — but checking is the only proof the right therapist is on the other end.) |  |  | I understand: they can read my patterns and the decrypted entries behind them; every read is audit-logged; revoking ends access immediately but cannot unread what has already been seen. | Zero-knowledge: your key is wrapped to your therapist's public key — the server never sees it, and neither does anyone else. | Therapist: Old Doctor | Read this fingerprint back to your therapist (in the room or on the phone). If it does not match what their portal shows, STOP — a mismatch means the key was substituted. | No active grants — your journal is shared with no one. | Share with a therapist | Your grants | Look up | Copy fingerprint | Confirm and share | 8098 3DC2 185C D248 1CBC 88FF 63F4 A7DECopy fingerprint"
+
+ ❯ tests/auditRegressionsUI.test.tsx:30:28
+     28|   await act(async()=>pending.resolve({therapist_id:'old-therapist',dis…
+     29|   await settle(20,3);
+     30|   expect(textOf(root)).not.toContain('Old Doctor');
+       |                            ^
+     31|   expect(root.root.findAllByType('input').filter(node=>node.props.type…
+     32|   await press(root,'Look up');await settle(20,3);expect(lookup).toHave…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  tests/auditRegressionsUI.test.tsx > independent UI custody probes > changing a pairing code during key wrapping stops the unconfirmed grant before dispatch
+AssertionError: expected "grantConsent" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st grantConsent call:
+
+    Array [
+      "OLD12345",
+      "ephemeral",
+      "wrapped",
+      "BgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgY=",
+    ]
+
+
+Number of calls: 1
+
+ ❯ tests/auditRegressionsUI.test.tsx:47:21
+     45|   await typeInto(root,'Pairing code','NEW12345');
+     46|   await act(async()=>pending.resolve({ephemeralPubB64:'ephemeral',wrap…
+     47|   expect(grant).not.toHaveBeenCalled();await act(async()=>root.unmount…
+       |                     ^
+     48|  });
+     49|  it('failed safety-plan reads cannot overwrite stored data and a retry…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 3 skipped (5)
+   Start at  14:24:20
+   Duration  736ms (transform 55%, tests 32%, import 7%, setup 5%)
+

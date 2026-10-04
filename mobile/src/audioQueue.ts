@@ -1,7 +1,7 @@
 /** Encrypted takes live in files, with small, scoped AsyncStorage descriptors.
  * Acknowledgements compare revisions; clearing beats every outstanding request.
  * No automatic eviction/rejection deletes the user's only recording copy. */
-import { captureOpaqueLocalWritePermit, captureLocalWritePermit, assertLocalWritePermit, commitLocalWrite, type LocalWritePermit } from "./localWriteGuard";
+import { captureOpaqueLocalWritePermit, captureLocalWritePermit, assertLocalWritePermit, commitLocalWrite, localWriteScopeEpoch, type LocalWritePermit } from "./localWriteGuard";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system/legacy";
 import { api, ApiError, canonicalOrigin, getBaseUrl, OriginPinnedError } from "./api/client";
@@ -117,15 +117,18 @@ export async function audioQueueStatus(userId?: string): Promise<{ total: number
 }
 const inFlight = new Map<string, Promise<number>>();
 export async function flushAudioQueue(): Promise<number> {
-  const epoch = generation;
+  const epoch = generation, ownershipEpoch = localWriteScopeEpoch();
   const userId = await api.getUserId(); if (!userId) return 0;
+  if (ownershipEpoch !== localWriteScopeEpoch()) return 0;
+  const permit = captureLocalWritePermit(userId);
   const origin = await getBaseUrl(); if (epoch !== generation) return 0;
+  assertLocalWritePermit(permit);
   const scope = keyFor(origin, userId, "");
   const running = inFlight.get(scope); if (running) return running;
-  const task = flush(origin, userId, epoch).finally(() => { if (inFlight.get(scope) === task) inFlight.delete(scope); });
+  const task = flush(origin, userId, epoch, permit).finally(() => { if (inFlight.get(scope) === task) inFlight.delete(scope); });
   inFlight.set(scope, task); return task;
 }
-async function flush(origin: string, userId: string, epoch: number): Promise<number> {
+async function flush(origin: string, userId: string, epoch: number, permit: LocalWritePermit): Promise<number> {
   const eraseEpoch = await AsyncStorage.getItem(erasedKey(origin, userId));
   // A child's ciphertext may upload only after the parent entry is acknowledged.
   await flushQueue(userId).catch(() => {});
@@ -145,10 +148,18 @@ async function flush(origin: string, userId: string, epoch: number): Promise<num
         // Migrate one legacy blob only after its durable file is complete.
         const original = raw;
         const legacy = row;
-        const file = await newFile(legacy.blobB64, legacy, origin, userId);
         await serialized(async () => {
-          if (epoch !== generation || await AsyncStorage.getItem(key) !== original) { await removeFile(file); return; }
-          await AsyncStorage.setItem(key, JSON.stringify(file)); row = file; raw = JSON.stringify(file);
+          if (epoch !== generation || await AsyncStorage.getItem(key) !== original) return;
+          // The native file is part of the admitted migration, too. Erasure
+          // must drain it before deleting this account's directory.
+          await commitLocalWrite(permit, async () => {
+            const file = await newFile(legacy.blobB64, legacy, origin, userId);
+            try {
+              if (epoch !== generation || await AsyncStorage.getItem(key) !== original) { await removeFile(file); return; }
+              assertLocalWritePermit(permit);
+              await AsyncStorage.setItem(key, JSON.stringify(file)); row = file; raw = JSON.stringify(file);
+            } catch (error) { await removeFile(file).catch(() => {}); throw error; }
+          });
         });
         if (!isFile(row)) continue;
       }
@@ -157,16 +168,17 @@ async function flush(origin: string, userId: string, epoch: number): Promise<num
       const blob = await bytes(item);
       if (epoch !== generation || await api.getUserId() !== userId || canonicalOrigin(await getBaseUrl()) !== canonicalOrigin(origin)) break;
       let failure: unknown = null;
-      try { await api.uploadAudioAttachment(id, blob, item.mime, item.durationSeconds, origin); }
+      try { await api.uploadAudioAttachment(id, blob, item.mime, item.durationSeconds, origin, permit); }
       catch (err) { failure = err; }
       await serialized(async () => {
         if (epoch !== generation || await AsyncStorage.getItem(erasedKey(origin, userId)) !== eraseEpoch || await AsyncStorage.getItem(key) !== snapshot) return;
+        assertLocalWritePermit(permit);
         if (!failure) {
-          await AsyncStorage.removeItem(key); await removeFile(item).catch(() => {}); uploaded++;
+          await commitLocalWrite(permit, async () => { await AsyncStorage.removeItem(key); await removeFile(item).catch(() => {}); }); uploaded++;
         } else if (failure instanceof ApiError && failure.status === 401) {
-          await AsyncStorage.setItem(key, JSON.stringify({ ...item, notBefore: Date.now() + SESSION_EXPIRED_RETRY_MS }));
+          await commitLocalWrite(permit, () => AsyncStorage.setItem(key, JSON.stringify({ ...item, notBefore: Date.now() + SESSION_EXPIRED_RETRY_MS })));
         } else if (failure instanceof ApiError && [403, 404, 409, 413].includes(failure.status)) {
-          await AsyncStorage.setItem(key, JSON.stringify({ ...item, rejection: failure.status, notBefore: Date.now() + SESSION_EXPIRED_RETRY_MS }));
+          await commitLocalWrite(permit, () => AsyncStorage.setItem(key, JSON.stringify({ ...item, rejection: failure.status, notBefore: Date.now() + SESSION_EXPIRED_RETRY_MS })));
         }
       });
       if (failure instanceof ApiError && failure.status === 401) break;
@@ -199,7 +211,7 @@ export async function retryAudioQueue(userId: string): Promise<void> {
         const id = key.slice(keyFor(origin, userId, "").length);
         // A crash between parent commit and releasing the descriptor is
         // recoverable; an actually unsaved parent stays in custody.
-        try { await api.getEntry(id, origin); delete item.parentPending; }
+        try { await api.getEntry(id, origin, permit); delete item.parentPending; }
         catch { continue; }
       }
       delete item.notBefore; delete item.rejection; await commitLocalWrite(permit, () => AsyncStorage.setItem(key, JSON.stringify(item)));
@@ -218,40 +230,69 @@ export async function listSavedAudio(userId: string): Promise<Array<{ id: string
   return result;
 }
 export async function removeSavedAudio(userId: string, id: string, expectedRevision?: string): Promise<void> {
+  const permit = captureLocalWritePermit(userId), epoch = generation;
   const origin = await getBaseUrl();
   await serialized(async () => {
+    assertLocalWritePermit(permit);
+    if (epoch !== generation) throw new Error("Recording removal was cancelled by account cleanup");
     const key = keyFor(origin, userId, id); const row = parse(await AsyncStorage.getItem(key), fileScope(origin, userId));
     if (expectedRevision && (!row || !isFile(row) || row.revision !== expectedRevision)) throw new Error("The saved recording changed; refresh before removing it");
-    await removeFile(row); await AsyncStorage.removeItem(key);
-    await FileSystem.deleteAsync(`${directoryFor(origin, userId)}exports/${Buffer.from(id).toString("base64url")}.json`, { idempotent: true });
+    if (epoch !== generation) throw new Error("Recording removal was cancelled by account cleanup");
+    // Drain the complete admitted deletion before a rotation snapshot or
+    // credential replacement. The queue mutex keeps its descriptor stable.
+    await commitLocalWrite(permit, async () => {
+      await removeFile(row); await AsyncStorage.removeItem(key);
+      await FileSystem.deleteAsync(`${directoryFor(origin, userId)}exports/${Buffer.from(id).toString("base64url")}.json`, { idempotent: true });
+    });
   });
 }
 /** Bounded, one-record ciphertext export. The native share sheet gets a
  * file, and no plaintext/key is ever shared. Original outbox custody stays. */
 export async function exportSavedAudio(userId: string, id: string): Promise<void> {
+  const permit = captureLocalWritePermit(userId), epoch = generation;
+  const check = () => {
+    assertLocalWritePermit(permit);
+    if (epoch !== generation) throw new Error("Recording export was cancelled by account cleanup");
+  };
   const origin = await getBaseUrl();
+  check();
   const row = parse(await AsyncStorage.getItem(keyFor(origin, userId, id)), fileScope(origin, userId));
+  check();
   if (!row) throw new Error("This saved recording could not be read");
   const username = await api.getUsername(); if (!username) throw new Error("No saved account");
+  check();
   let envelope = await cachedEnvelope(username);
+  check();
   if (!envelope) {
     const fetched = await fetchEnvelope();
+    check();
     if (fetched.status === "ok") envelope = fetched.envelope;
     else if (fetched.status !== "legacy") throw new Error("The account's encryption format could not be verified; unlock online before exporting");
   }
   const salt = envelope?.saltB64 ?? await api.getCachedSalt(username);
+  check();
   if (!salt) throw new Error("Unlock online once before exporting this recording");
   const blob = await bytes(row);
+  check();
   const bundle = { version: 2, user_id: userId, username, salt, key_scheme: envelope?.scheme ?? "v1", kdf_params: envelope?.kdfParams ?? null, wrapped_data_key: envelope?.wrappedB64 ?? null, entries: [], insights: [], measures: [], audio: [{ client_entry_id: id, blob, mime_type: row.mime, duration_seconds: row.durationSeconds, content_version: 1, created_at: new Date(row.queuedAt).toISOString() }] };
   const Sharing = await import("expo-sharing");
+  check();
   if (!await Sharing.isAvailableAsync()) throw new Error("File sharing is unavailable on this device");
+  check();
   const dir = `${directoryFor(origin, userId)}exports/`;
-  await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
   const uri = `${dir}${Buffer.from(id).toString("base64url")}.json`;
-  await FileSystem.writeAsStringAsync(uri, JSON.stringify(bundle), { encoding: FileSystem.EncodingType.UTF8 });
+  await serialized(async () => {
+    check();
+    await commitLocalWrite(permit, async () => {
+      await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+      check();
+      await FileSystem.writeAsStringAsync(uri, JSON.stringify(bundle), { encoding: FileSystem.EncodingType.UTF8 });
+    });
+  });
   // Retain encrypted scratch until scoped account cleanup; Android share
   // consumers can read after shareAsync resolves. A canceled sheet must
   // never delete the outbox or its only recording copy.
+  check();
   await Sharing.shareAsync(uri, { mimeType: "application/json", UTI: "public.json" });
 }
 export async function clearAudioQueue(userId?: string): Promise<void> {
@@ -272,18 +313,26 @@ export async function prepareAudioRekey(userId: string, oldKey: Buffer, newKey: 
   const origin = await getBaseUrl();
   return serialized(async () => {
     const changes: Array<{ key: string; before: string; after: string }> = [];
-    for (const key of await scopeKeys(origin, userId)) {
-      const before = await AsyncStorage.getItem(key); const item = parse(before, fileScope(origin, userId));
-      if (!before || !item) throw new Error("A retained recording needs repair before key rotation");
-      const id = key.slice(keyFor(origin, userId, "").length);
-      const plain = decryptAudio({ dataKey: oldKey }, userId, id, await bytes(item));
-      try {
-        const blob = encryptAudio({ dataKey: newKey }, userId, id, plain);
-        const next = await newFile(blob.blobB64, item, origin, userId);
-        changes.push({ key, before, after: JSON.stringify(next) });
-      } finally { plain.fill(0); }
+    try {
+      for (const key of await scopeKeys(origin, userId)) {
+        const before = await AsyncStorage.getItem(key); const item = parse(before, fileScope(origin, userId));
+        if (!before || !item) throw new Error("A retained recording needs repair before key rotation");
+        const id = key.slice(keyFor(origin, userId, "").length);
+        const plain = decryptAudio({ dataKey: oldKey }, userId, id, await bytes(item));
+        try {
+          const blob = encryptAudio({ dataKey: newKey }, userId, id, plain);
+          const next = await newFile(blob.blobB64, item, origin, userId);
+          changes.push({ key, before, after: JSON.stringify(next) });
+        } finally { plain.fill(0); }
+      }
+      return changes;
+    } catch (error) {
+      // No journal owns these files until the whole preparation succeeds.
+      // A later unreadable take must not leak earlier staged ciphertext on
+      // every retry. Live old-key descriptors/files remain untouched.
+      await cleanupAudioRekey(changes, "after").catch(() => {});
+      throw error;
     }
-    return changes;
   });
 }
 

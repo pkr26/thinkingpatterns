@@ -1,0 +1,82 @@
+npm notice run mindpattern-portal@1.0.0 npx
+npm notice run 'vitest' run tests/views.test.tsx -t does not dispatch
+
+ RUN  v5.0.1 /Users/pradeepreddy/Desktop/mental_health_application/portal
+
+stderr | tests/views.test.tsx > does not dispatch an encrypted note edit after the chart has unmounted
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+The current testing environment is not configured to support act(...)
+
+stderr | tests/views.test.tsx > does not dispatch an encrypted note edit after the chart has unmounted
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/views.test.tsx > does not dispatch an encrypted note edit after the chart has unmounted
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/views.test.tsx > does not dispatch an encrypted note edit after the chart has unmounted
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/views.test.tsx > does not dispatch an encrypted note edit after the chart has unmounted
+The current testing environment is not configured to support act(...)
+
+stderr | tests/views.test.tsx > does not dispatch an encrypted note edit after the chart has unmounted
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/views.test.tsx > does not dispatch an encrypted note edit after the chart has unmounted
+The current testing environment is not configured to support act(...)
+
+stderr | tests/views.test.tsx > does not dispatch an encrypted note edit after the chart has unmounted
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/views.test.tsx > does not dispatch an encrypted note edit after the chart has unmounted
+The current testing environment is not configured to support act(...)
+
+ ❯ tests/views.test.tsx (97 tests | 1 failed | 96 skipped) 24ms
+   × does not dispatch an encrypted note edit after the chart has unmounted 23ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/views.test.tsx > does not dispatch an encrypted note edit after the chart has unmounted
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      "retired-note",
+      "SEALEDNOTE==",
+      1,
+    ]
+
+
+Number of calls: 1
+
+ ❯ tests/views.test.tsx:2245:36
+    2243|   await act(async () => release({ clientNoteId: note.client_note_id, b…
+    2244|   await flush(4);
+    2245|   expect(mockedApi.updateNote).not.toHaveBeenCalled();
+       |                                    ^
+    2246| });
+    2247|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 96 skipped (97)
+   Start at  14:20:24
+   Duration  310ms (transform 72%, import 13%, tests 10%, setup 5%, worker 1%)
+

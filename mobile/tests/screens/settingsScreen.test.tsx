@@ -237,6 +237,21 @@ describe("saved recording custody controls", () => {
     await enqueueAudio({ userId: "user-1", clientEntryId: "recording:one", ...encryptAudio({ dataKey: vault.get().dataKey }, "user-1", "recording:one", Buffer.from("private voice")), mime: "audio/m4a", durationSeconds: 5 });
   }
 
+  it("an export pressed on the old list cannot adopt a replacement account after its owner lookup", async () => {
+    const sharing = await import("../helpers/expoSharingMock"); sharing.shareAsync.mockClear();
+    await seedRecording();
+    const root = await render(<SettingsScreen navigation={nav as never} />); await flush();
+    let release!: (value: string) => void;
+    vi.mocked(api.getUserId).mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+    await firePress(root, "Export encrypted recording 1"); await flush();
+    const { enqueueAudio } = await import("../../src/audioQueue"), { encryptAudio } = await import("../../src/crypto/MindPatternCrypto");
+    const replacementKey = Buffer.alloc(32, 9);
+    await enqueueAudio({ userId: "replacement-account", clientEntryId: "recording:one", ...encryptAudio({ dataKey: replacementKey }, "replacement-account", "recording:one", Buffer.from("replacement account's private voice")), mime: "audio/m4a", durationSeconds: 5 });
+    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 2), dataKey: replacementKey }, "replacement-account");
+    await act(async () => release("replacement-account")); await flush();
+    expect(sharing.shareAsync).not.toHaveBeenCalled();
+  });
+
   it("exports ciphertext without deleting it, and deletes only after explicit confirmation", async () => {
     const fs = await import("../helpers/expoFsMock");
     const sharing = await import("../helpers/expoSharingMock");

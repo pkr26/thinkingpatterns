@@ -11,7 +11,7 @@
  * data key changed elsewhere (S-8) and surfaces as `credentialRotated` —
  * never a retry loop, never stale keys.
  */
-import { ApiError, api, hasSession, sessionUserId, type InsightsResponse } from "./api/client";
+import { ApiError, api, hasSession, sessionAbortSignal, sessionUserId, type InsightsResponse } from "./api/client";
 import { decryptInsights, type InsightsPayload } from "./crypto/patient";
 import { checkAnalysisGeneration, FRESHNESS_ERROR } from "./stateSeqGuard";
 import { withLock } from "./platform";
@@ -35,16 +35,20 @@ export async function reconcileInsights(): Promise<ReconcileOutcome> {
   // path must report "locked", not crash.
   if (!owner || !vault.isUnlocked() || vault.ownerUserId() !== owner) return { kind: "locked" };
   const keys = vault.get();
+  const signal = sessionAbortSignal();
+  const current = (): boolean => !!signal && !signal.aborted && sessionUserId() === owner && vault.isUnlocked() && vault.ownerUserId() === owner && vault.get().dataKey === keys.dataKey;
   let summary;
   try {
     summary = await api.insights();
   } catch (err) {
+    if (!current()) return { kind: "locked" };
     if (err instanceof ApiError && err.status === 0) return { kind: "offline" };
     // 401/410 funnels fire the client's session-expiry latch (App handles
     // the lockdown); here they only end this reconciliation.
     if (err instanceof ApiError && (err.status === 401 || err.status === 410)) return { kind: "locked" };
     return { kind: "error", message: err instanceof Error ? err.message : "reconciliation failed" };
   }
+  if (!current()) return { kind: "locked" };
   if (summary.blob === null) {
     // Baseline phase: nothing is decrypted before the threshold — there is
     // no generation to guard yet.
@@ -57,23 +61,26 @@ export async function reconcileInsights(): Promise<ReconcileOutcome> {
     // during that await zeroizes them, and the decrypt below then fails
     // for a reason that is NOT "the key changed elsewhere". Re-check the
     // lock first so a post-lock failure maps to the locked funnel.
-    if (!vault.isUnlocked()) return { kind: "locked" };
+    if (!current()) return { kind: "locked" };
     payload = await decryptInsights(keys.dataKey, owner, summary.blob);
   } catch {
     // A lock during the decrypt itself is the same story: the shared key
     // died mid-flight — locked, never a false credential-rotation funnel.
-    if (!vault.isUnlocked()) return { kind: "locked" };
+    if (!current()) return { kind: "locked" };
     // The session is alive but the data key cannot open the blob: the
     // password was rotated on ANOTHER device and the corpus was rekeyed
     // (S-8). Fail closed with the actionable funnel — never loop.
     return { kind: "credentialRotated" };
   }
+  if (!current()) return { kind: "locked" };
   try {
     await checkAnalysisGeneration(owner, payload.state_seq, summary.state_seq);
   } catch (err) {
+    if (!current()) return { kind: "locked" };
     if (err instanceof Error && err.message === FRESHNESS_ERROR) return { kind: "freshness" };
     throw err;
   }
+  if (!current()) return { kind: "locked" };
   return { kind: "ok", phase: summary.phase, stateSeq: payload.state_seq ?? null, summary, payload };
 }
 

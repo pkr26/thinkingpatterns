@@ -1,0 +1,42 @@
+npm notice run mindpattern-portal@1.0.0 test
+npm notice run vitest run --coverage
+
+ RUN  v5.0.1 /Users/pradeepreddy/Desktop/mental_health_application/portal
+      Coverage enabled with v8
+
+
+ Test Files  26 passed (26)
+      Tests  512 passed (512)
+   Start at  14:30:52
+   Duration  2.14s (tests 48%, transform 26%, import 8%, setup 8%, environment 8%, worker 2%)
+
+  Transform  transforming modules took 4.21s · 26% of tracked time, re-done on every run
+             persist transforms across runs with fsModuleCache: true
+             learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns
+
+ % Coverage report from v8
+-------------------|---------|----------|---------|---------|-------------------
+File               | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+-------------------|---------|----------|---------|---------|-------------------
+All files          |   92.58 |    85.16 |   90.94 |   96.59 |                   
+ src               |   91.13 |    84.61 |   86.77 |   96.77 |                   
+  App.tsx          |   95.13 |     82.1 |   94.11 |   97.27 | 114,167,327,370   
+  ...rBoundary.tsx |   94.11 |      100 |    87.5 |   93.75 | 47                
+  api.ts           |   87.07 |    85.94 |   76.81 |   92.77 | ...1014-1029,1052 
+  crypto.ts        |   91.44 |    80.87 |   97.56 |   98.55 | 767-769,807       
+  kvstore.ts       |   89.01 |     87.5 |   75.67 |   98.52 | 47                
+  noteDrafts.ts    |   87.37 |    75.71 |   83.33 |   98.36 | 59                
+  platform.ts      |   98.61 |    97.05 |     100 |     100 | 49                
+  ui.tsx           |   95.65 |    93.47 |     100 |   97.14 | 57                
+ src/views         |   93.85 |     85.5 |   95.27 |   96.45 |                   
+  LoginView.tsx    |    96.1 |     92.7 |   94.44 |   97.03 | 221-226,233-234   
+  PatientView.tsx  |   93.59 |    84.66 |   94.73 |   95.72 | ...1517,1569,1718 
+  PatientsView.tsx |   93.54 |    84.35 |   96.34 |   97.16 | ...65,574,657,693 
+-------------------|---------|----------|---------|---------|-------------------
+
+=============================== Coverage summary ===============================
+Statements   : 92.58% ( 2399/2591 )
+Branches     : 85.16% ( 1602/1881 )
+Functions    : 90.94% ( 432/475 )
+Lines        : 96.59% ( 2016/2087 )
+================================================================================

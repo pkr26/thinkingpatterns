@@ -2,6 +2,13 @@
 
 October 3, 2026. Original baseline: `9c1ba47508f474afc5f70588dd2771d80c2eece7`.
 
+**Independent follow-up:** the latest commit was independently audited and
+additional defects were reproduced and fixed. See
+[AUDIT_LAST_COMMIT_2026-10-03.md](AUDIT_LAST_COMMIT_2026-10-03.md) for the new
+findings and current verification. The implementation descriptions and suite
+counts below record the original committed remediation checkpoint, except the
+explicitly corrected red-team and monitoring rows.
+
 The identified engineering defects have received substantial fixes across the
 mobile app, patient web, clinician portal, API, database and operational tools.
 This report distinguishes implemented behavior from release evidence still
@@ -55,8 +62,8 @@ remain in the evidence directory so they cannot be mistaken for fresh passes.
 | PostgreSQL upgrade | **PASS** previous head `a3f7c1d9b5e2`→`d6a0c4e8b213`; exact journal/note/revision ciphertext and full legacy audio row preserved and authenticated. Complete graph has 31 migrations. The utility rejects Python optimization that would disable verification. [Log](reports/remediation-2026-10-03/validation-logs/postgres-final-upgrade.log) |
 | Real encrypted backup restore | **PASS** current Docker helper encrypts and tags with one resolved secret; authenticated private-snapshot decrypt feeds real pg_restore. All fixture rows and latest schema match; restored ciphertext authenticates. [Log](reports/remediation-2026-10-03/validation-logs/backup-restore-final.log) |
 | Tooling adversarial contracts | **19 passed**: inclusive mutation floors, incomplete/runtime-error rejection, lost-kill rejection, exact campaign/verdict inventory, skipped-attack refusal, byte-exact AAD vectors, actual OpenSSL round trips, tampering, long-key rejection, in-place replacement and secret-rotation consistency. [Log](reports/remediation-2026-10-03/validation-logs/tooling-contracts-final.log) |
-| Current red-team campaigns | **All 11 campaigns/108 expected verdicts complete; zero harness errors**: 92 BLOCKED, 4 FINDING, 10 INFO, 2 PARTIAL. Three architectural findings remain documented; mobile registry advisories remain a fourth finding and fail the hard release/audit policy. Completeness is not a clean-security claim. [Summary](reports/remediation-2026-10-03/redteam-summary.json) |
-| Monitoring | Pinned real promtool validates configuration/rules and healthy/boundary/sustained-fault cases for eight alerts. This proves rule behavior, not delivered pages to an operator. [Log](reports/remediation-2026-10-03/validation-logs/promtool-alert-tests.log) |
+| Current red-team campaigns | **All 11 campaigns/108 expected verdicts complete; zero harness errors**: 89 BLOCKED, 4 FINDING, 13 INFO, 2 PARTIAL in the independent rerun. The original 92/4/10/2 count overstated three unexercised multi-worker probes as BLOCKED. Three architectural findings remain documented; mobile registry advisories remain a fourth finding and fail the hard release/audit policy. Completeness is not a clean-security claim. [Summary](reports/remediation-2026-10-03/redteam-summary.json) |
+| Monitoring | Pinned real promtool validates configuration/rules and healthy/boundary/sustained-fault cases for seven alert rules across eight scenarios. This proves rule behavior, not delivered pages to an operator. [Log](reports/remediation-2026-10-03/validation-logs/promtool-alert-tests.log) |
 | Development Compose | **PASS** `config --quiet` with documented local image tags, after repairing the dev overlay. Omitted required image inputs still fail as intended; no development stack is claimed deployed. [Log](reports/remediation-2026-10-03/validation-logs/compose-dev-configured-final.log) |
 | Source/configuration | Backend Ruff formatting/lint and mypy across 46 application files; client typechecks; 234 project Python files, 21 YAML/workflow files and 58 JSON files parse, including publication evidence and the manifest; all ten shell scripts pass warning-level shellcheck. Source whitespace checks preserve verbatim terminal logs. |
 
@@ -111,7 +118,7 @@ mutation, remote message, independent certification or clinical study was
 performed. The [evidence directory](reports/remediation-2026-10-03/README.md)
 documents reproducible synthetic checks and their boundaries.
 
-Owned loopback servers, the disposable PostgreSQL container and the read-only
+At the original remediation checkpoint, owned loopback servers, the disposable PostgreSQL container and the read-only
 test emulator have been stopped; temporary synthetic database, backup keys
 and local TLS files were removed. Source, evidence, installed toolchains and
 unrelated user containers were retained. [Cleanup log](reports/remediation-2026-10-03/validation-logs/owned-test-cleanup-final.log).

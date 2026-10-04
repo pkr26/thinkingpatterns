@@ -26,6 +26,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   setKvBackendForTests(null);
 });
 
@@ -81,6 +82,36 @@ describe("reconcileInsights funnels", () => {
       return jsonResponse({ phase: "insight", active_days: 40, streak: 1, days_remaining: 0, blob, state_seq: 5 });
     });
     expect(await reconcileInsights()).toEqual({ kind: "locked" });
+  });
+
+  it("does not return decrypted insights from a retired account after a suspended generation check", async () => {
+    let release!: (value: string | null) => void;
+    let waiting = false;
+    setKvBackendForTests({
+      getItem: async key => key === `mindpattern.stateSeq.${USER}` ? new Promise(resolve => { waiting = true; release = resolve; }) : null,
+      setItem: async () => {}, removeItem: async () => {},
+    });
+    const blob = await insightsBlob(21);
+    stubFetch(() => jsonResponse({ phase: "insight", active_days: 40, streak: 3, days_remaining: 0, blob, state_seq: 21 }));
+    const pending = reconcileInsights();
+    await vi.waitFor(() => expect(waiting).toBe(true));
+    vault.lock(); installSession("different-user");
+    vault.unlock({ authKey: new Uint8Array(32).fill(8), dataKey: new Uint8Array(32).fill(8) }, "different-user");
+    release("21");
+    await expect(pending).resolves.toEqual({ kind: "locked" });
+  });
+
+  it("a late decrypt failure cannot label the replacement account's credential as rotated", async () => {
+    const crypto = await import("../src/crypto/patient");
+    let reject!: (error: Error) => void;
+    const decrypt = vi.spyOn(crypto, "decryptInsights").mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+    stubFetch(() => jsonResponse({ phase: "insight", active_days: 40, streak: 3, days_remaining: 0, blob: "deferred", state_seq: 21 }));
+    const pending = reconcileInsights();
+    await vi.waitFor(() => expect(decrypt).toHaveBeenCalled());
+    vault.lock(); installSession("different-user");
+    vault.unlock({ authKey: new Uint8Array(32).fill(8), dataKey: new Uint8Array(32).fill(8) }, "different-user");
+    reject(new Error("old operation failed authentication"));
+    await expect(pending).resolves.toEqual({ kind: "locked" });
   });
 });
 

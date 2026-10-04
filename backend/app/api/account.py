@@ -274,6 +274,13 @@ async def export_account(
     never holds the key.
     """
 
+    # populate_existing refreshes the identity-map object supplied by the
+    # authentication dependency too. Capture authorization before any read,
+    # otherwise comparing fresh.token_epoch with user.token_epoch compares
+    # the refreshed value with itself after a concurrent credential change.
+    expected_export_epoch = user.token_epoch
+    export_jti = getattr(getattr(request, "state", None), "mindpattern_token_jti", None)
+
     # A slow client must never pin this request's database cursor/transaction
     # for the full download. Admission caps active exports, and each page
     # below owns a short-lived session that closes BEFORE any bytes are
@@ -313,7 +320,11 @@ async def export_account(
             .scalars()
             .first()
         )
-        if fresh is None or not fresh.is_active or fresh.token_epoch != user.token_epoch:
+        if fresh is None or not fresh.is_active or fresh.token_epoch != expected_export_epoch:
+            raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+        if isinstance(
+            export_jti, str
+        ) and await request.app.state.token_revocations.is_revoked_checked(session, export_jti):
             raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
         await ensure_no_rekey(session, fresh.id)
         # L-8 (2026-09-20): the insights section is SNAPSHOT-paginated, and
@@ -325,10 +336,9 @@ async def export_account(
         # cutoff — so the old (created_at, id) keyset could move an
         # un-emitted row across/beyond the cursor and silently drop it from
         # the bundle. The snapshot membership is frozen instead: ids absent
-        # from a later page's blob fetch (an undated row replaced by a
-        # recompute between pages) are skipped — data that no longer exists
-        # cannot be exported — but nothing that existed at the cutoff can
-        # ever be dropped by cursor drift. The set is small and bounded by
+        # from a later page (an undated row replaced by a recompute between
+        # pages) abort the download, so a complete bundle never silently
+        # omits that analysis. The set is small and bounded by
         # construction (2 undated rows + the 90-day dated-question window).
         insight_snapshot = list(
             (
@@ -404,7 +414,7 @@ async def export_account(
             measures=[],
         )
         await session.commit()
-    except Exception:
+    except BaseException:
         if acquired_export_slot and export_limiter is not None:
             export_limiter.release_on_behalf_of(export_borrower)
         raise
@@ -414,13 +424,22 @@ async def export_account(
         head.model_dump(mode="json", exclude={"shares", "entries", "insights", "measures", "audio"})
     )[1:-1]
 
-    expected_export_epoch = fresh.token_epoch
     expected_export_revisions = (fresh.entries_revision, fresh.measures_revision)
 
     async def check_export_snapshot(page_session):
         current = await page_session.get(User, fresh.id, populate_existing=True)
         if current is None or not current.is_active or current.token_epoch != expected_export_epoch:
             raise ApiError(status_code=401, detail="export session retired", code="unauthorized")
+        if isinstance(
+            export_jti, str
+        ) and await request.app.state.token_revocations.is_revoked_checked(
+            page_session, export_jti
+        ):
+            raise ApiError(status_code=401, detail="export session retired", code="unauthorized")
+        # Partial rekey batches commit before the final epoch/revision bump.
+        # A journal is therefore a snapshot change even if those counters
+        # still equal the header's values. Never complete a mixed-key export.
+        await ensure_no_rekey(page_session, fresh.id)
         if (current.entries_revision, current.measures_revision) != expected_export_revisions:
             raise ApiError(
                 status_code=409,
@@ -607,14 +626,18 @@ async def export_account(
                                 )
                             ).all()
                         }
+                        if set(sizes) != set(chunk_ids):
+                            raise ApiError(
+                                status_code=409,
+                                detail="analysis changed during export; retry",
+                                code="collection_changed",
+                            )
                         # SQL IN has no order guarantee: restore the frozen
                         # snapshot order so the byte bound consumes rows in
                         # the bundle's deterministic sequence and the
                         # pending-tail cursor below advances over the SAME
                         # sequence.
-                        ordered_meta = [
-                            (row_id, sizes[row_id]) for row_id in chunk_ids if row_id in sizes
-                        ]
+                        ordered_meta = [(row_id, sizes[row_id]) for row_id in chunk_ids]
                         selected = _take_export_metadata_page(ordered_meta)
                         used_blob_bytes = 0
                         position_by_id = {row_id: pos for pos, row_id in enumerate(chunk_ids)}
@@ -664,12 +687,10 @@ async def export_account(
                         for row in selected_rows.values():
                             page_session.expunge(row)
                         # Consume the chunk through the last row the blob
-                        # loop actually PROCESSED (emitted or confirmed
-                        # vanished) — a row the byte bound stopped BEFORE
+                        # loop actually emitted — a row the byte bound stopped BEFORE
                         # stays pending and is re-fetched on the next short
                         # page, exactly like the entries cursor's
-                        # last_processed. An empty selection means the whole
-                        # chunk vanished since the snapshot: consume it too.
+                        # last_processed.
                         # 2026-09-21 audit A-2: the processed branch used to
                         # replace pending_ids with the chunk tail ALONE,
                         # silently discarding every id queued past the first

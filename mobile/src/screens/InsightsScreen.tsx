@@ -381,15 +381,23 @@ function technicalRows(p: PatternCard): [string, string][] {
 }
 
 function describe(p: PatternCard): string {
+  if (p.kind === "mood_correlation") {
+    const delta = p.detail?.mood_delta;
+    if (typeof delta !== "number") return tr("insights.desc.unavailable");
+    if (delta === 0) return tr("insights.desc.noDifference");
+    const direction = tr(`insights.words.${measuredDirection(p.detail?.direction, delta)}`);
+    if (p.detail?.channel === "sleep_quality") return tr("insights.desc.sleepCorrelation", { direction });
+    if (p.detail?.source === "tag") return tr("insights.desc.tagCorrelation", { label: themeLabel(p.label), direction });
+    return tr("insights.desc.moodCorrelation", { label: themeLabel(p.label), direction, shift: Math.abs(delta).toFixed(1) });
+  }
+  if (p.kind === "link") {
+    if (p.detail?.direction !== "higher" && p.detail?.direction !== "lower") return tr("insights.desc.unavailable");
+    const direction = tr(`insights.words.${p.detail.direction}`);
+    if (p.detail?.channel === "sleep_quality") return tr("insights.desc.sleepLink", { direction });
+    if (p.detail?.source === "tag") return tr("insights.desc.tagLink", { label: themeLabel(p.label), direction });
+    return tr("insights.desc.link", { label: themeLabel(p.label), direction });
+  }
   if (p.detail?.channel === "sleep_quality") {
-    if (p.kind === "link") {
-      const direction = tr(p.detail?.direction === "higher" ? "insights.words.higher" : "insights.words.lower");
-      return tr("insights.desc.sleepLink", { direction });
-    }
-    if (p.kind === "mood_correlation") {
-      const direction = tr(p.detail?.direction === "higher" ? "insights.words.higher" : "insights.words.lower");
-      return tr("insights.desc.sleepCorrelation", { direction });
-    }
     if (p.kind === "temporal") {
       return tr("insights.desc.sleepTemporal", {
         day: p.detail?.day !== undefined ? localWeekday(p.detail.day) : tr("insights.desc.certainDay"),
@@ -397,14 +405,6 @@ function describe(p: PatternCard): string {
     }
   }
   if (p.detail?.source === "tag") {
-    if (p.kind === "mood_correlation") {
-      const direction = tr(p.detail?.direction === "higher" ? "insights.words.higher" : "insights.words.lower");
-      return tr("insights.desc.tagCorrelation", { label: themeLabel(p.label), direction });
-    }
-    if (p.kind === "link") {
-      const direction = tr(p.detail?.direction === "higher" ? "insights.words.higher" : "insights.words.lower");
-      return tr("insights.desc.tagLink", { label: themeLabel(p.label), direction });
-    }
     if (p.kind === "temporal") {
       return tr("insights.desc.tagTemporal", {
         label: themeLabel(p.label),
@@ -415,22 +415,6 @@ function describe(p: PatternCard): string {
   if (p.kind === "temporal") {
     const day = p.detail?.day !== undefined ? localWeekday(p.detail.day) : tr("insights.desc.sameDay");
     return tr("insights.desc.temporal", { label: themeLabel(p.label), count: p.occurrences, day });
-  }
-  if (p.kind === "mood_correlation") {
-    if (typeof p.detail?.mood_delta !== "number") return tr("insights.desc.unavailable");
-    const delta = p.detail.mood_delta;
-    if (delta === 0) return tr("insights.desc.noDifference");
-    const direction = tr(`insights.words.${measuredDirection(p.detail.direction, delta)}`);
-    return tr("insights.desc.moodCorrelation", {
-      label: themeLabel(p.label),
-      direction,
-      shift: Math.abs(delta).toFixed(1),
-    });
-  }
-  if (p.kind === "link") {
-    if (p.detail?.direction !== "higher" && p.detail?.direction !== "lower") return tr("insights.desc.unavailable");
-    const direction = tr(p.detail?.direction === "higher" ? "insights.words.higher" : "insights.words.lower");
-    return tr("insights.desc.link", { label: themeLabel(p.label), direction });
   }
   if (p.kind === "inertia") {
     return tr("insights.desc.inertia");

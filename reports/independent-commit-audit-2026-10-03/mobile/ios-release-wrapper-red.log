@@ -1,0 +1,15 @@
+Native release preflight: FAIL native projects exist — missing ios and android projects. Generate/restore the native React Native projects, install pods, and validate Keychain/Keystore before releasing.
+Native release preflight: FAIL react-native-keychain is a direct dependency — src/secureStore.ts and src/biometricUnlock.ts hold session and wrap keys in the OS Keychain/Keystore through it. Re-add react-native-keychain to package.json dependencies before releasing — its removal must fail here, not on a device.
+Native release preflight: FAIL react-native-keychain autolinking — cannot inspect autolinking without the native projects (check 1 must pass first).
+Native release preflight: FAIL iOS Health usage strings — src/healthkit.ts is imported but ios/ is missing, so the Health usage strings cannot be verified. When the project is generated, add NSHealthShareUsageDescription and NSHealthUpdateUsageDescription to ios/<App>/Info.plist (see mobile/README.md for the wording guidance).
+Native release preflight: FAIL Android allowBackup — android/ is missing, so the manifest cannot be verified (check 1 must pass first).
+Native release preflight: FAIL Android FLAG_SECURE/adjustResize — android/ is missing (check 1 must pass first).
+Native release preflight: FAIL iOS HealthKit entitlement — ios/ is missing (check 1 must pass first).
+Native release preflight: FAIL iOS State-of-Mind bridge — ios/ is missing (check 1 must pass first).
+Native release preflight: FAIL Android release signing — android/ is missing (check 1 must pass first).
+Native release preflight: FAIL Android R8 minification — android/ is missing (check 1 must pass first).
+Native release preflight: FAIL Android network security config — android/ is missing (check 1 must pass first).
+Native release preflight: FAIL iOS snapshot shield — ios/ is missing (check 1 must pass first).
+Native release preflight: PASS git keystore hygiene — no *.jks|*.keystore|*.p12|*.pfx|*.mobileprovision or keystore.properties outside the debug/example allowlist is tracked
+Native release preflight: FAIL extended native launch/resource contracts — ENOENT: no such file or directory, open 'index.js'
+Native release preflight failed: 13 of 14 checks did not pass.

@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-03",
+  "reviewed_commit": "ad797b060ac5de986e2eac6a044da8d6439a1c03",
+  "code_tooling_finding_groups": 27,
+  "report_accuracy_corrections": 2,
+  "finding_groups": {
+    "backend": 7,
+    "mobile": 12,
+    "web": 4,
+    "portal": 3,
+    "tooling": 1
+  },
+  "checks": {
+    "backend_sqlite": {
+      "status": "pass",
+      "passed": 1991,
+      "skipped": 6,
+      "coverage_percent": 95.5,
+      "unchanged_coverage_floor_percent": 95,
+      "duration_seconds": 415.76
+    },
+    "backend_postgresql": {
+      "status": "pass",
+      "passed": 1995,
+      "skipped": 2,
+      "duration_seconds": 563.28
+    },
+    "mobile": {
+      "status": "pass",
+      "passed": 2276,
+      "skipped": 1,
+      "coverage_percent": {
+        "statements": 91.38,
+        "branches": 86.02,
+        "functions": 88.44,
+        "lines": 95.29
+      }
+    },
+    "web": {
+      "status": "pass",
+      "passed": 803,
+      "skipped": 5,
+      "coverage_percent": {
+        "statements": 87.05,
+        "branches": 80.61,
+        "functions": 85.94,
+        "lines": 91.48
+      }
+    },
+    "portal": {
+      "status": "pass",
+      "passed": 512,
+      "skipped": 0
+    },
+    "tooling": {
+      "status": "pass",
+      "passed": 20
+    },
+    "redteam": {
+      "status": "inventory_complete",
+      "campaigns": 11,
+      "verdicts": 108,
+      "counts": {
+        "BLOCKED": 89,
+        "FINDING": 4,
+        "INFO": 13,
+        "PARTIAL": 2,
+        "NOT-RUN": 0,
+        "ERROR": 0
+      }
+    },
+    "android_all_abi_debug_compile": {
+      "status": "pass",
+      "gradle_tasks": 345,
+      "fresh_install_executed_tasks": 302,
+      "final_current_source_executed_tasks": 43
+    },
+    "metro_android_ios_production_bundles": {
+      "status": "pass"
+    },
+    "chrome_synthetic_https_built_artifacts": {
+      "status": "pass"
+    },
+    "postgres_migration_real_encrypted_backup_restore": {
+      "status": "pass",
+      "migration_head": "d6a0c4e8b213",
+      "migrations": 31,
+      "public_tables_compared": 15,
+      "tamper_refused_without_plaintext": true
+    },
+    "monitoring": {
+      "status": "pass",
+      "alert_rules": 7,
+      "fault_test_scenarios": 8
+    },
+    "gitleaks_original_history": {
+      "status": "pass",
+      "commits": 93
+    },
+    "gitleaks_final_source_evidence_snapshot": {
+      "status": "pass",
+      "scope": "Frozen working-tree source and evidence copied into an isolated synthetic Git-history snapshot; original index untouched."
+    }
+  },
+  "release_blockers": [
+    "Real operator security contact/canonical URL and deployment configuration",
+    "Mobile registry audit:28 high affected paths; source backports verified but registry/hard gate remain blocked",
+    "Full Xcode/signing and physical-device behavior",
+    "Hosted CI/production load/TLS/alert delivery/object-store/offsite recovery evidence",
+    "Human usability/accessibility/language and statistical/clinical validation",
+    "Documented verifier-replay/offline-guessing/server-visible metadata risks"
+  ],
+  "scope_note": "Passing independent local tests does not certify release or clinical benefit. Coverage floors, dependency policies and placeholder gates remain unchanged. Full mutation campaigns and hosted CI were not rerun.",
+  "cleanup_complete": true,
+  "changes_committed_at_validation": false,
+  "publication": "Fixes and independent evidence are included in this follow-up commit; no deployment was performed."
+}

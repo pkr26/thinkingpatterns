@@ -1,0 +1,65 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+__ test_audio_cleanup_uses_authoritative_attempts_after_another_drains_retry ___
+
+app = <fastapi.applications.FastAPI object at 0x10f88d400>
+settings = Settings(environment='development', audit_journal_path='', scrypt_n=131072, token_ttl_seconds=86400, processing_sessio...interval_seconds=900, therapist_sharing_enabled=True, cors_origins=[], trust_proxy_headers=False, trusted_proxy_ips=[])
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10fb74950>
+
+    async def test_audio_cleanup_uses_authoritative_attempts_after_another_drains_retry(app, settings, monkeypatch):
+        clock = [utcnow()]
+        monkeypatch.setattr(audio_store, "utcnow", lambda: clock[0])
+        first_id, second_id = "1" * 32, "2" * 32
+        async with app.state.sessionmaker() as session:
+            session.add_all(
+                [
+                    AudioDeletion(id=first_id, backend="local", storage_key="first", not_before=clock[0] - timedelta(seconds=2)),
+                    AudioDeletion(id=second_id, backend="local", storage_key="second", not_before=clock[0] - timedelta(seconds=1)),
+                ]
+            )
+            await session.commit()
+    
+        started, resume = asyncio.Event(), asyncio.Event()
+    
+        class Store:
+            backend = "local"
+    
+            async def delete(self, key):
+                if key == "first":
+                    started.set()
+                    await resume.wait()
+                    return
+                raise audio_store.AudioStoreError("second object temporarily unavailable")
+    
+        monkeypatch.setattr(audio_store, "get_audio_store_cached", lambda _settings: Store())
+    
+        async def drain(identifiers=None):
+            async with app.state.sessionmaker() as session:
+                return await audio_store.drain_audio_deletions(session, settings, identifiers=identifiers)
+    
+        first = asyncio.create_task(drain())
+        await asyncio.wait_for(started.wait(), timeout=2)
+        try:
+            assert await drain([second_id]) == 0
+            async with app.state.sessionmaker() as session:
+                pending = await session.get(AudioDeletion, second_id)
+                assert pending.attempts == 1
+                assert pending.not_before == clock[0] + timedelta(seconds=60)
+            clock[0] += timedelta(seconds=61)
+        finally:
+            resume.set()
+            outcome = await asyncio.gather(first, return_exceptions=True)
+        assert outcome == [1]
+        async with app.state.sessionmaker() as session:
+            pending = await session.get(AudioDeletion, second_id)
+>           assert pending.attempts == 2
+E           assert 1 == 2
+E            +  where 1 = <app.models.AudioDeletion object at 0x10fadf680>.attempts
+
+tests/test_independent_commit_audit_2026_10_03.py:357: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  mindpattern.audio_store:audio_store.py:424 audio deletion deferred: tombstone 22222222222222222222222222222222
+WARNING  mindpattern.audio_store:audio_store.py:424 audio deletion deferred: tombstone 22222222222222222222222222222222
+=========================== short test summary info ============================
+FAILED tests/test_independent_commit_audit_2026_10_03.py::test_audio_cleanup_uses_authoritative_attempts_after_another_drains_retry
+1 failed in 0.20s

@@ -1,0 +1,4 @@
+npm notice run mindpattern-mobile@1.0.0 verify:dependency-patches
+npm notice run node tools/verify_dependency_patches.mjs
+Verified dependency backports (0 source files applied).
+Dependency regressions passed: bounded nested patterns and strict nested DigestAlgorithm, including valid inputs.

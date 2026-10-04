@@ -8,7 +8,7 @@
  * expose another account's metadata. Scope is now a storage mechanism, not
  * a convention.
  */
-import { captureOpaqueLocalWritePermit, assertLocalWritePermit, commitLocalWrite, type LocalWritePermit } from "./localWriteGuard";
+import { captureLocalWritePermit, captureOpaqueLocalWritePermit, assertLocalWritePermit, commitLocalWrite, type LocalWritePermit } from "./localWriteGuard";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { api, ApiError, canonicalOrigin, getBaseUrl, OriginPinnedError } from "./api/client";
 import { buildAad, decrypt, encrypt } from "./crypto/envelope";
@@ -455,9 +455,9 @@ function classifyError(error: unknown): FlushOutcome {
  *    * anything else (network, 429, 401) -> retry later; the item stays
  *              queued and the verification happens again on that attempt.
  */
-async function verifyDuplicateOutcome(clientEntryId: string, scope: QueueScope): Promise<FlushOutcome> {
+async function verifyDuplicateOutcome(clientEntryId: string, scope: QueueScope, permit: LocalWritePermit): Promise<FlushOutcome> {
   try {
-    await api.getEntry(clientEntryId, scope.origin);
+    await api.getEntry(clientEntryId, scope.origin, permit);
     return { kind: "duplicate" };
   } catch (verifyError) {
     if (verifyError instanceof ApiError && verifyError.status === 404) {
@@ -475,6 +475,9 @@ async function verifyDuplicateOutcome(clientEntryId: string, scope: QueueScope):
 
 /** Upload due items for exactly one origin/account scope. */
 export async function flushQueue(currentUserId: string): Promise<number> {
+  // Stored ciphertext has an immutable owner even without an unlocked key.
+  // Capture before migration/scope reads; a later request must retain it.
+  const permit = captureLocalWritePermit(currentUserId);
   await migrateUnscopedLegacyData();
   const scope = await scopeFor(currentUserId);
   let sent = 0;
@@ -497,7 +500,8 @@ export async function flushQueue(currentUserId: string): Promise<number> {
 
     let outcome: FlushOutcome;
     try {
-      await api.createQueuedEntry(item.clientEntryId, item.blobB64, item.entryDate, scope.origin);
+      assertLocalWritePermit(permit);
+      await api.createQueuedEntry(item.clientEntryId, item.blobB64, item.entryDate, scope.origin, permit);
       outcome = { kind: "sent" };
     } catch (error) {
       // Refused locally: the origin moved under us between the check above
@@ -508,7 +512,7 @@ export async function flushQueue(currentUserId: string): Promise<number> {
       // established classification.
       outcome =
         error instanceof ApiError && error.status === 409
-          ? await verifyDuplicateOutcome(item.clientEntryId, scope)
+          ? await verifyDuplicateOutcome(item.clientEntryId, scope, permit)
           : classifyError(error);
     }
 
@@ -523,6 +527,7 @@ export async function flushQueue(currentUserId: string): Promise<number> {
       const preserved = await serialized(async () => {
         const queue = await readItems(scope.queue, scope, peek.generation);
         if (wipedSince(peek.generation)) return false;
+        assertLocalWritePermit(permit);
         const index = queue.findIndex((entry) => entry.clientEntryId === item.clientEntryId);
         if (index >= 0) {
           queue[index] = {
@@ -530,7 +535,7 @@ export async function flushQueue(currentUserId: string): Promise<number> {
             attempts: (item.attempts ?? 0) + 1,
             notBefore: Date.now() + SESSION_EXPIRED_RETRY_MS,
           };
-          await writeItems(scope.queue, queue);
+          await commitLocalWrite(permit, () => writeItems(scope.queue, queue));
           if (wipedSince(peek.generation)) return false;
         }
         return true;
@@ -542,20 +547,25 @@ export async function flushQueue(currentUserId: string): Promise<number> {
     const committed = await serialized(async () => {
       const queue = await readItems(scope.queue, scope, peek.generation);
       if (wipedSince(peek.generation)) return false;
+      assertLocalWritePermit(permit);
       const index = queue.findIndex((entry) => entry.clientEntryId === item.clientEntryId);
       if (index < 0) return true; // another flush resolved it
       switch (outcome.kind) {
         case "sent":
         case "duplicate":
           queue.splice(index, 1);
-          await writeItems(scope.queue, queue);
+          await commitLocalWrite(permit, () => writeItems(scope.queue, queue));
           break;
         case "reject":
         case "reject-and-stop":
           queue.splice(index, 1);
-          await appendRejected(scope, [item], peek.generation);
-          if (wipedSince(peek.generation)) return false;
-          await writeItems(scope.queue, queue);
+          const rejectionCommitted = await commitLocalWrite(permit, async () => {
+            await appendRejected(scope, [item], peek.generation);
+            if (wipedSince(peek.generation)) return false;
+            await writeItems(scope.queue, queue);
+            return true;
+          });
+          if (!rejectionCommitted) return false;
           break;
         case "retry": {
           const attempts = item.attempts ?? 0;
@@ -574,7 +584,7 @@ export async function flushQueue(currentUserId: string): Promise<number> {
             attempts: attempts + 1,
             notBefore: Date.now() + delay,
           };
-          await writeItems(scope.queue, queue);
+          await commitLocalWrite(permit, () => writeItems(scope.queue, queue));
           break;
         }
       }

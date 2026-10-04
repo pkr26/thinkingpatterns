@@ -298,14 +298,19 @@ function validateInsights(value: unknown): Record<string, unknown> {
   if (row.stats === undefined) return row;
   const stats = payloadRecord(row.stats);
   finiteField(stats,"avg_sentiment",-1,1); finiteField(stats,"total_entries",0,10_000_000); finiteField(stats,"active_days",0,10_000_000);
+  for (const key of ["first_date", "last_date"]) if (stats[key] !== undefined && stats[key] !== null && (typeof stats[key] !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(stats[key] as string))) throw new Error("Invalid encrypted chart date.");
   if (stats.patterns !== undefined) {
     if (!Array.isArray(stats.patterns) || stats.patterns.length > 1_000) throw new Error("Invalid encrypted patterns.");
     for (const raw of stats.patterns) {
       const pattern = payloadRecord(raw);
       if (typeof pattern.label !== "string" || pattern.label.length > 1_000 || typeof pattern.kind !== "string" || pattern.kind.length > 100) throw new Error("Invalid encrypted pattern label.");
+      if (typeof pattern.confidence !== "number" || typeof pattern.occurrences !== "number") throw new Error("Invalid encrypted pattern evidence.");
       finiteField(pattern,"confidence",0,1); finiteField(pattern,"occurrences",0,10_000_000);
-      if (pattern.detail !== undefined) {
+      {
+        // All renderers access detail directly, including legacy patterns.
         const detail = payloadRecord(pattern.detail);
+        finiteField(detail,"strength",0,1);
+        for (const key of ["sample_days", "sample_entries"]) finiteField(detail,key,0,10_000_000);
         if (detail.evidence_dates !== undefined && (!Array.isArray(detail.evidence_dates) || detail.evidence_dates.length > 10_000 || detail.evidence_dates.some(date => typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)))) throw new Error("Invalid encrypted evidence dates.");
         for (const key of ["pattern_pid","pattern_state","first_seen","last_seen"]) if (detail[key] !== undefined && typeof detail[key] !== "string") throw new Error("Invalid encrypted pattern detail.");
         for (const key of ["sensitive","is_new"]) if (detail[key] !== undefined && typeof detail[key] !== "boolean") throw new Error("Invalid encrypted pattern flags.");

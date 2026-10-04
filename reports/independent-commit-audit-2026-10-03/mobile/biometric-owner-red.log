@@ -1,0 +1,55 @@
+npm notice run mindpattern-mobile@1.0.0 npx
+npm notice run 'vitest' run tests/biometricOwnership.test.ts --maxWorkers=2
+
+ RUN  v4.1.11 /Users/pradeepreddy/Desktop/mental_health_application/mobile
+
+ ❯ tests/biometricOwnership.test.ts (2 tests | 2 failed) 8ms
+   × erasure drains an admitted biometric key write so its raw data key cannot reappear after cleanup 7ms
+   × credential replacement drains an admitted biometric deletion before the replacement can enable its wrap 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/biometricOwnership.test.ts > erasure drains an admitted biometric key write so its raw data key cannot reappear after cleanup
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ tests/biometricOwnership.test.ts:31:18
+     29|   await new Promise<void>(r => setImmediate(r));
+     30|   const waited = !erased; release.resolve(); await enabling; expect(aw…
+     31|   expect(waited).toBe(true);
+       |                  ^
+     32|   expect(await hasBiometricUnlock(USER)).toBe(false);
+     33|   expect(await Keychain.hasGenericPassword({ service: SERVICE })).toBe…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  tests/biometricOwnership.test.ts > credential replacement drains an admitted biometric deletion before the replacement can enable its wrap
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ tests/biometricOwnership.test.ts:47:18
+     45|   await new Promise<void>(r => setImmediate(r));
+     46|   const waited = !replaced; release.resolve(); await disabling; await …
+     47|   expect(waited).toBe(true); expect(await api.getUserId()).toBe(OTHER);
+       |                  ^
+     48| });
+     49|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  14:24:59
+   Duration  355ms (transform 203ms, setup 69ms, import 198ms, tests 8ms, environment 0ms)
+

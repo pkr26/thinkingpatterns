@@ -1,0 +1,41 @@
+npm notice run mindpattern-mobile@1.0.0 npx
+npm notice run 'vitest' run tests/audioOwnership.test.ts --maxWorkers=2
+
+ RUN  v4.1.11 /Users/pradeepreddy/Desktop/mental_health_application/mobile
+
+ ❯ tests/audioOwnership.test.ts (2 tests | 2 failed) 8ms
+   × account erasure wins an export suspended before native file creation and sharing 6ms
+   × a saved-recording removal cannot continue after its initial origin lookup spans account replacement 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/audioOwnership.test.ts > account erasure wins an export suspended before native file creation and sharing
+AssertionError: expected undefined to be an instance of Error
+ ❯ tests/audioOwnership.test.ts:35:27
+     33|   const writesAfterErasure = fs.writeAsStringAsync.mock.calls.length;
+     34|   release.resolve(true);
+     35|   expect(await exporting).toBeInstanceOf(Error);
+       |                           ^
+     36|   expect(Sharing.shareAsync).not.toHaveBeenCalled();
+     37|   expect(fs.writeAsStringAsync).toHaveBeenCalledTimes(writesAfterErasu…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  tests/audioOwnership.test.ts > a saved-recording removal cannot continue after its initial origin lookup spans account replacement
+AssertionError: expected undefined to be an instance of Error
+ ❯ tests/audioOwnership.test.ts:51:26
+     49|   const removing = removeSavedAudio(USER, previous.id, previous.revisi…
+     50|   await started.promise; await api.setSession("replacement-token", OTH…
+     51|   expect(await removing).toBeInstanceOf(Error);
+       |                          ^
+     52|   expect(await listSavedAudio(USER)).toHaveLength(1);
+     53| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  14:17:26
+   Duration  312ms (transform 174ms, setup 60ms, import 173ms, tests 8ms, environment 0ms)
+

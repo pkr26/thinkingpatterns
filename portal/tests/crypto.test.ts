@@ -52,6 +52,33 @@ const unb64 = (t: string): Uint8Array<ArrayBuffer> => {
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
 };
+describe("authenticated insight schema boundaries", () => {
+  it.each([
+    { kind: "topic", label: "work", confidence: 0.5, occurrences: 2 },
+    { kind: "topic", label: "work", confidence: null, occurrences: 2, detail: {} },
+    { kind: "topic", label: "work", confidence: 0.5, occurrences: null, detail: {} },
+    { kind: "topic", label: "work", confidence: 0.5, occurrences: 2, detail: { strength: "high" } },
+    { kind: "topic", label: "work", confidence: 0.5, occurrences: 2, detail: { sample_days: -3 } },
+  ])("rejects patterns that cannot satisfy the rendered schema: %j", async pattern => {
+    const key = new Uint8Array(32).fill(7);
+    const blob = await encrypt(key, new TextEncoder().encode(JSON.stringify({ v: 2, stats: { patterns: [pattern] } })), buildAad("insights", "schema-owner", "patterns"));
+    await expect(decryptInsights(key, "schema-owner", toB64(blob))).rejects.toThrow();
+  });
+
+  it("rejects an object where a chart date must be text", async () => {
+    const key = new Uint8Array(32).fill(7);
+    const blob = await encrypt(key, new TextEncoder().encode(JSON.stringify({ v: 2, stats: { patterns: [], first_date: { malformed: true } } })), buildAad("insights", "schema-owner", "patterns"));
+    await expect(decryptInsights(key, "schema-owner", toB64(blob))).rejects.toThrow();
+  });
+
+  it("accepts the backend's empty-window stats with nullable dates", async () => {
+    const key = new Uint8Array(32).fill(7);
+    const payload = { v: 2, stats: { patterns: [], total_entries: 0, active_days: 0, first_date: null, last_date: null, avg_sentiment: null } };
+    const blob = await encrypt(key, new TextEncoder().encode(JSON.stringify(payload)), buildAad("insights", "schema-owner", "patterns"));
+    await expect(decryptInsights(key, "schema-owner", toB64(blob))).resolves.toEqual(payload);
+  });
+});
+
 const toB64 = (bytes: Uint8Array): string => {
   let binary = "";
   for (const b of bytes) binary += String.fromCharCode(b);

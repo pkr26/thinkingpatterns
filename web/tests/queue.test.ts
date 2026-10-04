@@ -86,6 +86,82 @@ describe("enqueue + scope", () => {
   });
 });
 
+describe("flush account ownership", () => {
+  it("a retained callback cannot flush the previous account with a replacement bearer", async () => {
+    await enqueue(item(1));
+    installSession("user-2", "replacement");
+    const fetch = stubFetch(() => jsonResponse({ id: "wrong-account-row" }, { status: 201 }));
+    expect(await flushQueue("user-1")).toBe(0);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(await queueLength("user-1")).toBe(1);
+  });
+
+  it("account replacement during a queue read prevents a delayed upload", async () => {
+    const { backend } = freshBackend();
+    setKvBackendForTests(backend);
+    await enqueue(item(1));
+    const original = backend.getItem;
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    let started = false;
+    backend.getItem = async key => {
+      const value = await original(key);
+      if (key.includes(".items.")) { started = true; await held; }
+      return value;
+    };
+    const fetch = stubFetch(() => jsonResponse({ id: "wrong-account-row" }, { status: 201 }));
+    const flushing = flushQueue("user-1");
+    await vi.waitFor(() => expect(started).toBe(true));
+    installSession("user-2", "replacement");
+    release();
+    expect(await flushing).toBe(0);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(await queueLength("user-1")).toBe(1);
+  });
+
+  it("a retired flush cannot write retry metadata after a pending response", async () => {
+    const { backend, dump } = freshBackend();
+    setKvBackendForTests(backend);
+    await enqueue(item(1));
+    const before = dump();
+    let release!: (response: Response) => void;
+    const held = new Promise<Response>(resolve => { release = resolve; });
+    const fetch = stubFetch(() => held);
+    const flushing = flushQueue("user-1");
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+    installSession("user-2", "replacement");
+    release(jsonResponse({ detail: "temporary failure" }, { status: 503 }));
+    expect(await flushing).toBe(0);
+    expect(dump()).toEqual(before);
+  });
+
+  it("account replacement during a rejected-store read preserves the pending queue", async () => {
+    const { backend, dump } = freshBackend();
+    setKvBackendForTests(backend);
+    await enqueue(item(1));
+    const before = dump();
+    const original = backend.getItem;
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    let started = false;
+    backend.getItem = async key => {
+      const value = await original(key);
+      if (key.includes(".rejected.")) { started = true; await held; }
+      return value;
+    };
+    const fetch = stubFetch(() => jsonResponse({ detail: "rejected" }, { status: 400 }));
+    const flushing = flushQueue("user-1");
+    await vi.waitFor(() => expect(started).toBe(true));
+    installSession("user-2", "replacement");
+    release();
+    expect(await flushing).toBe(0);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(dump()).toEqual(before);
+    expect(await queueLength("user-1")).toBe(1);
+    expect(await rejectedEntries("user-1")).toHaveLength(0);
+  });
+});
+
 describe("flushQueue", () => {
   it("uploads due items as first-generation creates and removes them", async () => {
     await enqueue(item(1));

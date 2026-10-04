@@ -1,0 +1,2 @@
+PASS: HEAD ad797b060ac5de986e2eac6a044da8d6439a1c03 manifest; all 1133 file hashes and byte lengths match; no missing/unlisted files; manifest is the sole self-exclusion.
+The manifest currentHead field names its precommit parent because the inventory was generated before publication; its file content matches the actual committed tree. This check does not authenticate later uncommitted fixes.

@@ -75,6 +75,10 @@ class _PageSession:
     async def get(self, model, identifier, **kwargs):
         return self.fresh
 
+    async def scalar(self, statement):
+        assert "rekey_journal" in str(statement)
+        return None
+
     async def execute(self, statement):
         assert self._results, "unexpected export query"
         return self._results.pop(0)

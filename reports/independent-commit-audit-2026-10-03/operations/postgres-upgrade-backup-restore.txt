@@ -1,0 +1,4 @@
+PASS: previous-head upgrade to d6a0c4e8b213 preserves exact journal, current note, revision and audio metadata; ciphertext authenticates; custody defaults and deletion outbox are correct
+PASS: actual encrypted Docker backup decrypts byte-exactly and pg_restore preserves every row in all 15 public tables
+Fixture row counts: {"alembic_version": 1, "audio_attachments": 1, "entries": 1, "therapist_note_revisions": 1, "therapist_notes": 1, "users": 2}
+PASS: tampered real database backup is rejected before emitting plaintext

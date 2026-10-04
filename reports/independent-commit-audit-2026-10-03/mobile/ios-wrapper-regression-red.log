@@ -1,0 +1,57 @@
+npm notice run mindpattern-mobile@1.0.0 npx
+npm notice run 'vitest' run tests/nativeBuildTools.test.ts --maxWorkers=2
+
+ RUN  v4.1.11 /Users/pradeepreddy/Desktop/mental_health_application/mobile
+
+Native release preflight: FAIL native projects exist — missing ios and android projects. Generate/restore the native React Native projects, install pods, and validate Keychain/Keystore before releasing.
+Native release preflight: FAIL react-native-keychain is a direct dependency — src/secureStore.ts and src/biometricUnlock.ts hold session and wrap keys in the OS Keychain/Keystore through it. Re-add react-native-keychain to package.json dependencies before releasing — its removal must fail here, not on a device.
+Native release preflight: FAIL react-native-keychain autolinking — cannot inspect autolinking without the native projects (check 1 must pass first).
+Native release preflight: FAIL iOS Health usage strings — src/healthkit.ts is imported but ios/ is missing, so the Health usage strings cannot be verified. When the project is generated, add NSHealthShareUsageDescription and NSHealthUpdateUsageDescription to ios/<App>/Info.plist (see mobile/README.md for the wording guidance).
+Native release preflight: FAIL Android allowBackup — android/ is missing, so the manifest cannot be verified (check 1 must pass first).
+Native release preflight: FAIL Android FLAG_SECURE/adjustResize — android/ is missing (check 1 must pass first).
+Native release preflight: FAIL iOS HealthKit entitlement — ios/ is missing (check 1 must pass first).
+Native release preflight: FAIL iOS State-of-Mind bridge — ios/ is missing (check 1 must pass first).
+Native release preflight: FAIL Android release signing — android/ is missing (check 1 must pass first).
+Native release preflight: FAIL Android R8 minification — android/ is missing (check 1 must pass first).
+Native release preflight: FAIL Android network security config — android/ is missing (check 1 must pass first).
+Native release preflight: FAIL iOS snapshot shield — ios/ is missing (check 1 must pass first).
+Native release preflight: FAIL extended native launch/resource contracts — ENOENT: no such file or directory, open 'index.js'
+Native release preflight failed: 13 of 14 checks did not pass.
+ ❯ tests/nativeBuildTools.test.ts (1 test | 1 failed) 51ms
+   × the iOS release wrapper runs its real preflight from the mobile root and preserves Xcode's working directory 50ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/nativeBuildTools.test.ts > the iOS release wrapper runs its real preflight from the mobile root and preserves Xcode's working directory
+Error: Command failed: sh /Users/pradeepreddy/Desktop/mental_health_application/mobile/tools/bundle_ios.sh
+Native release preflight: FAIL native projects exist — missing ios and android projects. Generate/restore the native React Native projects, install pods, and validate Keychain/Keystore before releasing.
+Native release preflight: FAIL react-native-keychain is a direct dependency — src/secureStore.ts and src/biometricUnlock.ts hold session and wrap keys in the OS Keychain/Keystore through it. Re-add react-native-keychain to package.json dependencies before releasing — its removal must fail here, not on a device.
+Native release preflight: FAIL react-native-keychain autolinking — cannot inspect autolinking without the native projects (check 1 must pass first).
+Native release preflight: FAIL iOS Health usage strings — src/healthkit.ts is imported but ios/ is missing, so the Health usage strings cannot be verified. When the project is generated, add NSHealthShareUsageDescription and NSHealthUpdateUsageDescription to ios/<App>/Info.plist (see mobile/README.md for the wording guidance).
+Native release preflight: FAIL Android allowBackup — android/ is missing, so the manifest cannot be verified (check 1 must pass first).
+Native release preflight: FAIL Android FLAG_SECURE/adjustResize — android/ is missing (check 1 must pass first).
+Native release preflight: FAIL iOS HealthKit entitlement — ios/ is missing (check 1 must pass first).
+Native release preflight: FAIL iOS State-of-Mind bridge — ios/ is missing (check 1 must pass first).
+Native release preflight: FAIL Android release signing — android/ is missing (check 1 must pass first).
+Native release preflight: FAIL Android R8 minification — android/ is missing (check 1 must pass first).
+Native release preflight: FAIL Android network security config — android/ is missing (check 1 must pass first).
+Native release preflight: FAIL iOS snapshot shield — ios/ is missing (check 1 must pass first).
+Native release preflight: FAIL extended native launch/resource contracts — ENOENT: no such file or directory, open 'index.js'
+Native release preflight failed: 13 of 14 checks did not pass.
+
+ ❯ tests/nativeBuildTools.test.ts:14:20
+     12|     mkdirSync(join(native, "scripts"));
+     13|     writeFileSync(join(native, "scripts", "react-native-xcode.sh"), '#…
+     14|     const output = execFileSync("sh", [join(mobile, "tools", "bundle_i…
+       |                    ^
+     15|       cwd: ios, encoding: "utf8", timeout: 30_000,
+     16|       env: { ...process.env, CONFIGURATION: "Release", PROJECT_DIR: io…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  14:27:33
+   Duration  195ms (transform 47ms, setup 63ms, import 7ms, tests 51ms, environment 0ms)
+

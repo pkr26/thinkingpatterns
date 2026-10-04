@@ -195,7 +195,7 @@ describe("flushAudioQueue", () => {
     const uploaded = await flushAudioQueue();
     expect(uploaded).toBe(1);
     // 2026-10-01 audit H1: every upload is pinned to the flush's origin.
-    expect(api.uploadAudioAttachment).toHaveBeenCalledWith("e9", blob, "audio/m4a", 42, baseUrl);
+    expect(api.uploadAudioAttachment).toHaveBeenCalledWith("e9", blob, "audio/m4a", 42, baseUrl, expect.objectContaining({ userId: "alice" }));
     expect(await audioQueueCount("alice")).toBe(0);
   });
 

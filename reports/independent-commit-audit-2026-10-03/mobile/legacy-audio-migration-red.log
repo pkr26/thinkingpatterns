@@ -1,0 +1,35 @@
+npm notice run mindpattern-mobile@1.0.0 npx
+npm notice run 'vitest' run tests/audioOwnership.test.ts --maxWorkers=2
+
+ RUN  v4.1.11 /Users/pradeepreddy/Desktop/mental_health_application/mobile
+
+ ❯ tests/audioOwnership.test.ts (5 tests | 1 failed) 11ms
+   × erasure drains a legacy recording migration already writing a native file 4ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/audioOwnership.test.ts > erasure drains a legacy recording migration already writing a native file
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ tests/audioOwnership.test.ts:80:37
+     78|   await new Promise<void>(r => setImmediate(r)); const finishedBeforeN…
+     79|   release.resolve(); await flushing; expect(await erasure).toEqual([]);
+     80|   expect(finishedBeforeNativeWrite).toBe(false);
+       |                                     ^
+     81|   expect(fs.__hasFile(fs.writeAsStringAsync.mock.calls.at(-1)![0])).to…
+     82|   expect(await listSavedAudio(USER)).toEqual([]);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 4 passed (5)
+   Start at  14:42:40
+   Duration  435ms (transform 246ms, setup 71ms, import 248ms, tests 11ms, environment 0ms)
+

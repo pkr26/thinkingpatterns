@@ -1,0 +1,224 @@
+{
+  "schema_version": 1,
+  "reviewed_commit": "ad797b060ac5de986e2eac6a044da8d6439a1c03",
+  "captured_at_utc": "2026-10-03T22:00:18.304981+00:00",
+  "scope": "All changed non-report code/test/tool files plus untracked regression files. Original source manifest authenticates original HEAD; this inventory authenticates frozen follow-up source. Reports and validation logs are excluded to avoid self-reference.",
+  "source_file_count": 43,
+  "files": [
+    {
+      "path": ".gitignore",
+      "bytes": 3230,
+      "sha256": "e63b816aef92333f31f0c1b016bd76268fe0d685954ab1656bdccb82aee3e3b8"
+    },
+    {
+      "path": "backend/app/api/account.py",
+      "bytes": 109172,
+      "sha256": "0b048835e4b012b14673edf780ed8c61df13fb01cbdd87b81bbf0b3fa83c0209"
+    },
+    {
+      "path": "backend/app/api/insights.py",
+      "bytes": 123005,
+      "sha256": "23e49fb85a7994f74a842b16ffcfd15ea00656755f3d4c198129db7e82bbe3cb"
+    },
+    {
+      "path": "backend/app/services/audio_store.py",
+      "bytes": 19318,
+      "sha256": "ddea1d5869a62f6a352925c4851c2285cbb15538c125b26d1bbe43cd3966ef95"
+    },
+    {
+      "path": "backend/tests/test_api_resilience_coverage.py",
+      "bytes": 35873,
+      "sha256": "1c89cc7e4cec2635432bdba84cd3c2cf01d7643c48ec97a3ed1b25c9999677e1"
+    },
+    {
+      "path": "backend/tests/test_independent_commit_audit_2026_10_03.py",
+      "bytes": 15088,
+      "sha256": "2e903e90d434cc2cbd4266722880a438f991a881e6c5aa67f9c4bb0bfc2e00ea"
+    },
+    {
+      "path": "backend/tests/test_mutation_pins_2026_09_30.py",
+      "bytes": 13593,
+      "sha256": "c1d08e29eab8fc32ca11ba2e1523a46f302c60325e4e7d7301f63cce29dbb9ba"
+    },
+    {
+      "path": "mobile/src/api/client.ts",
+      "bytes": 92261,
+      "sha256": "dfee54b2287c9dc914a9fcb6f7f5eb661f5cc41d7b2e9f14353827ff800f178b"
+    },
+    {
+      "path": "mobile/src/audioQueue.ts",
+      "bytes": 20725,
+      "sha256": "ec7c0e5ac595a1d52edddb926627cb41fbe9e26dcb67f28182f0d6d8407a83ba"
+    },
+    {
+      "path": "mobile/src/biometricUnlock.ts",
+      "bytes": 4287,
+      "sha256": "44e6a3df1de67512852c65fd036a93b04e5e249169f29e3ac2f5d5c62358fd87"
+    },
+    {
+      "path": "mobile/src/offlineQueue.ts",
+      "bytes": 38148,
+      "sha256": "8a4c11904b1e49fad2d19fff50e2d6cfde04d24d3b85afd4393ebeebe0a64db6"
+    },
+    {
+      "path": "mobile/src/screens/InsightsScreen.tsx",
+      "bytes": 47745,
+      "sha256": "39f98b476cb20728a645aa22204610f072475c6d40f7574c9ff234cdfb506ce6"
+    },
+    {
+      "path": "mobile/src/screens/SafetyPlanScreen.tsx",
+      "bytes": 15514,
+      "sha256": "4d980ab94f8b8827c8782535fea60fea96b66b1d048ca90c05bc7e3a69ca6552"
+    },
+    {
+      "path": "mobile/src/screens/SettingsScreen.tsx",
+      "bytes": 74730,
+      "sha256": "5274096dcf71a69f19876150eb8970418f3317ff9a9abc06bbf79c247c3a0dbc"
+    },
+    {
+      "path": "mobile/tests/audioOwnership.test.ts",
+      "bytes": 6274,
+      "sha256": "b5023e82b881d174bbf1403a58ea9a7d46ae44dfa5359741411e13332c6ed3f3"
+    },
+    {
+      "path": "mobile/tests/audioQueue.test.ts",
+      "bytes": 13771,
+      "sha256": "8bb9d98ee8a3ea1e9aa40b3a5353888483690969ab4efd303d679ad11f570799"
+    },
+    {
+      "path": "mobile/tests/biometricOwnership.test.ts",
+      "bytes": 3168,
+      "sha256": "1ab2a82a66e395b348730638a8672235772228cb28bb5201e9468dc8662e0ccf"
+    },
+    {
+      "path": "mobile/tests/nativeBuildTools.test.ts",
+      "bytes": 1369,
+      "sha256": "fd91aac4a0accf40fe67fa30411ab7369ad285ca39d94ff1bdb8f5626d96a7b0"
+    },
+    {
+      "path": "mobile/tests/offlineQueue.test.ts",
+      "bytes": 58272,
+      "sha256": "99f64bc02989e75377cacbd6e35215380573eea4f34d12731973c657b5551150"
+    },
+    {
+      "path": "mobile/tests/queueOwnership.test.ts",
+      "bytes": 8371,
+      "sha256": "8d2e44e86308d295c5c8bb7014fbb8aca8c5ba381d4ecd950772857aad58ee33"
+    },
+    {
+      "path": "mobile/tests/screens/entryVoice.test.tsx",
+      "bytes": 8844,
+      "sha256": "8035d644b1c9dc2343024b06fd6317709d475ece6b55030edf046bcd62daa24a"
+    },
+    {
+      "path": "mobile/tests/screens/insightsScreen.pins.test.tsx",
+      "bytes": 29295,
+      "sha256": "daa344c1b88a47bb3750379ba8c3560f73d89bb6a22e0715b50b4f300d4d1ad2"
+    },
+    {
+      "path": "mobile/tests/screens/safetyPlanScreen.test.tsx",
+      "bytes": 14753,
+      "sha256": "ec97783ff6bcd899c2d48b45ee67cc40dc1eea8c6667a4052b86cb90c0e0192e"
+    },
+    {
+      "path": "mobile/tests/screens/settingsScreen.test.tsx",
+      "bytes": 100224,
+      "sha256": "9ee76091671ef65ed85c70fb395906032a2b194afc485370fb423f3ba5c43abf"
+    },
+    {
+      "path": "mobile/tools/bundle_ios.sh",
+      "bytes": 519,
+      "sha256": "aeee629c4a2097579148af9e3e3ff4019042d1d8ca8dc905014a5db2d2a71a59"
+    },
+    {
+      "path": "portal/src/App.tsx",
+      "bytes": 17991,
+      "sha256": "44b85fac02e4941d004f0406cbc049df7849fb94d6a6cc887094b06d46828d2b"
+    },
+    {
+      "path": "portal/src/crypto.ts",
+      "bytes": 37461,
+      "sha256": "41a06923cd1130f46c07ab5132cd35464362de9ab675c7550882db32c89832d5"
+    },
+    {
+      "path": "portal/src/views/PatientView.tsx",
+      "bytes": 89418,
+      "sha256": "5bd48e916f0a714719bbe19a4624a9be46a8ae6f1b3640675c219ea5f2404ce2"
+    },
+    {
+      "path": "portal/tests/app.test.tsx",
+      "bytes": 30866,
+      "sha256": "62e22641733e0a52c3d2de30b48bb1c9f9e0c94d1b9dd3344da671dc055c0082"
+    },
+    {
+      "path": "portal/tests/crypto.test.ts",
+      "bytes": 36126,
+      "sha256": "8e53c444022c60d0d2ce8653d110e0013c475570796ce7b0282688ca5502187b"
+    },
+    {
+      "path": "portal/tests/views.test.tsx",
+      "bytes": 116694,
+      "sha256": "f6aa7d26ba6c4579f8209eb3de3adf81e72187549930bf14d12e94b821611d9f"
+    },
+    {
+      "path": "redteam/export_evidence.py",
+      "bytes": 1858,
+      "sha256": "a782d06f5c36b09e7917b62d00d64c4391dd288553f13b13528c859715347028"
+    },
+    {
+      "path": "tools/tests/test_export_evidence.py",
+      "bytes": 4126,
+      "sha256": "52ec9c7754a4ac0b78a81ded969efc7d00f6cc48dcbb5c315d9ca88d2e3ee5ba"
+    },
+    {
+      "path": "web/src/api/client.ts",
+      "bytes": 50580,
+      "sha256": "4788f8090b917da49ba43c320acb4dd2b9611a9b897c2cd4acf9f88479bea51a"
+    },
+    {
+      "path": "web/src/crypto/patient.ts",
+      "bytes": 15032,
+      "sha256": "96af149ea87b69b61eca4e29bd91aca81a035f124f44542b1473bda30d32ac4f"
+    },
+    {
+      "path": "web/src/offlineQueue.ts",
+      "bytes": 29705,
+      "sha256": "6b23b35f03fa725da01d485389518c73af4cf7af30737304a5642518e993ca3e"
+    },
+    {
+      "path": "web/src/sync.ts",
+      "bytes": 5136,
+      "sha256": "ed5fb24eebda69d1a5c49208292fec5a57c824524915096ae1ad8aa390e58d62"
+    },
+    {
+      "path": "web/src/views/Share.tsx",
+      "bytes": 13976,
+      "sha256": "db3c64b5e59ce1d916f079b5dd73976b583cce732dc69c9e2fe2e51c46c211eb"
+    },
+    {
+      "path": "web/tests/auditRegressionsUI.test.tsx",
+      "bytes": 7038,
+      "sha256": "6b705b9780748042283e8740f319e0372853afd61d0baeee8d1c3e22c7ccdcc6"
+    },
+    {
+      "path": "web/tests/crypto.test.ts",
+      "bytes": 18095,
+      "sha256": "a8968da68e62e0f64dc8ed3c404da9c334773ac869688e3e240e6bf9b05b6c0c"
+    },
+    {
+      "path": "web/tests/localRotation.idb.test.ts",
+      "bytes": 13311,
+      "sha256": "a95fd08990a612102df9d5347da986144e60fd82471152971561df742f1c8e1c"
+    },
+    {
+      "path": "web/tests/queue.test.ts",
+      "bytes": 29860,
+      "sha256": "0e996e0f94b90358a899a47e46ca044dfca1227c6aa0c342e290205e6c857e7a"
+    },
+    {
+      "path": "web/tests/sync.test.ts",
+      "bytes": 10942,
+      "sha256": "a20eacb77a71539fb1820337c0a38520023896c8cc02edbb18acf4a13763f219"
+    }
+  ]
+}

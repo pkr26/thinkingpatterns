@@ -14,7 +14,7 @@
  *    URL to move under a flush),
  *  - Buffer.byteLength → TextEncoder length, Buffer base64url → manual.
  */
-import { ApiError, api, sessionUserId } from "./api/client";
+import { ApiError, api, sessionAbortSignal, sessionUserId } from "./api/client";
 import { buildAad } from "./crypto/aad";
 import { decrypt, encrypt, fromBase64, toBase64, zeroize, type Bytes } from "./crypto/core";
 import { currentOrigin, withLock } from "./platform";
@@ -266,10 +266,10 @@ async function rejectedFor(scope: QueueScope, generation = queueGeneration): Pro
   return readItems(scope.rejected, scope, generation);
 }
 
-async function appendRejected(scope: QueueScope, items: QueuedEntry[], generation: number): Promise<void> {
-  if (items.length === 0 || wipedSince(generation)) return;
+async function appendRejected(scope: QueueScope, items: QueuedEntry[], generation: number, stillCurrent: () => boolean): Promise<void> {
+  if (items.length === 0 || !stillCurrent() || wipedSince(generation)) return;
   const existing = await rejectedFor(scope, generation);
-  if (wipedSince(generation)) return;
+  if (!stillCurrent() || wipedSince(generation)) return;
   const ids = new Set(existing.map((item) => item.clientEntryId));
   for (const item of items) {
     if (!ids.has(item.clientEntryId)) {
@@ -277,7 +277,7 @@ async function appendRejected(scope: QueueScope, items: QueuedEntry[], generatio
       ids.add(item.clientEntryId);
     }
   }
-  if (!wipedSince(generation)) await writeItems(scope.rejected, existing,scope.permit);
+  if (stillCurrent() && !wipedSince(generation)) await writeItems(scope.rejected, existing,scope.permit);
 }
 
 export async function quarantinedQueueExists(userId?: string): Promise<boolean> {
@@ -407,14 +407,22 @@ async function verifyDuplicateOutcome(clientEntryId: string): Promise<FlushOutco
  *  + generation fence, and cross-tab under the queue-flush Web Lock that
  *  flushQueueOnReconnect holds around this call. */
 export async function flushQueue(currentUserId: string): Promise<number> {
+  // Storage scope identifies the ciphertext owner, not the bearer that a
+  // later API call will capture. Retain the starting session across every
+  // queue/read/network await, including an explicit old-owner callback.
+  const signal = sessionAbortSignal();
+  const startingGeneration = queueGeneration;
+  const ownsSession = () => !!signal && !signal.aborted && sessionUserId() === currentUserId && !wipedSince(startingGeneration);
+  if (!ownsSession()) return 0;
   const scope = await scopeFor(currentUserId);
+  if (!ownsSession()) return 0;
   const batch = await serialized(async () => {
     const generation = queueGeneration;
     return { generation, items: await readItems(scope.queue, scope, generation) };
   });
   const { generation } = batch;
   let sent = 0;
-  if (batch.items.length === 0) return sent;
+  if (!ownsSession() || batch.items.length === 0) return sent;
 
   const removed = new Set<string>(); // sent / verified duplicate / rejected
   const requeued = new Map<string, QueuedEntry>(); // retry / session-expired
@@ -423,7 +431,7 @@ export async function flushQueue(currentUserId: string): Promise<number> {
   let stop = false;
 
   for (const item of batch.items) {
-    if (stop || scope.origin !== currentOrigin()) break;
+    if (stop || !ownsSession() || scope.origin !== currentOrigin()) break;
     // In order, skipping items still inside a backoff/advisory window —
     // exactly the "first due item" the per-item drain used to pick.
     if (item.notBefore !== undefined && item.notBefore > Date.now()) continue;
@@ -433,11 +441,13 @@ export async function flushQueue(currentUserId: string): Promise<number> {
       await api.createEntry(item.clientEntryId, item.blobB64, item.entryDate, 1);
       outcome = { kind: "sent" };
     } catch (error) {
+      if (!ownsSession()) return sent;
       outcome =
         error instanceof ApiError && error.status === 409
           ? await verifyDuplicateOutcome(item.clientEntryId)
           : classifyError(error);
     }
+    if (!ownsSession()) return sent;
     switch (outcome.kind) {
       case "sent":
         removed.add(item.clientEntryId);
@@ -483,14 +493,14 @@ export async function flushQueue(currentUserId: string): Promise<number> {
 
   if (removed.size > 0 || requeued.size > 0 || rejects.length > 0) {
     const committed = await serialized(async () => {
-      if (wipedSince(generation)) return false;
+      if (!ownsSession() || wipedSince(generation)) return false;
       // Re-read under the mutex and apply by id: entries enqueued in THIS
       // process while the drain was awaiting the network survive untouched
       // (and an item another flush already resolved is simply not found).
       const current = await readItems(scope.queue, scope, generation);
-      if (wipedSince(generation)) return false;
-      if (rejects.length > 0) await appendRejected(scope, rejects, generation);
-      if (wipedSince(generation)) return false;
+      if (!ownsSession() || wipedSince(generation)) return false;
+      if (rejects.length > 0) await appendRejected(scope, rejects, generation, ownsSession);
+      if (!ownsSession() || wipedSince(generation)) return false;
       await writeItems(
         scope.queue,
         current

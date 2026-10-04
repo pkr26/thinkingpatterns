@@ -127,6 +127,16 @@ describe("SafetyPlanScreen: load", () => {
 });
 
 describe("SafetyPlanScreen: edit and save", () => {
+  it("cannot save a previous account's mounted form into a replacement account", async () => {
+    const root = await render(<SafetyPlanScreen navigation={nav} />); await flush();
+    await typeIntoField(root, "My warning signs", "Private words from the original account");
+    vi.mocked(api.getUserId).mockResolvedValue("replacement-account");
+    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 2), dataKey: Buffer.alloc(32, 9) }, "replacement-account");
+    await pressLabel(root, "Save my safety plan"); await flush();
+    expect(await storage.getItem("@mindpattern/safety_plan_replacement-account")).toBeNull();
+    expect(Alert.alert).toHaveBeenCalledWith("Could not save", expect.any(String));
+    expect(inputByLabel(root, "My warning signs").props.value).toBe("Private words from the original account");
+  });
   it("a late explicit-save ACK retains a newer encrypted draft instead of acknowledging different words", async () => {
     const root = await render(<SafetyPlanScreen navigation={nav} />); await flush();
     await typeIntoField(root, "My warning signs", "the explicitly saved older words");
@@ -205,6 +215,17 @@ describe("SafetyPlanScreen: edit and save", () => {
 });
 
 describe("SafetyPlanScreen: locked states", () => {
+  it("a delayed initial account lookup cannot adopt a replacement vault's plan", async () => {
+    let release!: (value: string) => void;
+    vi.mocked(api.getUserId).mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+    const root = await render(<SafetyPlanScreen navigation={nav} />); await flush();
+    const replacementKey = Buffer.alloc(32, 9);
+    await saveSafetyPlan(replacementKey, "replacement-account", { ...(await import("../../src/safetyPlan")).emptySafetyPlan(), warningSigns: "The replacement account's private plan" });
+    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 2), dataKey: replacementKey }, "replacement-account");
+    await act(async () => release("replacement-account")); await flush();
+    expect(textOf(root)).toContain("unlock to read or edit it");
+    expect(textOf(root)).not.toContain("1. My warning signs");
+  });
   it("a locked vault at mount shows the locked view with crisis help one tap away", async () => {
     vault.lock();
     const root = await render(<SafetyPlanScreen navigation={nav} />);

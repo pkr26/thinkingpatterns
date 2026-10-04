@@ -1,0 +1,376 @@
+Negative control: the current eight independent regressions executed against app/ from unchanged HEAD ad797b060ac5de986e2eac6a044da8d6439a1c03 in an isolated temporary checkout.
+
+FFFFFFFF                                                                 [100%]
+=================================== FAILURES ===================================
+______ test_export_rejects_retired_epoch_before_refreshing_same_orm_user _______
+
+client = <httpx.AsyncClient object at 0x10ade70e0>
+app = <fastapi.applications.FastAPI object at 0x10a09d6a0>
+
+    async def test_export_rejects_retired_epoch_before_refreshing_same_orm_user(client, app):
+        patient = ClientEmulator("audit-export-epoch", "password")
+        await patient.register(client)
+        request = SimpleNamespace(app=app, state=SimpleNamespace(), method="GET")
+        async with app.state.sessionmaker() as session:
+            user = await require_user(request, patient.headers["Authorization"], session)
+            expected_epoch = user.token_epoch
+            async with app.state.sessionmaker() as retire_session:
+                await retire_session.execute(
+                    update(User)
+                    .where(User.id == patient.user_id)
+                    .values(token_epoch=expected_epoch + 1)
+                )
+                await retire_session.commit()
+            response = None
+            try:
+>               with pytest.raises(ApiError) as raised:
+                     ^^^^^^^^^^^^^^^^^^^^^^^
+E               Failed: DID NOT RAISE ApiError
+
+tests/test_independent_commit_audit_2026_10_03.py:60: Failed
+_______ test_export_stops_after_same_device_logout_without_epoch_change ________
+
+client = <httpx.AsyncClient object at 0x10b102d50>
+app = <fastapi.applications.FastAPI object at 0x10a09d7f0>
+
+    async def test_export_stops_after_same_device_logout_without_epoch_change(client, app):
+        patient = ClientEmulator("audit-export-logout", "password")
+        await patient.register(client)
+        response = await _export_response(app, patient)
+        await _advance_to(response, ',"entries":[')
+        assert (await client.post("/api/auth/logout", headers=patient.headers)).status_code == 204
+        try:
+>           with pytest.raises(ApiError) as raised:
+                 ^^^^^^^^^^^^^^^^^^^^^^^
+E           Failed: DID NOT RAISE ApiError
+
+tests/test_independent_commit_audit_2026_10_03.py:75: Failed
+_____ test_export_stops_when_rotation_is_interrupted_before_revision_bump ______
+
+client = <httpx.AsyncClient object at 0x10b420410>
+app = <fastapi.applications.FastAPI object at 0x10b160980>
+
+    async def test_export_stops_when_rotation_is_interrupted_before_revision_bump(client, app):
+        patient = ClientEmulator("audit-export-rekey", "password")
+        await patient.register(client)
+        await patient.create_entry(
+            client, "preserve every generation", utcnow().date(), "partial-entry"
+        )
+        response = await _export_response(app, patient)
+        await _advance_to(response, ',"entries":[')
+        # A committed journal is the durable state of an interrupted rekey. Its
+        # early batches leave the account epoch/collection revisions unchanged.
+        async with lifecycle_locks.hold(f"llm-lifecycle:{patient.user_id}"):
+            async with app.state.sessionmaker() as session:
+                entry = await session.scalar(select(Entry).where(Entry.user_id == patient.user_id))
+                rewritten, already_new = insights._rekey_entry_batch(
+                    bytearray(patient.data_key),
+                    bytearray(os.urandom(32)),
+                    [(entry.id, entry.client_entry_id, entry.content_version, bytes(entry.blob))],
+                    patient.user_id,
+                )
+                assert already_new == 0
+                entry.blob = rewritten[0][1]
+                session.add(RekeyJournal(user_id=patient.user_id, stage="entries"))
+                await session.commit()
+        try:
+>           with pytest.raises(ApiError) as raised:
+                 ^^^^^^^^^^^^^^^^^^^^^^^
+E           Failed: DID NOT RAISE ApiError
+
+tests/test_independent_commit_audit_2026_10_03.py:106: Failed
+_______ test_export_refuses_insight_replaced_before_size_metadata_fetch ________
+
+client = <httpx.AsyncClient object at 0x10a093a80>
+app = <fastapi.applications.FastAPI object at 0x10b42cc20>
+
+    async def test_export_refuses_insight_replaced_before_size_metadata_fetch(client, app):
+        patient = ClientEmulator("audit-export-analysis", "password")
+        await patient.register(client)
+        async with app.state.sessionmaker() as session:
+            await insights._replace_insight(session, patient.user_id, "brain", None, b"a" * 60)
+            await session.commit()
+            original_id = await session.scalar(select(Insight.id))
+        response = await _export_response(app, patient)
+        await _advance_to(response, '],"insights":[')
+        # This is the exact delete/insert write used by successful recompute.
+        async with lifecycle_locks.hold(f"llm-lifecycle:{patient.user_id}"):
+            async with app.state.sessionmaker() as session:
+                await insights._replace_insight(session, patient.user_id, "brain", None, b"b" * 60)
+                await session.commit()
+                assert await session.scalar(select(Insight.id)) != original_id
+        try:
+>           with pytest.raises(ApiError) as raised:
+                 ^^^^^^^^^^^^^^^^^^^^^^^
+E           Failed: DID NOT RAISE ApiError
+
+tests/test_independent_commit_audit_2026_10_03.py:129: Failed
+__________ test_export_head_cancellation_releases_admission_capacity ___________
+
+client = <httpx.AsyncClient object at 0x10a0910f0>
+app = <fastapi.applications.FastAPI object at 0x10b711010>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10b52b0d0>
+
+    async def test_export_head_cancellation_releases_admission_capacity(client, app, monkeypatch):
+        patient = ClientEmulator("audit-export-cancel", "password")
+        await patient.register(client)
+        request = SimpleNamespace(app=app, state=SimpleNamespace(), method="GET")
+        async with app.state.sessionmaker() as session:
+            user = await require_user(request, patient.headers["Authorization"], session)
+            started = asyncio.Event()
+    
+            async def blocked_read(*args, **kwargs):
+                started.set()
+                await asyncio.Event().wait()
+    
+            monkeypatch.setattr(session, "execute", blocked_read)
+            limiter = app.state.export_limiter
+            task = asyncio.create_task(account.export_account(request, user=user, session=session))
+            await asyncio.wait_for(started.wait(), timeout=2)
+            assert limiter.borrowed_tokens == 1
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+>           assert limiter.borrowed_tokens == 0
+E           assert 1 == 0
+E            +  where 1 = <anyio._backends._asyncio.CapacityLimiter object at 0x10b764b40>.borrowed_tokens
+
+tests/test_independent_commit_audit_2026_10_03.py:157: AssertionError
+________ test_atomic_rotation_journals_commit_and_detects_tail_deletion ________
+
+client = <httpx.AsyncClient object at 0x10bcbc170>
+app = <fastapi.applications.FastAPI object at 0x10b9d52b0>
+settings = Settings(environment='development', audit_journal_path='/private/var/folders/yy/8vxx571s72vbb5jg4zt6v2fm0000gn/T/pytes...interval_seconds=900, therapist_sharing_enabled=True, cors_origins=[], trust_proxy_headers=False, trusted_proxy_ips=[])
+tmp_path = PosixPath('/private/var/folders/yy/8vxx571s72vbb5jg4zt6v2fm0000gn/T/pytest-of-pradeepreddy/pytest-24523/test_atomic_rotation_journals_0')
+
+    async def test_atomic_rotation_journals_commit_and_detects_tail_deletion(
+        client, app, settings, tmp_path
+    ):
+        settings.audit_journal_path = str(tmp_path / "audit.journal")
+        patient = ClientEmulator("audit-rekey-journal", "password")
+        await patient.register(client)
+        old_token = await patient.open_processing_session(client)
+        new_token = await patient.open_processing_session_for(client, os.urandom(32))
+        headers = {
+            **patient.headers,
+            "X-Account-Verifier": patient.auth_key_b64,
+            "X-Processing-Token": old_token,
+            "X-New-Processing-Token": new_token,
+        }
+        payload = patient.rekey_payload()
+        response = await client.post("/api/processing/rekey", headers=headers, json=payload)
+        assert response.status_code == 200, response.text
+>       journal = (tmp_path / "audit.journal").read_bytes()
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_independent_commit_audit_2026_10_03.py:177: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/Users/pradeepreddy/.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/pathlib/__init__.py:777: in read_bytes
+    with self.open(mode='rb', buffering=0) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = PosixPath('/private/var/folders/yy/8vxx571s72vbb5jg4zt6v2fm0000gn/T/pytest-of-pradeepreddy/pytest-24523/test_atomic_rotation_journals_0/audit.journal')
+mode = 'rb', buffering = 0, encoding = None, errors = None, newline = None
+
+    def open(self, mode='r', buffering=-1, encoding=None,
+             errors=None, newline=None):
+        """
+        Open the file pointed to by this path and return a file object, as
+        the built-in open() function does.
+        """
+        if "b" not in mode:
+            encoding = io.text_encoding(encoding)
+>       return io.open(self, mode, buffering, encoding, errors, newline)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       FileNotFoundError: [Errno 2] No such file or directory: '/private/var/folders/yy/8vxx571s72vbb5jg4zt6v2fm0000gn/T/pytest-of-pradeepreddy/pytest-24523/test_atomic_rotation_journals_0/audit.journal'
+
+/Users/pradeepreddy/.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/pathlib/__init__.py:771: FileNotFoundError
+_________ test_audio_cleanup_claims_each_tombstone_before_provider_io __________
+
+app = <fastapi.applications.FastAPI object at 0x10bc21a90>
+settings = Settings(environment='development', audit_journal_path='', scrypt_n=131072, token_ttl_seconds=86400, processing_sessio...interval_seconds=900, therapist_sharing_enabled=True, cors_origins=[], trust_proxy_headers=False, trusted_proxy_ips=[])
+tmp_path = PosixPath('/private/var/folders/yy/8vxx571s72vbb5jg4zt6v2fm0000gn/T/pytest-of-pradeepreddy/pytest-24523/test_audio_cleanup_claims_each0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10bc32820>
+
+    async def test_audio_cleanup_claims_each_tombstone_before_provider_io(
+        app, settings, tmp_path, monkeypatch
+    ):
+        settings.audio_local_dir = str(tmp_path / "audio")
+        store = audio_store.get_audio_store_cached(settings)
+        key = audio_store.new_storage_key("0" * 32)
+        await store.put(key, b"ciphertext" * 8)
+        async with app.state.sessionmaker() as session:
+            row = AudioDeletion(
+                backend=store.backend,
+                storage_key=key,
+                storage_locator=audio_store.storage_locator(store),
+                not_before=utcnow(),
+            )
+            session.add(row)
+            await session.commit()
+            identifier = row.id
+    
+        entered = asyncio.Event()
+        resume = asyncio.Event()
+        original_delete = audio_store.LocalAudioStore.delete
+        calls = 0
+    
+        async def transient_failure(self, storage_key):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                entered.set()
+                await resume.wait()
+                raise audio_store.AudioStoreError("transient first-drain failure")
+            await original_delete(self, storage_key)
+    
+        monkeypatch.setattr(audio_store.LocalAudioStore, "delete", transient_failure)
+    
+        async def drain():
+            async with app.state.sessionmaker() as session:
+                return await audio_store.drain_audio_deletions(session, settings)
+    
+        first = asyncio.create_task(drain())
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        try:
+            # The sweeper/request cleanup must see the first provider call's
+            # durable lease instead of dispatching a competing deletion.
+            competing_result = await drain()
+        finally:
+            resume.set()
+            outcome = await asyncio.gather(first, return_exceptions=True)
+>       assert outcome == [0]
+E       assert [StaleDataErr...re matched.")] == [0]
+E         
+E         At index 0 diff: StaleDataError("UPDATE statement on table 'audio_deletions' expected to update 1 row(s); 0 were matched.") != 0
+E         Use -v to get more diff
+
+tests/test_independent_commit_audit_2026_10_03.py:250: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  mindpattern.audio_store:audio_store.py:397 audio deletion deferred: tombstone 684d57e7cc8441ccbda9a2fc43861954
+_________ test_cancelled_audio_cleanup_retains_durable_expiring_lease __________
+
+    async def drain():
+        async with app.state.sessionmaker() as session:
+>           return await audio_store.drain_audio_deletions(session, settings)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_independent_commit_audit_2026_10_03.py:292: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+app/services/audio_store.py:393: in drain_audio_deletions
+    await store_for_object(settings, row).delete(row.storage_key)
+tests/test_independent_commit_audit_2026_10_03.py:286: in cancelled_delete
+    await asyncio.Event().wait()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <asyncio.locks.Event object at 0x10c0824c0 [unset]>
+
+    async def wait(self):
+        """Block until the internal flag is true.
+    
+        If the internal flag is true on entry, return True
+        immediately.  Otherwise, block until another task calls
+        set() to set the flag to true, then return True.
+        """
+        if self._value:
+            return True
+    
+        fut = self._get_loop().create_future()
+        self._waiters.append(fut)
+        try:
+>           await fut
+E           asyncio.exceptions.CancelledError
+
+/Users/pradeepreddy/.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/asyncio/locks.py:213: CancelledError
+
+The above exception was the direct cause of the following exception:
+
+app = <fastapi.applications.FastAPI object at 0x10b9d5400>
+settings = Settings(environment='development', audit_journal_path='', scrypt_n=131072, token_ttl_seconds=86400, processing_sessio...interval_seconds=900, therapist_sharing_enabled=True, cors_origins=[], trust_proxy_headers=False, trusted_proxy_ips=[])
+tmp_path = PosixPath('/private/var/folders/yy/8vxx571s72vbb5jg4zt6v2fm0000gn/T/pytest-of-pradeepreddy/pytest-24523/test_cancelled_audio_cleanup_r0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10bf99320>
+
+    async def test_cancelled_audio_cleanup_retains_durable_expiring_lease(
+        app, settings, tmp_path, monkeypatch
+    ):
+        settings.audio_local_dir = str(tmp_path / "audio")
+        store = audio_store.get_audio_store_cached(settings)
+        key = audio_store.new_storage_key("0" * 32)
+        await store.put(key, b"ciphertext" * 8)
+        async with app.state.sessionmaker() as session:
+            row = AudioDeletion(
+                backend=store.backend,
+                storage_key=key,
+                storage_locator=audio_store.storage_locator(store),
+                not_before=utcnow(),
+            )
+            session.add(row)
+            await session.commit()
+            identifier = row.id
+    
+        entered = asyncio.Event()
+        original_delete = audio_store.LocalAudioStore.delete
+    
+        async def cancelled_delete(self, storage_key):
+            entered.set()
+            await asyncio.Event().wait()
+    
+        monkeypatch.setattr(audio_store.LocalAudioStore, "delete", cancelled_delete)
+    
+        async def drain():
+            async with app.state.sessionmaker() as session:
+                return await audio_store.drain_audio_deletions(session, settings)
+    
+        task = asyncio.create_task(drain())
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+>       assert await asyncio.wait_for(drain(), timeout=2) == 0
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_independent_commit_audit_2026_10_03.py:299: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/Users/pradeepreddy/.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/asyncio/tasks.py:487: in wait_for
+    async with timeouts.timeout(timeout):
+               ^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <Timeout [expired]>
+exc_type = <class 'asyncio.exceptions.CancelledError'>
+exc_val = CancelledError(), exc_tb = <traceback object at 0x10bc94800>
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> bool | None:
+        assert self._state in (_State.ENTERED, _State.EXPIRING)
+    
+        if self._timeout_handler is not None:
+            self._timeout_handler.cancel()
+            self._timeout_handler = None
+    
+        if self._state is _State.EXPIRING:
+            self._state = _State.EXPIRED
+    
+            if self._task.uncancel() <= self._cancelling and exc_type is not None:
+                # Since there are no new cancel requests, we're
+                # handling this.
+                if issubclass(exc_type, exceptions.CancelledError):
+>                   raise TimeoutError from exc_val
+E                   TimeoutError
+
+/Users/pradeepreddy/.local/share/uv/python/cpython-3.14.7-macos-aarch64-none/lib/python3.14/asyncio/timeouts.py:115: TimeoutError
+=========================== short test summary info ============================
+FAILED tests/test_independent_commit_audit_2026_10_03.py::test_export_rejects_retired_epoch_before_refreshing_same_orm_user
+FAILED tests/test_independent_commit_audit_2026_10_03.py::test_export_stops_after_same_device_logout_without_epoch_change
+FAILED tests/test_independent_commit_audit_2026_10_03.py::test_export_stops_when_rotation_is_interrupted_before_revision_bump
+FAILED tests/test_independent_commit_audit_2026_10_03.py::test_export_refuses_insight_replaced_before_size_metadata_fetch
+FAILED tests/test_independent_commit_audit_2026_10_03.py::test_export_head_cancellation_releases_admission_capacity
+FAILED tests/test_independent_commit_audit_2026_10_03.py::test_atomic_rotation_journals_commit_and_detects_tail_deletion
+FAILED tests/test_independent_commit_audit_2026_10_03.py::test_audio_cleanup_claims_each_tombstone_before_provider_io
+FAILED tests/test_independent_commit_audit_2026_10_03.py::test_cancelled_audio_cleanup_retains_durable_expiring_lease
+8 failed in 4.94s

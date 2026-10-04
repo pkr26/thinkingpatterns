@@ -19,7 +19,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Alert, AppState, BackHandler, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { api } from "../api/client";
 import { vault } from "../vault";
-import { captureLocalWritePermit } from "../localRekey";
+import { captureLocalWritePermit, assertLocalWritePermit } from "../localRekey";
 import { localWriteScopeEpoch } from "../localWriteGuard";
 import { useSession } from "../store";
 import {
@@ -57,6 +57,7 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
   /** The last SAVED/LOADED plan — the baseline for "unsaved changes". */
   const savedPlanRef = useRef<SafetyPlan>(emptySafetyPlan());
   const ownerRef = useRef<string | null>(null);
+  const ownerScopeRef = useRef<number | null>(null);
   const draftKeyRef = useRef<Buffer | null>(null);
   const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftWrites = useRef<Promise<void>>(Promise.resolve());
@@ -65,10 +66,15 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
     if (draftTimer.current) { clearTimeout(draftTimer.current); draftTimer.current = null; }
     const owner = ownerRef.current;
     if (!owner || !draftKeyRef.current || !planIsDirty()) return;
+    // Preserve the original screen's ownership through its draft queue.
+    if (ownerScopeRef.current !== localWriteScopeEpoch()) return;
+    let writePermit;
+    try { writePermit = captureLocalWritePermit(owner, draftKeyRef.current); }
+    catch { return; }
     const ownedKey = Buffer.from(draftKeyRef.current);
     const snapshot = { ...planRef.current };
     draftWrites.current = draftWrites.current.catch(() => {}).then(async () => {
-      try { await saveSafetyPlanDraft(ownedKey, owner, snapshot); }
+      try { assertLocalWritePermit(writePermit); await saveSafetyPlanDraft(ownedKey, owner, snapshot); }
       finally { ownedKey.fill(0); }
     });
     // A failed draft never masquerades as an explicitly saved plan.
@@ -121,6 +127,10 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
 
   useEffect(() => {
     let cancelled = false;
+    const hydrationEpoch = localWriteScopeEpoch(), hydrationOwner = vault.ownerUserId();
+    const hydrationKey = vault.isUnlocked() ? vault.get().dataKey : null;
+    const ownsHydration = () => !cancelled && hydrationEpoch === localWriteScopeEpoch() && vault.isUnlocked()
+      && !!hydrationOwner && vault.ownerUserId() === hydrationOwner && vault.get().dataKey === hydrationKey;
     void (async () => {
       try {
         const userId = await api.getUserId();
@@ -129,10 +139,13 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
           if (!cancelled) setLocked(true);
           return;
         }
+        if (!ownsHydration() || userId !== hydrationOwner) throw new Error("The safety-plan account changed");
         ownerRef.current = userId;
+        ownerScopeRef.current = hydrationEpoch;
         draftKeyRef.current = Buffer.from(vault.get().dataKey);
         const stored = await loadSafetyPlan(draftKeyRef.current, userId);
         if (cancelled) return;
+        if (!ownsHydration()) throw new Error("The safety-plan account changed");
         if (stored !== null) {
           savedPlanRef.current = stored;
           updatePlan(stored);
@@ -146,6 +159,8 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
           updatePlan(prefilled);
         }
         const draft = await loadSafetyPlanDraft(draftKeyRef.current, userId);
+        if (cancelled) return;
+        if (!ownsHydration()) throw new Error("The safety-plan account changed");
         if (!cancelled && draft) {
           updatePlan(draft);
           showStatus(tr("safetyplan.draftRestored"), "ok");
@@ -217,6 +232,7 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
         return;
       }
       if (vault.ownerUserId() !== userId) throw new Error(tr("common.sessionDamagedTitle"));
+      if (ownerRef.current !== userId || ownerScopeRef.current !== submitEpoch) throw new Error(tr("common.sessionDamagedTitle"));
       const dataKey = vault.get().dataKey;
       const writePermit = captureLocalWritePermit(userId, dataKey);
       await saveSafetyPlan(dataKey, userId, savedSnapshot);

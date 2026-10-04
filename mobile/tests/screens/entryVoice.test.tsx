@@ -160,6 +160,7 @@ describe("EntryScreen voice flow", () => {
       "audio/m4a",
       4, // the recorder's honest 4200 ms
       "http://localhost:8000", // origin-pinned outbox upload
+      expect.objectContaining({ userId: "user-1" }), // immutable ciphertext owner
     );
   });
 

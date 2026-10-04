@@ -8,11 +8,11 @@ import { buildAad } from "../src/crypto/aad";
 import * as cryptoCore from "../src/crypto/core";
 import { saveSafetyPlan,loadSafetyPlan,EMPTY_SAFETY_PLAN } from "../src/safetyPlan";
 import { enqueue,flushQueue,requeueRejected } from "../src/offlineQueue";
-import { api,ApiError } from "../src/api/client";
+import { api,ApiError,setSession,clearSession } from "../src/api/client";
 const owner="idb-rotation",draft=`mindpattern.draft.active.${owner}`,oldKey=new Uint8Array(32).fill(2),newKey=new Uint8Array(32).fill(3);
 const credential={operation_id:"11111111-1111-4111-8111-111111111111",new_salt:toBase64(new Uint8Array(16).fill(4)),new_verifier:toBase64(newKey)};
 beforeEach(()=>{setKvBackendForTests(null);resetKvConnectionForTests();vi.stubGlobal("indexedDB",new IDBFactory());vi.stubGlobal("navigator",{locks:{request:async(_name:string,run:()=>Promise<unknown>)=>run()}});});
-afterEach(()=>{vi.restoreAllMocks();vi.unstubAllGlobals();resetKvConnectionForTests();});
+afterEach(()=>{clearSession();vi.restoreAllMocks();vi.unstubAllGlobals();resetKvConnectionForTests();});
 async function ciphertext(text:string){return toBase64(await encrypt(oldKey,new TextEncoder().encode(text),buildAad("draft",owner)));}
 async function unfencedLegacyWrite(value:string){
  const request=indexedDB.open("mindpattern",1);const db=await new Promise<IDBDatabase>((resolve,reject)=>{request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
@@ -56,6 +56,7 @@ describe("transactional migration custody",()=>{
   expect(await kv.getItem(writeGenerationKey(owner))).not.toContain(toBase64(newKey));
  });
  it("prevents an old flush's rejection from reinserting old blobs after rotation",async()=>{
+  setSession("rotation-fixture-token",owner,"rotation-fixture");
   const id="late-rejected-entry",entry={userId:owner,clientEntryId:id,blobB64:toBase64(await encrypt(oldKey,new TextEncoder().encode("rejectable words"),buildAad("entry",owner,id,"1"))),entryDate:"2026-10-03"};
   await enqueue(entry,await kv.captureWritePermit(owner,oldKey));
   let reject:((error:Error)=>void)|undefined;

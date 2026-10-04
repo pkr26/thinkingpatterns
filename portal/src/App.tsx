@@ -339,6 +339,9 @@ export function App(): React.JSX.Element {
         resetKey={`patient:${view.patient.user_id}`}
       >
         <PatientView
+          // Browser history can move directly between charts. Each chart
+          // owns its draft key copy, plaintext state and pending operations.
+          key={`${session.userId}:${view.patient.user_id}`}
           patient={view.patient}
           session={session}
           onBack={() => { writePatientRoute(null); setView({ kind: "patients" }); }}

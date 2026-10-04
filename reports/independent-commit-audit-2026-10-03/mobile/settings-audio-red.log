@@ -1,0 +1,89 @@
+npm notice run mindpattern-mobile@1.0.0 npx
+npm notice run 'vitest' run tests/screens/settingsScreen.test.tsx --maxWorkers=2
+
+ RUN  v4.1.11 /Users/pradeepreddy/Desktop/mental_health_application/mobile
+
+stderr | tests/screens/settingsScreen.test.tsx > saved recording custody controls > an export pressed on the old list cannot adopt a replacement account after its owner lookup
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/settingsScreen.test.tsx > saved recording custody controls > an export pressed on the old list cannot adopt a replacement account after its owner lookup
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/settingsScreen.test.tsx > saved recording custody controls > an export pressed on the old list cannot adopt a replacement account after its owner lookup
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/settingsScreen.test.tsx > saved recording custody controls > an export pressed on the old list cannot adopt a replacement account after its owner lookup
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/settingsScreen.test.tsx > saved recording custody controls > an export pressed on the old list cannot adopt a replacement account after its owner lookup
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/settingsScreen.test.tsx > saved recording custody controls > an export pressed on the old list cannot adopt a replacement account after its owner lookup
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/settingsScreen.test.tsx > saved recording custody controls > an export pressed on the old list cannot adopt a replacement account after its owner lookup
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/settingsScreen.test.tsx > saved recording custody controls > an export pressed on the old list cannot adopt a replacement account after its owner lookup
+The current testing environment is not configured to support act(...)
+
+ ❯ tests/screens/settingsScreen.test.tsx (108 tests | 1 failed) 1982ms
+     × an export pressed on the old list cannot adopt a replacement account after its owner lookup 31ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/screens/settingsScreen.test.tsx > saved recording custody controls > an export pressed on the old list cannot adopt a replacement account after its owner lookup
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      "/tmp/mindpattern-test-documents/mindpattern-audio/aHR0cDovLzEyNy4wLjAuMTo4MDAwAHJlcGxhY2VtZW50LWFjY291bnQ/exports/cmVjb3JkaW5nOm9uZQ.json",
+      Object {
+        "UTI": "public.json",
+        "mimeType": "application/json",
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ tests/screens/settingsScreen.test.tsx:252:36
+    250|     vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(…
+    251|     await act(async () => release("replacement-account")); await flush…
+    252|     expect(sharing.shareAsync).not.toHaveBeenCalled();
+       |                                    ^
+    253|   });
+    254|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 107 passed (108)
+   Start at  14:22:31
+   Duration  2.79s (transform 600ms, setup 80ms, import 645ms, tests 1.98s, environment 0ms)
+

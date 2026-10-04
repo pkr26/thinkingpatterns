@@ -1,0 +1,89 @@
+npm notice run mindpattern-mobile@1.0.0 npx
+npm notice run 'vitest' run tests/screens/safetyPlanScreen.test.tsx --maxWorkers=2
+
+ RUN  v4.1.11 /Users/pradeepreddy/Desktop/mental_health_application/mobile
+
+stderr | tests/screens/safetyPlanScreen.test.tsx > SafetyPlanScreen: edit and save > cannot save a previous account's mounted form into a replacement account
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/safetyPlanScreen.test.tsx > SafetyPlanScreen: edit and save > cannot save a previous account's mounted form into a replacement account
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/safetyPlanScreen.test.tsx > SafetyPlanScreen: edit and save > cannot save a previous account's mounted form into a replacement account
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/safetyPlanScreen.test.tsx > SafetyPlanScreen: edit and save > cannot save a previous account's mounted form into a replacement account
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/safetyPlanScreen.test.tsx > SafetyPlanScreen: edit and save > cannot save a previous account's mounted form into a replacement account
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/safetyPlanScreen.test.tsx > SafetyPlanScreen: edit and save > cannot save a previous account's mounted form into a replacement account
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/safetyPlanScreen.test.tsx > SafetyPlanScreen: edit and save > cannot save a previous account's mounted form into a replacement account
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/safetyPlanScreen.test.tsx > SafetyPlanScreen: locked states > a delayed initial account lookup cannot adopt a replacement vault's plan
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/safetyPlanScreen.test.tsx > SafetyPlanScreen: locked states > a delayed initial account lookup cannot adopt a replacement vault's plan
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/safetyPlanScreen.test.tsx > SafetyPlanScreen: locked states > a delayed initial account lookup cannot adopt a replacement vault's plan
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/safetyPlanScreen.test.tsx > SafetyPlanScreen: locked states > a delayed initial account lookup cannot adopt a replacement vault's plan
+The current testing environment is not configured to support act(...)
+
+ ❯ tests/screens/safetyPlanScreen.test.tsx (15 tests | 2 failed) 526ms
+     × cannot save a previous account's mounted form into a replacement account 16ms
+     × a delayed initial account lookup cannot adopt a replacement vault's plan 13ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/screens/safetyPlanScreen.test.tsx > SafetyPlanScreen: edit and save > cannot save a previous account's mounted form into a replacement account
+AssertionError: expected '6q6Uae86xaVQYXe0i+0zMlHRwdBQc07oQViRX…' to be null
+
+- Expected:
+null
+
++ Received:
+"6q6Uae86xaVQYXe0i+0zMlHRwdBQc07oQViRXoy5oDYZD9Oi2bF58DdxljPvQS3sM6LFTBOXVusI+Vjs1Rm6AuMTWkkm2ba2XWXxdLD3Thxu+E/D538oABDUqYuVlnr5z8l/xltbVixMnfVBOZ9lMTjYK57vWeMU70a4X9XFGwCDQ/sqmLKLPZJaGNCq4z5JOD7rTHlUMFN8F+L66CCqzLmc+N2fEBXt2rIQq4O1Mi6s+IWO6ju1rcXmHHi551VPRZlwnPghfvGZkWBCotxK+Zn51bYv8ohIpTArnM9P1izZ5D3eV3ULITdYavLof1ypPyv6KBwL7/WvPh7bjgiOTfEHA8+/vLhsMt2qY1j8ykWVM3jaEbhLXBr++ujG+fX7YMwrHIRhLL7r7VQSlraMrml9OfAfJi6gcyb/dUBBgeMVr/OH0pkNS47sVxcVcqRBH1kHNz196z4qTjcNXwy59t7IyqYIfoemNqP6RodjP1FceCgtnuiR"
+
+ ❯ tests/screens/safetyPlanScreen.test.tsx:136:83
+    134|     vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(…
+    135|     await pressLabel(root, "Save my safety plan"); await flush();
+    136|     expect(await storage.getItem("@mindpattern/safety_plan_replacement…
+       |                                                                                   ^
+    137|     expect(Alert.alert).toHaveBeenCalledWith("Could not save", expect.…
+    138|     expect(inputByLabel(root, "My warning signs").props.value).toBe("P…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  tests/screens/safetyPlanScreen.test.tsx > SafetyPlanScreen: locked states > a delayed initial account lookup cannot adopt a replacement vault's plan
+AssertionError: expected 'A safety plan is yours: what your war…' to contain 'unlock to read or edit it'
+
+Expected: "unlock to read or edit it"
+Received: "A safety plan is yours: what your warning signs look like, what helps, who to reach. It stays on this device, encrypted with your key — it is never sent anywhere. It is a personal tool to lean on, not a substitute for professional help. Unsaved edits are kept as an encrypted draft on this device. Save updates your plan; Discard removes the draft. 1. My warning signs Thoughts, feelings, situations or behaviors that tell you a hard time is starting 38/4000 2. Things I can do to cope What has calmed or grounded you before — in your own words 0/4000 3. People and places that help Names, numbers and places you can turn to 0/4000 4. Who I can ask for help People you trust enough to say “I need help” to 0/4000 5. Professionals and services Your therapist, doctor or clinic — the crisis lines below are filled in to start 0/4000 6. Making my environment safer What you could move, lock or set aside ahead of a hard moment 0/4000 Save my safety plan Back Need help now? Crisis resources"
+
+ ❯ tests/screens/safetyPlanScreen.test.tsx:226:26
+    224|     vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(…
+    225|     await act(async () => release("replacement-account")); await flush…
+    226|     expect(textOf(root)).toContain("unlock to read or edit it");
+       |                          ^
+    227|     expect(textOf(root)).not.toContain("1. My warning signs");
+    228|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 13 passed (15)
+   Start at  14:20:49
+   Duration  870ms (transform 204ms, setup 59ms, import 216ms, tests 526ms, environment 0ms)
+

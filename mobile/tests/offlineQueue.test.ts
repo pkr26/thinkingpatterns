@@ -93,7 +93,7 @@ describe("offline queue scope", () => {
 
     expect(await scopedKeys("items")).toHaveLength(2);
     expect(await flushQueue("alice")).toBe(1);
-    expect(api.createQueuedEntry).toHaveBeenCalledWith("a-1", expect.any(String), "2026-09-01", "https://one.example.test");
+    expect(api.createQueuedEntry).toHaveBeenCalledWith("a-1", expect.any(String), "2026-09-01", "https://one.example.test", expect.objectContaining({ userId: "alice" }));
     expect(await queueLength("alice")).toBe(0);
     expect(await queueLength("bob")).toBe(1);
 
@@ -195,7 +195,7 @@ describe("cross-origin upload containment (2026-09-18 audit)", () => {
 
     expect(await flushQueue("alice")).toBe(1);
     expect(api.createQueuedEntry).toHaveBeenCalledTimes(1);
-    expect(api.createQueuedEntry).toHaveBeenCalledWith("a-first", expect.any(String), "2026-09-01", "https://one.example.test");
+    expect(api.createQueuedEntry).toHaveBeenCalledWith("a-first", expect.any(String), "2026-09-01", "https://one.example.test", expect.objectContaining({ userId: "alice" }));
     // Under the NEW origin the old scope is invisible — the containment
     // guarantee itself — and nothing was moved to any rejected store.
     expect(await queueLength("alice")).toBe(0);
@@ -229,7 +229,7 @@ describe("cross-origin upload containment (2026-09-18 audit)", () => {
     baseUrl = "http://127.0.0.1:8000";
     expect(await queueLength("alice")).toBe(1);
     expect(await flushQueue("alice")).toBe(1);
-    expect(api.createQueuedEntry).toHaveBeenCalledWith("a-loop", expect.any(String), "2026-09-01", "http://127.0.0.1:8000");
+    expect(api.createQueuedEntry).toHaveBeenCalledWith("a-loop", expect.any(String), "2026-09-01", "http://127.0.0.1:8000", expect.objectContaining({ userId: "alice" }));
 
     baseUrl = "http://[::1]:8000";
     await enqueue(entry("alice", "a-v6"));
@@ -514,7 +514,7 @@ describe("flush retry semantics (restored 2026-09-18)", () => {
     vi.mocked(api.getEntry).mockResolvedValueOnce({ id: "x", client_entry_id: "a-dup", blob: "b", entry_date: "2026-09-20", received_at: "2026-09-20T00:00:00Z", content_version: 1 } as never);
 
     expect(await flushQueue("alice")).toBe(0);
-    expect(vi.mocked(api.getEntry)).toHaveBeenCalledWith("a-dup", expect.any(String));
+    expect(vi.mocked(api.getEntry)).toHaveBeenCalledWith("a-dup", expect.any(String), expect.objectContaining({ userId: "alice" }));
     expect(await queueLength("alice")).toBe(0);
     expect(await rejectedEntries("alice")).toEqual([]);
   });
@@ -641,7 +641,7 @@ describe("mutation hardening (2026-09-18)", () => {
     expect(await queueLength("alice")).toBe(1);
     expect(await flushQueue("alice")).toBe(1);
     expect(api.createQueuedEntry).toHaveBeenCalledWith(
-      "a-portless", expect.any(String), "2026-09-01", "http://127.0.0.1",
+      "a-portless", expect.any(String), "2026-09-01", "http://127.0.0.1", expect.objectContaining({ userId: "alice" }),
     );
   });
 

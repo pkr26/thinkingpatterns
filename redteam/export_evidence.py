@@ -21,7 +21,9 @@ def inspect_export(
     rendered = json.dumps(bundle, ensure_ascii=True, sort_keys=True)
     for label, secret in secrets.items():
         encodings = (
-            [secret]
+            # Match JSON's representation, including escaped punctuation,
+            # line breaks and non-ASCII text in real journal/password values.
+            [json.dumps(secret, ensure_ascii=True)[1:-1]]
             if isinstance(secret, str)
             else [
                 base64.b64encode(secret).decode("ascii"),

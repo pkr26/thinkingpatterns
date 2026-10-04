@@ -688,7 +688,7 @@ async def rekey(
         _auth_limiter,
         hash_verifier_off_loop,
     )
-    from ._audit import append_access_log
+    from ._audit import append_access_log, flush_audit_journal
     from ..security import envelope
     from ..security.kdf import (
         KDF_PARAMS_MIN_PBKDF2_ITERATIONS,
@@ -1242,6 +1242,11 @@ async def rekey(
                             ) from None
                         raise
                     key_store.destroy_all_for_owner(final_user.id)
+                    # This transaction uses a private session, so it never
+                    # reaches get_session's post-commit journal hook. Anchor
+                    # the committed security event outside the DB too; an
+                    # exact response-loss retry must not append it again.
+                    await flush_audit_journal(session, settings.audit_journal_path)
         return result
     except _RekeyMismatch:
         raise ApiError(

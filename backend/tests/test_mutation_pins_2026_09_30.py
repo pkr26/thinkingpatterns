@@ -181,7 +181,8 @@ MODULE_CONSTANTS_DIGESTS = {
     "app.security.sharing": "647c6968345282e5",
     "app.security.tokens": "9fd35793a68932a7",
     "app.security.totp": "764e7437fd20e644",
-    "app.services.audio_store": "cad5858e779e5566",
+    # Deliberate 2026-10-03 addition: a 300-second durable deletion claim.
+    "app.services.audio_store": "5386f0f678f8b818",
     "app.services.crisis": "214490ad774f26f4",
     "app.services.llm": "5051ada0a5d8a7f2",
     "app.services.patterns": "5c1b74f0800b1a40",

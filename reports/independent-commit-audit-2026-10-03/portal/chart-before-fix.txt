@@ -1,0 +1,120 @@
+npm notice run mindpattern-portal@1.0.0 npx
+npm notice run 'vitest' run tests/app.test.tsx -t isolates and restores
+
+ RUN  v5.0.1 /Users/pradeepreddy/Desktop/mental_health_application/portal
+
+stderr | tests/app.test.tsx > isolates and restores encrypted drafts when browser history switches directly between patients
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+The current testing environment is not configured to support act(...)
+
+stderr | tests/app.test.tsx > isolates and restores encrypted drafts when browser history switches directly between patients
+The current testing environment is not configured to support act(...)
+
+stderr | tests/app.test.tsx > isolates and restores encrypted drafts when browser history switches directly between patients
+The current testing environment is not configured to support act(...)
+
+stderr | tests/app.test.tsx > isolates and restores encrypted drafts when browser history switches directly between patients
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/app.test.tsx > isolates and restores encrypted drafts when browser history switches directly between patients
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/app.test.tsx > isolates and restores encrypted drafts when browser history switches directly between patients
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/app.test.tsx > isolates and restores encrypted drafts when browser history switches directly between patients
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/app.test.tsx > isolates and restores encrypted drafts when browser history switches directly between patients
+The current testing environment is not configured to support act(...)
+
+stderr | tests/app.test.tsx > isolates and restores encrypted drafts when browser history switches directly between patients
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/app.test.tsx > isolates and restores encrypted drafts when browser history switches directly between patients
+The current testing environment is not configured to support act(...)
+
+stderr | tests/app.test.tsx > isolates and restores encrypted drafts when browser history switches directly between patients
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/app.test.tsx > isolates and restores encrypted drafts when browser history switches directly between patients
+The current testing environment is not configured to support act(...)
+
+stderr | tests/app.test.tsx > isolates and restores encrypted drafts when browser history switches directly between patients
+The current testing environment is not configured to support act(...)
+
+stderr | tests/app.test.tsx > isolates and restores encrypted drafts when browser history switches directly between patients
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/app.test.tsx > isolates and restores encrypted drafts when browser history switches directly between patients
+The current testing environment is not configured to support act(...)
+
+stderr | tests/app.test.tsx > isolates and restores encrypted drafts when browser history switches directly between patients
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/app.test.tsx > isolates and restores encrypted drafts when browser history switches directly between patients
+The current testing environment is not configured to support act(...)
+
+stderr | tests/app.test.tsx > isolates and restores encrypted drafts when browser history switches directly between patients
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/app.test.tsx > isolates and restores encrypted drafts when browser history switches directly between patients
+The current testing environment is not configured to support act(...)
+
+stderr | tests/app.test.tsx > isolates and restores encrypted drafts when browser history switches directly between patients
+The current testing environment is not configured to support act(...)
+
+ ❯ tests/app.test.tsx (26 tests | 1 failed | 25 skipped) 1027ms
+   × isolates and restores encrypted drafts when browser history switches directly between patients 1026ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/app.test.tsx > isolates and restores encrypted drafts when browser history switches directly between patients
+AssertionError: expected 'Second patient\'s saved draft' to be 'First patient\'s private draft' // Object.is equality
+
+Expected: "First patient's private draft"
+Received: "Second patient's saved draft"
+
+ ❯ tests/app.test.tsx:632:88
+    630|     window.location.hash = "#/patient/first";
+    631|     await act(async () => { window.dispatchEvent(new Event("popstate")…
+    632|     await vi.waitFor(() => expect(root.root.findAllByType("textarea")[…
+       |                                                                                        ^
+    633|   } finally {
+    634|     await act(async () => root.unmount());
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 25 skipped (26)
+   Start at  14:17:03
+   Duration  1.30s (tests 84%, transform 12%, import 2%, setup 1%)
+

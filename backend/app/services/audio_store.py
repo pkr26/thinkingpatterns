@@ -36,7 +36,7 @@ import uuid
 from datetime import timedelta
 from pathlib import Path
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import Settings
@@ -50,6 +50,11 @@ logger = logging.getLogger("mindpattern.audio_store")
 # backlogged deployment catches up over cycles instead of holding one
 # long transaction.
 SWEEP_BATCH = 500
+
+# A drain commits ownership before provider I/O. This comfortably exceeds
+# the S3 transport's bounded connect/read/retry budget, and a crashed or
+# cancelled worker leaves a tombstone that becomes retryable after the lease.
+DELETION_LEASE_SECONDS = 300
 
 # Sentinel for "no fetch cap" (the S3 get path keeps a uniform limit+1
 # read shape; an int this large is effectively unbounded).
@@ -377,6 +382,8 @@ def enqueue_audio_delete(session: AsyncSession, row, *, store=None, not_before=N
 async def drain_audio_deletions(
     session: AsyncSession, settings: Settings, *, identifiers=None, limit: int = 50
 ) -> int:
+    from ..db import rowcount
+
     query = (
         select(AudioDeletion)
         .where(AudioDeletion.not_before <= utcnow())
@@ -389,15 +396,40 @@ async def drain_audio_deletions(
     await session.commit()  # No pooled transaction across provider I/O.
     removed = 0
     for row in rows:
+        lease_until = utcnow() + timedelta(seconds=DELETION_LEASE_SECONDS)
+        claim = await session.execute(
+            update(AudioDeletion)
+            .where(AudioDeletion.id == row.id, AudioDeletion.not_before <= utcnow())
+            .values(not_before=lease_until)
+            .returning(AudioDeletion.attempts)
+        )
+        attempts_before = claim.scalar_one_or_none()
+        await session.commit()
+        if attempts_before is None:
+            continue
+        owned = (
+            AudioDeletion.id == row.id,
+            AudioDeletion.not_before == lease_until,
+        )
         try:
             await store_for_object(settings, row).delete(row.storage_key)
         except AudioStoreError:
-            row.attempts += 1
-            row.not_before = utcnow() + timedelta(seconds=min(3600, 30 * 2 ** min(row.attempts, 7)))
+            # A preloaded batch can outlive another drain's failed attempt
+            # and retry delay. The claim returns the DB's current count;
+            # using the stale ORM snapshot would reset exponential backoff.
+            attempts = attempts_before + 1
+            await session.execute(
+                update(AudioDeletion)
+                .where(*owned)
+                .values(
+                    attempts=attempts,
+                    not_before=utcnow() + timedelta(seconds=min(3600, 30 * 2 ** min(attempts, 7))),
+                )
+            )
             logger.warning("audio deletion deferred: tombstone %s", row.id)
         else:
-            await session.delete(row)
-            removed += 1
+            deleted = await session.execute(delete(AudioDeletion).where(*owned))
+            removed += rowcount(deleted)
         await session.commit()
     return removed
 

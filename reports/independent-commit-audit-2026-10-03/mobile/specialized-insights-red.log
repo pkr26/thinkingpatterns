@@ -1,0 +1,203 @@
+npm notice run mindpattern-mobile@1.0.0 npx
+npm notice run 'vitest' run tests/screens/insightsScreen.pins.test.tsx --maxWorkers=2
+
+ RUN  v4.1.11 /Users/pradeepreddy/Desktop/mental_health_application/mobile
+
+stderr | tests/screens/insightsScreen.pins.test.tsx > InsightsScreen pins: evidence-row presence guards > keeps specialized summaries consistent with signed evidence: {"channel":"sleep_quality"}
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/insightsScreen.pins.test.tsx > InsightsScreen pins: evidence-row presence guards > keeps specialized summaries consistent with signed evidence: {"channel":"sleep_quality"}
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/insightsScreen.pins.test.tsx > InsightsScreen pins: evidence-row presence guards > keeps specialized summaries consistent with signed evidence: {"channel":"sleep_quality"}
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/insightsScreen.pins.test.tsx > InsightsScreen pins: evidence-row presence guards > keeps specialized summaries consistent with signed evidence: {"channel":"sleep_quality"}
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/insightsScreen.pins.test.tsx > InsightsScreen pins: evidence-row presence guards > keeps specialized summaries consistent with signed evidence: {"channel":"sleep_quality"}
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/insightsScreen.pins.test.tsx > InsightsScreen pins: evidence-row presence guards > keeps specialized summaries consistent with signed evidence: {"channel":"sleep_quality"}
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/insightsScreen.pins.test.tsx > InsightsScreen pins: evidence-row presence guards > keeps specialized summaries consistent with signed evidence: {"channel":"sleep_quality"}
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/insightsScreen.pins.test.tsx > InsightsScreen pins: evidence-row presence guards > keeps specialized summaries consistent with signed evidence: {"source":"tag"}
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/insightsScreen.pins.test.tsx > InsightsScreen pins: evidence-row presence guards > keeps specialized summaries consistent with signed evidence: {"source":"tag"}
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/insightsScreen.pins.test.tsx > InsightsScreen pins: evidence-row presence guards > keeps specialized summaries consistent with signed evidence: {"source":"tag"}
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/insightsScreen.pins.test.tsx > InsightsScreen pins: evidence-row presence guards > keeps specialized summaries consistent with signed evidence: {"source":"tag"}
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/insightsScreen.pins.test.tsx > InsightsScreen pins: evidence-row presence guards > keeps specialized summaries consistent with signed evidence: {"source":"tag"}
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/insightsScreen.pins.test.tsx > InsightsScreen pins: evidence-row presence guards > keeps specialized summaries consistent with signed evidence: {"source":"tag"}
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/insightsScreen.pins.test.tsx > InsightsScreen pins: evidence-row presence guards > keeps specialized summaries consistent with signed evidence: {"source":"tag"}
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/insightsScreen.pins.test.tsx > InsightsScreen pins: evidence-row presence guards > does not manufacture specialized directions for absent or zero evidence: {"channel":"sleep_quality"}
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/insightsScreen.pins.test.tsx > InsightsScreen pins: evidence-row presence guards > does not manufacture specialized directions for absent or zero evidence: {"channel":"sleep_quality"}
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/insightsScreen.pins.test.tsx > InsightsScreen pins: evidence-row presence guards > does not manufacture specialized directions for absent or zero evidence: {"channel":"sleep_quality"}
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/insightsScreen.pins.test.tsx > InsightsScreen pins: evidence-row presence guards > does not manufacture specialized directions for absent or zero evidence: {"channel":"sleep_quality"}
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/insightsScreen.pins.test.tsx > InsightsScreen pins: evidence-row presence guards > does not manufacture specialized directions for absent or zero evidence: {"channel":"sleep_quality"}
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/insightsScreen.pins.test.tsx > InsightsScreen pins: evidence-row presence guards > does not manufacture specialized directions for absent or zero evidence: {"channel":"sleep_quality"}
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/insightsScreen.pins.test.tsx > InsightsScreen pins: evidence-row presence guards > does not manufacture specialized directions for absent or zero evidence: {"channel":"sleep_quality"}
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/insightsScreen.pins.test.tsx > InsightsScreen pins: evidence-row presence guards > does not manufacture specialized directions for absent or zero evidence: {"source":"tag"}
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/insightsScreen.pins.test.tsx > InsightsScreen pins: evidence-row presence guards > does not manufacture specialized directions for absent or zero evidence: {"source":"tag"}
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/insightsScreen.pins.test.tsx > InsightsScreen pins: evidence-row presence guards > does not manufacture specialized directions for absent or zero evidence: {"source":"tag"}
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/insightsScreen.pins.test.tsx > InsightsScreen pins: evidence-row presence guards > does not manufacture specialized directions for absent or zero evidence: {"source":"tag"}
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/insightsScreen.pins.test.tsx > InsightsScreen pins: evidence-row presence guards > does not manufacture specialized directions for absent or zero evidence: {"source":"tag"}
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/insightsScreen.pins.test.tsx > InsightsScreen pins: evidence-row presence guards > does not manufacture specialized directions for absent or zero evidence: {"source":"tag"}
+The current testing environment is not configured to support act(...)
+
+stderr | tests/screens/insightsScreen.pins.test.tsx > InsightsScreen pins: evidence-row presence guards > does not manufacture specialized directions for absent or zero evidence: {"source":"tag"}
+The current testing environment is not configured to support act(...)
+
+ ❯ tests/screens/insightsScreen.pins.test.tsx (33 tests | 4 failed) 568ms
+     × keeps specialized summaries consistent with signed evidence: {"channel":"sleep_quality"} 16ms
+     × keeps specialized summaries consistent with signed evidence: {"source":"tag"} 15ms
+     × does not manufacture specialized directions for absent or zero evidence: {"channel":"sleep_quality"} 12ms
+     × does not manufacture specialized directions for absent or zero evidence: {"source":"tag"} 11ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/screens/insightsScreen.pins.test.tsx > InsightsScreen pins: evidence-row presence guards > keeps specialized summaries consistent with signed evidence: {"channel":"sleep_quality"}
+AssertionError: expected 'MOOD LINK observed On nights you rate…' to contain 'Your entries read higher'
+
+- Expected
++ Received
+
+- Your entries read higher
++ MOOD LINK observed On nights you rated as rougher than your own usual, your entries read lower the same day. 7 mentions · observation strength 62%
++ Observation strength is a heuristic, not diagnostic probability. Hide the evidence Not about me anymore — mute Evidence window ? → ? Mood difference entries read higher by 0.40 than your own norm Method Within-person: days with this theme vs your own mood baseline in the same weeks (Welch's t + effect-size gate). Patterns like this can occasionally appear by chance — that's why we show the evidence. An observation about your own data — not a diagnosis or advice. These are observations, not advice or diagnosis. You decide what they mean. Need help now? Crisis resources
+
+ ❯ tests/screens/insightsScreen.pins.test.tsx:214:28
+    212|     for (const direction of [undefined, "unrecognized"]) {
+    213|       const root = await renderExpanded([pattern({ kind: "mood_correla…
+    214|       expect(textOf(root)).toContain("Your entries read higher");
+       |                            ^
+    215|       expect(textOf(root)).toContain("entries read higher by 0.40");
+    216|       expect(textOf(root)).not.toContain("read lower");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  tests/screens/insightsScreen.pins.test.tsx > InsightsScreen pins: evidence-row presence guards > keeps specialized summaries consistent with signed evidence: {"source":"tag"}
+AssertionError: expected 'MOOD LINK observed Your entries read …' to contain 'Your entries read higher'
+
+- Expected
++ Received
+
+- Your entries read higher
++ MOOD LINK observed Your entries read lower on days you tag 'work'. 7 mentions · observation strength 62%
++ Observation strength is a heuristic, not diagnostic probability. Hide the evidence Not about me anymore — mute Evidence window ? → ? Mood difference entries read higher by 0.40 than your own norm Method Within-person: days with this theme vs your own mood baseline in the same weeks (Welch's t + effect-size gate). Patterns like this can occasionally appear by chance — that's why we show the evidence. An observation about your own data — not a diagnosis or advice. These are observations, not advice or diagnosis. You decide what they mean. Need help now? Crisis resources
+
+ ❯ tests/screens/insightsScreen.pins.test.tsx:214:28
+    212|     for (const direction of [undefined, "unrecognized"]) {
+    213|       const root = await renderExpanded([pattern({ kind: "mood_correla…
+    214|       expect(textOf(root)).toContain("Your entries read higher");
+       |                            ^
+    215|       expect(textOf(root)).toContain("entries read higher by 0.40");
+    216|       expect(textOf(root)).not.toContain("read lower");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  tests/screens/insightsScreen.pins.test.tsx > InsightsScreen pins: evidence-row presence guards > does not manufacture specialized directions for absent or zero evidence: {"channel":"sleep_quality"}
+AssertionError: expected 'MOOD LINK observed On nights you rate…' to contain 'Details for this observation are unav…'
+
+- Expected
++ Received
+
+- Details for this observation are unavailable
++ MOOD LINK observed On nights you rated as rougher than your own usual, your entries read lower the same day. 7 mentions · observation strength 62%
++ Observation strength is a heuristic, not diagnostic probability. Hide the evidence Not about me anymore — mute Evidence window ? → ? Method Within-person: days with this theme vs your own mood baseline in the same weeks (Welch's t + effect-size gate). Patterns like this can occasionally appear by chance — that's why we show the evidence. An observation about your own data — not a diagnosis or advice. These are observations, not advice or diagnosis. You decide what they mean. Need help now? Crisis resources
+
+ ❯ tests/screens/insightsScreen.pins.test.tsx:224:28
+    222|     for (const kind of ["mood_correlation", "link"]) {
+    223|       const root = await renderExpanded([pattern({ kind, detail: speci…
+    224|       expect(textOf(root)).toContain("Details for this observation are…
+       |                            ^
+    225|       expect(textOf(root)).not.toContain("read lower");
+    226|       root.unmount();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  tests/screens/insightsScreen.pins.test.tsx > InsightsScreen pins: evidence-row presence guards > does not manufacture specialized directions for absent or zero evidence: {"source":"tag"}
+AssertionError: expected 'MOOD LINK observed Your entries read …' to contain 'Details for this observation are unav…'
+
+- Expected
++ Received
+
+- Details for this observation are unavailable
++ MOOD LINK observed Your entries read lower on days you tag 'work'. 7 mentions · observation strength 62%
++ Observation strength is a heuristic, not diagnostic probability. Hide the evidence Not about me anymore — mute Evidence window ? → ? Method Within-person: days with this theme vs your own mood baseline in the same weeks (Welch's t + effect-size gate). Patterns like this can occasionally appear by chance — that's why we show the evidence. An observation about your own data — not a diagnosis or advice. These are observations, not advice or diagnosis. You decide what they mean. Need help now? Crisis resources
+
+ ❯ tests/screens/insightsScreen.pins.test.tsx:224:28
+    222|     for (const kind of ["mood_correlation", "link"]) {
+    223|       const root = await renderExpanded([pattern({ kind, detail: speci…
+    224|       expect(textOf(root)).toContain("Details for this observation are…
+       |                            ^
+    225|       expect(textOf(root)).not.toContain("read lower");
+    226|       root.unmount();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 29 passed (33)
+   Start at  14:39:13
+   Duration  1.43s (transform 630ms, setup 81ms, import 681ms, tests 568ms, environment 0ms)
+

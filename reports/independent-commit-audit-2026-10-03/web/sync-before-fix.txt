@@ -1,0 +1,77 @@
+npm notice run mindpattern-web@0.1.0 npx
+npm notice run 'vitest' run tests/sync.test.ts -t retired account|replacement account
+
+ RUN  v5.0.2 /Users/pradeepreddy/Desktop/mental_health_application/web
+
+ ❯ tests/sync.test.ts (17 tests | 2 failed | 15 skipped) 124ms
+   ❯ reconcileInsights funnels (10)
+     × does not return decrypted insights from a retired account after a suspended generation check 70ms
+     × a late decrypt failure cannot label the replacement account's credential as rotated 52ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/sync.test.ts > reconcileInsights funnels > does not return decrypted insights from a retired account after a suspended generation check
+AssertionError: expected { kind: 'ok', phase: 'insight', …(3) } to deeply equal { kind: 'locked' }
+
+- Expected
++ Received
+
+  {
+-   "kind": "locked",
++   "kind": "ok",
++   "payload": {
++     "state_seq": 21,
++     "stats": {
++       "patterns": [],
++     },
++     "v": 2,
++   },
++   "phase": "insight",
++   "stateSeq": 21,
++   "summary": {
++     "active_days": 40,
++     "blob": "AAAAAAAAAAAAAAAACz5aVbLUbEGpvDea0L/Lk3uA8mN8C/kSALpm3gSbd50C8KSxYb5rtT26IZr3fqSwbZSdl2HzRaaUJ5J9/AY=",
++     "days_remaining": 0,
++     "phase": "insight",
++     "state_seq": 21,
++     "streak": 3,
++   },
+  }
+
+ ❯ tests/sync.test.ts:101:25
+     99|     vault.unlock({ authKey: new Uint8Array(32).fill(8), dataKey: new U…
+    100|     release("21");
+    101|     await expect(pending).resolves.toEqual({ kind: "locked" });
+       |                         ^
+    102|   });
+    103|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  tests/sync.test.ts > reconcileInsights funnels > a late decrypt failure cannot label the replacement account's credential as rotated
+AssertionError: expected { kind: 'credentialRotated' } to deeply equal { kind: 'locked' }
+
+- Expected
++ Received
+
+  {
+-   "kind": "locked",
++   "kind": "credentialRotated",
+  }
+
+ ❯ tests/sync.test.ts:114:25
+    112|     vault.unlock({ authKey: new Uint8Array(32).fill(8), dataKey: new U…
+    113|     reject(new Error("old operation failed authentication"));
+    114|     await expect(pending).resolves.toEqual({ kind: "locked" });
+       |                         ^
+    115|   });
+    116| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 15 skipped (17)
+   Start at  14:21:41
+   Duration  402ms (transform 47%, tests 38%, setup 10%, import 3%, worker 1%)
+

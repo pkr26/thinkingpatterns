@@ -1,0 +1,101 @@
+npm notice run mindpattern-mobile@1.0.0 npx
+npm notice run 'vitest' run tests/queueOwnership.test.ts --maxWorkers=2
+
+ RUN  v4.1.11 /Users/pradeepreddy/Desktop/mental_health_application/mobile
+
+ ❯ tests/queueOwnership.test.ts (2 tests | 2 failed) 18ms
+   × an explicit old-account text flush never uploads its ciphertext with a replacement account's bearer 15ms
+   × a last audio origin await cannot let old-account ciphertext adopt the replacement bearer 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/queueOwnership.test.ts > an explicit old-account text flush never uploads its ciphertext with a replacement account's bearer
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      "http://localhost:8000/api/v1/entries",
+      Object {
+        "body": "{"client_entry_id":"saved","blob":"5ujlSP1Zj+ZC4Lvwf0V+g4ID/PllB2xgkEpWdWaWNlbaghwK9ZJqXdBg6KqHSh/H1rIsvsIzDsLP56PPdAHzSGgm","entry_date":"2026-10-03","content_version":1}",
+        "headers": Object {
+          "Authorization": "Bearer replacement-account-token",
+          "Content-Type": "application/json",
+        },
+        "method": "POST",
+        "redirect": "error",
+        "signal": AbortSignal {
+          Symbol(kEvents): undefined,
+          Symbol(events.maxEventTargetListeners): 0,
+          Symbol(events.maxEventTargetListenersWarned): false,
+          Symbol(kHandlers): undefined,
+          Symbol(kAborted): false,
+          Symbol(kReason): undefined,
+          Symbol(kComposite): false,
+        },
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ tests/queueOwnership.test.ts:25:21
+     23|   await api.setSession("replacement-account-token", OTHER, "bob");
+     24|   await flushQueue(USER).catch(() => {});
+     25|   expect(fetch).not.toHaveBeenCalled(); expect(await queueLength(USER)…
+       |                     ^
+     26| });
+     27|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  tests/queueOwnership.test.ts > a last audio origin await cannot let old-account ciphertext adopt the replacement bearer
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      "http://localhost:8000/api/v1/audio/attachments",
+      Object {
+        "body": "{"client_entry_id":"saved","blob":"Qz5h9Z4mEDzyCDYoxs+JCpLbyYk33FLMxZaC+dIP/7dfaYFmJ8rL3PoYQFfbLIl00GaLhQ0=","mime":"audio/m4a","duration_seconds":4}",
+        "headers": Object {
+          "Authorization": "Bearer replacement-account-token",
+          "Content-Type": "application/json",
+        },
+        "method": "POST",
+        "redirect": "error",
+        "signal": AbortSignal {
+          Symbol(kEvents): undefined,
+          Symbol(events.maxEventTargetListeners): 0,
+          Symbol(events.maxEventTargetListenersWarned): false,
+          Symbol(kHandlers): undefined,
+          Symbol(kAborted): false,
+          Symbol(kReason): undefined,
+          Symbol(kComposite): false,
+        },
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ tests/queueOwnership.test.ts:40:21
+     38|   const flushing = flushAudioQueue(); await started.promise;
+     39|   await api.setSession("replacement-account-token", OTHER, "bob"); rel…
+     40|   expect(fetch).not.toHaveBeenCalled(); expect(await audioQueueCount(U…
+       |                     ^
+     41| });
+     42|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  14:30:00
+   Duration  347ms (transform 172ms, setup 79ms, import 157ms, tests 18ms, environment 0ms)
+

@@ -1,0 +1,35 @@
+npm notice run mindpattern-mobile@1.0.0 npx
+npm notice run 'vitest' run tests/audioOwnership.test.ts --maxWorkers=2
+
+ RUN  v4.1.11 /Users/pradeepreddy/Desktop/mental_health_application/mobile
+
+ ❯ tests/audioOwnership.test.ts (4 tests | 1 failed) 11ms
+   × failed preparation cleans every staged recording file when a later retained take cannot decrypt 4ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/audioOwnership.test.ts > failed preparation cleans every staged recording file when a later retained take cannot decrypt
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ tests/audioOwnership.test.ts:76:55
+     74|   const staged = fs.writeAsStringAsync.mock.calls.slice(priorWrites).m…
+     75|   expect(staged).toHaveLength(1);
+     76|   for (const uri of staged) expect(fs.__hasFile(uri)).toBe(false);
+       |                                                       ^
+     77|   expect(await listSavedAudio(USER)).toHaveLength(2);
+     78| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 passed (4)
+   Start at  14:19:21
+   Duration  311ms (transform 176ms, setup 61ms, import 171ms, tests 11ms, environment 0ms)
+

@@ -1,0 +1,7 @@
+drift: FAIL: stale:1@sha256:aaaaaaaaaaaa: tag moved AND pin is 2467d old (>90d) — re-pin deliberately (deploy/README.md, 'Digest pinning')
+drift: fresh:1@sha256:bbbbbbbbbbbb: tag moved (registry 2222222222222222222222222222222222222222222222222222222222222222); pin is 1d old (within the 90d window)
+drift: FAIL: unknown:1@sha256:cccccccccccc: tag moved (registry 3333333333333333333333333333333333333333333333333333333333333333) AND the pin has no deploy/README.md inventory row — add the row, then re-pin deliberately
+drift: FAIL: gone:1@sha256:dddddddddddd: tag no longer resolves at the registry (404) — stale pin, re-pin deliberately
+drift: FAIL: netfail:1@sha256:eeeeeeeeeeee: registry unreachable or auth failed after retry — the gate fails loud (set DRIFT_ALLOW_NETWORK_FAIL=1 to consciously skip)
+drift: FAIL: future:1@sha256:ffffffffffff: inventory date is in the future — fix the deploy/README.md row (bad data, not a window)
+drift: selftest OK — every failure mode proven individually: moved/stale, missing-inventory, deleted-tag, transport, future-dated row

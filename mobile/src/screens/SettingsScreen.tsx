@@ -722,10 +722,23 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
   // user on an English-locale device gets the app in their language.
   const [audioStatus, setAudioStatus] = useState({ total: 0, needsAttention: 0 });
   const [savedAudio, setSavedAudio] = useState<Awaited<ReturnType<typeof listSavedAudio>>>([]);
+  const savedAudioOwnership = useRef<SensitiveOwnership | null>(null);
   const refreshSavedAudio = async () => {
+    const operation = captureSensitiveOwnership(); assertSensitiveOwnership(operation);
     const owner = await api.getUserId();
-    setAudioStatus(await audioQueueStatus(owner ?? undefined));
-    setSavedAudio(owner ? await listSavedAudio(owner) : []);
+    assertSensitiveOwnership(operation);
+    if (!owner || owner !== operation.owner) throw new Error(tr("common.sessionDamagedTitle"));
+    const status = await audioQueueStatus(owner); assertSensitiveOwnership(operation);
+    const recordings = await listSavedAudio(owner); assertSensitiveOwnership(operation);
+    savedAudioOwnership.current = operation;
+    setAudioStatus(status); setSavedAudio(recordings);
+  };
+  const savedAudioOwner = async (operation: SensitiveOwnership | null): Promise<string> => {
+    if (!operation) throw new Error(tr("common.sessionDamagedTitle"));
+    assertSensitiveOwnership(operation);
+    const owner = await api.getUserId(); assertSensitiveOwnership(operation);
+    if (!owner || owner !== operation.owner) throw new Error(tr("common.sessionDamagedTitle"));
+    return owner;
   };
   useEffect(() => { void refreshSavedAudio().catch(() => {}); }, []);
   const [language, setLanguageState] = useState<LanguageChoice>("device");
@@ -1061,9 +1074,10 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       {audioStatus.total > 0 && <View style={{ gap: 8 }}>
         <Text style={{ color: t.colors.body }}>{tr("settings.savedAudioQueue", { count: audioStatus.total, attention: audioStatus.needsAttention })}</Text>
         <GhostButton label={tr("settings.retryAudio")} disabled={busy} onPress={() => {
+          const operation = savedAudioOwnership.current;
           void (async () => {
             setBusy(true);
-            try { const owner = await api.getUserId(); if (owner) await retryAudioQueue(owner); await refreshSavedAudio(); }
+            try { const owner = await savedAudioOwner(operation); await retryAudioQueue(owner); if (operation) assertSensitiveOwnership(operation); await refreshSavedAudio(); }
             catch { Alert.alert(tr("settings.couldNotRetryTitle"), tr("settings.couldNotRetryBody")); }
             finally { setBusy(false); }
           })();
@@ -1072,14 +1086,16 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
           <Text style={{ color: t.colors.body }}>{tr("settings.savedAudioItem", { number: index + 1, date: item.queuedAt ? new Date(item.queuedAt).toLocaleDateString(dateLocaleTag()) : tr("settings.recordingDateUnavailable") })}</Text>
           {item.needsAttention && <Text style={{ color: t.colors.muted }}>{tr("settings.audioNeedsAttention")}</Text>}
           <GhostButton label={tr("settings.exportAudio", { number: index + 1 })} disabled={busy} onPress={() => {
-            void (async () => { setBusy(true); try { const owner = await api.getUserId(); if (owner) await exportSavedAudio(owner, item.id); }
+            const operation = savedAudioOwnership.current;
+            void (async () => { setBusy(true); try { const owner = await savedAudioOwner(operation); await exportSavedAudio(owner, item.id); }
               catch (err) { Alert.alert(tr("settings.exportFailedTitle"), requestFailureCopy(err)); } finally { setBusy(false); } })();
           }} />
           <GhostButton label={tr("settings.removeAudio", { number: index + 1 })} disabled={busy} onPress={() => {
+            const operation = savedAudioOwnership.current;
             Alert.alert(tr("settings.removeAudioTitle"), tr("settings.removeAudioBody"), [
               { text: tr("common.cancel"), style: "cancel" },
               { text: tr("settings.removeAudioConfirm"), style: "destructive", onPress: () => {
-                void (async () => { setBusy(true); try { const owner = await api.getUserId(); if (owner) await removeSavedAudio(owner, item.id, item.revision); await refreshSavedAudio(); }
+                void (async () => { setBusy(true); try { const owner = await savedAudioOwner(operation); await removeSavedAudio(owner, item.id, item.revision); if (operation) assertSensitiveOwnership(operation); await refreshSavedAudio(); }
                   catch (err) { Alert.alert(tr("settings.couldNotRetryTitle"), requestFailureCopy(err)); } finally { setBusy(false); } })();
               } },
             ]);

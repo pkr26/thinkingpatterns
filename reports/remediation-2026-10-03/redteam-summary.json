@@ -1,10 +1,10 @@
 {
   "date": "2026-10-03",
-  "scope": "11 current executable campaigns; complete108-verdict inventory. Findings policy remains in CI; complete is not a clean security assessment.",
+  "scope": "Independent rerun of all 11 executable campaigns after commit ad797b060ac5de986e2eac6a044da8d6439a1c03; complete 108-verdict inventory. Findings policy remains in CI; completeness is not a clean security assessment.",
   "counts": {
-    "BLOCKED": 92,
+    "BLOCKED": 89,
     "FINDING": 4,
-    "INFO": 10,
+    "INFO": 13,
     "PARTIAL": 2,
     "NOT-RUN": 0,
     "ERROR": 0
@@ -45,5 +45,15 @@
   ],
   "new_unaccepted_finding": "G2.npm-audit",
   "pipeline_policy": "Existing three architectural residuals remain documented. Mobile hard npm audit and new-finding release gate remain blocked on G2; no allowlist expansion.",
-  "mobile_refresh": "Final eight mobile red-team tests rerun after native ownership/authentication changes; see validation-logs/mobile-redteam.log. Other ten campaign sources unchanged since redteam-final-current.log."
+  "mobile_refresh": "See the independent evidence directory for the final mobile suite and red-team rerun; original mobile-redteam.log is historical checkpoint evidence.",
+  "original_recorded_counts": {
+    "BLOCKED": 92,
+    "FINDING": 4,
+    "INFO": 10,
+    "PARTIAL": 2,
+    "NOT-RUN": 0,
+    "ERROR": 0
+  },
+  "count_correction": "The single-process guard refuses two workers. Three dependent multi-worker attack probes are INFO/unexercised, not blocked attacks; the original recorded counts overstated these as BLOCKED.",
+  "evidence": "../independent-commit-audit-2026-10-03/operations/redteam-final.txt"
 }

@@ -208,6 +208,31 @@ describe("InsightsScreen pins: evidence-row presence guards", () => {
     expect(textOf(root)).not.toContain("−0.00");
   });
 
+  it.each([{ channel: "sleep_quality" }, { source: "tag" }])("keeps specialized summaries consistent with signed evidence: %j", async (specialized) => {
+    for (const direction of [undefined, "unrecognized"]) {
+      const root = await renderExpanded([pattern({ kind: "mood_correlation", detail: { ...specialized, mood_delta: 0.4, direction } })]);
+      const summary = "channel" in specialized
+        ? "your entries read higher the same day"
+        : "Your entries read higher on days you tag";
+      expect(textOf(root)).toContain(summary);
+      expect(textOf(root)).toContain("entries read higher by 0.40");
+      expect(textOf(root)).not.toContain("read lower");
+      root.unmount();
+    }
+  });
+
+  it.each([{ channel: "sleep_quality" }, { source: "tag" }])("does not manufacture specialized directions for absent or zero evidence: %j", async (specialized) => {
+    for (const kind of ["mood_correlation", "link"]) {
+      const root = await renderExpanded([pattern({ kind, detail: specialized })]);
+      expect(textOf(root)).toContain("Details for this observation are unavailable");
+      expect(textOf(root)).not.toContain("read lower");
+      root.unmount();
+    }
+    const zero = await renderExpanded([pattern({ kind: "mood_correlation", detail: { ...specialized, mood_delta: 0, direction: "lower" } })]);
+    expect(textOf(zero)).toContain("No difference was measured");
+    expect(textOf(zero)).not.toContain("read lower");
+  });
+
   it("does not manufacture zero baselines or a direction from incomplete cached evidence", async () => {
     const root = await renderExpanded([pattern({ kind: "avoidance", detail: { silences: 3, observed: 10 } })]);
     expect(textOf(root)).toContain("your usual silent-day rate is unavailable");

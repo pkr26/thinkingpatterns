@@ -634,6 +634,9 @@ export function setUnauthorizedHandler(handler: (() => void) | null): void {
 
 interface RequestOptions {
   localWritePermit?: LocalWritePermit;
+  /** Durable outboxes may flush while the vault is locked. Bind their
+   * ciphertext owner to the stored bearer owner at the dispatch boundary. */
+  expectedUserId?: string;
   /** The request ships a credential that must never survive a redirect
    *  (verifier, data key). For these, an unverifiable final URL — some
    *  network stacks leave response.url empty — is treated as a redirect
@@ -713,6 +716,12 @@ async function request(
   }
   const token = opts.noBearer ? null : await secureStore.getItem(TOKEN_KEY);
   assertOwnership();
+  if (opts.expectedUserId !== undefined) {
+    const owner = await secureStore.getItem(USER_ID_KEY);
+    assertOwnership();
+    if (owner !== opts.expectedUserId) throw new ApiError(0, "The queued ciphertext belongs to another account; no request was sent.", "stale_operation");
+    if (!token) throw new ApiError(0, "No authenticated session owns the queued ciphertext; no request was sent.", "stale_operation");
+  }
   const headers: Record<string, string> = { "Content-Type": "application/json", ...extraHeaders };
   if (token) headers.Authorization = `Bearer ${token}`;
   const controller = new AbortController();
@@ -1026,11 +1035,18 @@ export const api = {
         // All three values are session material and live encrypted at rest
         // (see secureStore): a device backup must not contain a usable token.
         check();
-        await secureStore.setItem(TOKEN_KEY, token);
+        const previousOwner = await secureStore.getItem(USER_ID_KEY);
+        check();
+        // Retire the bearer before replacing its identity, and publish the
+        // new bearer last. A process/storage interruption at any boundary
+        // therefore leaves either the intact old tuple or no usable bearer;
+        // it cannot pair old-account ciphertext with a new-account token.
+        await secureStore.removeItem(TOKEN_KEY);
         check();
         await secureStore.setItem(USER_ID_KEY, userId);
         check();
         if (username !== undefined) await secureStore.setItem(USERNAME_KEY, username);
+        else if (previousOwner !== userId) await secureStore.removeItem(USERNAME_KEY);
         // M-3: pin the origin on first successful authentication. Later logins
         // at a different origin render the warning (see originPinStatus).
         try {
@@ -1042,13 +1058,17 @@ export const api = {
           // best effort: the warning surface degrades to "unpinned" silently
         }
         check();
+        await secureStore.setItem(TOKEN_KEY, token);
+        check();
       } catch (err) {
-        // A caller retired without a replacement transition must not leave a
-        // partially published bearer. A newer transition owns its own wipe.
-        if (epoch === localWriteScopeEpoch() && options.stillCurrent?.() === false) {
+        // Fail closed on our own publication failure. A newer transition
+        // owns its own cleanup; never erase credentials it is publishing.
+        if (epoch === localWriteScopeEpoch()) {
+          changeLocalSessionOwner(null);
+          const cleanupEpoch = localWriteScopeEpoch();
           for (const key of [TOKEN_KEY, USER_ID_KEY, USERNAME_KEY]) {
-            if (epoch !== localWriteScopeEpoch()) break;
-            await secureStore.removeItem(key);
+            if (cleanupEpoch !== localWriteScopeEpoch()) break;
+            try { await secureStore.removeItem(key); } catch { /* Preserve the original failure; token-last keeps interrupted identity writes unauthenticated. */ }
           }
         }
         throw err;
@@ -1434,20 +1454,20 @@ export const api = {
    *  nothing sent) if the selected server moved, so queued ciphertext can
    *  never ride a different origin's credentials. The queue always sends
    *  content_version 1 (an upload is the first generation of its id). */
-  createQueuedEntry: (clientEntryId: string, blobB64: string, entryDate: string, expectedOrigin: string) =>
+  createQueuedEntry: (clientEntryId: string, blobB64: string, entryDate: string, expectedOrigin: string, localWritePermit?: LocalWritePermit) =>
     request(
       "POST",
       `${API_PREFIX}/entries`,
       { client_entry_id: clientEntryId, blob: blobB64, entry_date: entryDate, content_version: 1 },
       {},
-      { expectedOrigin },
+      { expectedOrigin, localWritePermit, expectedUserId: localWritePermit?.userId },
     ),
   /** One entry by its stable client id (audit fix M-5, 2026-09-20): the
    *  idempotivity-verification primitive. The offline queue proves a 409
    *  "already exists" answer is REAL before discarding its only local copy
    *  — a hostile/flaky server that 409s without persisting surfaces as a
    *  404 here. Optionally origin-pinned like the queue upload. */
-  getEntry: async (clientEntryId: string, expectedOrigin?: string) => {
+  getEntry: async (clientEntryId: string, expectedOrigin?: string, localWritePermit?: LocalWritePermit) => {
     if (!ENTRY_ID_PATTERN.test(clientEntryId)) {
       throw new ApiError(0, "invalid entry id — refusing the request");
     }
@@ -1456,7 +1476,7 @@ export const api = {
       `${API_PREFIX}/entries/${encodeURIComponent(clientEntryId)}`,
       undefined,
       {},
-      expectedOrigin !== undefined ? { expectedOrigin } : {},
+      { expectedOrigin, localWritePermit, expectedUserId: localWritePermit?.userId },
     ) as Promise<ListedEntry>;
   },
   /** Atomically replace an existing encrypted entry. The client id stays
@@ -1707,6 +1727,7 @@ export const api = {
     mime: string,
     durationSeconds: number,
     expectedOrigin?: string,
+    localWritePermit?: LocalWritePermit,
   ) =>
     request(
       "POST",
@@ -1722,7 +1743,7 @@ export const api = {
       // recorded under — without the pin, a mid-flush server switch made
       // the remaining rows upload to the NEW origin (404) and the 404
       // handler below DELETED the only copy of the recording.
-      expectedOrigin !== undefined ? { expectedOrigin } : {},
+      { expectedOrigin, localWritePermit, expectedUserId: localWritePermit?.userId },
     ),
   fetchAudioAttachment: (attachmentId: string) =>
     request("GET", `${API_PREFIX}/audio/attachments/${encodeURIComponent(attachmentId)}`),

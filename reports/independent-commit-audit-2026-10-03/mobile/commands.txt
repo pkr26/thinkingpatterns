@@ -1,0 +1,27 @@
+Audited commit: ad797b060ac5de986e2eac6a044da8d6439a1c03
+Working directory: mobile/ unless otherwise stated
+
+Baseline:
+npm test -- --maxWorkers=2
+
+Clean install:
+npm ci
+
+Final current source:
+npm test -- --maxWorkers=2
+npm run typecheck
+npm run verify:vectors
+npm run verify:dependency-patches
+npm run verify:native-release
+npx vitest run --config redteam.vitest.config.ts redteam/f_mobile.test.ts --maxWorkers=2
+npx react-native bundle --platform android --dev false --entry-file index.js --max-workers 2 --bundle-output /tmp/mobile-independent-final-android.bundle --assets-dest /tmp/mobile-independent-final-android-assets
+npx react-native bundle --platform ios --dev false --entry-file index.js --max-workers 2 --bundle-output /tmp/mobile-independent-final-ios.bundle --assets-dest /tmp/mobile-independent-final-ios-assets
+
+Working directory mobile/android/:
+ANDROID_HOME=/Users/pradeepreddy/Library/Android/sdk ANDROID_SDK_ROOT=/Users/pradeepreddy/Library/Android/sdk JAVA_HOME=/Users/pradeepreddy/Library/Java/JavaVirtualMachines/jdk-21.0.12.1+1/Contents/Home ./gradlew :app:assembleDebug --no-daemon
+
+Negative control:
+Isolated git archive of audited commit under /tmp/mobile-independent-original-head/.
+Copy current tests/queueOwnership.test.ts and tests/screens/insightsScreen.pins.test.tsx into its mobile/ tree; symlink installed mobile/node_modules. Active working source is untouched.
+npx vitest run tests/queueOwnership.test.ts tests/screens/insightsScreen.pins.test.tsx -t 'interrupted replacement login|keeps specialized|manufacture specialized' --maxWorkers=2
+Same command passes current source. Five regression cases fail the audited commit with concrete contradictory copy/mixed-bearer assertions; no timing failure is counted as a negative-control result.

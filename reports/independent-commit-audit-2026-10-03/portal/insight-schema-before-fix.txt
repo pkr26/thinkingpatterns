@@ -1,0 +1,218 @@
+npm notice run mindpattern-portal@1.0.0 npx
+npm notice run 'vitest' run tests/crypto.test.ts -t rendered schema|chart date
+
+ RUN  v5.0.1 /Users/pradeepreddy/Desktop/mental_health_application/portal
+
+ ❯ tests/crypto.test.ts (67 tests | 6 failed | 61 skipped) 11ms
+   ❯ authenticated insight schema boundaries (6)
+     × rejects patterns that cannot satisfy the rendered schema: {"kind":"topic","label":"work","confidence":0.5,"occurrences":2} 7ms
+     × rejects patterns that cannot satisfy the rendered schema: {"kind":"topic","label":"work","confidence":null,"occurrences":2,"detail":{}} 1ms
+     × rejects patterns that cannot satisfy the rendered schema: {"kind":"topic","label":"work","confidence":0.5,"occurrences":null,"detail":{}} 1ms
+     × rejects patterns that cannot satisfy the rendered schema: {"kind":"topic","label":"work","confidence":0.5,"occurrences":2,"detail":{"strength":"high"}} 0ms
+     × rejects patterns that cannot satisfy the rendered schema: {"kind":"topic","label":"work","confidence":0.5,"occurrences":2,"detail":{"sample_days":-3}} 1ms
+     × rejects an object where a chart date must be text 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/crypto.test.ts > authenticated insight schema boundaries > rejects patterns that cannot satisfy the rendered schema: {"kind":"topic","label":"work","confidence":0.5,"occurrences":2}
+AssertionError: promise resolved "{ v: 2, stats: { patterns: [ …(1) ] } }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "stats": {
++     "patterns": [
++       {
++         "confidence": 0.5,
++         "kind": "topic",
++         "label": "work",
++         "occurrences": 2,
++       },
++     ],
++   },
++   "v": 2,
+  }
+
+ ❯ tests/crypto.test.ts:65:67
+     63|     const key = new Uint8Array(32).fill(7);
+     64|     const blob = await encrypt(key, new TextEncoder().encode(JSON.stri…
+     65|     await expect(decryptInsights(key, "schema-owner", toB64(blob))).re…
+       |                                                                   ^
+     66|   });
+     67|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  tests/crypto.test.ts > authenticated insight schema boundaries > rejects patterns that cannot satisfy the rendered schema: {"kind":"topic","label":"work","confidence":null,"occurrences":2,"detail":{}}
+AssertionError: promise resolved "{ v: 2, stats: { patterns: [ …(1) ] } }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "stats": {
++     "patterns": [
++       {
++         "confidence": null,
++         "detail": {},
++         "kind": "topic",
++         "label": "work",
++         "occurrences": 2,
++       },
++     ],
++   },
++   "v": 2,
+  }
+
+ ❯ tests/crypto.test.ts:65:67
+     63|     const key = new Uint8Array(32).fill(7);
+     64|     const blob = await encrypt(key, new TextEncoder().encode(JSON.stri…
+     65|     await expect(decryptInsights(key, "schema-owner", toB64(blob))).re…
+       |                                                                   ^
+     66|   });
+     67|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  tests/crypto.test.ts > authenticated insight schema boundaries > rejects patterns that cannot satisfy the rendered schema: {"kind":"topic","label":"work","confidence":0.5,"occurrences":null,"detail":{}}
+AssertionError: promise resolved "{ v: 2, stats: { patterns: [ …(1) ] } }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "stats": {
++     "patterns": [
++       {
++         "confidence": 0.5,
++         "detail": {},
++         "kind": "topic",
++         "label": "work",
++         "occurrences": null,
++       },
++     ],
++   },
++   "v": 2,
+  }
+
+ ❯ tests/crypto.test.ts:65:67
+     63|     const key = new Uint8Array(32).fill(7);
+     64|     const blob = await encrypt(key, new TextEncoder().encode(JSON.stri…
+     65|     await expect(decryptInsights(key, "schema-owner", toB64(blob))).re…
+       |                                                                   ^
+     66|   });
+     67|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+ FAIL  tests/crypto.test.ts > authenticated insight schema boundaries > rejects patterns that cannot satisfy the rendered schema: {"kind":"topic","label":"work","confidence":0.5,"occurrences":2,"detail":{"strength":"high"}}
+AssertionError: promise resolved "{ v: 2, stats: { patterns: [ …(1) ] } }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "stats": {
++     "patterns": [
++       {
++         "confidence": 0.5,
++         "detail": {
++           "strength": "high",
++         },
++         "kind": "topic",
++         "label": "work",
++         "occurrences": 2,
++       },
++     ],
++   },
++   "v": 2,
+  }
+
+ ❯ tests/crypto.test.ts:65:67
+     63|     const key = new Uint8Array(32).fill(7);
+     64|     const blob = await encrypt(key, new TextEncoder().encode(JSON.stri…
+     65|     await expect(decryptInsights(key, "schema-owner", toB64(blob))).re…
+       |                                                                   ^
+     66|   });
+     67|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/6]⎯
+
+ FAIL  tests/crypto.test.ts > authenticated insight schema boundaries > rejects patterns that cannot satisfy the rendered schema: {"kind":"topic","label":"work","confidence":0.5,"occurrences":2,"detail":{"sample_days":-3}}
+AssertionError: promise resolved "{ v: 2, stats: { patterns: [ …(1) ] } }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "stats": {
++     "patterns": [
++       {
++         "confidence": 0.5,
++         "detail": {
++           "sample_days": -3,
++         },
++         "kind": "topic",
++         "label": "work",
++         "occurrences": 2,
++       },
++     ],
++   },
++   "v": 2,
+  }
+
+ ❯ tests/crypto.test.ts:65:67
+     63|     const key = new Uint8Array(32).fill(7);
+     64|     const blob = await encrypt(key, new TextEncoder().encode(JSON.stri…
+     65|     await expect(decryptInsights(key, "schema-owner", toB64(blob))).re…
+       |                                                                   ^
+     66|   });
+     67|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/6]⎯
+
+ FAIL  tests/crypto.test.ts > authenticated insight schema boundaries > rejects an object where a chart date must be text
+AssertionError: promise resolved "{ v: 2, stats: { patterns: [], …(1) } }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "stats": {
++     "first_date": {
++       "malformed": true,
++     },
++     "patterns": [],
++   },
++   "v": 2,
+  }
+
+ ❯ tests/crypto.test.ts:71:67
+     69|     const key = new Uint8Array(32).fill(7);
+     70|     const blob = await encrypt(key, new TextEncoder().encode(JSON.stri…
+     71|     await expect(decryptInsights(key, "schema-owner", toB64(blob))).re…
+       |                                                                   ^
+     72|   });
+     73| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/6]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  6 failed | 61 skipped (67)
+   Start at  14:18:30
+   Duration  171ms (transform 57%, setup 20%, tests 12%, import 9%, worker 2%)
+

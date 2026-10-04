@@ -91,6 +91,21 @@ class ExportPrivacyEvidenceTests(unittest.TestCase):
                         evidence.inspect_export(body, self.expected, self.secrets),
                     )
 
+    def test_json_escaped_journals_and_passwords_cannot_evade_detection(self):
+        for secret in (
+            'private writing with "quoted text"',
+            "private writing\nwith a second line",
+            "contraseña privada y escritura íntima",
+            "private writing with \\backslashes",
+        ):
+            with self.subTest(secret=secret):
+                body = copy.deepcopy(self.bundle)
+                body["entries"][0]["unexpected_diagnostic"] = secret
+                self.assertIn(
+                    "plaintext secret present: sentinel",
+                    evidence.inspect_export(body, self.expected, {"sentinel": secret}),
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

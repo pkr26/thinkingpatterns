@@ -22,6 +22,7 @@ coverage/
 # Reviewed synthetic validation evidence accompanies the October 3 reports.
 !reports/audit-2026-10-03/validation-logs/*.log
 !reports/remediation-2026-10-03/validation-logs/*.log
+!reports/independent-commit-audit-2026-10-03/mobile/*.log
 
 # Local state
 *.db

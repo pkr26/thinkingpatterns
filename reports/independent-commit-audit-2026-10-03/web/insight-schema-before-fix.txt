@@ -1,0 +1,188 @@
+npm notice run mindpattern-web@0.1.0 npx
+npm notice run 'vitest' run tests/crypto.test.ts -t satisfy the rendered|chart date
+
+ RUN  v5.0.2 /Users/pradeepreddy/Desktop/mental_health_application/web
+
+ ❯ tests/crypto.test.ts (71 tests | 6 failed | 65 skipped) 10ms
+   ❯ insights + question payload layer (9)
+     × rejects authenticated patterns that cannot satisfy the rendered schema: {"kind":"topic","label":"work","confidence":0.5,"occurrences":2} 7ms
+     × rejects authenticated patterns that cannot satisfy the rendered schema: {"kind":"topic","label":"work","confidence":null,"occurrences":2,"detail":{}} 1ms
+     × rejects authenticated patterns that cannot satisfy the rendered schema: {"kind":"topic","label":"work","confidence":0.5,"occurrences":null,"detail":{}} 1ms
+     × rejects authenticated patterns that cannot satisfy the rendered schema: {"kind":"topic","label":"work","confidence":0.5,"occurrences":2,"detail":{"strength":"high"}} 0ms
+     × rejects authenticated patterns that cannot satisfy the rendered schema: {"kind":"topic","label":"work","confidence":0.5,"occurrences":2,"detail":{"sample_days":-3}} 0ms
+     × rejects an authenticated object where a chart date must be text 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/crypto.test.ts > insights + question payload layer > rejects authenticated patterns that cannot satisfy the rendered schema: {"kind":"topic","label":"work","confidence":0.5,"occurrences":2}
+AssertionError: promise resolved "{ v: 2, stats: { patterns: [ …(1) ] } }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "stats": {
++     "patterns": [
++       {
++         "confidence": 0.5,
++         "kind": "topic",
++         "label": "work",
++         "occurrences": 2,
++       },
++     ],
++   },
++   "v": 2,
+  }
+
+ ❯ tests/crypto.test.ts:342:70
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  tests/crypto.test.ts > insights + question payload layer > rejects authenticated patterns that cannot satisfy the rendered schema: {"kind":"topic","label":"work","confidence":null,"occurrences":2,"detail":{}}
+AssertionError: promise resolved "{ v: 2, stats: { patterns: [ …(1) ] } }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "stats": {
++     "patterns": [
++       {
++         "confidence": null,
++         "detail": {},
++         "kind": "topic",
++         "label": "work",
++         "occurrences": 2,
++       },
++     ],
++   },
++   "v": 2,
+  }
+
+ ❯ tests/crypto.test.ts:342:70
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  tests/crypto.test.ts > insights + question payload layer > rejects authenticated patterns that cannot satisfy the rendered schema: {"kind":"topic","label":"work","confidence":0.5,"occurrences":null,"detail":{}}
+AssertionError: promise resolved "{ v: 2, stats: { patterns: [ …(1) ] } }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "stats": {
++     "patterns": [
++       {
++         "confidence": 0.5,
++         "detail": {},
++         "kind": "topic",
++         "label": "work",
++         "occurrences": null,
++       },
++     ],
++   },
++   "v": 2,
+  }
+
+ ❯ tests/crypto.test.ts:342:70
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+ FAIL  tests/crypto.test.ts > insights + question payload layer > rejects authenticated patterns that cannot satisfy the rendered schema: {"kind":"topic","label":"work","confidence":0.5,"occurrences":2,"detail":{"strength":"high"}}
+AssertionError: promise resolved "{ v: 2, stats: { patterns: [ …(1) ] } }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "stats": {
++     "patterns": [
++       {
++         "confidence": 0.5,
++         "detail": {
++           "strength": "high",
++         },
++         "kind": "topic",
++         "label": "work",
++         "occurrences": 2,
++       },
++     ],
++   },
++   "v": 2,
+  }
+
+ ❯ tests/crypto.test.ts:342:70
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/6]⎯
+
+ FAIL  tests/crypto.test.ts > insights + question payload layer > rejects authenticated patterns that cannot satisfy the rendered schema: {"kind":"topic","label":"work","confidence":0.5,"occurrences":2,"detail":{"sample_days":-3}}
+AssertionError: promise resolved "{ v: 2, stats: { patterns: [ …(1) ] } }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "stats": {
++     "patterns": [
++       {
++         "confidence": 0.5,
++         "detail": {
++           "sample_days": -3,
++         },
++         "kind": "topic",
++         "label": "work",
++         "occurrences": 2,
++       },
++     ],
++   },
++   "v": 2,
+  }
+
+ ❯ tests/crypto.test.ts:342:70
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/6]⎯
+
+ FAIL  tests/crypto.test.ts > insights + question payload layer > rejects an authenticated object where a chart date must be text
+AssertionError: promise resolved "{ v: 2, stats: { patterns: [], …(1) } }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "stats": {
++     "first_date": {
++       "malformed": true,
++     },
++     "patterns": [],
++   },
++   "v": 2,
+  }
+
+ ❯ tests/crypto.test.ts:348:70
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/6]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  6 failed | 65 skipped (71)
+   Start at  14:18:06
+   Duration  220ms (transform 66%, setup 22%, tests 7%, import 5%, worker 2%)
+

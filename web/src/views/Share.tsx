@@ -17,7 +17,7 @@
  * two-step revoke confirm.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, ApiError, type ListedConsent } from "../api/client";
+import { api, ApiError, sessionAbortSignal, type ListedConsent } from "../api/client";
 import { toBase64, zeroize } from "../crypto/core";
 import { keyFingerprint, wrapDataKeyForTherapist } from "../crypto/sharing";
 import { t } from "../strings";
@@ -28,6 +28,7 @@ export function ShareView(): React.JSX.Element {
   const [consents, setConsents] = useState<ListedConsent[] | null>(null);
   const [code, setCode] = useState("");
   const [lookup, setLookup] = useState<{
+    code: string;
     name: string;
     fingerprint: string;
     therapistId: string;
@@ -46,6 +47,8 @@ export function ShareView(): React.JSX.Element {
   const [copied, setCopied] = useState(false);
   const [armedRevoke, setArmedRevoke] = useState<string | null>(null);
   const generation = useRef(0);
+  const pairingGeneration = useRef(0);
+  const mounted = useRef(true);
 
   const load = useCallback(async (): Promise<void> => {
     const run = generation.current + 1;
@@ -65,38 +68,49 @@ export function ShareView(): React.JSX.Element {
   }, []);
 
   useEffect(() => {
+    mounted.current = true;
     void load();
+    return () => { mounted.current = false; generation.current += 1; pairingGeneration.current += 1; };
   }, [load]);
 
   const doLookup = async (): Promise<void> => {
+    const operation = ++pairingGeneration.current;
+    const pairingCode = code.trim();
+    const signal = sessionAbortSignal();
+    const current = (): boolean => mounted.current && operation === pairingGeneration.current && !!signal && !signal.aborted;
     setError("");
     setStatus(null);
     setLookup(null);
     setCopied(false);
     setDisclosureAccepted(false);
     setFingerprintVerified(false);
-    if (!code.trim()) {
+    if (!pairingCode) {
       setError(t("share.webCodeRule"));
       return;
     }
     setBusy(true);
     try {
-      const found = await api.pairingLookup(code.trim());
+      const found = await api.pairingLookup(pairingCode);
+      if (!current()) return;
+      const fingerprint = await keyFingerprint(found.wrap_pub_key);
+      if (!current()) return;
       setLookup({
+        code: pairingCode,
         name: found.display_name,
         therapistId: found.therapist_id,
         wrapPubKey: found.wrap_pub_key,
-        fingerprint: await keyFingerprint(found.wrap_pub_key),
+        fingerprint,
         // Server-provided comparison strings (optional fields): strings or
         // nothing — anything else degrades to hidden, never a broken render.
         sas: typeof found.sas === "string" ? found.sas : null,
         serverFingerprint: typeof found.wrap_key_fingerprint === "string" ? found.wrap_key_fingerprint : null,
       });
     } catch (err) {
+      if (!current()) return;
       if (err instanceof ApiError && err.status === 404) setError(t("share.webCodeExpired"));
       else setError(err instanceof Error ? err.message : t("share.webLookupFailed"));
     } finally {
-      setBusy(false);
+      if (current()) setBusy(false);
     }
   };
 
@@ -113,7 +127,9 @@ export function ShareView(): React.JSX.Element {
 
   const grant = async (): Promise<void> => {
     const owner = vault.ownerUserId();
-    if (!owner || !vault.isUnlocked() || !lookup) return;
+    if (!owner || !vault.isUnlocked() || !lookup || lookup.code !== code.trim() || !disclosureAccepted || !fingerprintVerified) return;
+    const operation = pairingGeneration.current;
+    const signal = sessionAbortSignal();
     setBusy(true);
     setError("");
     // 2026-09-28 audit (LOW, the moodLog/Entry M-3 idiom): snapshot BOTH
@@ -123,17 +139,16 @@ export function ShareView(): React.JSX.Element {
     // (and a zero verifier). The copies die in the finally; a lock at any
     // re-check aborts with the honest locked message instead.
     const keys = vault.get();
+    const current = (): boolean => mounted.current && operation === pairingGeneration.current && !!signal && !signal.aborted && vault.isUnlocked() && vault.ownerUserId() === owner && vault.get().dataKey === keys.dataKey;
     const dataKey = new Uint8Array(new ArrayBuffer(keys.dataKey.length));
     dataKey.set(keys.dataKey);
     const authKey = new Uint8Array(new ArrayBuffer(keys.authKey.length));
     authKey.set(keys.authKey);
     try {
       const wrap = await wrapDataKeyForTherapist(dataKey, lookup.wrapPubKey, owner, lookup.therapistId);
-      if (!vault.isUnlocked()) {
-        setError(t("common.sessionLocked"));
-        return;
-      }
-      await api.grantConsent(code.trim(), wrap.ephemeralPubB64, wrap.wrappedKeyB64, toBase64(authKey));
+      if (!current()) return;
+      await api.grantConsent(lookup.code, wrap.ephemeralPubB64, wrap.wrappedKeyB64, toBase64(authKey));
+      if (!current()) return;
       setStatus(t("share.webGrantedStatus", { name: lookup.name }));
       setCode("");
       setLookup(null);
@@ -142,6 +157,7 @@ export function ShareView(): React.JSX.Element {
       setFingerprintVerified(false);
       await load();
     } catch (err) {
+      if (!current()) return;
       if (err instanceof ApiError && err.code === "disclosure_outdated") {
         setError(t("share.webTermsChanged"));
       } else {
@@ -149,7 +165,7 @@ export function ShareView(): React.JSX.Element {
       }
     } finally {
       zeroize(dataKey, authKey);
-      setBusy(false);
+      if (current()) setBusy(false);
     }
   };
 
@@ -200,7 +216,7 @@ export function ShareView(): React.JSX.Element {
     <>
       <Card title={t("share.webTitle")}>
         <Note tone="muted">{t("share.webZeroKnowledge")}</Note>
-        <Field label={t("share.webPairingCode")} value={code} onChange={(value) => { setCode(value); setLookup(null); setFingerprintVerified(false); setDisclosureAccepted(false); }} placeholder={t("share.webPairingPlaceholder")} />
+        <Field label={t("share.webPairingCode")} value={code} onChange={(value) => { pairingGeneration.current += 1; setBusy(false); setCode(value); setLookup(null); setCopied(false); setFingerprintVerified(false); setDisclosureAccepted(false); }} placeholder={t("share.webPairingPlaceholder")} />
         <Button label={busy ? t("settings.working") : t("share.webLookUp")} onPress={() => void doLookup()} disabled={busy} small variant="ghost" />
         {lookup && (
           <>
