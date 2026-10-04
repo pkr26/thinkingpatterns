@@ -1,21 +1,10 @@
 /**
- * Threshold-crossing notice: shown at most ONCE per account.
+ * Per-account stamp for the one-time analysis-threshold notice.
+ * Record the stamp when the notice appears, not when it is dismissed.
+ * secureStore encrypts the record; account erasure removes it.
  *
- * Thirty days of writing is the app's own ask; the day it completes was
- * historically invisible (the Entry header simply flipped wording). This
- * stamp backs the one-time calm "your patterns are ready" card — one
- * appearance, ever, then never again. The stamp is recorded when the card
- * is SHOWN (not when dismissed): a notice that could nag across restarts
- * is worse than no notice.
- *
- * Persisted per account at @mindpattern/threshold_notice_<userId> via the
- * encrypted secure store; account deletion must wipe it (the
- * SettingsScreen deletion flow, the same idiom as crisisDialog.ts).
- *
- * Failure direction is toward SHOWING once more: when storage is
- * unreadable a process-lifetime memory mirror is the only record, so a
- * broken store can repeat the card after a restart at worst — a benign,
- * celebratory message, never a gate on anything.
+ * If persistence fails, an in-memory mirror prevents repeats in the current
+ * process. A restart may show the notice again rather than suppressing it.
  */
 import { secureStore } from "./secureStore";
 import { accountStorageKey } from "./accountStorage";

@@ -1,27 +1,11 @@
 /**
- * Patterns (WEB_PLAN P6.1–6.3): the analysis surface. Baseline phase shows
- * the honest 30-day ring + the device-local mood trend (never synced);
- * post-threshold, every surfaced pattern renders as a card with its
- * lifecycle evidence label, a "Why am I seeing this?" panel (window, n,
- * effect size, confidence, method in plain language), per-pattern mute
- * (coarse pattern ids only, local), and the sensitive non-quoting
- * contract: a crisis-adjacent pattern NEVER echoes its text — it says so
- * calmly and links to support.
+ * Analysis cards with evidence, local mutes, and baseline mood progress.
  *
- * M-W4 (audit 2026-09-26): the muted pid set is CONTENT-DERIVED
- * ("topic:divorce") and used to sit in plaintext localStorage — it now
- * lives in the encrypted kv seam (patternMutes.ts, data-key sealed). The
- * server-side mute sync (recordPatternMute → recompute blob) is unchanged.
- *
- * Redesign 2026-09-26: baseline progress renders as a calm progress track
- * with an SVG diverging-bar mood trend (dates + per-bar titles); the
- * disclosure is styled; sensitive patterns render on a soft lavender card
- * — the non-quoting contract is untouched.
+ * Crisis-adjacent patterns never quote sensitive text; they link to support.
+ * Muted pattern ids are content-derived and persist encrypted. Server mute
+ * updates travel only with an explicit recompute.
  */
-// @ts-nocheck
-
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api } from "../api/client";
 import { matchesCrisisSuppress } from "../crisisDetect";
 import { displayError } from "../errors";
 import { recentMoods } from "../moodLog";
@@ -153,8 +137,6 @@ export function PatternsView(props: { onCrisis: () => void }): React.JSX.Element
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState("");
   const generation = useRef(0);
-
-  const userId = vault.ownerUserId();
 
   const load = useCallback(async (): Promise<void> => {
     const run = generation.current + 1;

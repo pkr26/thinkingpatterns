@@ -27,8 +27,7 @@ import pytest
 from sqlalchemy import select
 
 from app.models import AccessLog, AudioAttachment, Consent, ConsentEvent, User
-from app.services import stt as stt_service
-from app.services import llm as llm_service
+from app.services import llm as llm_service, stt as stt_service
 from app.services.audio_store import (
     AudioStoreError,
     S3AudioStore,

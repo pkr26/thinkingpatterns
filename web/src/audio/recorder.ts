@@ -1,20 +1,11 @@
 /**
- * The microphone recorder (VOICE_PLAN P3, 2026-09-29).
+ * MediaRecorder lifecycle and browser-supported recording formats.
  *
- * MediaRecorder with the browser-format fallback chain pinned in
- * shared/audio_vectors.json: Chrome/Firefox speak webm/opus, Safari only
- * reliably produces mp4/AAC — the FIRST mime isTypeSupported accepts wins,
- * and the file extension is always derived from the ACTUAL winning mime
- * (naming an mp4 ".webm" is the classic Safari recorder bug). Hard
- * 5-minute auto-stop (the plan's recording cap; the server bound is 310 s).
- *
- * The hook owns the MediaStream's lifecycle: stop() and unmount both tear
- * down every track and the recorder; the resulting Blob never touches
- * storage — it lives in memory until the entry is saved (kept ⇒ encrypted
- * and uploaded) or discarded.
+ * The first supported MIME type wins; the extension follows the actual MIME
+ * type. Recordings stop after five minutes. Stopping or unmounting releases
+ * all media tracks. The resulting Blob stays in memory until it is discarded
+ * or encrypted for upload. Format parity is pinned by shared/audio_vectors.json.
  */
-// @ts-nocheck
-
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /** Client-side recording cap; the server accepts up to 310 s for clock

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 from datetime import date, datetime
-from typing import Annotated, Literal, TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -486,7 +486,7 @@ class LlmConsentResponse(BaseModel):
 class VoiceConsentRequest(StrictRequestModel):
     """Opting into third-party speech-to-text is explicit, per-user, and
     re-authenticated — it gates sending recorded audio off-server
-    (VOICE_PLAN.md). Same shape as LlmConsentRequest."""
+    (docs/plans/voice-plan.md). Same shape as LlmConsentRequest."""
 
     enabled: bool
     verifier: str | None = Field(default=None, min_length=1, max_length=MAX_VERIFIER_B64)
@@ -502,7 +502,7 @@ class VoiceConsentResponse(BaseModel):
     voice_consent_policy: str | None = None
 
 
-# Voice journaling request/response schemas (VOICE_PLAN.md). The audio_b64
+# Voice journaling request/response schemas (docs/plans/voice-plan.md). The audio_b64
 # ceiling is a generous STATIC bound: the live route cap is the middleware's
 # route-scoped settings.audio_max_body_bytes (4 MiB default); this field cap
 # only bounds pydantic's own work before the route runs.

@@ -39,7 +39,7 @@ services:
     image: ${MINDPATTERN_BACKUP_IMAGE:?set MINDPATTERN_BACKUP_IMAGE to mindpattern-backup:local for the development overlay}
 
   # S3-compatible scratch object store for kept voice recordings in dev
-  # (VOICE_PLAN.md P2). NOT part of any production deployment: production
+  # (docs/plans/voice-plan.md P2). NOT part of any production deployment: production
   # points MINDPATTERN_AUDIO_BUCKET at a real, dedicated bucket with
   # least-privilege IAM credentials supplied via compose secrets.
   audio-minio:

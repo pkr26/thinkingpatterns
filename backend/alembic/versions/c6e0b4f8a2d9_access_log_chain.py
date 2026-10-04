@@ -48,7 +48,7 @@ from datetime import datetime, timezone
 
 import sqlalchemy as sa
 from alembic import op
-from sqlalchemy import table, column
+from sqlalchemy import column, table
 
 revision: str = "c6e0b4f8a2d9"
 down_revision: str | Sequence[str] | None = "b5d9a3e7f1c8"

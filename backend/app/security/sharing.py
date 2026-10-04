@@ -67,8 +67,7 @@ PORTAL_NOTES_INFO = b"mindpattern/portal-notes/v1"
 THERAPIST_KEY_CONTEXT = "therapist-key"
 NOTE_CONTEXT = "note"
 
-# b64(91 bytes SPKI DER) = 124 chars — the schema caps match exactly.
-SPKI_P256_B64_CHARS = 124
+# A P-256 public key is 91 DER bytes (124 base64 characters).
 SPKI_P256_DER_BYTES = 91
 
 # Pairing codes: 8 chars from a 30-symbol ambiguous-free alphabet

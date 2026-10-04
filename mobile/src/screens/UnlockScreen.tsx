@@ -1,30 +1,13 @@
 /**
- * Cold-restart unlock gate. The session token lives on disk, but the key
- * vault is memory-only — after an app restart the user is "logged in" yet
- * locked out of every crypto operation. This screen re-derives the keys
- * from the password and re-verifies via login, which also refreshes a
- * possibly-expired token in the same round.
+ * Unlock the memory-only vault using a password or an opted-in biometric
+ * wrap. Password login also refreshes the persisted server session.
  *
- * OFFLINE VERIFICATION (the critical fix): the old offline path unlocked
- * the vault with ANY password — nothing verified the derivation. Now a
- * marker sealed under the data key at the last ONLINE login (see
- * unlockProof.ts) is opened with the freshly derived key: the wrong
- * password fails AEAD authentication and the vault stays locked, so a
- * mistyped password can never encrypt new entries under a wrong key.
+ * Offline password unlock must authenticate the marker sealed during a
+ * previous online login. A wrong password cannot unlock the vault or encrypt
+ * new entries under an unverified key.
  *
- * HONEST COPY (audit fix): the old subtitle claimed "Your keys never leave
- * this device" — false, since a processing session ships the data key once
- * (single-use, memory-only). The subtitle now tells the truth calmly.
- *
- * BIOMETRIC UNLOCK (2026-09-19): when this device has biometrics AND the
- * account previously stored a biometric wrap (src/biometricUnlock.ts), a
- * primary "Unlock with biometrics" button appears ABOVE the password
- * field. It restores LOCAL DECRYPTION only — a 401 from the server still
- * requires the password, which is why the dummies below are honest: the
- * vault zeroizes the master key the moment it takes ownership, and the
- * auth key exists solely to log in with the password. The password path is
- * never demoted, never hidden, and stays the default; every biometric
- * failure lands as one calm inline line, not a lockout.
+ * Biometrics restore local decryption only. Expired server credentials still
+ * require the password, which remains available after any biometric failure.
  */
 import { localWriteScopeEpoch } from "../localWriteGuard";
 import { resumeLocalRekey, pendingLocalRekey, pendingLocalRekeyOldSalt } from "../localRekey";
@@ -39,10 +22,9 @@ import {
   Text,
   TextInput,
 } from "react-native";
-import qcrypto from "react-native-quick-crypto"; // registers the Buffer global used below
 import { api, ApiError } from "../api/client";
-import { deriveKeysAsync } from "../crypto/MindPatternCrypto";
-import type { Keys } from "../crypto/MindPatternCrypto";
+import { deriveKeysAsync } from "../crypto/journalCrypto";
+import type { Keys } from "../crypto/journalCrypto";
 import { KDF_ITERATIONS, zeroize } from "../crypto/kdf";
 import { cachedEnvelope, cacheEnvelope, fetchEnvelope, unwrapSessionDataKey, type EnvelopeInfo } from "../keyScheme";
 import { vault } from "../vault";

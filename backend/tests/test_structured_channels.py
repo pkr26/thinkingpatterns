@@ -377,7 +377,7 @@ class TestVaderBreadth:
             assert SENTIMENT_LEXICON[word] < 0
 
     def test_emoji_score_mood_without_becoming_topics_or_themes(self):
-        from app.services.brain import sentiment_score, extract_themes
+        from app.services.brain import extract_themes, sentiment_score
 
         assert sentiment_score(["great", "day", "😀"]) > sentiment_score(["great", "day"])
         assert sentiment_score(["rough", "night", "😭"]) < sentiment_score(["rough", "night"])

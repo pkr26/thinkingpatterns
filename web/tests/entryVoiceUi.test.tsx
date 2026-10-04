@@ -4,13 +4,9 @@
  *  with the voice wave and had no test driving their actual UI states —
  *  Entry.tsx sat at 56% functions. Minimal getUserMedia/MediaRecorder
  *  globals drive the real useVoiceRecorder hook through its states. */
-// @ts-nocheck
-
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import React from "react";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import { EntryView } from "../src/views/Entry";
-import { encryptEntry } from "../src/crypto/patient";
 import { vault } from "../src/vault";
 import { installSession, jsonResponse, resetTestState, stubFetch } from "./helpers/api";
 import { press, pressSwitch, render, settle, textOf } from "./helpers/rtr";

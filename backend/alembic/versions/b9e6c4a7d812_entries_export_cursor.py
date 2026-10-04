@@ -17,7 +17,6 @@ from collections.abc import Sequence
 
 from alembic import op
 
-
 revision: str = "b9e6c4a7d812"
 down_revision: str | Sequence[str] | None = "f6a9b4d1e203"
 branch_labels: str | Sequence[str] | None = None

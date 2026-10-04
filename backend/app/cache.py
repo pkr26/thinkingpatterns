@@ -1,20 +1,9 @@
-"""Sliding-window rate limiting with an in-memory counter.
+"""Bounded in-process rate limiting and token-revocation storage.
 
-v1 shipped the in-process counter, which is exact for the single-process
-deployment the brief describes (multi-worker uvicorn would fragment every
-bucket — run one worker per instance or front several instances with a
-shared counter before scaling out).
-
-2026-09-26 audit item 2: the original FIXED-window counter admitted up to
-2x the configured limit across a window boundary (a full budget at the end
-of one window plus a full budget at the start of the next both fit inside
-one sliding 60-second span). The counter is now an exact sliding window:
-every hit is aged out precisely ``window_seconds`` after it landed, so any
-window-aligned burst trick no longer doubles the budget. Memory stays
-bounded two ways: the per-key hit log compresses its OLDEST entries once
-it passes a small entry cap (compression keeps the counts exact and ages
-them at the OLDEST timestamp — strictly more conservative, never less),
-and the registry caps tracked keys with eviction (below).
+The deployment serves one process per database; multiple workers would
+split counters and revocation state. Rate-limit hits use a monotonic clock
+and sliding expiry. Per-key timestamp compression and capped key eviction
+bound memory under identity floods; their tradeoffs are documented below.
 """
 
 from __future__ import annotations
@@ -33,19 +22,9 @@ from fastapi import HTTPException, Request
 
 from .deps import ApiError
 
-# Hard ceiling on tracked keys: bounds memory when an attacker rotates
-# identities (spoofed XFF, IPv6). Past the cap the OLDEST windows are evicted
-# even if not yet stale — worst case a few attackers' buckets reset early,
-# which beats unbounded growth.
-#
-# 2026-09-26 audit item 3: raised 10_000 -> 50_000. Under an identity flood
-# the old cap let ~10k fresh attacker keys evict *active* buckets, resetting
-# real clients' counters mid-window; 5x headroom means an attacker must mint
-# 50k distinct rate-limit identities before ANY active bucket is touched.
-# Documented trade-off: 50k keys of (at most) ~128 compressed log entries
-# each is a few MiB of Python objects in the absolute worst case — bounded,
-# and only reachable by an attacker who already sent 50k+ requests inside
-# one window (each key requires a real request to exist).
+# Cap identity cardinality. Eviction prefers stale keys, then the oldest
+# active windows; evicting an active key resets its budget early. This is
+# the bounded-memory tradeoff under an identity flood.
 MAX_TRACKED_KEYS = 50_000
 
 # Eviction runs when the cap is crossed and clears down to the cap minus
@@ -54,12 +33,10 @@ MAX_TRACKED_KEYS = 50_000
 # the event loop's request path, so per-hit full scans add latency).
 EVICTION_BATCH = MAX_TRACKED_KEYS // 10
 
-# Per-key bound on DISTINCT hit timestamps retained. Beyond it the two
-# oldest entries merge (older timestamp, summed counts): counts stay exact
-# and can only age out LATER than the truth — fail-closed for limiting —
-# while a key hammered thousands of times in one window costs O(1) memory.
-# Legitimate traffic never reaches this (the highest default limit is 300
-# hits/min); it exists so an attacker cannot grow one key's log unboundedly.
+# Cap distinct timestamps per key. Overflow merges the oldest two entries
+# at the older timestamp, preserving their total until that timestamp
+# expires. The newer merged hit can consequently expire early; callers
+# should treat compression as a bounded-memory approximation.
 _MAX_LOG_ENTRIES = 128
 
 
@@ -69,8 +46,8 @@ class _WindowLog:
 
     ``window_seconds`` is bookkeeping the eviction path uses to judge
     idleness without a live call; hit() rewrites it on every hit. A key's
-    count is always the exact sum of retained entries; merging (above)
-    preserves the total while aging it conservatively.
+    count is the exact sum of retained entries; timestamp compression
+    determines when a merged group expires.
     """
 
     window_seconds: int
@@ -91,20 +68,11 @@ class HitResult:
 
 
 class SlidingWindowCounter:
-    """Per-key exact sliding windows keyed on the monotonic clock.
+    """Per-key sliding windows measured with a monotonic clock.
 
-    The window length is supplied by the CALLER on every hit()/check();
-    ``window_seconds`` stored per key is bookkeeping the eviction path uses
-    to judge idleness, and hit() rewrites it on every call. A key's count is
-    judged against the window passed with the current call — in practice
-    each bucket prefix uses one window from settings, so callers never
-    observe a mismatch.
-
-    Sliding semantics (audit item 2): a hit recorded at time T stops
-    counting at exactly T + window. ``count`` therefore never exceeds the
-    configured limit within ANY window-aligned span — the fixed-window 2x
-    boundary burst is gone. ``retry_after`` reports when the OLDEST retained
-    hit ages out, i.e. the earliest moment the count can decrease.
+    Each hit/check supplies its window length. The stored length helps
+    eviction identify idle keys; bucket prefixes normally use a consistent
+    setting. Retry-After reports when the oldest retained group expires.
     """
 
     def __init__(self) -> None:
@@ -115,9 +83,7 @@ class SlidingWindowCounter:
         """Record one hit; return the window count and a usable Retry-After."""
         if window_seconds <= 0:
             raise ValueError("window_seconds must be positive")
-        # Monotonic clock (2026-09-20, informational hardening): a wall-clock
-        # step backwards (NTP correction) used to re-open closed windows and
-        # stretch Retry-After; elapsed time is what a window measures.
+        # Wall-clock corrections must not alter elapsed rate-limit windows.
         current = now if now is not None else time.monotonic()
         with self._lock:
             state = self._hits.get(key)
@@ -132,12 +98,10 @@ class SlidingWindowCounter:
             else:
                 state.log.append((current, 1))
             if len(state.log) > _MAX_LOG_ENTRIES:
-                # Merge the two oldest entries under the OLDER timestamp:
-                # the total is preserved exactly and the merged mass ages
-                # out no earlier than the truth (fail-closed for limiting).
-                stamp, count = state.log.popleft()
-                next_stamp, next_count = state.log.popleft()
-                state.log.appendleft((stamp, count + next_count))
+                # Preserve the count while bounding retained timestamps.
+                oldest_timestamp, oldest_count = state.log.popleft()
+                _, next_count = state.log.popleft()
+                state.log.appendleft((oldest_timestamp, oldest_count + next_count))
             state.total += 1
             if len(self._hits) > MAX_TRACKED_KEYS:
                 self._evict_locked(current)

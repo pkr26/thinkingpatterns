@@ -1,23 +1,13 @@
 /**
- * Encrypted-at-rest session storage (H3 fix).
+ * Encrypted local storage using a random per-install device key held by
+ * iOS Keychain or Android Keystore. The iOS key uses ThisDeviceOnly access;
+ * app storage contains ciphertext rather than the key or bearer token.
  *
- * AsyncStorage is an unencrypted plist/SQLite file on both platforms: a
- * forensic tool, an ADB/iTunes backup, or a malicious sideloaded app used
- * to read the bearer token verbatim. This wrapper AES-256-GCM-encrypts
- * every stored value under a random per-install key. That key is held in
- * iOS Keychain / Android Keystore through react-native-keychain, with an
- * "this device only" iOS accessibility class. A backup therefore contains
- * ciphertext but not the key needed to open it.
+ * Missing native key storage fails closed. Production never falls back to
+ * storing the device key in AsyncStorage; tests can inject a backend.
  *
- * There is intentionally NO runtime AsyncStorage fallback for the device
- * key. If native Keychain/Keystore is not linked or unavailable, sign-in
- * fails closed instead of creating a recoverable session secret in a file.
- * Tests can inject a backend with setSecureStoreBackend; production code
- * never selects an insecure backend.
- *
- * Storage schema: values are a versioned envelope { v: 1, c: <base64
- * ciphertext> }; legacy bare-base64 ciphertext migrates transparently on
- * read (read-through, the moodLog idiom). Corrupt payloads read as absent.
+ * Values use a versioned envelope { v: 1, c: <base64 ciphertext> }. Legacy
+ * bare-base64 ciphertext migrates on read; corrupt payloads read as absent.
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Keychain from "react-native-keychain";

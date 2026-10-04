@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { ApiError } from "./api/client";
 import { t } from "./strings";
 

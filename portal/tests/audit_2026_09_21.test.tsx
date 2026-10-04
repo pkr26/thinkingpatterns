@@ -1,5 +1,5 @@
 /**
- * Audit-fix regressions (2026-09-21, AUDIT_2026-09-21.md section 1.4):
+ * Audit-fix regressions (2026-09-21, docs/archive/audits/AUDIT_2026-09-21.md section 1.4):
  * FIX 15 — only the .print-only session summary prints; the evidence
  *           drill-down's decrypted journal text never reaches paper.
  * FIX 16 — multi-line notes and journal entries keep their line breaks
@@ -13,7 +13,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import React from "react";
 
 vi.mock("../src/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/api")>();
@@ -146,7 +145,7 @@ beforeEach(() => {
   window.sessionStorage.clear();
 });
 
-describe("audit fixes 2026-09-21 (AUDIT_2026-09-21.md 1.4)", () => {
+describe("audit fixes 2026-09-21 (docs/archive/audits/AUDIT_2026-09-21.md 1.4)", () => {
   // 2026-09-26 CSP hardening: the print rules moved from an inline <style>
   // tag (rendered by the chart) to public/print.css — a real stylesheet
   // loaded via <link media="print"> — which is what lets style-src drop
@@ -201,7 +200,7 @@ describe("audit fixes 2026-09-21 (AUDIT_2026-09-21.md 1.4)", () => {
   });
 
   it("FIX 15: print forces dark text on white — the dark theme cannot leak to paper", async () => {
-    const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+    await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
     await flush();
     // <main>'s dark tokens (var(--bg)/var(--body)) must be overridden by an
     // !important author rule from the print stylesheet.

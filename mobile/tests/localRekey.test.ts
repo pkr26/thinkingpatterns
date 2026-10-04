@@ -5,7 +5,7 @@ import { prepareLocalRekey, resumeLocalRekey, pendingLocalRekey, clearLocalRekey
 import { emptySafetyPlan, saveSafetyPlan, loadSafetyPlan } from "../src/safetyPlan";
 import { savePendingMeasure, loadPendingMeasure } from "../src/pendingMeasure";
 import { isV2Bound, noteV2Bound, resetEntryVersionMirrors } from "../src/entryVersions";
-import { encryptAudio, decryptAudio } from "../src/crypto/MindPatternCrypto";
+import { encryptAudio, decryptAudio } from "../src/crypto/journalCrypto";
 import { enqueueAudio } from "../src/audioQueue";
 import * as fs from "./helpers/expoFsMock";
 const user = "local-rekey-owner";

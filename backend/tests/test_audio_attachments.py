@@ -1,6 +1,6 @@
 """Voice attachment API (P2): storage, quota, expiry, IDOR, therapist gate.
 
-VOICE_PLAN.md gates for this phase:
+docs/plans/voice-plan.md gates for this phase:
   * one opaque attachment per entry, upsert-replace semantics
   * 30-day retention: lazy expiry on fetch + the sweep function
   * per-user byte quota over LIVE (unexpired) attachments
@@ -17,10 +17,9 @@ filesystem store, so object lifecycles are asserted on actual files.
 from __future__ import annotations
 
 import base64
-
-import pytest
 from datetime import date, timedelta
 
+import pytest
 from sqlalchemy import select, update
 
 from app.models import AccessLog, AudioAttachment, Consent, Entry, User, utcnow

@@ -2,8 +2,6 @@
  *  version-conflict editing, delete, and the rollback guard. Entries are
  *  encrypted with the REAL patient crypto so the decrypt path is the
  *  shipping one. */
-// @ts-nocheck
-
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HistoryView } from "../src/views/History";
 import { decryptEntry, encryptEntry } from "../src/crypto/patient";
@@ -13,7 +11,7 @@ import { observeEntryVersions, resetEntryVersionMirrors } from "../src/entryVers
 import { setKvBackendForTests, type KvBackend } from "../src/kvstore";
 import { vault } from "../src/vault";
 import { installSession, jsonResponse, resetTestState, stubFetch } from "./helpers/api";
-import { flush, press, render, settle, textOf, textOfNode, typeArea, typeInto } from "./helpers/rtr";
+import { press, render, settle, textOf, textOfNode, typeArea, typeInto } from "./helpers/rtr";
 
 const ORIGIN = "http://localhost:5173";
 const DATA_KEY = new Uint8Array(new ArrayBuffer(32)).fill(9);

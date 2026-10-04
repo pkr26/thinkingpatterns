@@ -6,7 +6,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system/legacy";
 import { api, ApiError, canonicalOrigin, getBaseUrl, OriginPinnedError } from "./api/client";
 import { engine } from "./crypto/engine";
-import { decryptAudio, encryptAudio } from "./crypto/MindPatternCrypto";
+import { decryptAudio, encryptAudio } from "./crypto/journalCrypto";
 import { flushQueue, pendingEntryIds } from "./offlineQueue";
 import { cachedEnvelope, fetchEnvelope } from "./keyScheme";
 import { ACCOUNT_STORAGE_PREFIX } from "./accountStorage";

@@ -3,8 +3,6 @@
  *  the draft seal never running. These pins hold the two layers: calm
  *  fallback copy (localized), the draft seal firing on catch, and the
  *  view boundary recovering on navigation without a reload. */
-// @ts-nocheck
-
 import { describe, expect, it, vi } from "vitest";
 import React from "react";
 import { act } from "react";

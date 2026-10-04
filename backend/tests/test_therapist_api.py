@@ -20,8 +20,8 @@ The claims under test, in order of consequence:
 
 from __future__ import annotations
 
-import base64
 import asyncio
+import base64
 import json
 from datetime import date, timedelta
 
@@ -577,8 +577,7 @@ class TestTherapistReads:
         assert base64.b64decode(body[0]["wrapped_key"])
 
     async def test_patient_list_cap_is_explicit_and_grant_preserves_code(self, client, monkeypatch):
-        from app.api import consents as consents_api
-        from app.api import therapist as therapist_api
+        from app.api import consents as consents_api, therapist as therapist_api
 
         # Small test seam; production keeps a 100-record total cap.  Patch
         # both modules because therapist.py imports the shared constant for

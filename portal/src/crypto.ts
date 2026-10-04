@@ -9,12 +9,13 @@
  *   wrap_kek  = HKDF-SHA256(master, salt=zeros, info="mindpattern/portal-wrap/v1")
  *   note_key  = HKDF-SHA256(master, salt=zeros, info="mindpattern/portal-notes/v1")
  *
- * The wrap KEK decrypts THIS therapist's P-256 private key (fetched from
- * GET /therapist/me as an opaque blob); the note key encrypts notes. The
- * patient data key is never stored — it is unwrapped per patient per
- * session (ECDH + HKDF over the consent's wrapped key) and kept in memory
- * only.
+ * The wrap KEK opens the therapist's P-256 identity key. The v1 note key
+ * is retained for legacy decryption; identity-derived v2 keys and the
+ * active notes keyring preserve access across credential changes.
+ * Patient data keys are unwrapped per patient and remain in session memory.
  */
+import { buildAad } from "./aad";
+
 
 const subtle = (): SubtleCrypto => {
   const c = globalThis.crypto;
@@ -39,7 +40,7 @@ const AUTH_INFO = new TextEncoder().encode("mindpattern/auth/v1");
 const PORTAL_WRAP_INFO = new TextEncoder().encode("mindpattern/portal-wrap/v1");
 const PORTAL_NOTES_INFO = new TextEncoder().encode("mindpattern/portal-notes/v1");
 
-/** 2026-10-01 audit C3: notes seal under the therapist's IDENTITY key
+/** Identity-derived note keys use the therapist's P-256 private key
  *  (HKDF over the P-256 private key), not the password. The private key's
  *  BYTES are unchanged by a password change (only their locker is
  *  re-wrapped), so notes — and every future revision — stay decryptable
@@ -61,20 +62,18 @@ const WRAP_INFO = new TextEncoder().encode("mindpattern/wrap/v1");
  * matching backend kdf.hkdf_sha256(salt=None). */
 const ZERO_SALT = new Uint8Array(32);
 
-const b64 = (bytes: Bytes): string => {
+export const toBase64 = (bytes: Bytes): string => {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary);
 };
 
-const unb64 = (text: string): Bytes => {
+export const fromBase64 = (text: string): Bytes => {
   const binary = atob(text);
   const out = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
   return out;
 };
-
-export { b64 as toBase64, unb64 as fromBase64 };
 
 async function hkdf(ikm: BufferSource, salt: BufferSource, info: BufferSource, length: number): Promise<Bytes> {
   const key = await subtle().importKey("raw", ikm, "HKDF", false, ["deriveBits"]);
@@ -184,11 +183,10 @@ export async function unlockWrapPrivateKeyWithNotesKey(
   keyBlobB64: string,
   username: string,
 ): Promise<{ privateKey: CryptoKey; noteKeyV2: Bytes }> {
-  const { buildAad } = await import("./aad");
   let encrypted: Bytes | null = null;
   let pkcs8: Bytes | null = null;
   try {
-    encrypted = unb64(keyBlobB64);
+    encrypted = fromBase64(keyBlobB64);
     pkcs8 = await decrypt(
       wrapKek,
       encrypted,
@@ -221,7 +219,6 @@ export async function unwrapPatientDataKey(
   therapistId: string,
   therapistPubSpkiB64: string,
 ): Promise<Bytes> {
-  const { buildAad } = await import("./aad");
   let ephDer: Bytes | null = null;
   let thDer: Bytes | null = null;
   let wrapped: Bytes | null = null;
@@ -229,9 +226,9 @@ export async function unwrapPatientDataKey(
   let shared: Bytes | null = null;
   let kek: Bytes | null = null;
   try {
-    ephDer = unb64(ephemeralPubSpkiB64);
-    thDer = unb64(therapistPubSpkiB64);
-    wrapped = unb64(wrappedKeyB64);
+    ephDer = fromBase64(ephemeralPubSpkiB64);
+    thDer = fromBase64(therapistPubSpkiB64);
+    wrapped = fromBase64(wrappedKeyB64);
     const ephPub = await subtle().importKey(
       "spki",
       ephDer,
@@ -297,11 +294,10 @@ export async function decryptMeasure(
   userId: string,
   measure: { client_measure_id: string; blob: string; measure_date: string },
 ): Promise<MeasureReading | null> {
-  const { buildAad } = await import("./aad");
   let encrypted: Bytes | null = null;
   let plain: Bytes | null = null;
   try {
-    encrypted = unb64(measure.blob);
+    encrypted = fromBase64(measure.blob);
     plain = await decrypt(
       dataKey,
       encrypted,
@@ -385,7 +381,6 @@ export async function decryptCaseloadSummary(
   userId: string,
   therapistId: string,
 ): Promise<CaseloadSummary | null> {
-  const { buildAad } = await import("./aad");
   let ephDer: Bytes | null = null;
   let thDer: Bytes | null = null;
   let wrapped: Bytes | null = null;
@@ -394,9 +389,9 @@ export async function decryptCaseloadSummary(
   let kek: Bytes | null = null;
   let plain: Bytes | null = null;
   try {
-    ephDer = unb64(ephemeralPubSpkiB64);
-    thDer = unb64(therapistPubSpkiB64);
-    wrapped = unb64(summaryBlobB64);
+    ephDer = fromBase64(ephemeralPubSpkiB64);
+    thDer = fromBase64(therapistPubSpkiB64);
+    wrapped = fromBase64(summaryBlobB64);
     const ephPub = await subtle().importKey(
       "spki",
       ephDer,
@@ -456,7 +451,6 @@ export async function encryptNote(
   clientNoteId: string,
   text: string,
 ): Promise<NoteSealed> {
-  const { buildAad } = await import("./aad");
   const payload = new TextEncoder().encode(JSON.stringify({ v: 1, text })) as Bytes;
   try {
     const blob = await encrypt(
@@ -464,16 +458,14 @@ export async function encryptNote(
       payload,
       buildAad(NOTE_CONTEXT, therapistId, userId, clientNoteId),
     );
-    return { clientNoteId, blobB64: b64(blob) };
+    return { clientNoteId, blobB64: toBase64(blob) };
   } finally {
     zeroize(payload);
   }
 }
 
-/** Decrypt a note blob under EITHER key (2026-10-01 audit C3): new blobs
- *  seal under the identity-derived v2 key; legacy blobs under the retired
- *  password-derived label — tried second, so migrated deployments keep
- *  reading pre-migration rows until their password change rekeys them. */
+/** Try the active notes key, then legacy and historical custody keys.
+ * Credential changes rewrap the keyring while preserving existing note keys. */
 export async function decryptNoteAny(
   noteKeyV2: Bytes,
   legacyNoteKey: Bytes,
@@ -496,11 +488,10 @@ export async function decryptNote(
   clientNoteId: string,
   blobB64: string,
 ): Promise<string> {
-  const { buildAad } = await import("./aad");
   let encrypted: Bytes | null = null;
   let plain: Bytes | null = null;
   try {
-    encrypted = unb64(blobB64);
+    encrypted = fromBase64(blobB64);
     plain = await decrypt(
       noteKey,
       encrypted,
@@ -544,11 +535,10 @@ export async function decryptInsights(
     last_date?: string;
   };
 }> {
-  const { buildAad } = await import("./aad");
   let encrypted: Bytes | null = null;
   let plain: Bytes | null = null;
   try {
-    encrypted = unb64(blobB64);
+    encrypted = fromBase64(blobB64);
     plain = await decrypt(dataKey, encrypted, buildAad("insights", userId, "patterns"));
     return validateInsights(decodeJson(plain)) as unknown as { state_seq?: number; stats: { patterns: PatternPayload[] } };
   } finally {
@@ -579,11 +569,10 @@ export async function decryptEntry(
   transcript_lang?: string;
   english_text?: string | null;
 }> {
-  const { buildAad } = await import("./aad");
   let encrypted: Bytes | null = null;
   let plain: Bytes | null = null;
   try {
-    encrypted = unb64(entry.blob);
+    encrypted = fromBase64(entry.blob);
     // Deep-audit 2026-09-28 CRITICAL fix: since M-2 (2026-09-20) every
     // patient client writes entries under the four-part v2 AAD and the
     // server-side rekey upgrades every row to v2 — a v1-only attempt
@@ -664,14 +653,13 @@ export async function sealPrivateKeyForUpload(
   pkcs8: Bytes,
   username: string,
 ): Promise<string> {
-  const { buildAad } = await import("./aad");
   try {
     const blob = await encrypt(
       wrapKek,
       pkcs8,
       buildAad(THERAPIST_KEY_CONTEXT, username),
     );
-    return b64(blob);
+    return toBase64(blob);
   } finally {
     zeroize(pkcs8);
   }
@@ -695,10 +683,9 @@ export async function openSealedPrivateKey(
   keyBlobB64: string,
   username: string,
 ): Promise<Bytes | null> {
-  const { buildAad } = await import("./aad");
   let encrypted: Bytes | null = null;
   try {
-    encrypted = unb64(keyBlobB64);
+    encrypted = fromBase64(keyBlobB64);
     return await decrypt(
       wrapKek,
       encrypted,
@@ -719,7 +706,7 @@ export async function openSealedPrivateKey(
  * exists only as a zeroized byte buffer inside this function — its base64
  * form is never materialized, and no long-lived object field carries
  * extractable private material. The returned object holds public material
- * (the SPKI b64 — public, safe as a string) and the sealed blob only; the
+ * (the SPKI toBase64 — public, safe as a string) and the sealed blob only; the
  * bytes uploaded are exactly what the previous generate-then-seal flow
  * produced (same KEK, same AAD, same envelope). */
 export async function generateTherapistKeyPair(
@@ -734,7 +721,7 @@ export async function generateTherapistKeyPair(
   try {
     pkcs8 = new Uint8Array(await subtle().exportKey("pkcs8", pair.privateKey));
     return {
-      publicKeySpkiB64: b64(spki),
+      publicKeySpkiB64: toBase64(spki),
       wrapKeyBlobB64: await sealPrivateKeyForUpload(wrapKek, pkcs8, username),
     };
   } finally {
@@ -755,7 +742,7 @@ export async function generateTherapistKeyPair(
  * a determined attacker grind a colliding P-256 key (~2^32) and defeat the
  * read-back. Both platforms changed together (cross-platform contract). */
 export async function keyFingerprint(spkiB64: string): Promise<string> {
-  const digest = new Uint8Array(await subtle().digest("SHA-256", unb64(spkiB64)));
+  const digest = new Uint8Array(await subtle().digest("SHA-256", fromBase64(spkiB64)));
   let hex = "";
   for (const byte of digest.subarray(0, 16)) hex += byte.toString(16).padStart(2, "0");
   hex = hex.toUpperCase();
@@ -772,7 +759,7 @@ export async function keyFingerprint(spkiB64: string): Promise<string> {
  *  nothing against a malicious server; this locally computed digest is
  *  the actual key-substitution check. */
 export async function serverWrapKeyFingerprint(spkiB64: string): Promise<string> {
-  const digest = new Uint8Array(await subtle().digest("SHA-256", unb64(spkiB64)));
+  const digest = new Uint8Array(await subtle().digest("SHA-256", fromBase64(spkiB64)));
   let hex = "";
   for (const byte of digest.subarray(0, 8)) hex += byte.toString(16).padStart(2, "0");
   return hex;
@@ -792,8 +779,7 @@ export async function decryptAudio(
   clientEntryId: string,
   blobB64: string,
 ): Promise<Bytes> {
-  const { buildAad } = await import("./aad");
-  const encrypted = unb64(blobB64);
+  const encrypted = fromBase64(blobB64);
   return await decrypt(
     dataKey,
     encrypted,
@@ -811,15 +797,13 @@ export function wipeNotesKeyring(ring: NotesKeyring | null | undefined): void {
   ring?.active.fill(0); for (const key of ring?.historical ?? []) key.fill(0);
 }
 export async function sealNotesKeyring(kek: Bytes, therapistId: string, ring: NotesKeyring): Promise<string> {
-  const { buildAad } = await import("./aad");
   if (ring.active.length !== KEY_SIZE || ring.historical.length > 512 || ring.historical.some(key => key.length !== KEY_SIZE)) throw new Error("Invalid notes custody.");
-  const plain = new TextEncoder().encode(JSON.stringify({ v: 1, active: b64(ring.active), historical: ring.historical.map(b64) }));
-  try { return b64(await encrypt(kek, plain, buildAad("portal-notes-keyring", therapistId, "v1"))); }
+  const plain = new TextEncoder().encode(JSON.stringify({ v: 1, active: toBase64(ring.active), historical: ring.historical.map(toBase64) }));
+  try { return toBase64(await encrypt(kek, plain, buildAad("portal-notes-keyring", therapistId, "v1"))); }
   finally { plain.fill(0); }
 }
 export async function openNotesKeyring(kek: Bytes, therapistId: string, blob: string): Promise<NotesKeyring> {
-  const { buildAad } = await import("./aad");
-  const plain = await decrypt(kek, unb64(blob), buildAad("portal-notes-keyring", therapistId, "v1"));
+  const plain = await decrypt(kek, fromBase64(blob), buildAad("portal-notes-keyring", therapistId, "v1"));
   const keys: Bytes[] = [];
   try {
     const value: unknown = JSON.parse(new TextDecoder().decode(plain));
@@ -828,8 +812,8 @@ export async function openNotesKeyring(kek: Bytes, therapistId: string, blob: st
     if (row.v !== 1 || typeof row.active !== "string" || !Array.isArray(row.historical) || row.historical.length > 512) throw new Error("Unsupported notes custody.");
     for (const encoded of [row.active, ...row.historical]) {
       if (typeof encoded !== "string") throw new Error("Invalid notes custody key.");
-      const key = unb64(encoded); keys.push(key);
-      if (key.length !== KEY_SIZE || b64(key) !== encoded) throw new Error("Invalid notes custody key.");
+      const key = fromBase64(encoded); keys.push(key);
+      if (key.length !== KEY_SIZE || toBase64(key) !== encoded) throw new Error("Invalid notes custody key.");
     }
     return { active: keys[0]!, historical: keys.slice(1) };
   } catch (err) { for (const key of keys) key.fill(0); throw err; }

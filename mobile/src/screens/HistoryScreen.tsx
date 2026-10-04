@@ -35,7 +35,7 @@ import {
   View,
 } from "react-native";
 import { api, ApiError, ENTRY_PAGE_BYTES } from "../api/client";
-import { decryptEntry, encryptEntry, type EntryPayload } from "../crypto/MindPatternCrypto";
+import { decryptEntry, encryptEntry, type EntryPayload } from "../crypto/journalCrypto";
 import { playVoiceAttachment, type PlayingVoice } from "../audio/playback";
 import { createAudioPlayer } from "expo-audio";
 import {forgetEntryVersion, observeEntryVersions , isV2Bound, noteV2Bound} from "../entryVersions";

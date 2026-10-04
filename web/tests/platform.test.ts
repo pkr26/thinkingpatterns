@@ -1,7 +1,5 @@
 /** The platform seam: origin + storage + downloads + locks + connectivity
  *  all degrade safely when the DOM is absent or hostile (WEB_PLAN R-7). */
-// @ts-nocheck
-
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   currentOrigin,

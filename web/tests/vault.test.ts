@@ -1,7 +1,5 @@
 /** The memory-only key vault: unlock/lock lifecycle, owner binding,
  *  zeroization on lock, and observable subscription. */
-// @ts-nocheck
-
 import { describe, expect, it, vi } from "vitest";
 import { vault } from "../src/vault";
 import type { Bytes } from "../src/crypto/core";

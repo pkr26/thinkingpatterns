@@ -300,8 +300,7 @@ async def main() -> int:
         print("no password given (LOADTEST_PASSWORD or prompt) — refusing to run", file=sys.stderr)
         return 2
 
-    from datetime import date, datetime, timedelta
-    from datetime import timezone as tz
+    from datetime import date, datetime, timedelta, timezone as tz
 
     async with httpx.AsyncClient(base_url=args.url, timeout=120) as client:
         print(f"==> load probe against {args.url} ({args.users} users)")

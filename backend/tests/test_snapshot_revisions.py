@@ -19,7 +19,6 @@ from app.deps import ApiError
 from app.models import User
 from tests.helpers import ClientEmulator, TherapistEmulator
 
-
 TODAY = date.today()
 
 
@@ -304,8 +303,7 @@ async def test_notes_snapshot_revision_tracks_create_update_delete_and_noop_retr
 
 async def test_revision_helpers_fail_closed_when_an_owner_is_missing_or_at_limit():
     """Never permit a write/page without a trustworthy collection marker."""
-    from app.api import entries as entries_api
-    from app.api import therapist as therapist_api
+    from app.api import entries as entries_api, therapist as therapist_api
 
     class MissingOwnerSession:
         async def scalar(self, statement):
@@ -345,8 +343,7 @@ async def test_revision_helpers_fail_closed_when_an_owner_is_missing_or_at_limit
 
 async def test_snapshot_pages_fail_closed_if_marker_moves_during_assembly(client, monkeypatch):
     """A post-selection marker check catches a bypassed second worker."""
-    from app.api import entries as entries_api
-    from app.api import therapist as therapist_api
+    from app.api import entries as entries_api, therapist as therapist_api
 
     owner = ClientEmulator("revision-moving-owner", "pw")
     await owner.register(client)

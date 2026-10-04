@@ -1,12 +1,8 @@
 /**
- * Patients: the therapist's consented patient list, the pairing-code
- * generator (how a new patient connects), and the honest empty/revoked
- * states. Selecting an active patient opens the pattern view.
- *
- * NEW-3 / F.4 (2026-09-22): the "Account security" panel surfaces the
- * backend's verifier-gated atomic custody/password routes and
- * PUT /therapist/wrap-key — password change, legacy interrupted-change
- * recovery, and compromise rotation of the sharing key.
+ * Consented patients, pairing, and account security controls.
+ * Active patients open the detailed read-only review. Password and custody
+ * changes require verifier-gated routes; recovery also supports interrupted
+ * legacy password changes.
  */
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { api, auth, ApiError, type AccessLogRow, type Patient } from "../api";

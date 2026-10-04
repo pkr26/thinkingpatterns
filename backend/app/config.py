@@ -21,8 +21,8 @@ from __future__ import annotations
 import logging
 import os
 import warnings
-from ipaddress import ip_network
 from dataclasses import dataclass, field
+from ipaddress import ip_network
 from urllib.parse import urlparse
 
 logger = logging.getLogger("mindpattern")
@@ -316,8 +316,8 @@ class Settings:
     @property
     def audit_mac_secret_hex(self) -> str:
         """Hex-encoded HMAC key for AccessLog.entry_mac (32 bytes)."""
-        from cryptography.hazmat.primitives.kdf.hkdf import HKDF
         from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
         explicit = self.audit_mac_secret_explicit.strip()
         if explicit:
@@ -498,7 +498,7 @@ class Settings:
     llm_data_retention: str = ""
     llm_policy_version: str = "v1"
 
-    # --- voice journaling (2026-09-29, VOICE_PLAN.md) ------------------------
+    # --- voice journaling (2026-09-29, docs/plans/voice-plan.md) ------------------------
     #
     # Fail closed like therapist sharing: production defaults OFF (the
     # whole /audio router 404s until an operator opts in), while
@@ -956,7 +956,7 @@ class Settings:
             raise RuntimeError("llm_provider_name must be at most 120 characters")
         if len(self.llm_data_retention.strip()) > 500:
             raise RuntimeError("llm_data_retention must be at most 500 characters")
-        # --- voice journaling validation (VOICE_PLAN.md, 2026-09-29) ---------
+        # --- voice journaling validation (docs/plans/voice-plan.md, 2026-09-29) ---------
         if self.stt_url.strip():
             # Recorded audio is POSTed to this endpoint, so it gets exactly
             # the llm_url transport discipline: https-only outside an exact
@@ -1104,7 +1104,7 @@ class Settings:
             llm_provider_name=os.getenv("MINDPATTERN_LLM_PROVIDER_NAME", ""),
             llm_data_retention=os.getenv("MINDPATTERN_LLM_DATA_RETENTION", ""),
             llm_policy_version=os.getenv("MINDPATTERN_LLM_POLICY_VERSION", "v1"),
-            # Voice journaling (VOICE_PLAN.md): same secret-file resolution
+            # Voice journaling (docs/plans/voice-plan.md): same secret-file resolution
             # as every other credential-bearing setting.
             audio_enabled=_optional_bool_env("MINDPATTERN_AUDIO_ENABLED"),
             stt_url=os.getenv("MINDPATTERN_STT_URL", "").strip(),

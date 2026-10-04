@@ -42,8 +42,8 @@ vi.mock("../src/api/client", async () => {
   return { ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
 });
 
-vi.mock("../src/crypto/MindPatternCrypto", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../src/crypto/MindPatternCrypto")>();
+vi.mock("../src/crypto/journalCrypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/crypto/journalCrypto")>();
   return { ...actual, encryptEntry: vi.fn(() => ({ blobB64: "QkxPQg==" })) };
 });
 
@@ -230,7 +230,7 @@ describe("screens render under es", () => {
     __setLocaleForTests("es");
     const { EntryScreen } = await import("../src/screens/EntryScreen");
     const { vault } = await import("../src/vault");
-    const { encryptEntry } = await import("../src/crypto/MindPatternCrypto");
+    const { encryptEntry } = await import("../src/crypto/journalCrypto");
     const { render, textOf, pressLabel, typeInto } = await import("./helpers/rtr");
     vault.lock();
     vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, 2) }, "user-1");

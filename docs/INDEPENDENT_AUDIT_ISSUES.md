@@ -363,7 +363,7 @@ These lenses are not interchangeable: a clean dependency scan, for example, does
 
 - Severity: Medium
 - Status: Open
-- Evidence: `RESEARCH.md` says screeners are not administered; README sections conflict about journal-text LLM analysis.
+- Evidence: `docs/research.md` says screeners are not administered; README sections conflict about journal-text LLM analysis.
 - Required remediation: describe the actual current feature set and clearly distinguish disabled, experimental, and production paths.
 
 ### DOC-002 — Privacy policy template is internally inconsistent and incomplete

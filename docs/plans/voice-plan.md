@@ -137,7 +137,7 @@ share-voice grant. Every play streams through the audited endpoint.
 
 ## The voice contract (what all four codebases implement)
 
-Same discipline as the multi-device sync contract in `WEB_PLAN.md` — one
+Same discipline as the multi-device sync contract in `docs/plans/web-plan.md` — one
 table, pinned by `shared/audio_vectors.json` (P0), enforced by tests on
 every side.
 
@@ -147,7 +147,7 @@ every side.
 | V-2 | Duration & size | Client auto-stops at 300 s; requests carry `duration_seconds` (≤ 310 server-validated) and the audio route has its own body cap (`MINDPATTERN_AUDIO_MAX_BODY_BYTES`, default 4 MiB — remediation 2026-09-29: the shipped default is tighter than this plan originally specified) replacing the global 2 MiB on `/api/{v1,}/audio` paths only. |
 | V-3 | Transcription request/response | `POST /audio/transcriptions {audio_b64, mime, duration_seconds}` → `200 {original_text, language (ISO 639-1), language_raw (provider string), english_text|null, provider_name, policy_version}`. Stateless; audio bytes never persisted. Errors: `403 voice_consent_required`, `413 audio_too_large`, `503 stt_unconfigured`, `502 stt_upstream`, a flat `404 not_found` when the flag is off (the shared vectors' `feature_flag` note). |
 | V-4 | Entry payload v3 | `{text, sentiment, created_at, energy, sleep, tags, tod}` + `transcript_lang` (ISO 639-1 or absent), `english_text` (string or null), `input_mode: "typed"|"voice"`. Decryptors accept v1/v2/v3 (missing fields default to typed behavior). `english_text` always matches the *saved* text: if the patient edits the transcript, the client re-translates via `POST /audio/translations {text, source_lang}` before saving. |
-| V-5 | Audio blob crypto | Same patient data key as entries, AES-256-GCM, AAD `("audio", userId, clientEntryId, 1)`, serialized `nonce‖ct‖tag` base64 in JSON. AAD binding makes cross-entry swaps and cross-user grafts fail closed. Implemented once per client: `web/src/crypto/patient.ts`, `mobile/src/crypto/MindPatternCrypto.ts`, `portal/src/crypto.ts` (decrypt only). |
+| V-5 | Audio blob crypto | Same patient data key as entries, AES-256-GCM, AAD `("audio", userId, clientEntryId, 1)`, serialized `nonce‖ct‖tag` base64 in JSON. AAD binding makes cross-entry swaps and cross-user grafts fail closed. Implemented once per client: `web/src/crypto/patient.ts`, `mobile/src/crypto/journalCrypto.ts`, `portal/src/crypto.ts` (decrypt only). |
 | V-6 | Attachment lifecycle | Max one attachment per entry (`user_id`+`client_entry_id` unique); re-upload is an upsert that deletes the previous S3 object first. `expires_at = created_at + MINDPATTERN_AUDIO_RETENTION_DAYS` (30). Deletion cascades: entry delete, audio delete, account erasure, and expiry sweeper all remove row + object. Lazy expiry check on every fetch → `410 audio_expired`. |
 | V-7 | Playback | Fetch encrypted blob → decrypt in memory → object URL → play → revoke. Never cached at rest by any client; portal included. |
 | V-8 | Offline | Voice requires connectivity (mic disabled offline). Attachment upload is best-effort in-session retry; on failure the entry persists and the user is told the recording wasn't kept. No offline audio queueing in v1 (O-5). |
@@ -349,7 +349,7 @@ raises `client_max_body_size` for the audio location to match.
 - `src/nativeFeatures.ts` — recorder behind the existing dynamic-import
   capability pattern so the app degrades gracefully if the native module
   is unavailable.
-- `src/crypto/MindPatternCrypto.ts` — `encryptAudio`/`decryptAudio` + v3
+- `src/crypto/journalCrypto.ts` — `encryptAudio`/`decryptAudio` + v3
   payload (same vectors as web).
 - `src/screens/EntryScreen.tsx` / `HistoryScreen.tsx` /
   `SettingsScreen.tsx` / `TherapistShareScreen.tsx` — same UX as web;

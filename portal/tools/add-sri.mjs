@@ -1,34 +1,10 @@
 /**
- * Post-build SRI stamp for the portal (FE-3, pentest 2026-09-29).
+ * Stamp local scripts, stylesheets, and script/style preload links with SHA-384 SRI.
+ * Recomputing hashes on every build avoids stale integrity attributes.
+ * Missing referenced assets fail the build; external URLs are reported and skipped.
  *
- * Mirrors web/tools/add-sri.mjs — the portal build was the last bundle
- * without it, so a tampered or substituted portal asset still executed
- * under `script-src 'self'` while the patient web client's dist carried
- * integrity hashes. Same mechanic here: vite emits
- * `<script type="module" crossorigin src="/assets/…">` and the shell links
- * the external `/portal.css` (+ `/print.css` for print); this step
- * recomputes sha384 over each referenced local asset and injects
- * `integrity` attributes into dist/index.html. A tampered or substituted
- * bundle then fails to execute/load in the browser even if an attacker
- * can write to the static host — same-origin SRI is cheap insurance for a
- * static app with no server-side rendering.
- *
- * Stamped surfaces: <script src>, <link rel="stylesheet">,
- * <link rel="modulepreload"> and <link rel="preload" as="script|style">.
- * KNOWN LIMITATION, stated honestly (inherited from the web tool): fonts
- * and other assets referenced from INSIDE CSS (url() in @font-face and
- * the like) cannot carry integrity attributes — they are fetched by the
- * CSS engine, not by an HTML tag — so their integrity is only covered
- * transitively by the stylesheet's own hash. Cross-origin (non
- * root-relative) references are skipped with a warning, never silently.
- *
- * The web tool additionally gates on its public/.well-known/security.txt
- * placeholders; the portal ships no security.txt (that RFC 9116 channel
- * belongs to the patient-facing origin), so no such gate exists here.
- *
- * Fail-closed: a build whose index.html references a local asset that is
- * missing, or that cannot be stamped, exits nonzero so CI never ships an
- * unstamped shell. Run automatically by `npm run build`.
+ * SRI authenticates the referenced asset, not resources fetched from inside CSS.
+ * It also assumes the delivered HTML and its integrity attributes are trusted.
  */
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";

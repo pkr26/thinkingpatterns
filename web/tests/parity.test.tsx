@@ -2,24 +2,17 @@
  *  sharing (lookup → fingerprint → disclosure → fresh-step-up grant →
  *  revoke), settings (LLM consent, access log, export download, queue
  *  recovery, rotation flow, delete gates). Real crypto; fetch stubs. */
-// @ts-nocheck
-
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MeasuresView } from "../src/views/Measures";
 import { ShareView } from "../src/views/Share";
 import { SettingsView } from "../src/views/Settings";
-import { encrypt, fromBase64, toBase64 } from "../src/crypto/core";
-import { buildAad } from "../src/crypto/aad";
-import { INSTRUMENTS } from "../src/measures";
 import { setKvBackendForTests, type KvBackend } from "../src/kvstore";
 import { vault } from "../src/vault";
 import { installSession, jsonResponse, resetTestState, stubFetch } from "./helpers/api";
 import { isDisabled, press, pressSwitch, render, settle, textOf, textOfNode, typeInto } from "./helpers/rtr";
 
 const ORIGIN = "http://localhost:5173";
-const DATA_KEY = new Uint8Array(new ArrayBuffer(32)).fill(8);
 const USER = "user-1";
-const NONCE = fromBase64("AAAAAAAAAAAAAAAA");
 
 const memoryBackend = (): KvBackend => {
   const map = new Map<string, string>();
@@ -116,8 +109,6 @@ describe("MeasuresView", () => {
 });
 
 describe("ShareView", () => {
-  const SPKI = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE" + "A".repeat(80); // not used for real crypto here
-
   it("lookup shows the therapist + fingerprint; grant requires BOTH attestations (W-4)", async () => {
     const calls: { url: string; init: RequestInit }[] = [];
     stubFetch((url, init) => {

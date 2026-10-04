@@ -320,8 +320,8 @@ vi.mock("../src/api/client", async (importOriginal) => {
 vi.mock("../src/reauth", () => ({
   verifyPasswordForVault: vi.fn(),
 }));
-vi.mock("../src/crypto/MindPatternCrypto", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../src/crypto/MindPatternCrypto")>();
+vi.mock("../src/crypto/journalCrypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/crypto/journalCrypto")>();
   return {
     ...actual,
     decryptEntry: vi.fn(),
@@ -345,7 +345,7 @@ vi.mock("../src/biometricUnlock", () => ({ disableBiometricUnlock: vi.fn(async (
 const { api, ApiError } = await import("../src/api/client");
 const mockedApi = vi.mocked(api);
 const mockedReauth = vi.mocked((await import("../src/reauth")).verifyPasswordForVault);
-const mockedCrypto = vi.mocked(await import("../src/crypto/MindPatternCrypto"));
+const mockedCrypto = vi.mocked(await import("../src/crypto/journalCrypto"));
 const { rotatePassword } = await import("../src/rotation");
 
 describe("mutation pins 2026-09-22: password rotation stages", () => {

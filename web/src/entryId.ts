@@ -7,8 +7,6 @@
  * impossibility. base64url output satisfies the client+backend
  * [A-Za-z0-9_-]{1,64} contract band.
  */
-// @ts-nocheck
-
 import { randomBytes } from "./platform";
 
 export function newClientEntryId(entryDate: string): string {

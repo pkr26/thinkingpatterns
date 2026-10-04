@@ -1,9 +1,10 @@
 # Python
 .venv/
 __pycache__/
-*.pyc
+*.py[cod]
 *.egg-info/
 .pytest_cache/
+.hypothesis/
 .mutmut-cache
 mutants/
 htmlcov/
@@ -18,6 +19,7 @@ mobile/android/app/build/
 mobile/.verify-build/
 mobile/.decrypt-build/
 coverage/
+*.tsbuildinfo
 *.log
 # Reviewed synthetic validation evidence accompanies the October 3 reports.
 !reports/audit-2026-10-03/validation-logs/*.log
@@ -25,26 +27,22 @@ coverage/
 !reports/independent-commit-audit-2026-10-03/mobile/*.log
 
 # Local state
+.DS_Store
 *.db
 *.sqlite3
 .env
 
-# SQLite sidecar files (L-3, 2026-09-20): *.db does NOT match the WAL/SHM
-# journals — they hold committed-but-uncheckpointed row images (salts,
-# verifiers, ciphertext) and were one `git add -A` away from a commit.
+# SQLite sidecars contain database content and must stay local.
 *.db-wal
 *.db-shm
 *.db-journal
+*.sqlite3-wal
+*.sqlite3-shm
+*.sqlite3-journal
 
-# Local simulation/dev database artifacts (L-4): contains password
-# verifiers for synthetic accounts — kept out of the checkout root.
+# Local simulation state and runtime audio objects
 backend/.artifacts/
 
-# dev artifacts — never commit real databases
-backend/mindpattern.db
-backend/demo.db
-# runtime object store (local audio backend, sim campaigns) — ciphertext
-# only, but it is generated state, not source
 backend/data/
 .tools/
 
@@ -70,8 +68,7 @@ redteam/mutation_campaign_*/results/
 mobile/reports/
 portal/reports/
 
-# Native project build/state artifacts (2026-09-21: ios/ + android/ now ship
-# in-tree; everything a per-machine build regenerates stays out)
+# Native build output and per-machine state
 mobile/ios/build/
 mobile/ios/DerivedData/
 mobile/ios/*.xcuserstate
@@ -86,11 +83,7 @@ mobile/android/keystore.properties
 *.keystore
 !mobile/android/app/debug.keystore
 
-# Key-material net (2026-09-28 audit): private keys, PKCS#12 bundles and
-# keystores must never enter version control by accident. Nothing matching
-# these patterns is currently tracked (verified against git ls-files), so
-# there are NO re-includes; if a legitimate reviewed fixture ever needs to
-# be committed, re-include it explicitly here with a written reason.
+# Private keys and signing material; reviewed fixtures need explicit exceptions.
 *.pem
 *.key
 *.p12
@@ -103,18 +96,14 @@ id_rsa*
 # Stryker sandbox (in-place temp; only present if a run is killed mid-flight)
 stryker-tmp/
 
-# Compose file-mounted secrets (2026-09-26 infra audit): only the .example
-# templates are committed; every filled copy is a live credential.
+# File-mounted secrets: commit only example templates.
 deploy/secrets/*
 !deploy/secrets/*.example
 
 # Alertmanager receiver config (fail-closed mount): only the example ships.
 deploy/monitoring/alertmanager/alertmanager.yml
-deploy/secrets/rclone_config
 
-
-# 2026-10-01 audit M20: GUI-test screenshots render decrypted (synthetic)
-# journal content and a TOTP secret — generated artifacts, never source.
+# Browser drill screenshots can contain decrypted journals and enrollment secrets.
 gui-test-screenshots/
 e2e_gui/screenshots/
 e2e_gui/audit_screenshots/

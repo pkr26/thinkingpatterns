@@ -1,5 +1,5 @@
 /**
- * Audit fixes 2026-09-26 (AUDIT_FULL_CODEBASE_2026-09-26.md, portal):
+ * Audit fixes 2026-09-26 (docs/archive/audits/AUDIT_FULL_CODEBASE_2026-09-26.md, portal):
  *
  *  M-P1 — every lock boundary (sign-out, idle lock, 401 expiry, bfcache
  *         restore) fires POST /auth/logout best-effort before the local
@@ -17,7 +17,6 @@
  * pinned by tests/crypto.test.ts against the real WebCrypto).
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import React from "react";
 
 vi.mock("../src/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/api")>();
@@ -101,7 +100,7 @@ const mockedApi = vi.mocked(api);
 const { PatientView, resetInsightsFreshness } = await import("../src/views/PatientView");
 const mockedCrypto = vi.mocked(await import("../src/crypto"));
 const rtr = await import("./helpers/rtr");
-const { render, flush, textOf, press, buttonByLabel } = rtr;
+const { render, flush, press, buttonByLabel } = rtr;
 
 const patient = {
   user_id: "user-1",

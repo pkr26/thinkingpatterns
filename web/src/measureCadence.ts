@@ -1,23 +1,10 @@
 /**
- * The check-in cadence preference (clinical review 2026-09-27,
- * opt-in): "remind me to complete a check-in" every 2, 4 (default) or 8
- * weeks — the measurement-based-care rhythm the patient chooses for
- * themselves, never one imposed on them.
+ * Opt-in check-in reminders at two-, four-, or eight-week intervals.
  *
- * ALL LOCAL COMPUTATION, by construction: the preference lives in one
- * plain kvstore slot per account (the D-4 rule — the key is observable
- * metadata, the VALUE is a non-content preference like the theme or the
- * onboarding stamps: an enabled flag, a week count, and a snooze date
- * name no health data), and the due check compares the preference
- * against the measure history the Measures view ALREADY decrypts for the
- * trend. Nothing is sent anywhere; nothing is derived from entry text.
- *
- * TONE (safe-messaging): the banner this powers is a gentle "a check-in
- * is available", never a streak, a deadline, or a lapse. "Not now"
- * snoozes it for three days and that is the whole contract.
+ * Only the enabled flag, interval, and snooze date persist as local preferences.
+ * Due checks use the measure history already decrypted by the view; no journal
+ * content is inspected or sent. Dismissal snoozes the gentle prompt for three days.
  */
-// @ts-nocheck
-
 import { kv } from "./kvstore";
 import { localDateISO } from "./dates";
 

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { describe, expect, it } from "vitest";
 import { en } from "../src/locales/en";
 import { es } from "../src/locales/es";

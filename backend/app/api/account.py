@@ -31,8 +31,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..cache import check_keyed_limit_without_count, make_rate_limiter, record_keyed_failure
 from ..db import rowcount as db_rowcount
 from ..deps import (
-    ensure_no_rekey,
     ApiError,
+    ensure_no_rekey,
     get_session,
     require_regular_user,
     require_therapist_account,
@@ -43,8 +43,8 @@ from ..models import (
     KEY_SCHEME_V1,
     KEY_SCHEME_V2,
     AccessLog,
-    AuditChainState,
     AudioAttachment,
+    AuditChainState,
     Consent,
     ConsentEvent,
     Entry,
@@ -56,8 +56,8 @@ from ..models import (
     utcnow,
 )
 from ..schemas import (
-    AccountDeleteRequest,
     AccessLogExportRow,
+    AccountDeleteRequest,
     ConsentEventOut,
     CredentialRotateRequest,
     ExportBundle,
@@ -65,11 +65,14 @@ from ..schemas import (
     KeyEnvelopeUpgradeRequest,
     LlmConsentRequest,
     LlmConsentResponse,
-    PatientAccessLogOut,
     PasswordChangeRequest,
+    PatientAccessLogOut,
+    RecoveryPasswordResetRequest,
+    RecoverySetupRequest,
+    RecoveryStatusResponse,
+    ShareRecord,
     StepUpRequest,
     StepUpResponse,
-    ShareRecord,
     TotpConfirmRequest,
     TotpEnableResponse,
     TotpSetupRequest,
@@ -77,21 +80,6 @@ from ..schemas import (
     VoiceConsentRequest,
     VoiceConsentResponse,
     entry_out,
-    RecoveryPasswordResetRequest,
-    RecoverySetupRequest,
-    RecoveryStatusResponse,
-)
-from ._audit import append_access_log, parse_access_log_cursor
-from ._sharing_state import (
-    MAX_RETAINED_RELATIONSHIPS_PER_ACCOUNT,
-    add_consent_event,
-)
-from .auth import (
-    AUTH_KEY_SIZE,
-    SALT_BYTES,
-    _auth_limiter,
-    auth_work_slot,
-    hash_verifier_off_loop,
 )
 from ..security import crypto, envelope, kdf
 from ..security.deletion_tombstone import new_deletion_tombstone
@@ -113,10 +101,21 @@ from ..security.totp import (
     verify_code,
     wrap_secret,
 )
-from .measures import _measure_out
-from ..services import llm
+from ..services import llm, stt
 from ..services.audio_store import AudioStoreError, get_audio_store_cached
-from ..services import stt
+from ._audit import append_access_log, parse_access_log_cursor
+from ._sharing_state import (
+    MAX_RETAINED_RELATIONSHIPS_PER_ACCOUNT,
+    add_consent_event,
+)
+from .auth import (
+    AUTH_KEY_SIZE,
+    SALT_BYTES,
+    _auth_limiter,
+    auth_work_slot,
+    hash_verifier_off_loop,
+)
+from .measures import _measure_out
 
 logger = logging.getLogger("mindpattern.account")
 
@@ -1151,6 +1150,7 @@ async def export_account(
                         key = meta.pop("storage_key")
                         try:
                             from types import SimpleNamespace
+
                             from ..services.audio_store import store_for_object
 
                             source_store = store_for_object(

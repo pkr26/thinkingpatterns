@@ -2,13 +2,13 @@
 
 Attack-surface findings that the red-team harnesses (`redteam/run_all.sh`)
 continue to report as `FINDING`, reviewed and accepted for v1 on 2026-09-21
-during the AUDIT_2026-09-21.md remediation. The weekly red-team CI job
+during the docs/archive/audits/AUDIT_2026-09-21.md remediation. The weekly red-team CI job
 (`.github/workflows/redteam.yml`) fails on any FINDING **not** registered
 here, and its gate asserts this file names every allowlisted id — removing
 an id here (because it got fixed) must also remove it from the workflow's
 `DOCUMENTED_RESIDUALS` set; adding one requires a written defense below.
 
-These extend the audit's own residual paragraph (AUDIT_2026-09-21.md,
+These extend the audit's own residual paragraph (docs/archive/audits/AUDIT_2026-09-21.md,
 Part C: immutable analyzer string copies, the base64 data key crossing
 `/processing/sessions`, pairing MITM absent the human fingerprint tap,
 all-or-nothing epoch revocation) with the standing harness verdicts the
@@ -188,7 +188,7 @@ because this file is the register reviewers read):
 
 ## Pentest 2026-09-29 accepted residuals (T-3, T-4, I-6…I-9, INFRA-4)
 
-Residuals from the 2026-09-29 deep pentest (PENTEST_DEEP_2026-09-29.md
+Residuals from the 2026-09-29 deep pentest (docs/archive/audits/PENTEST_DEEP_2026-09-29.md
 §2/§4/§5) that are DOCUMENTED TRADES rather than open bugs — registered
 here because this file is the register reviewers read. MED-2 was subsequently
 closed: non-development boot now requires every purpose split plus a dedicated,
@@ -264,15 +264,15 @@ recorded here so they are not silently dropped (audit round 2, F-6):
   unchecked until the campaign directory exists with every mutant
       killed. Re-review: after the first scheduled Stryker measurements
       land, or before any v2 security review.
-- **README↔RESEARCH.md citation-resolution gate** — PLANNED (registered
-      2026-09-26 documentation pass). The README's error-code list is
-      CI-enforced against `backend/app/**` (the contract-gates scan),
+- **Analysis-to-research citation-resolution gate** — PLANNED (registered
+      2026-09-26 documentation pass). The API error-code list in `docs/api.md` is
+      CI-enforced against `backend/app/**` by `tools/check-docs.py`,
       but nothing yet machine-checks that every author-year citation the
-      README names (e.g. "Bourke et al. 2026") resolves to a
-      RESEARCH.md bibliography entry — the class of drift that let a
+      `docs/analysis.md` names (e.g. "Bourke et al. 2026") resolves to a
+      docs/research.md bibliography entry — the class of drift that let a
       Snippe year error survive until the 2026-09-26 sweep. A
-      contract-gate test extracting author-year references from README's
-      brain table and asserting each appears in RESEARCH.md's
+      contract-gate test extracting author-year references from the analysis
+      pattern table and asserting each appears in docs/research.md's
       bibliography is the intended shape; until it exists, citation
       claims are hand-verified only.
 

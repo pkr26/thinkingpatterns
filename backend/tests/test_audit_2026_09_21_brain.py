@@ -1,7 +1,7 @@
 """Regression tests for the 2026-09-21 audit, Part 1.1 (brain correctness).
 
 Each test names its finding (audit finding IDs D-1..D-5 from
-AUDIT_2026-09-21.md) and pins the fixed behavior:
+docs/archive/audits/AUDIT_2026-09-21.md) and pins the fixed behavior:
 
 * D-1: replication gate bypass via EVIDENCE_DATES_CAP eviction — a
   same-corpus recompute of a >60-evidence-day pattern must NOT satisfy

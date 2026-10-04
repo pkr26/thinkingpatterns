@@ -1,12 +1,7 @@
 /**
- * Month calendar with per-day mood dots (2026-09-17).
- *
- * The audit found History was a 50-per-page linear scroll — unusable past
- * a few months. This calendar gives the at-a-glance month: every journaled
- * day carries a dot colored by that day's check-in (green up, red down,
- * neutral gray), missing days stay blank (no guilt). Tapping a journaled
- * day filters the list to it; tapping it again (or a blank day) clears
- * the filter.
+ * Month calendar with per-day mood dots and a selected-day filter.
+ * Days without an entry stay blank. Tapping a journaled day filters the
+ * history; tapping it again or choosing a blank day clears the filter.
  */
 import React, { useMemo, useState } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";

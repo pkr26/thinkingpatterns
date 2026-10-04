@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 
 # The app fails closed: environment defaults to production, so importing
@@ -17,6 +18,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
+from app import main as main_module
 from app.config import Settings
 from app.main import create_app
 
@@ -53,9 +55,25 @@ def settings() -> Settings:
 
 
 @pytest_asyncio.fixture
-async def app(settings):
+async def app(settings, monkeypatch):
     application = create_app(settings)
+    initial_purge_finished = asyncio.Event()
+    purge_once = main_module._purge_deleted_account_once
+
+    async def finish_initial_purge(app):
+        try:
+            return await purge_once(app)
+        finally:
+            if app is application:
+                initial_purge_finished.set()
+
+    monkeypatch.setattr(main_module, "_purge_deleted_account_once", finish_initial_purge)
     async with application.router.lifespan_context(application):
+        # In-memory SQLite shares one connection across sessions. Finish the
+        # boot-time maintenance read before test requests start writing, or
+        # its session rollback can undo a concurrent registration transaction.
+        # The production worker remains active for subsequent lifecycle tests.
+        await asyncio.wait_for(initial_purge_finished.wait(), timeout=10)
         yield application
 
 

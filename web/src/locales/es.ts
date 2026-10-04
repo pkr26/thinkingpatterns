@@ -10,8 +10,6 @@
  *  - crisis phone numbers (988, 741741, 911) and URLs are NEVER
  *    translated — they are identical to the English catalog by design.
  */
-// @ts-nocheck
-
 
 export const es: Record<string, string> = {
   // ---------------------------------------------------------------- common

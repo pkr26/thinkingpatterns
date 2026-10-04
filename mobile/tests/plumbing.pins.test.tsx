@@ -10,7 +10,7 @@
  *  - reauth: keysEqual's length guard against a longer prefix key, the salt
  *    fallback catch, and the zeroize calls on both match and mismatch.
  */
-// @ts-nocheck
+// @ts-nocheck -- Navigation/style assertions inspect dynamically typed renderer nodes.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
@@ -54,7 +54,7 @@ vi.mock("../src/crypto/kdf", async (importOriginal) => {
 const { AppNavigator } = await import("../src/navigation");
 const { api } = await import("../src/api/client");
 const { darkTheme, lightTheme } = await import("../src/theme");
-const { deriveKeys, deriveKeysAsync } = await import("../src/crypto/MindPatternCrypto");
+const { deriveKeys, deriveKeysAsync } = await import("../src/crypto/journalCrypto");
 const { verifyPasswordForVault } = await import("../src/reauth");
 const { zeroize } = await import("../src/crypto/kdf");
 const { vault } = await import("../src/vault");

@@ -1,24 +1,11 @@
 /**
- * The UI kit — warm, calm, patient-facing, no dependencies (redesign
- * 2026-09-26). Components render through the token-driven classes in
- * public/app.css (light + dark themes) instead of literal inline colors;
- * the old `theme` hex object is retired in favor of src/tokens.ts, which
- * mirrors the CSS custom properties for JS-drawn charts.
+ * Accessible patient-facing UI components styled by public/app.css.
  *
- * Contracts kept from the previous kit: Buttons are real <button>s whose
- * handler is ABSENT (not merely ignored) when disabled; cards are
- * sections with h2 titles; Field/TextArea wrap controls in their labels;
- * Note preserves line breaks; ErrorBanner announces with role=alert;
- * AppFrame keeps the skip link, the sticky header, and the crisis entry
- * point one interaction from every screen.
- *
- * New in the redesign: selection is NEVER the danger color — option
- * chips carry aria-pressed with a soft sage fill and a check icon
- * (fixing the old red-selection bug), and Dialog/Toast/Toggle/Checkbox
- * give the app real overlays, feedback, and switch affordances.
+ * Disabled buttons omit their handlers; cards use section headings; controls
+ * have associated labels; notices expose live regions. Selection uses the
+ * primary palette rather than the danger color. Charts use tokens.ts to
+ * stay synchronized with the light and dark CSS themes.
  */
-// @ts-nocheck
-
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { t } from "./strings";
 import { moodFaceColors, usePaletteVersion } from "./tokens";

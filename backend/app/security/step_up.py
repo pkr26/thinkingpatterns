@@ -8,7 +8,6 @@ import secrets
 import time
 from dataclasses import dataclass
 
-
 STEP_UP_TTL_SECONDS = 120
 STEP_UP_MAX_PROOFS = 10_000
 STEP_UP_MAX_PER_USER = 8

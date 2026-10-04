@@ -1,8 +1,6 @@
 /** The kvstore's IndexedDB path, driven by a minimal fake IDB factory (the
  *  node runtime has none). The in-memory degradation path is exercised by
  *  every other suite implicitly; this pins the real storage adapter. */
-// @ts-nocheck
-
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { kv, resetKvConnectionForTests, setKvBackendForTests } from "../src/kvstore";
 

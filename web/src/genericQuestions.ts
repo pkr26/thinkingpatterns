@@ -1,20 +1,10 @@
 /**
- * GENERIC_QUESTIONS — EMBEDDED COPY of shared/generic_questions.json
- * (the cross-platform source of truth; Metro cannot import outside the
- * project root). Sync is enforced by tests/genericQuestions.test.ts,
- * which reads the shared file from disk and pins array-for-array parity.
+ * Embedded copy of shared/generic_questions.json for offline reflection.
  *
- * Invariants (pinned on BOTH platforms by test):
- *  - every entry ends with "?" (questions, never instructions)
- *  - the word "should" never appears (no advice language)
- *
- * 2026-09-17: expanded 8 -> 60 across evidence-informed reflective
- * families — noticing, self-compassion, gratitude, meaning, emotion
- * granularity, connection, energy, honest difficulty, curiosity. Every
- * phrasing stays observational, never prescriptive.
+ * Cross-platform parity tests pin the question pools. Questions remain
+ * observational: each ends with a question mark and avoids advice language.
+ * The selected question is deterministic for a local date and locale.
  */
-// @ts-nocheck
-
 
 import { localDateISO } from "./dates";
 import type { Locale } from "./strings";

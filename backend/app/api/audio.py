@@ -1,4 +1,4 @@
-"""Voice journaling endpoints (VOICE_PLAN.md, 2026-09-29, P1).
+"""Voice journaling endpoints (docs/plans/voice-plan.md, 2026-09-29, P1).
 
 Transcription + text translation only — attachments arrive in P2. The
 privacy contract of this router, enforced here and pinned by tests:
@@ -31,21 +31,20 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..cache import make_rate_limiter
-from ..deps import ensure_no_rekey, ApiError, get_session, require_regular_user
+from ..deps import ApiError, ensure_no_rekey, get_session, require_regular_user
 from ..locks import UserLocks, lifecycle_locks
 from ..models import AudioAttachment, AudioDeletion, Entry, User, new_id, utcnow
 from ..schemas import (
     AudioAttachmentCreate,
     AudioAttachmentCreated,
     AudioAttachmentOut,
-    AudioTranslationRequest,
-    AudioTranslationResponse,
     AudioTranscriptionRequest,
     AudioTranscriptionResponse,
+    AudioTranslationRequest,
+    AudioTranslationResponse,
 )
 from ..security.crypto import MIN_BLOB_SIZE
-from ..services import audio_store as audio_store_service
-from ..services import stt
+from ..services import audio_store as audio_store_service, stt
 from ..services.audio_store import AudioStoreError, get_audio_store_cached
 from ..services.stt import ALLOWED_AUDIO_MIMES, normalize_mime
 from ._audit import append_access_log

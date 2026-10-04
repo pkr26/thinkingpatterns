@@ -1,43 +1,21 @@
 /**
- * Daily entry: type (or paste speech-to-text output), encrypt on-device,
- * sync. Entries are encrypted before they leave the phone; the save flow
- * queues locally when offline and retries on next launch.
+ * Journal entry, optional mood details, and voice transcription.
+ * Entries are encrypted on-device; failed uploads remain in the encrypted
+ * offline queue. Explicit mood picks take precedence over local estimates.
  *
- * Mood check-in: a one-tap row behind an "Add details (optional)"
- * disclosure above Save ("How does today feel?" and friends) — an
- * explicit pick wins over the quick text estimate, rides in the encrypted
- * payload's sentiment field, and lands in the device-local mood log.
- * Never picking is fine: the text estimate fills the log as before and the
- * payload sentiment stays null for the server's engine. The row never
- * blocks saving. The disclosure is COLLAPSED by default (2026-09-19): a
- * daily writer scrolled past ten optional rows on every write. Nothing
- * set is silently hidden — with anything picked while collapsed, a
- * "Details added: …" summary line names the set channels and expands on
- * tap; the picks themselves ride in the save exactly as before.
+ * Typed drafts are encrypted after edits and flushed on background/unmount.
+ * Only acknowledged writes are called backed up. The account-bound memory
+ * stash also preserves navigation drafts, and question prompts append to an
+ * existing editor rather than replacing the user's words.
  *
- * Typed drafts are encrypted on-device after edits and flushed when the
- * screen backgrounds or unmounts. Only an acknowledged storage write is
- * called backed up; errors retain the prior ciphertext and stay visible.
- * The account-bound RAM stash remains a best-effort navigation fallback.
- * A draft stashed AFTER mount (the Question screen's
- * "Write about this" bridge) restores through the focus listener — set into
- * an empty editor, or APPENDED below in-progress typing after a blank line:
- * the bridge never overwrites the user's words and never silently drops the
- * question.
- *
- * Save feedback is inline and quiet: "Saved ✓" / "Saved — will sync when
- * online" appear as a transient status line where the user is already
- * looking. Alerts are reserved for failures that need a decision.
- *
- * Keyboard privacy: autoCorrect/spellCheck are OFF and textContentType is
- * "none" — journal text must not train or linger in keyboard caches.
+ * Save confirmations are inline; failures needing a decision use alerts.
+ * Autocorrect and spellcheck are disabled to limit keyboard caching.
  */
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   AppState,
   Keyboard,
-  KeyboardAvoidingView,
   Platform,
   ScrollView,
   StyleSheet,
@@ -47,13 +25,13 @@ import {
   View,
 } from "react-native";
 import { api, ApiError } from "../api/client";
-import { encryptEntry, timeOfDayBucket } from "../crypto/MindPatternCrypto";
+import { encryptEntry, timeOfDayBucket } from "../crypto/journalCrypto";
 import { zeroize } from "../crypto/kdf";
 import { vault } from "../vault";
 import { useSession, stashDraft, takeStashedDraft, peekStashedJournalDraft, clearStashedJournalDraft } from "../store";
 import { enqueue, flushQueue, QueueAbandonedError, QueueFullError } from "../offlineQueue";
 import { discardTakeFile, useVoiceRecorder } from "../audio/recorder";
-import { encryptAudio } from "../crypto/MindPatternCrypto";
+import { encryptAudio } from "../crypto/journalCrypto";
 import { enqueueAudio, releaseAudioParent, flushAudioQueue } from "../audioQueue";
 import { localDateISO, localStreak, recordMood, recentMoods } from "../moodLog";
 import { mirrorMoodCheckIn } from "../healthkit";
@@ -545,11 +523,6 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
         await recordCrisisDialogShown(userId, today);
         showCrisisAlert();
       };
-      // The explicit check-in pick, captured before the success path clears
-      // it — only an explicit pick is ever mirrored OUT to the Health app
-      // (the text-derived estimate stays device-local; a derived score is
-      // not the user's own act and does not belong in Health).
-      const moodPick = editorSnapshot.mood;
       const take = voice?.keepAudio ? voiceRecorder.take : null;
       if (take && voiceEntryIdRef.current?.uri !== take.uri) voiceEntryIdRef.current = { uri: take.uri, id: newClientEntryId(today) };
       const clientEntryId = take ? voiceEntryIdRef.current!.id : newClientEntryId(today);

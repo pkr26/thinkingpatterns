@@ -1,25 +1,14 @@
 /**
- * Per-entry content-version high-water marks (audit fix M-2, 2026-09-20).
+ * Per-entry rollback protection for version-bound ciphertext.
+ * AES-GCM verifies the entry's declared version, but a server could replay
+ * both an older valid blob and its matching version. Remembering the highest
+ * observed version detects that rollback before HistoryScreen renders it.
  *
- * The v2 entry AAD binds ("entry", userId, id, content_version) into the
- * ciphertext, so a stale blob can no longer masquerade as a NEWER version
- * of itself. What AES-GCM still cannot see is a both-copies rollback: a
- * compromised server replaying an older VALID blob together with its own
- * truthful, older version echo. This module pins the highest version ever
- * observed per entry in device-local storage — the same standing the
- * insights stateSeqGuard gives the analysis generation — and makes any
- * backwards move loud:
- *
- *   - HistoryScreen treats a rolled-back entry exactly like a tampered
- *     blob: skipped and counted, never rendered as today's truth.
- *
- * Storage is AES-GCM under the DATA KEY (AAD binds the user): the map is
- * device-local, unreadable and unwritable by the server, and a local
- * attacker who zeroes it degrades to "no memory" rather than to a forged
- * lower mark. A process-lifetime in-memory mirror keeps the guard alive
- * within a session even if device storage is wiped mid-run (stateSeqGuard
- * idiom). Deleting an entry forgets its mark so a later recreate of the
- * same id (legitimately version 1 again) does not false-alarm.
+ * The map is encrypted under the account data key. An in-memory mirror
+ * preserves the current process's observations if storage disappears.
+ * Deleting an entry removes its mark so a legitimate recreation can start
+ * at version 1. A separate set records entries that have authenticated with
+ * v2 AAD and must never fall back to unversioned legacy decryption.
  */
 import { captureLocalWritePermit, assertLocalWritePermit, commitLocalWrite, type LocalWritePermit } from "./localRekey";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -27,11 +16,8 @@ import { buildAad } from "./crypto/aad";
 import { decrypt, encrypt } from "./crypto/envelope";
 import { accountStorageKey } from "./accountStorage";
 
-// --- 2026-10-01 audit M1: the v2-bound set (see web/src/entryVersions.ts
-// for the full rationale) — ids whose blob has EVER authenticated under
-// the version-bound v2 AAD; for those, the legacy version-free fallback
-// is refused (a stale-blob replay is not a legacy row). Encrypted at rest
-// under the data key, AAD-bound to the user; absent/corrupt = no memory.
+// IDs authenticated with v2 AAD cannot use the legacy unversioned fallback.
+// The encrypted persisted set and process mirror enforce the same rule.
 const v2BoundMirror = new Map<string, Set<string>>();
 
 function v2BoundKey(userId: string): string {
@@ -76,14 +62,17 @@ async function persistV2Bound(userId: string, dataKey: Buffer, bound: Set<string
 /** Record that this id authenticated under the v2 binding — the legacy
  *  fallback is refused for the id from now on. */
 export async function noteV2Bound(userId: string, dataKey: Buffer, clientEntryId: string): Promise<void> {
-  const permit = captureLocalWritePermit(userId, dataKey), copy = Buffer.from(dataKey);
+  const permit = captureLocalWritePermit(userId, dataKey);
+  const keyCopy = Buffer.from(dataKey);
   try {
-    const bound = await loadV2Bound(userId, copy);
+    const bound = await loadV2Bound(userId, keyCopy);
     assertLocalWritePermit(permit);
     if (bound.has(clientEntryId)) return;
     bound.add(clientEntryId);
-    await persistV2Bound(userId, copy, bound, permit);
-  } finally { copy.fill(0); }
+    await persistV2Bound(userId, keyCopy, bound, permit);
+  } finally {
+    keyCopy.fill(0);
+  }
 }
 
 /** Whether this id has EVER authenticated under the v2 binding. */
@@ -167,27 +156,30 @@ export async function observeEntryVersions(
   dataKey: Buffer,
   rows: ReadonlyArray<{ clientEntryId: string; contentVersion: number }>,
 ): Promise<VersionObservation> {
-  const permit = captureLocalWritePermit(userId, dataKey), copy = Buffer.from(dataKey);
+  const permit = captureLocalWritePermit(userId, dataKey);
+  const keyCopy = Buffer.from(dataKey);
   try {
-  const mirror = await loadStored(userId, copy);
-  assertLocalWritePermit(permit);
-  const rolledBack: string[] = [];
-  let advanced = false;
-  for (const row of rows) {
-    if (!Number.isSafeInteger(row.contentVersion) || row.contentVersion < 1) continue;
-    const known = mirror.get(row.clientEntryId) ?? 0;
-    if (row.contentVersion < known) {
-      rolledBack.push(row.clientEntryId);
-      continue;
+    const mirror = await loadStored(userId, keyCopy);
+    assertLocalWritePermit(permit);
+    const rolledBack: string[] = [];
+    let advanced = false;
+    for (const row of rows) {
+      if (!Number.isSafeInteger(row.contentVersion) || row.contentVersion < 1) continue;
+      const known = mirror.get(row.clientEntryId) ?? 0;
+      if (row.contentVersion < known) {
+        rolledBack.push(row.clientEntryId);
+        continue;
+      }
+      if (row.contentVersion > known) {
+        mirror.set(row.clientEntryId, row.contentVersion);
+        advanced = true;
+      }
     }
-    if (row.contentVersion > known) {
-      mirror.set(row.clientEntryId, row.contentVersion);
-      advanced = true;
-    }
+    if (advanced) await persist(userId, keyCopy, mirror, permit);
+    return { rolledBack, advanced };
+  } finally {
+    keyCopy.fill(0);
   }
-  if (advanced) await persist(userId, copy, mirror, permit);
-  return { rolledBack, advanced };
-  } finally { copy.fill(0); }
 }
 
 /** The highest version remembered for one entry (null when never seen). */
@@ -204,16 +196,19 @@ export async function knownEntryVersion(
 /** Forget one entry's mark (its row was deleted; a later recreate of the
  * same id legitimately restarts at version 1). */
 export async function forgetEntryVersion(userId: string, dataKey: Buffer, clientEntryId: string): Promise<void> {
-  const permit = captureLocalWritePermit(userId, dataKey), copy = Buffer.from(dataKey);
+  const permit = captureLocalWritePermit(userId, dataKey);
+  const keyCopy = Buffer.from(dataKey);
   try {
-  const mirror = await loadStored(userId, copy);
-  assertLocalWritePermit(permit);
-  if (mirror.delete(clientEntryId)) await persist(userId, copy, mirror, permit);
-  // 2026-10-01 audit M1: the mark dies with the row.
-  const bound = await loadV2Bound(userId, copy);
-  assertLocalWritePermit(permit);
-  if (bound.delete(clientEntryId)) await persistV2Bound(userId, copy, bound, permit);
-  } finally { copy.fill(0); }
+    const mirror = await loadStored(userId, keyCopy);
+    assertLocalWritePermit(permit);
+    if (mirror.delete(clientEntryId)) await persist(userId, keyCopy, mirror, permit);
+    // Deleting the entry also removes its required-AAD-version marker.
+    const bound = await loadV2Bound(userId, keyCopy);
+    assertLocalWritePermit(permit);
+    if (bound.delete(clientEntryId)) await persistV2Bound(userId, keyCopy, bound, permit);
+  } finally {
+    keyCopy.fill(0);
+  }
 }
 
 /** Forget everything for a user (sign-out / account deletion / origin

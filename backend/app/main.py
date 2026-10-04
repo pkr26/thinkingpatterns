@@ -179,7 +179,7 @@ async def _prune_expired_questions_once(app: FastAPI) -> bool:
     from sqlalchemy import delete, select
 
     from .api.insights import QUESTION_RETENTION_DAYS
-    from .models import Insight, KIND_QUESTION, utcnow
+    from .models import KIND_QUESTION, Insight, utcnow
 
     cutoff = utcnow().date() - timedelta(days=QUESTION_RETENTION_DAYS)
     async with app.state.sessionmaker() as session:
@@ -355,8 +355,8 @@ async def _prune_access_log_once_with_evidence(
         authenticate_verification_checkpoint,
         compact_audit_journal,
         prune_access_logs,
-        seal_verification_checkpoint,
         seal_legacy_audit_states,
+        seal_verification_checkpoint,
         verify_access_log_chain_incremental,
     )
     from .models import (
@@ -769,7 +769,7 @@ async def _account_deletion_sweep(app: FastAPI) -> None:
 
 
 async def _audio_retention_sweep(app: FastAPI) -> None:
-    """Recurring 30-day audio-attachment retention pass (VOICE_PLAN.md).
+    """Recurring 30-day audio-attachment retention pass (docs/plans/voice-plan.md).
 
     Deletes expired attachments' objects then rows, one bounded batch per
     cycle; a store outage logs and retries next cycle (a failed pass must
@@ -779,11 +779,11 @@ async def _audio_retention_sweep(app: FastAPI) -> None:
     """
     from .services.audio_store import (
         AudioStoreError,
-        get_audio_store_cached,
-        sweep_expired_audio,
-        drain_audio_deletions,
-        reconcile_audio_inventory,
         audio_deletion_backlog,
+        drain_audio_deletions,
+        get_audio_store_cached,
+        reconcile_audio_inventory,
+        sweep_expired_audio,
     )
 
     while True:
@@ -1021,7 +1021,7 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
     app = FastAPI(
         title="Fathom API",
         version=APP_VERSION,
-        description="Zero-knowledge personal pattern recognition for mental state.",
+        description="Encrypted journaling API and deterministic pattern analysis.",
         lifespan=lifespan,
         # The interactive docs and schema are developer tooling: in any
         # non-development environment they would hand an attacker a complete

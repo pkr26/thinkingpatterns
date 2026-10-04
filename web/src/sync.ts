@@ -1,18 +1,11 @@
 /**
- * The multi-device reconciliation engine (WEB_PLAN P5, contract S-1):
- * the server is the single source of truth; this module pulls fresh truth
- * at the honest moments — login, regained focus, regained connectivity —
- * under a Web Lock so two tabs never reconcile concurrently, and routes
- * the account-wide death funnels (D-8) to the app with the right reason.
+ * Reconcile analysis on login, focus, and restored connectivity under a Web Lock.
  *
- * What reconciliation does NOT do: merge. Entries pages walk under one
- * revision snapshot or restart (S-5); insights decrypt through the
- * state_seq guard (S-6); a decrypt failure with a live session means the
- * data key changed elsewhere (S-8) and surfaces as `credentialRotated` —
- * never a retry loop, never stale keys.
+ * Insights pass the analysis-generation guard before rendering. A decryption
+ * failure with a still-current session reports credential rotation; a racing
+ * lock reports a locked session. Entry history performs its own revision-bound
+ * fetch and is not downloaded by reconciliation.
  */
-// @ts-nocheck
-
 import { ApiError, api, hasSession, sessionAbortSignal, sessionUserId, type InsightsResponse } from "./api/client";
 import { displayError } from "./errors";
 import { t } from "./strings";

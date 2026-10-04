@@ -30,7 +30,6 @@ from ..models import (
 )
 from .audio_store import enqueue_audio_delete, get_audio_store_cached
 
-
 ACCOUNT_PURGE_ROW_BATCH = 100
 ACCOUNT_PURGE_AUDIO_BATCH = 50
 ACCOUNT_DELETION_STATUS_PROBE_LIMIT = 1_001

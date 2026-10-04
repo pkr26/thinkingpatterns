@@ -8,8 +8,6 @@
  * replayed across recomputes). The shipped shape partitions taps from
  * mutes: {"feedback": [...], "muted": [pids], "unmuted": [pids]}.
  */
-// @ts-nocheck
-
 import { buildAad } from "./crypto/aad";
 import { decrypt, encrypt, fromBase64, toBase64, zeroize, type Bytes } from "./crypto/core";
 import { kv,type WritePermit } from "./kvstore";
@@ -60,23 +58,6 @@ async function readPending(dataKey: Bytes, userId: string): Promise<FeedbackEven
     return []; // wrong key / corruption: disposable
   } finally {
     zeroize(plaintext);
-  }
-}
-
-/** 2026-09-26 audit follow-up (B-7): rotation REWRAPS the pending
- *  feedback queue under the incoming data key instead of clearing it.
- *  A failure propagates so the rotation falls back to the old clear. */
-export async function rewrapFeedback(oldKey: Bytes, newKey: Bytes, userId: string): Promise<void> {
-  const permit=await kv.captureWritePermit(userId,newKey);
-  const pending = await readPending(oldKey, userId);
-  if (pending.length === 0) return;
-  let payload: Uint8Array<ArrayBuffer> | null = new TextEncoder().encode(JSON.stringify(pending.slice(-MAX_PENDING)));
-  try {
-    const blob = await encrypt(newKey, payload, buildAad("feedback-local", userId));
-    await kv.setItem(key(userId), toBase64(blob),permit);
-  } finally {
-    zeroize(payload);
-    payload = null;
   }
 }
 

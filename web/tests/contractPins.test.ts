@@ -1,8 +1,6 @@
 /** Cross-platform contract pins for the embedded copies: the crisis
  *  language contract and the reflective question pools must match
  *  shared/*.json exactly (the repo's copy-and-pin discipline, D-2). */
-// @ts-nocheck
-
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";

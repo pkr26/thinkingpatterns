@@ -7,7 +7,7 @@
  *    global expectStyle matcher is satisfied by GhostButton's text, which
  *    shares {color: muted, fontSize: 14}).
  */
-// @ts-nocheck
+// @ts-nocheck -- Mutation cases omit navigation and call Alert mock methods absent from native types.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
@@ -26,8 +26,8 @@ vi.mock("../../src/unlockProof", () => ({
   unlockProofExists: vi.fn(async () => false),
 }));
 
-vi.mock("../../src/crypto/MindPatternCrypto", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/crypto/MindPatternCrypto")>();
+vi.mock("../../src/crypto/journalCrypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/crypto/journalCrypto")>();
   return {
     ...actual,
     deriveKeysAsync: vi.fn(async () => ({
@@ -49,7 +49,7 @@ vi.mock("../../src/store", async (importOriginal) => {
 });
 
 const { api } = await import("../../src/api/client");
-const { deriveKeysAsync } = await import("../../src/crypto/MindPatternCrypto");
+const { deriveKeysAsync } = await import("../../src/crypto/journalCrypto");
 const { UnlockScreen } = await import("../../src/screens/UnlockScreen");
 const { vault } = await import("../../src/vault");
 const { render, flush, allText, pressLabel, typeInto } = await import("../helpers/rtr");

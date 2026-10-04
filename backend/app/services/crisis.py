@@ -625,8 +625,6 @@ def _fold_latin_marks(text: str) -> str:
 # ("k😊ll" must reach the fold as one token, not be pre-split into
 # "k 😊 ll" where the drop can no longer see both kept neighbors).
 _NONASCII_LETTER_RE = re.compile(r"[^\x00-\x7f]")
-_SCRIPT_BOUNDARY_RE = re.compile(r"([a-z0-9])([^\x00-\x7f])")
-_SCRIPT_BOUNDARY_RE2 = re.compile(r"([^\x00-\x7f])([a-z0-9])")
 
 
 def _is_nonascii_letter(ch: str) -> bool:

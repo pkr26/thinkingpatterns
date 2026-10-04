@@ -2,8 +2,6 @@
  *  switching, the catalog fallback, date formatting, the prompt chips, the
  *  deterministic question rotation, the mood label helpers, and the
  *  Language preference (auto/en/es, persisted + live — audit 2026-09-26). */
-// @ts-nocheck
-
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   __setLocaleForTests,

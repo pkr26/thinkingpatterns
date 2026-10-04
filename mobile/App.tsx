@@ -18,9 +18,7 @@ import { ErrorBoundary } from "./src/ErrorBoundary";
 export default function App(): React.JSX.Element {
   return (
     <ThemeProvider>
-      {/* 2026-10-01 audit L-4: no componentDidCatch existed anywhere — any
-          render throw white-screened the app with no crisis-resources
-          escape hatch. Inside ThemeProvider so the fallback is themed. */}
+      {/** Keep the fallback inside ThemeProvider and outside the screen tree. */}
       <ErrorBoundary>
         <ThemedApp />
       </ErrorBoundary>
@@ -28,19 +26,15 @@ export default function App(): React.JSX.Element {
   );
 }
 
-/** Kept below ThemeProvider so the app-switcher shield tracks an explicit
- * light/dark setting too. Calling useTheme above its provider meant the
- * shield permanently followed only the OS, briefly flashing the wrong color
- * when a user chose an override. */
+/** Use the selected theme for the app-switcher privacy shield. */
 function ThemedApp(): React.JSX.Element {
   const t = useTheme();
   const [languageReady, setLanguageReady] = useState(false);
   const [shielded, setShielded] = useState(AppState.currentState !== "active");
 
   useEffect(() => {
-    // 2026-09-29 deep audit (P2): apply the stored language override
-    // before the first meaningful render (unreadable storage keeps the
-    // device-detected locale — boot never blocks on it).
+    // Apply the stored language before the first screen renders.
+    // Unreadable storage preserves the detected device locale.
     let cancelled = false;
     void applyStoredLanguageChoice().finally(() => { if (!cancelled) setLanguageReady(true); });
     const sub = AppState.addEventListener("change", (state) => {
@@ -49,10 +43,8 @@ function ThemedApp(): React.JSX.Element {
     return () => { cancelled = true; sub.remove(); };
   }, []);
 
-  // Notification-tap routing (2026-09-27): a tap on the measure check-in
-  // nudge queues its destination; the navigator opens the Measures screen
-  // when the main flow is entered. Quiet no-op while the notification
-  // module is unlinked in this build (the seam's own guarantee).
+  // Queue notification destinations until the unlocked navigator is ready.
+  // Missing native notification support leaves routing inactive.
   useEffect(() => {
     let cancelled = false;
     let dispose: (() => void) | null = null;

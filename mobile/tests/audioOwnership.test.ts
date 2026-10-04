@@ -6,7 +6,7 @@ import { api, canonicalOrigin, getBaseUrl } from "../src/api/client";
 import { setSecureStoreBackend } from "../src/secureStore";
 import { prepareLocalRekey, __resetLocalKeyLifecycleForTests } from "../src/localRekey";
 import { enqueueAudio, exportSavedAudio, listSavedAudio, removeSavedAudio, flushAudioQueue } from "../src/audioQueue";
-import { encryptAudio } from "../src/crypto/MindPatternCrypto";
+import { encryptAudio } from "../src/crypto/journalCrypto";
 import { eraseDeletedAccountLocals } from "../src/accountErasure";
 
 vi.mock("../src/nativeFeatures", () => ({ cancelDailyReminder: vi.fn(async () => true), cancelMeasureReminder: vi.fn(async () => true) }));

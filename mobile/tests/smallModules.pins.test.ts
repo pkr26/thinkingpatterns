@@ -19,7 +19,6 @@
  * fast path, the utf8 encoding literal; entryId's unreachable padding
  * strip; genericQuestions' loop bound — see those files).
  */
-// @ts-nocheck
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import storage from "./helpers/storageMock";
@@ -34,7 +33,7 @@ beforeEach(() => {
 /** A fresh secureStore module graph backed by a KNOWN device key. */
 async function freshSecureStore(key: Buffer) {
   vi.resetModules();
-  const freshStorage = (await import("@react-native-async-storage/async-storage")).default as typeof storage;
+  const freshStorage = (await import("@react-native-async-storage/async-storage")).default;
   await freshStorage.setItem("@mindpattern/device_k", key.toString("base64"));
   const mod = await import("../src/secureStore");
   return { freshStorage, secureStore: mod.secureStore };
@@ -94,7 +93,7 @@ describe("unlockProof pins", () => {
     await storeUnlockProof(dataKey, "u9");
     const raw = await s.getItem("@mindpattern/unlockproof_u9");
     expect(raw).not.toBeNull();
-    const plain = decrypt(dataKey, Buffer.from(raw, "base64"), buildAad("unlockproof", "u9"));
+    const plain = decrypt(dataKey, Buffer.from(raw!, "base64"), buildAad("unlockproof", "u9"));
     expect(plain.toString("utf8")).toBe("mindpattern-unlock-proof/v1");
   });
 

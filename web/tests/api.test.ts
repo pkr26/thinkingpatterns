@@ -1,7 +1,5 @@
 /** The API client's hardening, error contract, session-death latch, and
  *  pagination validators — the request core is the security surface. */
-// @ts-nocheck
-
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   api,

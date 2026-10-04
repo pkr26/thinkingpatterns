@@ -1,27 +1,10 @@
 /**
- * Post-build SRI stamp (industrial hardening, 2026-09-26).
+ * Stamp local scripts, stylesheets, and script/style preload links with SHA-384 SRI.
+ * Recomputing hashes on every build avoids stale integrity attributes.
+ * Missing referenced assets fail the build; external URLs are reported and skipped.
  *
- * vite emits `<script type="module" crossorigin src="/assets/…">` and the
- * shell links the external `/app.css`; this step recomputes sha384 over
- * each referenced local asset and injects `integrity` attributes into
- * dist/index.html. A tampered or substituted bundle then fails to
- * execute/load in the browser even if an attacker can write to the static
- * host — same-origin SRI is cheap insurance for a static app with no
- * server-side rendering.
- *
- * Stamped surfaces: <script src>, <link rel="stylesheet">,
- * <link rel="modulepreload"> and <link rel="preload" as="script|style">
- * (2026-09-28 audit: the modulepreload/preload links vite emits were
- * silently unstamped before). KNOWN LIMITATION, stated honestly: fonts and
- * other assets referenced from INSIDE CSS (url() in @font-face and the
- * like) cannot carry integrity attributes — they are fetched by the CSS
- * engine, not by an HTML tag — so their integrity is only covered
- * transitively by the stylesheet's own hash. Cross-origin (non
- * root-relative) references are skipped with a warning, never silently.
- *
- * Fail-closed: a build whose index.html references a local asset that is
- * missing, or that cannot be stamped, exits nonzero so CI never ships an
- * unstamped shell. Run automatically by `npm run build`.
+ * SRI authenticates the referenced asset, not resources fetched from inside CSS.
+ * It also assumes the delivered HTML and its integrity attributes are trusted.
  */
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -56,7 +39,7 @@ let stamped = 0;
 // recomputed, so a rebuilt bundle never keeps a stale hash). Non
 // root-relative references cannot be stamped — they are skipped with a
 // WARNING so a CDN-relative or protocol-relative slip is visible, not
-// silently unprotected (2026-09-28 audit).
+// silently unprotected.
 html = html.replace(/<script\b[^>]*\bsrc="([^"]+)"[^>]*>/g, (tag, src) => {
   if (!src.startsWith("/")) {
     console.warn(`add-sri: SKIPPED non-root-relative script src="${src}" — it carries no integrity; verify it is intentionally external`);
@@ -71,11 +54,7 @@ html = html.replace(/<link\b[^>]*>/g, (tag) => {
   const rel = (tag.match(/\brel="([^"]+)"/)?.[1] ?? "").split(/\s+/);
   const as = tag.match(/\bas="([^"]+)"/)?.[1] ?? "";
   const href = tag.match(/\bhref="([^"]+)"/)?.[1];
-  // 2026-09-28 audit: vite's <link rel="modulepreload" …> and
-  // <link rel="preload" as="script|style" …> emissions were never matched
-  // by the old stylesheet-only regex — the module graph's subresource
-  // integrity silently did not exist. Attribute order is deliberately
-  // re-parsed per tag instead of assumed.
+  // Include preload links as well as stylesheets; attribute order is arbitrary.
   const stampable = rel.includes("stylesheet") || rel.includes("modulepreload")
     || (rel.includes("preload") && (as === "script" || as === "style"));
   if (!stampable) return tag;

@@ -1,12 +1,8 @@
 /**
- * Account recovery with the recovery key (wave 3, 2026-09-30).
- *
- * Reached from the login screen ("Forgot password? Use a recovery key").
- * The user proves the username + recovery key, chooses a NEW password,
- * and one button runs the whole sequence (recoverAccountWithKey): the
- * journal's data key is recovered, the new password takes over
- * server-side, the local caches follow, and the vault unlocks — every
- * word intact. Calm copy throughout: this screen is used on a bad day.
+ * Recovery-key sign-in and password replacement.
+ * recoverAccountWithKey verifies the recovery key, recovers the journal data
+ * key, changes the server credentials, updates local caches, and unlocks the
+ * vault. The raw recovery key remains on-device.
  */
 import React, { useEffect, useRef, useState } from "react";
 import {

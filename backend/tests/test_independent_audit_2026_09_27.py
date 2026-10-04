@@ -11,8 +11,8 @@ and the Settings knobs the fixes added.
 
 from __future__ import annotations
 
-import base64
 import asyncio
+import base64
 import os
 import threading
 import time
@@ -37,7 +37,7 @@ from app.api._audit import (
     validate_audit_journal_path,
     verify_access_log_chain,
 )
-from app.cache import SlidingWindowCounter, TokenRevocationStore, _MAX_LOG_ENTRIES
+from app.cache import _MAX_LOG_ENTRIES, SlidingWindowCounter, TokenRevocationStore
 from app.config import Settings, _secret_env
 from app.deps import ApiError
 from app.models import AccessLog, AuditChainState, TokenRevocation, utcnow

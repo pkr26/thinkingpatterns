@@ -77,7 +77,7 @@ import { api, ApiError } from "../src/api/client";
 import { upgradeKeyProtection } from "../src/envelopeUpgrade";
 import { vault } from "../src/vault";
 import { changeLocalSessionOwner, __resetLocalKeyLifecycleForTests } from "../src/localWriteGuard";
-import { deriveKeys } from "../src/crypto/MindPatternCrypto";
+import { deriveKeys } from "../src/crypto/journalCrypto";
 import { deriveMasterKey } from "../src/crypto/kdf";
 import { defaultKdfParams, envelopeKek, unwrapDataKey } from "../src/crypto/keyEnvelope";
 

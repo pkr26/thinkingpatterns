@@ -1,12 +1,11 @@
 /**
- * HealthKit State of Mind seam (2026-09-19).
+ * Write-only HealthKit State of Mind integration.
  *
  * The native module this seam drives is react-native-health — but the
- * community package (1.19.0, the newest published) predates iOS 18 and
- * carries NO State of Mind path natively, so
+ * linked community package lacks the State of Mind methods, so
  * ios/MindPattern/HealthBridge/RCTAppleHealthKit+MindPatternStateOfMind.m
- * (2026-09-22, independent-audit NEW-2) attaches a category onto the
- * pod's module implementing exactly the contract below; the package's JS
+ * attaches a category implementing the contract below to the pod's module.
+ * The package's JS
  * wrapper spreads the native module's methods, so the seam lights up the
  * moment the app target compiles that file. Capability probing still
  * degrades to "unavailable" — never a crash — when the bridge is absent,
@@ -47,7 +46,7 @@
  * reminders.ts idiom: a plain AsyncStorage per-account record — a
  * non-sensitive preference, never journal content — validated in full on
  * read, failing toward the disabled default. Account deletion must wipe
- * it (clearMoodMirrorPref rides the SettingsScreen deletion flow).
+ * it through the account-erasure flow.
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { accountStorageKey } from "./accountStorage";

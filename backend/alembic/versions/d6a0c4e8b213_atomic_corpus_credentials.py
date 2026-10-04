@@ -1,7 +1,7 @@
 """Bind resumable corpus rotation to its atomic credential transaction."""
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "d6a0c4e8b213"
 down_revision = "c5f9b3d7a102"

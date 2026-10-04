@@ -2,8 +2,6 @@
  *  reset. The window shim's storage persists across tests within a file,
  *  and the api client + vault are module singletons — both must be
  *  normalized between tests. */
-// @ts-nocheck
-
 import { vi } from "vitest";
 import { clearSession, setSession } from "../../src/api/client";
 import { resetCrisisDialogStampsForTests } from "../../src/crisisDialog";

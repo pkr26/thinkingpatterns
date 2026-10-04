@@ -7,8 +7,6 @@
  *  to send persists data-key-encrypted and retries on the next mount
  *  under the SAME client_measure_id; LOW (values, not indexes) — answers
  *  store option VALUES and selection compares values. */
-// @ts-nocheck
-
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MeasuresView } from "../src/views/Measures";

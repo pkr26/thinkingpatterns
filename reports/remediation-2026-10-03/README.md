@@ -2,7 +2,7 @@
 
 This directory records engineering changes after the historical audit at
 `9c1ba47508f474afc5f70588dd2771d80c2eece7`. Read the root
-[status](../../REMEDIATION_STATUS.md) for final outcomes and release limits.
+[status](../../docs/remediation-status.md) for final outcomes and release limits.
 
 Client/backend reports map fixes to the original finding IDs. Use the exact
 log links in the root status and owner reports as the authoritative checkpoints;

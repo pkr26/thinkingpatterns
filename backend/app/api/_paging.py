@@ -1,32 +1,14 @@
-"""ONE byte-page selection contract for every paginated collection read.
+"""Shared metadata-first pagination for encrypted collections.
 
-2026-09-26 audit item 22: five endpoints (patient entries, patient
-measures, therapist entries, therapist measures, therapist notes) hand
-duplicated the same metadata-first byte-page logic with drift — the
-entries read answered mid-page collection races with 409 ``conflict``
-while every sibling used ``collection_changed``, and its continuation
-header lacked the non-advancing guard the sibling reads had. This module
-is the single implementation:
+Callers size rows before fetching ciphertext and read the collection
+revision before and after the fetch. A changed revision produces a retryable
+409 collection_changed response.
 
-  * metadata-first sizing: ids + byte lengths are selected before any
-    ciphertext is materialized, with the ``limit + 1`` extra metadata row
-    as has-more evidence;
-  * byte budget: ``page_bytes`` is the explicit modern-client opt-in to a
-    short page + X-Next-Offset continuation; a legacy request instead
-    fails loudly (413 payload_too_large) if its full requested page would
-    exceed the hard response budget — never a silently truncated page;
-  * first-row escape hatch: one oversized first row is still refused with
-    413 (a caller must not receive an empty, apparently complete page when
-    it asked for less than a single valid item's ciphertext); a LATER
-    oversized row simply ends the page;
-  * optimistic revision marker: the caller reads the collection revision
-    before and after; any move answers 409 ``collection_changed`` (the
-    canonical code — entries' old ``conflict`` for the same condition is
-    deliberately retired);
-  * non-advancing-continuation guard: X-Next-Offset is emitted only when
-    the page actually returned rows — an absent header is the sole
-    end-of-results signal, so an empty page must never advertise a
-    non-advancing continuation.
+Clients opt into short pages with page_bytes and follow X-Next-Offset. Legacy
+requests must fit their full requested page within the hard response budget
+or receive 413. An oversized first row also produces 413, avoiding an empty
+page that could look complete. Continuations are emitted only when a page
+returned rows and more history remains.
 """
 
 from __future__ import annotations
@@ -73,12 +55,7 @@ def parse_expected_revision(value: str | None) -> int | None:
 def collection_changed_error(
     collection: str, header_name: str, current_revision: int | None = None
 ) -> ApiError:
-    """Retryable conflict for a collection that moved between page requests.
-
-    THE canonical mid-page drift answer (item 22): every paginated read —
-    entries, measures, notes — raises this same code so a client needs one
-    recovery strategy (restart from the first page with the fresh marker).
-    """
+    """Ask the client to restart paging with the current snapshot marker."""
     headers = {header_name: str(current_revision)} if current_revision is not None else None
     return ApiError(
         status_code=409,

@@ -47,8 +47,6 @@
  * list) — otherwise "I can't go on" typed on an iPhone silently missed
  * detection.
  */
-// @ts-nocheck
-
 import { CRISIS_BENIGN_COMPOUNDS, CRISIS_DIALOG_PATTERNS, CRISIS_SUPPRESS_EXTRA_PATTERNS } from "./crisisPhrases";
 
 /** Compiled once at module load; every pattern in the shared contract is

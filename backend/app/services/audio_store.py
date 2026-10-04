@@ -1,4 +1,4 @@
-"""Object storage for kept voice recordings (VOICE_PLAN.md P2, 2026-09-29).
+"""Object storage for kept voice recordings (docs/plans/voice-plan.md P2, 2026-09-29).
 
 The store holds OPAQUE client-side ciphertext only — the server can never
 decrypt what it puts and gets here. Two backends:
@@ -45,6 +45,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import Settings
+from ..locks import lifecycle_locks
 from ..models import (
     AudioAttachment,
     AudioDeletion,
@@ -53,7 +54,6 @@ from ..models import (
     new_id,
     utcnow,
 )
-from ..locks import lifecycle_locks
 
 logger = logging.getLogger("mindpattern.audio_store")
 

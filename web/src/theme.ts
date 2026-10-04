@@ -1,23 +1,10 @@
 /**
- * Theme preference — Light / Dark / Auto (redesign 2026-09-26).
+ * Persistent Light, Dark, or Auto display preference.
  *
- * The preference is a device-local cosmetic choice stored under the
- * mindpattern.* prefix (so account sign-out's privacy sweep clears it —
- * acceptable for a display setting). "auto" follows the OS
- * prefers-color-scheme and re-resolves live; the resolved value lands on
- * <html data-theme="…"> which app.css's token blocks key off.
- *
- * Hardening 2026-09-26 (ii): the FIRST paint is covered by the tiny
- * synchronous public/theme-init.js in <head> (before the stylesheet) —
- * this module remains the reactive half (live OS tracking + writes) and
- * is idempotent with it. applyThemePref also notifies tokens.ts so
- * JS-drawn charts re-render on every change (auto mode included).
- *
- * Every DOM touch is guarded: the test environment is node, where
- * window/document do not exist and these functions are inert.
+ * Auto follows live prefers-color-scheme changes. public/theme-init.js sets
+ * the first-paint theme; this module handles reactive updates and notifies
+ * chart palettes. DOM access is guarded for the Node test environment.
  */
-// @ts-nocheck
-
 
 import { notifyPaletteChanged } from "./tokens";
 

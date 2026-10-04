@@ -8,7 +8,7 @@
  * time; the caller only gets the verifier when the password is correct.
  */
 import { api, ApiError } from "./api/client";
-import { deriveKeysAsync } from "./crypto/MindPatternCrypto";
+import { deriveKeysAsync } from "./crypto/journalCrypto";
 import { zeroize } from "./crypto/kdf";
 import { vault } from "./vault";
 import { localWriteScopeEpoch } from "./localWriteGuard";

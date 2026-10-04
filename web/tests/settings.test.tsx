@@ -5,8 +5,6 @@
  *  tolerance), the M-W3 deletion sweep of every per-account IndexedDB store,
  *  and the LOW-b unknown-LLM state with retry. Real crypto (600k-iteration
  *  KDF — these tests are the slow ones by design); fetch stubs at the edge. */
-// @ts-nocheck
-
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsView } from "../src/views/Settings";
 import { decryptEntry, encryptEntry } from "../src/crypto/patient";
@@ -19,7 +17,7 @@ import { enqueue, queueLength, rejectedEntries } from "../src/offlineQueue";
 import { buildFeedbackBlob, recordFeedbackTap } from "../src/questionFeedback";
 import { recentMoods, recordMood } from "../src/moodLog";
 import { observeEntryVersions } from "../src/entryVersions";
-import { checkAnalysisGeneration, forgetAnalysisGeneration } from "../src/stateSeqGuard";
+import { checkAnalysisGeneration } from "../src/stateSeqGuard";
 import { readMutedPids, writeMutedPids } from "../src/patternMutes";
 import { readMeasureCadence } from "../src/measureCadence";
 import { savePendingMeasure } from "../src/pendingMeasure";

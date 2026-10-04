@@ -260,7 +260,7 @@ class SecureProcessingContext:
     GC-reclaimed) — the "milliseconds" claim in old marketing copy only ever
     applied to the buffers owned here. A process memory image taken during
     or shortly after a run can still contain analyzer strings; TEE-style
-    guarantees are deployment work (see PLAN.md).
+    guarantees are deployment work (see docs/plans/build-plan.md).
     """
 
     def __init__(self, key: bytes | bytearray) -> None:

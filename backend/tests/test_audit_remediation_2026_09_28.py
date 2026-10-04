@@ -1,4 +1,4 @@
-"""2026-09-28 audit remediation pins (AUDIT_SESSIONS_2026-09-28.md).
+"""2026-09-28 audit remediation pins (docs/archive/audits/AUDIT_SESSIONS_2026-09-28.md).
 
 Behavioral coverage for the fixes from the deep audit of the last two
 sessions:
@@ -364,8 +364,8 @@ def test_journal_compaction_drops_only_pre_cutoff_lines(tmp_path):
 
 async def test_sweep_verifies_with_the_heads_map_and_compacts(client, app, monkeypatch, tmp_path):
     """The sweep reuses one index and compacts superseded journal lines."""
-    from app.api import _audit as audit_module
     from app import main as main_mod
+    from app.api import _audit as audit_module
 
     journal_owner = "f" * 32
     old_line = f"{journal_owner} 1 {'a' * 64} {'b' * 64} 2020-01-01T00:00:00+00:00\n"

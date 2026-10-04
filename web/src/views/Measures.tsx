@@ -1,23 +1,10 @@
 /**
- * Measures (WEB_PLAN P7.1): PHQ-9 / GAD-7 / PHQ-2 questionnaires. The app
- * never interprets a score — no severity bands, no advice (the charter);
- * the trend is the patient's own data. Item 9 (self-harm) endorsement
- * gently points at the offline crisis resources AFTER the response is
- * safely saved. Scores travel encrypted under AAD "measure".
+ * Encrypted PHQ-9, GAD-7, and PHQ-2 questionnaires and score history.
  *
- * 2026-09-26 audit LOW (offline gap): a completed questionnaire that fails
- * to send (offline / status 0) no longer dies with an error banner — the
- * record persists data-key-encrypted (pendingMeasure.ts) and is restored +
- * retried on the next mount under the SAME client_measure_id (the server
- * is idempotent by that id; mobile MeasuresScreen parity).
- *
- * Redesign 2026-09-26: instruments switch through a segmented control,
- * answers are aria-pressed chips (never the danger color), completion
- * shows a progress track, and the trend renders as a real SVG bar chart
- * with dates and the latest score highlighted.
+ * Scores are presented without clinical interpretation. After a response is
+ * saved, PHQ-9 item 9 endorsement points to offline support resources.
+ * Unsent completed responses persist encrypted with a stable id for retry.
  */
-// @ts-nocheck
-
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api/client";
 import { decrypt, encrypt, fromBase64, toBase64, zeroize, type Bytes } from "../crypto/core";

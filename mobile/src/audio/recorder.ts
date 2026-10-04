@@ -1,5 +1,5 @@
 /**
- * The microphone recorder (VOICE_PLAN P4, 2026-09-29) over expo-audio.
+ * Microphone recording through expo-audio.
  *
  * Records m4a/AAC, 16 kHz mono ~24 kbps — the compressed speech profile
  * the plan pins (shared/audio_vectors.json) — with a hard 5-minute

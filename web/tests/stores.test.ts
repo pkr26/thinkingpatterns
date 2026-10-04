@@ -1,10 +1,8 @@
 /** entryVersions (the rollback guard) and moodLog (device-local, encrypted)
  *  over the kvstore seam: persistence, tamper degradation, and the honest
  *  behaviors the History view leans on. */
-// @ts-nocheck
-
 import { beforeEach, describe, expect, it } from "vitest";
-import { deriveMasterKey, fromBase64 } from "../src/crypto/core";
+import { fromBase64 } from "../src/crypto/core";
 import {
   forgetAllEntryVersions,
   forgetEntryVersion,

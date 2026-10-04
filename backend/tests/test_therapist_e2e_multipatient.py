@@ -43,8 +43,7 @@ from sqlalchemy import select
 
 from app.api._audit import verify_access_log_chain
 from app.models import AccessLog
-from app.security import crypto
-from app.security import sharing as sharing_crypto
+from app.security import crypto, sharing as sharing_crypto
 from tests.helpers import ClientEmulator, TherapistEmulator, daterange
 
 TODAY = date.today()

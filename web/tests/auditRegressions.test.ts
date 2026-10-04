@@ -1,11 +1,10 @@
-// @ts-nocheck
 import { afterEach, describe, it, expect, vi } from "vitest";
 import React, { act } from "react";
 import RTR from "react-test-renderer";
 import { useRecorder, type UseRecorder } from "../src/audio/recorder";
 import { enqueue, queueLength } from "../src/offlineQueue";
 import { setKvBackendForTests } from "../src/kvstore";
-import { api, setSession, clearSession, setSessionExpiredHandler, hasSession, REQUEST_TIMEOUT_MS } from "../src/api/client";
+import { api, setSession, clearSession, setSessionExpiredHandler, REQUEST_TIMEOUT_MS } from "../src/api/client";
 import { withLock } from "../src/platform";
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); setKvBackendForTests(null); clearSession(); setSessionExpiredHandler(null); });
 function deferred<T>() { let resolve!: (value:T)=>void; const promise=new Promise<T>(r=>resolve=r); return {promise,resolve}; }

@@ -1,21 +1,11 @@
 /**
- * Ciphertext-only offline queue — ported from mobile's offlineQueue.ts
- * (WEB_PLAN P4.4). Every queue, rejected-store, and corruption quarantine
- * is physically partitioned by BOTH API origin and account id; scope is a
- * storage mechanism, not a convention. Storage runs over the kvstore seam
- * (IndexedDB with an in-memory degradation); uploads run over this app's
- * single fixed origin, so the mobile client's origin-switch pinning
- * collapses to a scope equality check (the origin cannot move — but the
- * check stays, because defense in depth is cheap here).
+ * Ciphertext-only journal queue with rejected-record and corruption stores.
  *
- * Differences from the mobile original, all deliberate:
- *  - no legacy-key migration (this is a v1 app; no pre-v2 keys exist),
- *  - no OriginPinnedError surface (there is no user-configurable server
- *    URL to move under a flush),
- *  - Buffer.byteLength → TextEncoder length, Buffer base64url → manual.
+ * Each store is partitioned by API origin and account id. IndexedDB writes
+ * must commit before acknowledgement; storage failures propagate. All queue
+ * operations share the same Web Lock and in-tab serialization chain so
+ * read-repair, enqueue, and upload cannot overwrite each other.
  */
-// @ts-nocheck
-
 import { ApiError, api, sessionAbortSignal, sessionUserId } from "./api/client";
 import { buildAad } from "./crypto/aad";
 import { decrypt, encrypt, fromBase64, toBase64, zeroize, type Bytes } from "./crypto/core";
@@ -375,10 +365,6 @@ export async function quarantinedQueueExists(userId?: string): Promise<boolean> 
 export async function rejectedEntries(userId?: string): Promise<QueuedEntry[]> {
   const scope = await scopeFor(await resolveUserId(userId));
   return withLock(QUEUE_LOCK_NAME, () => serialized(() => rejectedFor(scope)));
-}
-
-export async function rejectedEntryCount(userId?: string): Promise<number> {
-  return (await rejectedEntries(userId)).length;
 }
 
 export async function enqueue(item: QueuedEntry,producerPermit?:WritePermit): Promise<void> {

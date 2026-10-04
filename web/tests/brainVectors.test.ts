@@ -10,8 +10,6 @@
  * (see the E-7 case below). The same standing as tests/crypto.test.ts
  * holds for the crypto.
  */
-// @ts-nocheck
-
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";

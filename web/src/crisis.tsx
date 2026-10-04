@@ -1,28 +1,11 @@
 /**
- * Crisis resources — one interaction from every screen, reachable in
- * every app state, and STATIC: it must never depend on the API being up
- * or on keys being unlocked (WEB_PLAN P1 skeleton; P8 expands with
- * localization and the full safe-messaging framing).
+ * Localized crisis resources in an accessible, focus-trapped dialog.
  *
- * Redesign 2026-09-26: the resources now render in an accessible overlay
- * dialog (role=dialog, focus-trapped, Esc to close) instead of REPLACING
- * the current view — the user's place in the app survives opening help,
- * and closing returns exactly where they were. SAFETY-CRITICAL invariants
- * unchanged: the copy resolves through the t() catalog (a Spanish device
- * reads Spanish support copy) and phone numbers, short codes and URLs
- * (911, 988, 741741, 988lifeline.org, findahelpline.com) are NEVER
- * translated.
- *
- * Clinical review 2026-09-27: the action list gains the 988 LIFELINE CHAT
- * (988lifeline.org/chat) — call and text were already there, but a person
- * who cannot or will not use a phone deserved the same lifeline in
- * writing — and, when the vault is unlocked, a "Make a safety plan" link
- * to the local encrypted plan. The plan link is a supplement BELOW the
- * static resources, never a gate in front of them: locked sessions still
- * see every number and line above.
+ * Resources are static and available without the API or an unlocked session.
+ * Phone numbers, short codes, and URLs are never translated. An unlocked
+ * session may also open the local safety plan; that link never gates access
+ * to the static resources.
  */
-// @ts-nocheck
-
 import { t } from "./strings";
 import { Button, Dialog, Icon, Note } from "./ui";
 import { vault } from "./vault";

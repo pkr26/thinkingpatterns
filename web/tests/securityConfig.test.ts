@@ -8,8 +8,6 @@
  *  form submission, COEP isolation, HSTS ready for preload submission,
  *  and noindex on a mental-health app that must stay out of search
  *  indexes and referrer graphs. */
-// @ts-nocheck
-
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";

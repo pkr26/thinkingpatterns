@@ -11,9 +11,9 @@ import os
 import uuid
 
 from sqlalchemy import select
-from app.security import crypto, sharing as sharing_crypto
 
 from app.models import AccessLog, Consent
+from app.security import crypto, sharing as sharing_crypto
 from tests.helpers import ClientEmulator, TherapistEmulator, patient_wrap_for
 
 

@@ -11,8 +11,8 @@
  *   - the 410 account-deleted death funnels to the lock (D-8 parity).
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { decryptEntry, encryptEntry } from "../src/crypto/MindPatternCrypto";
-import { deriveKeysAsync } from "../src/crypto/MindPatternCrypto";
+import { decryptEntry, encryptEntry } from "../src/crypto/journalCrypto";
+import { deriveKeysAsync } from "../src/crypto/journalCrypto";
 import { api, ApiError, setUnauthorizedHandler } from "../src/api/client";
 import { vault } from "../src/vault";
 import { __setLocaleForTests } from "../src/strings";

@@ -10,7 +10,7 @@ vi.mock("../src/api/client", async () => {
   return { ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
 });
 
-import { deriveKeys } from "../src/crypto/MindPatternCrypto";
+import { deriveKeys } from "../src/crypto/journalCrypto";
 import {
   verifyPasswordForVault,
   isVerificationFailedError,

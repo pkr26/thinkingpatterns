@@ -11,8 +11,6 @@
  * Both subkeys are pinned by shared/vectors.json (`vectors` cases carry
  * auth_key AND data_key).
  */
-// @ts-nocheck
-
 import { hkdfSha256, zeroize, type Bytes, KEY_SIZE } from "./core";
 
 const AUTH_INFO = new TextEncoder().encode("mindpattern/auth/v1");

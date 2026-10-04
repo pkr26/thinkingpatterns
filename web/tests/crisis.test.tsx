@@ -7,8 +7,6 @@
  * lifeline, in writing), and the "Make a safety plan" link renders only
  * while the vault is unlocked — always BELOW the static resources, which
  * stay complete and first in every state. */
-// @ts-nocheck
-
 import { describe, expect, it, vi } from "vitest";
 import { CrisisCard } from "../src/crisis";
 import { crisisDialogShownOn, recordCrisisDialogShown } from "../src/crisisDialog";

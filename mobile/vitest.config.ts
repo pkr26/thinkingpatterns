@@ -2,9 +2,7 @@ import { defineConfig } from "vitest/config";
 import { fileURLToPath } from "node:url";
 
 export default defineConfig({
-  // Vitest 4/Vite 8 uses Oxc for transforms. Configure the automatic JSX
-  // runtime there rather than also setting the legacy esbuild option (which
-  // makes Vite warn that it is ignored).
+  // Vite uses Oxc to transform the automatic JSX runtime.
   oxc: { jsx: { runtime: "automatic" } },
   test: {
     environment: "node",
@@ -15,20 +13,14 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       include: ["src/**/*.{ts,tsx}"],
-      // A global gate keeps the suite honest without pretending every
-      // platform-conditional/native seam is executable in node. The prior
-      // 98%-per-file gate made `npm test` permanently red despite 1,100+
-      // passing behavioral tests and was especially misleading for native
-      // availability branches. Raise this only alongside device coverage.
+      // Native-only branches need device verification in addition to this
+      // Node suite. Keep global coverage and stricter security-module floors.
       thresholds: {
         statements: 90,
         branches: 85,
         functions: 85,
         lines: 90,
-        // H-6 (2026-09-21 audit): per-file floors for the security-critical
-        // modules the global-only gate historically let drift (crisisDetect
-        // sat at 66 in the audit's snapshot). Floors sit just under today's
-        // measured values; raise them as coverage grows, never lower.
+        // Guard safety and crypto modules against coverage regressions.
         "src/crisisDetect.ts": { lines: 98 },
         "src/questionFeedback.ts": { lines: 90 },
         "src/strings.ts": { lines: 90 },
@@ -65,8 +57,7 @@ export default defineConfig({
         find: /^react-native-keychain$/,
         replacement: fileURLToPath(new URL("./tests/helpers/keychainMock.ts", import.meta.url)),
       },
-      // Voice journaling (VOICE_PLAN 2026-09-29): expo modules load through
-      // the same mock discipline as the other native seams.
+      // Match the Expo interfaces used by recording, storage, and sharing.
       {
         find: /^expo-audio$/,
         replacement: fileURLToPath(new URL("./tests/helpers/expoAudioMock.ts", import.meta.url)),

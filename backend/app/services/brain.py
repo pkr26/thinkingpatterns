@@ -4,7 +4,7 @@ v3 keeps everything v2 stood for (persistent encrypted memory, pattern
 lifecycle, decayed evidence, deterministic purity) and rebuilds the
 *analysis* on the methodological standards of intensive-longitudinal
 clinical research. Every detector below maps to a citable source; see
-RESEARCH.md for the full bibliography. The changes that matter:
+docs/research.md for the full bibliography. The changes that matter:
 
   * **Within-person analysis** (Bolger & Laurenceau 2013, *Intensive
     Longitudinal Methods*): every mood association is computed on
@@ -65,7 +65,7 @@ Determinism is absolute: ``update(state, entries, today)`` is a pure
 function of its arguments. No wall clock, no RNG, no network. The store
 is a JSON payload the caller encrypts under the user's data key.
 
-Scope guardrails (deliberate, see RESEARCH.md "never do"): no
+Scope guardrails (deliberate, see docs/research.md "never do"): no
 critical-slowing-down claims (mixed replications), no bipolar language,
 no relapse *prediction* claims (FDA wellness boundary) — observations of
 the user's own data, always phrased within-person ("than usual for
@@ -83,9 +83,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
-from . import crisis
-from . import phrases as phrase_miner
-from . import statsig
+from . import crisis, phrases as phrase_miner, statsig
 from .patterns import DAY_NAMES, SENTENCE_RE, WORD_RE, JournalEntry, Pattern
 
 STATE_VERSION = 2
@@ -2443,7 +2441,7 @@ def _strip_weekday_effects(day_residuals: dict[date, float]) -> dict[date, float
     """Per-weekday centering of the residual series (within-person).
 
     Weekly-cycle deconfounding (2026-09-26 statistical review, item 1 —
-    RESEARCH.md §5 row 1 promised "also detrend weekly cycles"; Golder &
+    docs/research.md §5 row 1 promised "also detrend weekly cycles"; Golder &
     Macy 2011 mandate removing day-of-week cycles before computing
     OTHER associations). A ±7-day rolling baseline absorbs slow TRENDS
     but not the weekly CYCLE: a theme that co-occurs with a weekday mood
@@ -2887,7 +2885,6 @@ _ES_RELATION_NOUNS: tuple[str, ...] = (
     "suegra",
     "suegro",
 )
-_ES_PERSON_CANDIDATES: frozenset[str] = frozenset(f"mi {noun}" for noun in _ES_RELATION_NOUNS)
 _ES_RELATION_RE = re.compile(
     r"\b(?:" + "|".join(rf"mi {noun}" for noun in _ES_RELATION_NOUNS) + r")\b"
 )

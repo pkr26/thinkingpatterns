@@ -13,8 +13,8 @@ import hashlib
 import hmac
 import json
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -127,11 +127,11 @@ async def snapshot_rows(session, settings: Settings) -> tuple[bytes, list[Access
 
 
 async def run(args) -> None:
+    from app.api._audit import compute_chain_state_mac, compute_entry_mac
     from app.config import Settings
     from app.db import build_engine, build_sessionmaker
     from app.main import _acquire_cross_host_guard, _release_cross_host_guard
     from app.models import AuditChainState, utcnow
-    from app.api._audit import compute_chain_state_mac, compute_entry_mac
     from app.singleprocess import single_process_guard
 
     settings = Settings.from_env()

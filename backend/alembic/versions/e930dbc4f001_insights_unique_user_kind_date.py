@@ -29,7 +29,6 @@ from collections.abc import Sequence
 
 from alembic import op
 
-
 # revision identifiers, used by Alembic.
 revision: str = "e930dbc4f001"
 down_revision: str | Sequence[str] | None = "73031d06d71b"

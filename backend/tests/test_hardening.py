@@ -97,6 +97,7 @@ async def test_inactive_user_cannot_login_or_use_api(client, app):
     await emu.register(client)
 
     from sqlalchemy import update
+
     from app.models import User
 
     async with app.state.sessionmaker() as session:
@@ -461,6 +462,7 @@ async def test_no_cors_headers_by_default(client):
 async def test_configured_cors_origin_is_echoed(settings):
     settings.cors_origins = ["https://web.example"]
     from httpx import ASGITransport, AsyncClient
+
     from app.main import create_app
 
     transport = ASGITransport(app=create_app(settings))
@@ -519,6 +521,7 @@ async def test_docs_hidden_in_any_non_development_env(monkeypatch, env):
     # The docs gate must match the config gates: any MINDPATTERN_ENV value
     # other than the exact "development" serves no API map.
     import httpx
+
     from app.main import create_app
 
     monkeypatch.setattr(

@@ -10,7 +10,7 @@ import uuid
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import select, update, text
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import auth
@@ -22,12 +22,12 @@ from app.models import (
     AudioAttachment,
     AudioDeletion,
     Consent,
+    Entry,
+    Insight,
+    Measure,
+    RekeyJournal,
     TokenRevocation,
     User,
-    RekeyJournal,
-    Entry,
-    Measure,
-    Insight,
     utcnow,
 )
 from app.security import crypto
@@ -601,8 +601,9 @@ async def test_measure_only_envelope_upgrade_requires_real_data_key(client):
 async def test_legacy_audit_sealing_requires_exact_attestation_and_refuses_bad_existing_mac(
     client, app, settings
 ):
-    from scripts.seal_legacy_audit import snapshot_rows, verify_attestation
     import hashlib
+
+    from scripts.seal_legacy_audit import snapshot_rows, verify_attestation
 
     patient = ClientEmulator("seal-review", "password")
     await patient.register(client)
@@ -639,8 +640,9 @@ async def test_offline_audit_cli_snapshot_refuses_changed_evidence_then_seals_ex
     tmp_path,
 ):
     import hashlib
-    from pathlib import Path
     import sys
+    from pathlib import Path
+
     from app.api._audit import compute_entry_hash
     from app.db import build_engine, build_sessionmaker, init_models
 

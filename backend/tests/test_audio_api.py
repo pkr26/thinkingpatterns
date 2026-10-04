@@ -1,6 +1,6 @@
 """Voice journaling API (P1): flag, consent gate, transcription, translation.
 
-VOICE_PLAN.md gates for this phase:
+docs/plans/voice-plan.md gates for this phase:
   * fail-closed flag (flat 404, no code advertising)
   * Art. 7 consent flow (verifier re-auth, fingerprint currency)
   * audio bytes never persisted anywhere (there is no storage path in P1 —

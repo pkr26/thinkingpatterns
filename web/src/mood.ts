@@ -1,23 +1,10 @@
 /**
- * The mood vocabulary: the explicit check-in scale plus the quick
- * text-derived estimate. Shared by the Entry screen (the one-tap mood row
- * and the device-local mood log write) and the History screen (per-entry
- * mood badge).
+ * Check-in vocabulary and local sentiment estimates.
  *
- * Values live in [-1, 1] — the range the mood log and the entry payload's
- * sentiment field already use. The labels deliberately avoid clinical and
- * judgmental language: Heavy and Light are states of the day, not verdicts
- * about the person.
- *
- * LOCALIZATION (audit fix 21, 2026-09-21): the VALUES are the wire
- * contract — numbers for mood/energy/sleep and English tag tokens — and
- * are never localized. Display labels resolve through the i18n catalog by
- * value (`labelKey`, plus activityTagLabel for the tags), so the check-in
- * speaks the app locale while the payload the server's engine reads stays
- * byte-identical across locales.
+ * Mood values span [-1, 1]. Numeric values and activity tokens are stable
+ * payload fields; only display labels are localized. Labels describe the
+ * user's experience without clinical interpretation.
  */
-// @ts-nocheck
-
 import { detectLanguage, sentimentScore } from "./brain/sentiment";
 import { t } from "./strings";
 

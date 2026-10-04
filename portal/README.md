@@ -16,9 +16,10 @@ patient patterns**, plus the therapist's own encrypted notes.
 - **Read-only by construction.** The portal's API surface is GET-only for
   patient data; there is no endpoint a therapist could use to change a
   patient's journal. Every read is audit-logged server-side.
-- **Notes are the therapist's own record.** Encrypted under the
-  therapist's password-derived key before leaving the browser; patients
-  never see them. Notes attach to a patient or to a specific pattern id.
+- **Notes are the therapist's own record.** Encrypted with a notes key
+  before leaving the browser; the password seals the keyring. Historical
+  keys preserve access across credential and sharing-identity changes.
+  Patients never see notes, which attach to a patient or pattern id.
 - **Crisis-adjacent patterns render non-quoting** (same contract as the
   patient app): the card never echoes the wording; the drill-down shows
   the entries in the patient's own words.
@@ -29,14 +30,13 @@ patient patterns**, plus the therapist's own encrypted notes.
   closes — so a second tab or browser starts from its own anchor and two
   open tabs can legitimately disagree. Where sessionStorage is
   unavailable (locked-down privacy modes), a localStorage fallback is
-  scrubbed at every lock boundary instead. No content is ever stored
-  locally.
+  scrubbed at every lock boundary instead. Visit anchors contain no
+  content; encrypted clinician drafts persist separately in IndexedDB.
 
 ## Language scope (deliberate)
 
 This portal is **intentionally English-only in this release**, while the
-patient clients (web and mobile) are bilingual. The decision, not an
-oversight (2026-09-26 audit L):
+patient clients (web and mobile) are bilingual. The scope reflects the current deployment model:
 
 - The portal's readers are clinicians charting in one clinic's working
   language; every deployment of this generation is single-language on the
@@ -110,33 +110,21 @@ The patients screen carries an on-demand "Account security" panel
 (collapsed by default — nothing is derived, fetched, or sent until it is
 opened) that surfaces the backend's verifier-gated rotation routes:
 
-- **Change password** (`PUT /api/v1/therapist/wrap-key`, then
-  `PUT /api/v1/account/credential`). The ordering is the backend's
-  contract: the sharing key is first re-sealed (same private key) under
-  the NEW password-derived KEK while both passwords are derivable, then
-  the login credential rotates (`{verifier, new_salt, new_verifier}`,
-  16-byte salt / 32-byte verifier, base64). The final PUT is retried up
-  to three times on network/5xx because its failure strands the account
-  in the re-wrapped window. On success the server bumps the token epoch,
-  so the portal immediately locks the session with a "every session —
-  including this one — has ended" notice. Every derived key byte is
-  zeroized when the flow ends.
-- **Recover sharing key** repairs the interrupted-change window: if the
-  wrap-key PUT landed but the credential PUT failed, the same key is
-  opened with the intended-new password and re-sealed under the current
-  sign-in password. The repair needs the failed change's fresh salt,
-  which the panel retains in memory only — after a page reload the
-  re-wrapped key is unrecoverable (the account still has no recovery
-  path).
-- **Rotate sharing key (suspected compromise)** publishes a genuinely
-  fresh keypair (`generateTherapistKeyPair` under the current KEK).
-  Existing grants stay readable only after each patient re-wraps via the
-  pairing fingerprint path; grants that never re-wrap are intentionally
-  lost. Requires the current password and an explicit confirmation.
+- **Change password** verifies historical notes custody, then atomically
+  commits the new credential, wrapped identity key, and wrapped notes keyring
+  through the therapist password route. Lost-response retries reuse the same
+  operation id and payload. Success ends all sessions and clears local keys.
+- **Recover sharing key** supports an interrupted legacy two-step change.
+  The current and intended passwords plus the interrupted change's salt
+  restore the existing identity. Notes custody is verified and confirmed
+  before changing the identity's wrapping.
+- **Rotate sharing key** first verifies and preserves notes custody, then
+  publishes a fresh identity. Existing patient grants are revoked and the
+  therapist must sign in again. Patients must verify the new fingerprint
+  and share again; retained note keys preserve historical clinician notes.
 
-All three actions re-authenticate with the current password's derived
-verifier (`X-Account-Verifier` for the wrap-key route); a stolen bearer
-token alone can reach none of them.
+All actions re-authenticate with the current password-derived verifier;
+a bearer token alone is insufficient.
 
 ## Crypto contracts
 
@@ -149,7 +137,7 @@ All crypto is WebCrypto and pinned byte-for-byte against
 | Private-key custody | HKDF `mindpattern/portal-wrap/v1` → AES-256-GCM(PKCS8 P-256 key), AAD `("therapist-key", username)` |
 | Patient data key | ECDH P-256 × consent's ephemeral key → HKDF (salt = both SPKI DERs, info `mindpattern/wrap/v1`) → AES-256-GCM unwrap, AAD `("consent-wrap", user, therapist)` |
 | Envelopes | nonce‖ct‖tag AES-256-GCM, AAD-bound like every other platform (see ../backend/app/security/crypto.py) |
-| Notes | HKDF `mindpattern/portal-notes/v1`, AAD `("note", therapist, patient, clientNoteId)` |
+| Notes | Active key from the encrypted notes keyring; legacy password-derived and identity-derived keys remain available for decryption. AAD `("note", therapist, patient, clientNoteId)` |
 
 Key material lives in memory only. Closing the tab forgets everything.
 

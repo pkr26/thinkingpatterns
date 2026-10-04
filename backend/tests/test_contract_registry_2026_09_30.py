@@ -5,8 +5,8 @@ every covering test: an error's status/detail and an operator-facing log
 message could change with nothing failing. Both ARE contracts here —
 deps.py documents error detail as client contract, and the runbooks key
 on log prose — so this file freezes the inventory the same way the
-contract-gates scan freezes the README's error-code list: every raise of
-an error type with constant status/detail, and every logger call with a
+tools/check-docs.py verifies the error-code list in docs/api.md: every
+raise of an error type with constant status/detail, and every logger call with a
 constant message template, per module. A deliberate contract change
 regenerates the block below (run this file's module main).
 

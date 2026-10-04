@@ -14,7 +14,7 @@
 > list). Append dated notes (`> 2026-09-xx: …`) rather than editing
 > history. At ship, `README.md` becomes authoritative for the shipped
 > reality and this file becomes the record (same convention as
-> `PLAN.md`).
+> `docs/plans/build-plan.md`).
 
 ## Goal
 
@@ -155,7 +155,7 @@ or emulator), recorded as dated notes.
 > PHQ-9/GAD-7/PHQ-2, therapist share/grant/revoke with the ECDH
 > wrap round-trip into the portal, settings incl. export) and P10's
 > shipped artifact are independently verified end-to-end by the
-> black-box browser pass of 2026-09-26 (E2E_TEST_REPORT_2026-09-26.md,
+> black-box browser pass of 2026-09-26 (docs/archive/audits/E2E_TEST_REPORT_2026-09-26.md,
 > T10–T20; 22/24 PASS, all three findings fixed same-day).
 >
 > **2026-09-26: P9.10 deferral registered.** The hand-written
@@ -1008,7 +1008,7 @@ what held, and what is accepted.
       **the multi-device sync contract replacing the single-device-writer
       line** per D-1), running instructions (dev proxy + demo account +
       the dual-client harness)
-- [x] 10.5 `CHANGELOG.md` entry; `PLAN.md` cross-pointer;
+- [x] 10.5 `CHANGELOG.md` entry; `docs/plans/build-plan.md` cross-pointer;
       `docs/DPIA_SKELETON.md` note on the browser storage surface;
       `docs/SECURITY_RESIDUALS.md` updated from P9
 - [ ] 10.6 End-to-end rehearsal on a staging host: fresh clone → backend

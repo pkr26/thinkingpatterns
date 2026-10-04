@@ -4,7 +4,6 @@
  * unlock failure and sign-out loop).
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import React from "react";
 import { act } from "react";
 
 vi.mock("../src/api", async (importOriginal) => {

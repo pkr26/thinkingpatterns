@@ -100,7 +100,7 @@ vi.mock("../src/reauth", () => ({
 import { api, ApiError } from "../src/api/client";
 import { rotatePassword } from "../src/rotation";
 import { vault } from "../src/vault";
-import { deriveKeys, deriveKeysAsync } from "../src/crypto/MindPatternCrypto";
+import { deriveKeys, deriveKeysAsync } from "../src/crypto/journalCrypto";
 import { deriveMasterKey } from "../src/crypto/kdf";
 import { envelopeKek, unwrapDataKey, wrapDataKey, defaultKdfParams } from "../src/crypto/keyEnvelope";
 import { enableBiometricUnlock, hasBiometricUnlock } from "../src/biometricUnlock";

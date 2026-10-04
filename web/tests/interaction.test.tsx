@@ -1,4 +1,3 @@
-// @ts-nocheck
 // @vitest-environment jsdom
 /**
  * Interaction-layer regression tests (hardening 2026-09-26 ii). The
@@ -162,7 +161,7 @@ describe("Dialog focus management", () => {
       </Dialog>,
     );
     const dialog = document.querySelector('[role="dialog"]')!;
-    const [first, last] = [...dialog.querySelectorAll("button")];
+    const [, last] = [...dialog.querySelectorAll("button")];
     act(() => last!.focus());
     render(
       <Dialog title="Help" onClose={() => { closeCalls += 1; }}>

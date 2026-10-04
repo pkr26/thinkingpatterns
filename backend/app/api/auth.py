@@ -51,12 +51,12 @@ from ..models import KEY_SCHEME_V1, KEY_SCHEME_V2, ROLE_THERAPIST, TotpBackupCod
 from ..schemas import (
     KeyEnvelopeResponse,
     LoginRequest,
+    RecoveryLoginRequest,
+    RecoveryLoginResponse,
     RegisterRequest,
     SaltLookupRequest,
     SaltResponse,
     TokenResponse,
-    RecoveryLoginRequest,
-    RecoveryLoginResponse,
 )
 from ..security import tokens
 from ..security.kdf import (

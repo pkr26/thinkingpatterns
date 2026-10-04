@@ -1,7 +1,7 @@
-"""Optional consent-gated SPEECH-TO-TEXT layer (VOICE_PLAN.md, 2026-09-29).
+"""Consent-gated speech-to-text and optional transcript translation.
 
-This is the module that can ship recorded audio off-server, so it follows
-the same no-benefit-of-the-doubt discipline as services/llm.py:
+Recorded audio may leave the server through this module. Provider calls
+follow the same consent and transport boundaries as services.llm:
 
   * The caller (api/audio.py) only reaches this path with the feature
     flag on AND a consent record that matches the CURRENT policy
@@ -52,9 +52,8 @@ STT_DISCLOSURE_VERSION = "v2"
 # outlive.
 STT_CONNECT_TIMEOUT_SECONDS = 5.0
 STT_TOTAL_TIMEOUT_SECONDS = 120.0
-# One retry (VOICE_PLAN V-x, remediated 2026-09-29): a cold provider queue
-# answering 429/503 once must not lose the patient's take. Honors
-# Retry-After up to this ceiling, else a fixed backoff.
+# Retry a transient provider failure once, honoring Retry-After up to the
+# ceiling and otherwise using the fixed backoff.
 STT_RETRY_BACKOFF_SECONDS = 1.0
 STT_RETRY_AFTER_CEILING_SECONDS = 5.0
 STT_RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})

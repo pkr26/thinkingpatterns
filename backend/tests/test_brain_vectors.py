@@ -15,9 +15,9 @@ from __future__ import annotations
 
 import json
 import math
+from pathlib import Path
 
 import pytest
-from pathlib import Path
 
 from app.services import brain, statsig
 from app.services.patterns import WORD_RE

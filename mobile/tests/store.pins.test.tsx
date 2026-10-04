@@ -11,7 +11,6 @@
  *  - refreshActiveDays keeping the last value when active_days is absent,
  *  - signOut wiping per-account hygiene exactly when the ids exist.
  */
-// @ts-nocheck
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
@@ -25,7 +24,6 @@ vi.mock("../src/api/client", async () => {
 vi.mock("../src/offlineQueue", () => ({
   prepareQueueRekey: vi.fn(async () => []),
   pendingEntryIds: vi.fn(async () => []),
-  abortInFlightFlush: vi.fn(),
   abortInFlightFlush: vi.fn(),
   flushQueueOnReconnect: vi.fn(async () => {}),
 }));
@@ -91,7 +89,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   while (mounted.length > 0) {
-    const root = mounted.pop();
+    const root = mounted.pop()!;
     await act(async () => {
       root.unmount();
     });

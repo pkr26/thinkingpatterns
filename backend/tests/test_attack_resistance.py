@@ -27,16 +27,15 @@ import logging
 import warnings
 from datetime import date, timedelta
 
-from app.api.insights import _utc_today
-
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.api.insights import _utc_today
 from app.config import Settings
 from app.main import create_app
 from app.security import crypto
-from app.services import brain, phrases
 from app.security.enclave import InMemoryKeyStore
+from app.services import brain, phrases
 from tests.helpers import ClientEmulator, TherapistEmulator, daterange
 
 TODAY = date.today()
@@ -277,16 +276,18 @@ class TestFeedbackPreflight:
 
 class TestSqlitePooling:
     def test_memory_database_keeps_static_pool(self):
-        from app.db import build_engine
         from sqlalchemy.pool import StaticPool
+
+        from app.db import build_engine
 
         for url in ("sqlite+aiosqlite://", "sqlite+aiosqlite:///:memory:"):
             engine = build_engine(url)
             assert isinstance(engine.pool, StaticPool), url
 
     def test_file_database_uses_per_checkout_connections(self, tmp_path):
-        from app.db import build_engine
         from sqlalchemy.pool import NullPool
+
+        from app.db import build_engine
 
         engine = build_engine(f"sqlite+aiosqlite:///{tmp_path}/dev.db")
         assert isinstance(engine.pool, NullPool)
@@ -377,9 +378,10 @@ class TestTrustedProxyValidation:
         """When every XFF entry is inside the trusted networks the identity
         silently degrades to the proxy address — that degradation must be
         logged (once), not silent."""
+        from fastapi import Request
+
         from app.cache import client_key
         from app.middleware import HardeningMiddleware
-        from fastapi import Request
 
         observed: dict[str, object] = {}
 

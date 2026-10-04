@@ -40,7 +40,6 @@ sys.path.insert(0, str(REPO / "backend"))
 os.environ.setdefault("MINDPATTERN_ENV", "development")
 
 import httpx  # noqa: E402
-
 from app.security import crypto  # noqa: E402
 from app.security import kdf as keyderive  # noqa: E402
 from tests.helpers import ClientEmulator  # noqa: E402
@@ -118,7 +117,9 @@ async def seed_journal(client, emu: ClientEmulator, days: int) -> None:
                 headers=emu.headers,
                 json={
                     "client_entry_id": f"e-{day.isoformat()}",
-                    "blob": emu.encrypt_entry(text, day, f"e-{day.isoformat()}", None, 1),
+                    "blob": emu.encrypt_entry(
+                        text, day, f"e-{day.isoformat()}", None, 1
+                    ),
                     "entry_date": day.isoformat(),
                     "content_version": 1,
                 },
@@ -130,9 +131,12 @@ async def seed_journal(client, emu: ClientEmulator, days: int) -> None:
     print(f"  {emu.username}: {days} journal days seeded (ending yesterday)")
 
 
-async def record_measure(emu: ClientEmulator, client, mid: str, payload: dict, day: date) -> None:
+async def record_measure(
+    emu: ClientEmulator, client, mid: str, payload: dict, day: date
+) -> None:
     blob = crypto.encrypt(
-        emu.data_key, json.dumps(payload).encode("utf-8"),
+        emu.data_key,
+        json.dumps(payload).encode("utf-8"),
         crypto.build_aad("measure", emu.user_id or "", mid),
     )
     response = await client.post(
@@ -163,17 +167,17 @@ async def decrypt_insights(client, emu: ClientEmulator) -> dict:
     blob = response.json()["blob"]
     assert blob is not None, "insights blob missing after recompute"
     plain = crypto.decrypt(
-        emu.data_key, base64.b64decode(blob),
+        emu.data_key,
+        base64.b64decode(blob),
         crypto.build_aad("insights", emu.user_id, "patterns"),
     )
     return json.loads(plain.decode("utf-8"))
 
 
 async def backdate(db_url: str, user_id: str, days: int) -> None:
+    from app.models import User
     from sqlalchemy import update
     from sqlalchemy.ext.asyncio import create_async_engine
-
-    from app.models import User
 
     engine = create_async_engine(db_url)
     try:
@@ -181,7 +185,9 @@ async def backdate(db_url: str, user_id: str, days: int) -> None:
             await conn.execute(
                 update(User)
                 .where(User.id == user_id)
-                .values(created_at=datetime.now(timezone.utc) - timedelta(days=days + 2))
+                .values(
+                    created_at=datetime.now(timezone.utc) - timedelta(days=days + 2)
+                )
             )
     finally:
         await engine.dispose()
@@ -191,7 +197,9 @@ async def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--api", default="http://localhost:8000")
     parser.add_argument("--db-url", default="")
-    parser.add_argument("--recompute-user", default="", help="login + one recompute, then exit")
+    parser.add_argument(
+        "--recompute-user", default="", help="login + one recompute, then exit"
+    )
     args = parser.parse_args()
 
     async with httpx.AsyncClient(base_url=args.api, timeout=30) as client:
@@ -204,7 +212,9 @@ async def main() -> None:
             import hashlib
 
             emu = ClientEmulator(username, password)
-            salt_response = await client.post("/api/auth/salt", json={"username": username})
+            salt_response = await client.post(
+                "/api/auth/salt", json={"username": username}
+            )
             assert salt_response.status_code == 200, salt_response.text
             emu.salt = base64.b64decode(salt_response.json()["salt"])
             emu.master_key = hashlib.pbkdf2_hmac(
@@ -217,7 +227,9 @@ async def main() -> None:
             print(f"{username}: caseload summaries rewritten for every ACTIVE consent")
             return
 
-        assert args.db_url, "--db-url is required for a first seed (created_at backdate)"
+        assert args.db_url, (
+            "--db-url is required for a first seed (created_at backdate)"
+        )
         print(f"seeding against {args.api} (db: {args.db_url})")
 
         alice = await register(client, ALICE, ALICE_PW)
@@ -226,21 +238,41 @@ async def main() -> None:
             await seed_journal(client, alice, 70)
             await recompute_and_report(client, alice)
             await record_measure(
-                alice, client, "m-phq9-flag",
-                {"v": 1, "measure": "phq9", "score": 14, "item9": 2,
-                 "completed_at": date.today().isoformat()},
+                alice,
+                client,
+                "m-phq9-flag",
+                {
+                    "v": 1,
+                    "measure": "phq9",
+                    "score": 14,
+                    "item9": 2,
+                    "completed_at": date.today().isoformat(),
+                },
                 date.today(),
             )
             await record_measure(
-                alice, client, "m-gad7",
-                {"v": 1, "measure": "gad7", "score": 9,
-                 "completed_at": (date.today() - timedelta(days=3)).isoformat()},
+                alice,
+                client,
+                "m-gad7",
+                {
+                    "v": 1,
+                    "measure": "gad7",
+                    "score": 9,
+                    "completed_at": (date.today() - timedelta(days=3)).isoformat(),
+                },
                 date.today() - timedelta(days=3),
             )
             await record_measure(
-                alice, client, "m-phq9-old",
-                {"v": 1, "measure": "phq9", "score": 5, "item9": 0,
-                 "completed_at": (date.today() - timedelta(days=10)).isoformat()},
+                alice,
+                client,
+                "m-phq9-old",
+                {
+                    "v": 1,
+                    "measure": "phq9",
+                    "score": 5,
+                    "item9": 0,
+                    "completed_at": (date.today() - timedelta(days=10)).isoformat(),
+                },
                 date.today() - timedelta(days=10),
             )
             print(f"  {ALICE}: measures recorded (phq9 14 w/ item9=2, gad7 9, phq9 5)")
@@ -250,9 +282,15 @@ async def main() -> None:
             await backdate(args.db_url, bob.user_id, 10)
             await seed_journal(client, bob, 10)
             await record_measure(
-                bob, client, "m-gad7-bob",
-                {"v": 1, "measure": "gad7", "score": 4,
-                 "completed_at": date.today().isoformat()},
+                bob,
+                client,
+                "m-gad7-bob",
+                {
+                    "v": 1,
+                    "measure": "gad7",
+                    "score": 4,
+                    "completed_at": date.today().isoformat(),
+                },
                 date.today(),
             )
             print(f"  {BOB}: baseline patient (no recompute), gad7 4 recorded")

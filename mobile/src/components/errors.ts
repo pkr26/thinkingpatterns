@@ -1,13 +1,7 @@
 /**
- * Calm error copy — the audit's "no raw err.message in Alerts" fix.
- *
- * ApiError.message is technical text assembled from server detail (even
- * sanitized, it reads like a stack trace to a vulnerable user at 2am), so
- * it never reaches a dialog: the STATUS decides the sentence. Local Errors
- * thrown by our own code carry copy we wrote and may pass through; unknown
- * non-Error failures degrade to a calm generic line. Every sentence here
- * follows the app voice — honest, non-prescriptive, no blame. Catalog
- * lookups (2026-09-19) keep both languages calm.
+ * Localized request-error copy, selected by HTTP status rather than server
+ * detail. Local Error messages may pass through when the caller owns their
+ * copy; use calmFallbackCopy when errors can contain library internals.
  */
 import { ApiError } from "../api/client";
 import { t } from "../strings";

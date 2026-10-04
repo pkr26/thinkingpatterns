@@ -1,21 +1,11 @@
 /**
- * Settings (WEB_PLAN P7.3–7.6): appearance (Light/Dark/Auto theme), LLM
- * consent (re-authenticated), the access log ("who accessed my data"),
- * the web-first ciphertext export download, queue recovery,
- * fresh-step-up-gated account deletion with the retention honesty note, and
- * the password-change flows — ROUTED BY KEY SCHEME (2026-09-26): v1
- * accounts keep the full rekey rotation (two single-use processing
- * sessions, therapist-grant re-wraps, credential rotation), v2 accounts
- * get the O(1) envelope re-wrap (PUT /account/password), and v1 accounts
- * can self-upgrade to v2 ("Upgrade key protection").
+ * Appearance, privacy, account security, export, and local recovery controls.
  *
- * Redesign 2026-09-26: sectioned cards (Appearance / Privacy & data /
- * Access log / Account / an isolated red Danger zone), the LLM consent
- * becomes a real switch, the theme preference is a segmented control,
- * and the access log renders as a timeline.
+ * Password changes preserve each account's key scheme: v1 migrates encrypted
+ * data, v2 rewraps its key envelope, and v1 accounts can opt into v2. Sensitive
+ * actions require fresh authentication; deletion retains a retryable local
+ * erasure checkpoint until cleanup completes.
  */
-// @ts-nocheck
-
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, auth, ApiError, sessionUsername } from "../api/client";
 import { deriveMasterKey, toBase64, fromBase64, zeroize, type Bytes } from "../crypto/core";

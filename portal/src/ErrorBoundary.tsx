@@ -1,13 +1,7 @@
 /**
- * Error boundary (deep audit 2026-09-29, HIGH): before this, any uncaught
- * render exception unmounted the whole portal — a white screen mid-review
- * for a clinician. The top-level boundary keeps the failure honest and
- * offers a reload; the view-level boundary (App.tsx) keeps the session,
- * navigation and lock chrome alive so a crash in one patient's chart
- * never ejects the clinician from the portal.
- *
- * No draft concept here (the portal writes no patient-facing drafts);
- * the calm copy is portal-English, matching the app's string posture.
+ * App-level and view-level render boundaries for the therapist portal.
+ * The app fallback offers a reload; the view fallback preserves the session
+ * and navigation. Copy distinguishes saved encrypted records from unsaved edits.
  */
 import { Component, type ReactNode } from "react";
 import { Button, Card } from "./ui";

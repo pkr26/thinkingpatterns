@@ -1,17 +1,10 @@
 /**
- * The statistics core of the on-device brain (2026-09-19): the pure
- * functions the inertia-family detectors need, ported from
- * backend/app/services/statsig.py and brain.py's Pearson helper.
+ * Pure statistical helpers shared with the backend analysis engine.
  *
- * Everything here is deterministic and pure — the same standing as the
- * Python engine: same verdict for the same inputs on every platform,
- * forever. Outputs are pinned against Python-generated vectors in
- * shared/brain_vectors.json (tests/brainVectors.test.ts); the erfc below
- * is W. J. Cody's rational approximation (double precision), so the
- * p-value tails agree with math.erfc to vector tolerance.
+ * Python-generated cases in shared/brain_vectors.json verify the numerical
+ * contract. erfc uses a power series near zero and a continued fraction in
+ * the tails; see its implementation for the error and convergence bounds.
  */
-// @ts-nocheck
-
 
 /** Lag-1-friendly Pearson r; null when unmeasurable (<3 pairs, no variance). */
 export function pearson(xs: number[], ys: number[]): number | null {

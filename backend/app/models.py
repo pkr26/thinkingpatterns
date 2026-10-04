@@ -6,7 +6,6 @@ import uuid
 from datetime import date, datetime, timezone
 
 from sqlalchemy import (
-    SmallInteger,
     BigInteger,
     Boolean,
     Date,
@@ -15,6 +14,7 @@ from sqlalchemy import (
     Index,
     Integer,
     LargeBinary,
+    SmallInteger,
     String,
     Text,
     UniqueConstraint,
@@ -182,7 +182,7 @@ class User(Base):
     # accepted. A runtime provider/policy change makes old consent inert
     # until the user explicitly re-consents.
     llm_consent_policy: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    # Voice journaling (2026-09-29, VOICE_PLAN.md): per-user opt-in before
+    # Voice journaling (2026-09-29, docs/plans/voice-plan.md): per-user opt-in before
     # any recorded audio is sent to the third-party STT endpoint. Same
     # Art. 7 demonstrability + policy-fingerprint discipline as llm_consent
     # (services/stt.py judges currency); off by default. server_default
@@ -458,7 +458,7 @@ class Consent(Base):
     # Which sharing-disclosure copy the patient answered (the LLM consent's
     # Art. 7 record, applied to sharing).
     disclosure: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    # Voice journaling (2026-09-29, VOICE_PLAN.md): patient-toggled grant
+    # Voice journaling (2026-09-29, docs/plans/voice-plan.md): patient-toggled grant
     # letting THIS therapist fetch kept voice recordings. Default false —
     # text insights flow under the existing scope, voice is a separate,
     # louder disclosure (tone is the most identifying PHI in the system).
@@ -601,7 +601,7 @@ class TherapistNote(Base):
 
 class AudioAttachment(Base):
     """One KEPT voice recording for an entry, stored as opaque client-side
-    ciphertext (VOICE_PLAN.md, 2026-09-29).
+    ciphertext (docs/plans/voice-plan.md, 2026-09-29).
 
     The patient's client encrypts the audio with the SAME data key as the
     entry, AAD-bound to ("audio", user_id, client_entry_id, 1); the server

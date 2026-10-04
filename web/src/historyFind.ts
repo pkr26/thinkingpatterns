@@ -1,16 +1,8 @@
 /**
- * History search + calendar helpers (2026-09-17).
- *
- * Pure functions: the search box and the mood calendar filter the
- * DECRYPTED, on-device list — no query ever leaves the phone.
- *
- * monthLabel formats through Intl with the app locale's tag (2026-09-19
- * i18n wave) — the old pinned English MONTH_NAMES table is gone; a
- * garbage month still degrades to the raw number-shaped output rather
- * than throwing.
+ * Search and calendar helpers over the decrypted, device-local journal.
+ * Queries never leave the browser. Month labels follow the app locale and
+ * fall back to the supplied value when the month is invalid.
  */
-// @ts-nocheck
-
 import { dateLocaleTag } from "./strings";
 
 export interface SearchableEntry {

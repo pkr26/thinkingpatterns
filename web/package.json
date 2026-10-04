@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "MindPattern patient web client — the mobile app's journaling experience in the browser, same zero-knowledge contract (WEB_PLAN.md).",
+  "description": "Fathom patient web client for encrypted journaling and reflection.",
   "scripts": {
     "dev": "vite",
     "build:base": "node tools/make-preauth-catalogs.mjs && tsc --noEmit && vite build",

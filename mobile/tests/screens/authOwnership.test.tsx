@@ -6,7 +6,7 @@ vi.mock("../../src/api/client",async importOriginal=>{
  const {makeApiMock}=await import("../helpers/apiMock");
  return {...actual,api:{...makeApiMock(),recoverLogin:vi.fn(),resetPasswordWithRecovery:vi.fn(async()=>({}))}};
 });
-vi.mock("../../src/crypto/MindPatternCrypto",async importOriginal=>({...await importOriginal<typeof import("../../src/crypto/MindPatternCrypto")>(),deriveKeysAsync:vi.fn()}));
+vi.mock("../../src/crypto/journalCrypto",async importOriginal=>({...await importOriginal<typeof import("../../src/crypto/journalCrypto")>(),deriveKeysAsync:vi.fn()}));
 vi.mock("../../src/crypto/kdf",async importOriginal=>({...await importOriginal<typeof import("../../src/crypto/kdf")>(),deriveMasterKeyAsync:vi.fn()}));
 vi.mock("../../src/unlockProof",()=>({storeUnlockProof:vi.fn(async()=>{}),verifyUnlockProof:vi.fn(async()=>"ok"),clearUnlockProof:vi.fn(async()=>{}),unlockProofExists:vi.fn(async()=>false)}));
 vi.mock("../../src/localRekey",()=>({resumeLocalRekey:vi.fn(async()=>{}),pendingLocalRekey:vi.fn(async()=>false),pendingLocalRekeyOldSalt:vi.fn(async()=>null)}));
@@ -14,7 +14,7 @@ vi.mock("../../src/biometricUnlock",()=>({biometricsSupported:vi.fn(async()=>tru
 const session=vi.hoisted(()=>({markLoggedIn:vi.fn(),refreshActiveDays:vi.fn(async()=>{}),signOut:vi.fn(async()=>{})}));
 vi.mock("../../src/store",()=>({useSession:()=>session}));
 import {api} from "../../src/api/client";
-import {deriveKeysAsync} from "../../src/crypto/MindPatternCrypto";
+import {deriveKeysAsync} from "../../src/crypto/journalCrypto";
 import {deriveMasterKeyAsync} from "../../src/crypto/kdf";
 import {unwrapBiometricDataKey} from "../../src/biometricUnlock";
 import {vault} from "../../src/vault";

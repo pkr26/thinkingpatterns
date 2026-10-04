@@ -4,8 +4,6 @@
  * wire contract, same loud-fail version guards); the AEAD/AAD primitives
  * come from ./core (portal's WebCrypto implementation).
  */
-// @ts-nocheck
-
 import { buildAad } from "./aad";
 import { decrypt, encrypt, fromBase64, toBase64, zeroize, type Bytes } from "./core";
 
@@ -126,13 +124,6 @@ export async function encryptEntry(
   }
 }
 
-/** The only entry payload schema versions this client understands (v2
- * added the structured channels; v3 the voice channels). An unknown
- * version must throw, never be silently miscast as today's shape — a
- * future v4 misread is how a schema roll corrupts the journal UI with
- * wrong-typed fields. */
-export const ENTRY_PAYLOAD_VERSIONS: readonly number[] = [1, 2, 3];
-
 export async function decryptEntry(
   dataKey: Bytes,
   userId: string,
@@ -175,12 +166,6 @@ export async function decryptEntry(
     zeroize(blob, plaintext);
   }
 }
-
-/** The only insights payload schema this client understands (the backend
- *  emits "v": 2). An unknown version must fail LOUDLY here — silently
- *  parsing a future schema as if it were v2 is how a schema roll corrupts
- *  the UI with misread fields. */
-export const INSIGHTS_PAYLOAD_VERSION = 2;
 
 export interface InsightsPayload {
   v: number;

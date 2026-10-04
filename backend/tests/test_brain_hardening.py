@@ -329,6 +329,7 @@ class TestMoodShiftReanchor:
         # Contrast: with the anchor disabled, the same runs keep
         # re-qualifying the months-old drop (this is the pre-fix behavior).
         import pytest
+
         from app.services import brain as brain_mod
 
         state = prior

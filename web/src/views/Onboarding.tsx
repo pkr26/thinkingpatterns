@@ -1,15 +1,8 @@
 /**
- * First-run onboarding (three panels, content mirroring the mobile app's
- * onboarding). The completion flag is a per-account non-content stamp in
- * generation-fenced IndexedDB — it names no health data, but still cannot
- * be recreated by a stale tab after confirmed account erasure.
- *
- * Redesign 2026-09-26: progress dots, a soft abstract gradient panel per
- * step (decorative shapes only — no people imagery), and a full-width
- * continue button.
+ * Three-panel first-run onboarding.
+ * Completion is a per-account, non-content flag in generation-fenced IndexedDB
+ * so a stale tab cannot recreate it after confirmed account erasure.
  */
-// @ts-nocheck
-
 import { useState } from "react";
 import { t } from "../strings";
 import { Button, Card, Icon, Note, ProgressDots } from "../ui";

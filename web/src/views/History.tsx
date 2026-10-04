@@ -1,27 +1,11 @@
 /**
- * History (WEB_PLAN P4.5/4.6): the account's decrypted journal — byte-paged
- * under one revision snapshot, searchable, with the mood calendar, honest
- * version-conflict editing ("reload theirs / reapply mine" — never a silent
- * overwrite), delete, and the entry-version rollback guard (a rolled-back
- * row is skipped and counted, exactly like a tampered blob).
+ * Decrypt and browse journal entries under a consistent server revision.
  *
- * H-5 (audit 2026-09-26): the payload's sentiment is only ever an explicit
- * check-in pick now, so the mood calendar sources like mobile — payload
- * pick first, the device-local mood log's day value as fallback.
- *
- * Redesign 2026-09-26: the calendar gains weekday headers, a color legend,
- * a month entry count, and tap-a-day filtering; entries render as cards
- * with a mood rail; delete is a two-step arm/confirm (matching the portal's
- * pattern) instead of a single unconfirmed press.
- *
- * Audit 2026-09-26 LOW: search maps hits back through a Map<id, entry>
- * built once per source (was entries.find per hit, O(n²)), the list
- * renders through a growing window with a "Show more" sentinel, and the
- * decrypt loop yields to the host periodically — the mood calendar's
- * sourcing is untouched.
+ * Entry-version guards reject rollback and tampering. Edits surface conflicts
+ * for explicit resolution. Search indexes the loaded entries, rendering grows
+ * in bounded windows, and decryption yields periodically to keep navigation
+ * responsive. Calendar mood prefers the explicit payload value, then the local log.
  */
-// @ts-nocheck
-
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, listEntriesWalk } from "../api/client";
 import { zeroize } from "../crypto/core";
@@ -29,7 +13,7 @@ import { decryptEntry, encryptEntry, type EntryPayload, type VoiceFields } from 
 import { playAttachment, type PlayingAudio } from "../audio/player";
 import { detectCrisisLanguage } from "../crisisDetect";
 import { crisisDialogShownOn, recordCrisisDialogShown } from "../crisisDialog";
-import { entryV2Bindings, noteV2BoundBatch, forgetEntryVersion, isV2Bound, noteV2Bound, observeEntryVersions } from "../entryVersions";
+import { entryV2Bindings, noteV2BoundBatch, forgetEntryVersion, observeEntryVersions } from "../entryVersions";
 import { filterEntries, monthGrid, monthLabel, stepMonth } from "../historyFind";
 import { recentMoods, removeMoodDay } from "../moodLog";
 import { localDateISO } from "../dates";

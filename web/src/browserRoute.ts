@@ -1,4 +1,3 @@
-// @ts-nocheck
 const VIEWS = new Set(["today", "history", "patterns", "question", "measures", "safetyplan", "share", "settings", "privacy"]);
 
 export function readBrowserView(): string {

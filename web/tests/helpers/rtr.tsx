@@ -7,8 +7,6 @@
  *  behavioral contracts stay: press() refuses disabled buttons (their
  *  handler is absent by design), and field lookups still require the
  *  control to be wrapped by its <label>. */
-// @ts-nocheck
-
 import { act } from "react";
 import { afterEach } from "vitest";
 import RTR from "react-test-renderer";

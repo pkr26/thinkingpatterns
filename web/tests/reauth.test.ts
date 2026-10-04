@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { deriveMasterKey, toBase64, zeroize } from "../src/crypto/core";
 import { derivePatientKeys } from "../src/crypto/keys";

@@ -19,9 +19,9 @@ from ..models import ROLE_THERAPIST, User
 from ..schemas import TherapistCustodyRequest, TherapistPasswordRequest
 from ..security import tokens
 from ..security.crypto import MIN_BLOB_SIZE
+from ._audit import append_access_log
 from .account import _require_verifier
 from .auth import AUTH_KEY_SIZE, SALT_BYTES, _auth_limiter, auth_work_slot, hash_verifier_off_loop
-from ._audit import append_access_log
 
 router = APIRouter(
     dependencies=[

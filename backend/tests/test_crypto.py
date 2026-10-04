@@ -8,6 +8,9 @@ import pytest
 
 from app.security import crypto
 from app.security.crypto import (
+    KEY_SIZE,
+    MIN_BLOB_SIZE,
+    NONCE_SIZE,
     CryptoError,
     SecureBuffer,
     TamperError,
@@ -15,9 +18,6 @@ from app.security.crypto import (
     decrypt,
     encrypt,
     generate_key,
-    KEY_SIZE,
-    MIN_BLOB_SIZE,
-    NONCE_SIZE,
 )
 
 

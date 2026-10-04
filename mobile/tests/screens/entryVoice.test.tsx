@@ -52,7 +52,7 @@ vi.mock("../../src/store", async (importOriginal) => {
 });
 
 const { api, ApiError } = await import("../../src/api/client");
-const { decryptEntry } = await import("../../src/crypto/MindPatternCrypto");
+const { decryptEntry } = await import("../../src/crypto/journalCrypto");
 const { EntryScreen } = await import("../../src/screens/EntryScreen");
 const { vault } = await import("../../src/vault");
 const { fakeRecorderStatus, recorderControls, __resetAudioMock } = await import("../helpers/expoAudioMock");

@@ -14,8 +14,8 @@ vi.mock("../../src/api/client", async (importOriginal) => {
   return { ...actualApi, ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
 });
 
-vi.mock("../../src/crypto/MindPatternCrypto", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/crypto/MindPatternCrypto")>();
+vi.mock("../../src/crypto/journalCrypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/crypto/journalCrypto")>();
   return {
     ...actual,
     deriveKeysAsync: vi.fn(async (password: string, salt: Buffer) => ({
@@ -35,7 +35,7 @@ vi.mock("../../src/store", async (importOriginal) => {
 });
 
 const { api, ApiError } = await import("../../src/api/client");
-const { deriveKeysAsync } = await import("../../src/crypto/MindPatternCrypto");
+const { deriveKeysAsync } = await import("../../src/crypto/journalCrypto");
 const { LoginScreen } = await import("../../src/screens/LoginScreen");
 const { takePendingOnboarding } = await import("../../src/onboarding");
 const { vault } = await import("../../src/vault");

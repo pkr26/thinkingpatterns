@@ -29,7 +29,7 @@ const { api } = await import("../../src/api/client");
 const { InsightsScreen } = await import("../../src/screens/InsightsScreen");
 const { vault } = await import("../../src/vault");
 const { buildAad, encrypt } = await import("../../src/crypto/envelope");
-const { INSIGHTS_PAYLOAD_VERSION } = await import("../../src/crypto/MindPatternCrypto");
+const { INSIGHTS_PAYLOAD_VERSION } = await import("../../src/crypto/journalCrypto");
 const { render, flush, textOf, allText, act } = await import("../helpers/rtr");
 const { resetApi } = await import("../helpers/apiMock");
 

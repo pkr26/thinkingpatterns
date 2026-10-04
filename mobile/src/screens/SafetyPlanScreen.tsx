@@ -16,7 +16,7 @@
  * the one part of a safety plan the app can honestly contribute itself.
  */
 import React, { useEffect, useRef, useState } from "react";
-import { Alert, AppState, BackHandler, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, AppState, BackHandler, ScrollView, Text, TextInput, View } from "react-native";
 import { api } from "../api/client";
 import { vault } from "../vault";
 import { captureLocalWritePermit, assertLocalWritePermit } from "../localRekey";

@@ -1,6 +1,6 @@
 # Backend test suite
 
-~1560 tests. Default run (from `backend/`):
+Run the regression suite from `backend/`:
 
 ```console
 ../.venv/bin/python -m pytest tests/ -q
@@ -10,6 +10,10 @@ Every test gets a fresh in-memory SQLite database and a fresh app instance
 (`conftest.py`'s `settings`/`app`/`client` fixtures). The process pins
 itself to UTC at conftest-import time — see the comment block in
 `conftest.py` for why host-local timezones must not leak into the suite.
+
+The app fixture also awaits the initial account-deletion maintenance pass.
+This prevents a startup read from rolling back a concurrent request on
+in-memory SQLite's shared connection.
 
 The CI gates that must stay green (`../.venv/bin/python -m ruff check .`,
 `ruff format --check .`, `mypy`, `pytest tests/ -q`) are documented in
@@ -111,11 +115,11 @@ as the database component. See pgserver's own README for its API.
 
 ---
 
-## Suite layout: the provenance map
+## Suite layout
 
-This suite is organized by PROVENANCE, not by module: each file pins the
-findings of the audit round, pentest, or mutation campaign that paid for
-it, and its module docstring cites that report. The topic index:
+The suite combines module tests with regression files grouped by the audit
+or mutation campaign that identified each issue. Module docstrings link
+findings to their source reports; this index groups suites by topic.
 
 | Layer | Suites | What they pin |
 |---|---|---|
@@ -135,38 +139,24 @@ it, and its module docstring cites that report. The topic index:
 | Infrastructure | `test_migrations`, `test_pg_profile`, `test_totp` | alembic parity + PG round-trips, the PG profile seam, TOTP ladder |
 | Property-based (2026-09-26) | `test_property_based` | hypothesis-driven adversarial-input properties for `_parse_entries` and `build_aad` (derandomized; see its module docstring) |
 
-### Why consolidation is deliberately deferred
+### Regression file names
 
-The obvious refactor — merge the audit-round files into per-module files
-("all brain tests in one place") — has been considered and rejected for
-now, honestly and deliberately: each provenance file is the machine-
-checked appendix of a specific report, its docstring names that report,
-and the redteam harnesses and mutation campaigns reference suites by
-these names and shapes. Re-shuffling ~1560 tests across files would
-break that finding→pin linkage (and the git archaeology behind it) for a
-purely navigational gain, while carrying real risk of silently dropping
-or double-running pins during the move. The table above is the topic
-index instead. Revisit only with a provenance-preserving mechanism
-(per-test source markers, a generated index) and a dedicated quiet
-window — not as a drive-by.
+Audit and mutation harnesses reference these files by name. Preserve their
+finding-to-test links when reorganizing tests; a rename must update the
+corresponding harnesses and report references.
 
 ---
 
 ## Conventions worth knowing before adding tests
 
-- **Serial execution is a hard assumption.** The in-process rate
-  counters, key store, and token epochs are per-process state, and the
-  shared-database cleanup wipes rows between tests without locking.
-  `pytest-xdist` (or any parallel runner) is therefore out of scope
-  until each worker owns its own database AND its own app state; CI runs
-  one serial process (the PG job's database contract documents this too).
-- **No wall-clock pins.** Tests that need time (TOTP timesteps) drive a
-  fake clock — see `helpers.TotpClock` / `install_totp_clock` — and perf
-  claims count WORK UNITS via monkeypatch spies (see `test_dos_hardening`,
-  `test_attack_resistance`), never `elapsed < N` seconds on loaded CI
-  runners. One deliberately-kept real-clock smoke test lives in
-  `test_totp.py` with a generous bound and a comment saying it is the
-  only one.
+- **Run tests serially.** Rate counters, key stores, and token epochs are
+  process-local, and shared-database cleanup removes rows between tests.
+  Parallel workers require separate databases and application state.
+- **Use deterministic clocks and work counts.** TOTP tests use
+  `helpers.TotpClock` and `install_totp_clock`. Performance tests count
+  operations with spies instead of asserting elapsed time; see
+  `test_dos_hardening` and `test_attack_resistance`. `test_totp.py` retains
+  one documented real-clock smoke test with a generous bound.
 - **The `slow` marker is quarantined** to the grandfathered KDF/vector
   pins (see `pyproject.toml`); a ratchet test fails if any other file
   acquires it.

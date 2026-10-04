@@ -1,4 +1,4 @@
-"""Add voice-transcription consent columns (VOICE_PLAN.md P1, 2026-09-29).
+"""Add voice-transcription consent columns (docs/plans/voice-plan.md P1, 2026-09-29).
 
 Voice journaling ships recorded audio to a third-party STT endpoint; the
 per-user opt-in gets the same GDPR Art. 7 demonstrability +

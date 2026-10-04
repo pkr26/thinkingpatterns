@@ -6,7 +6,7 @@ import { secureStore, setSecureStoreBackend } from "../src/secureStore";
 import { __resetLocalKeyLifecycleForTests } from "../src/localRekey";
 import { enqueue, flushQueue, queueLength } from "../src/offlineQueue";
 import { enqueueAudio, flushAudioQueue, audioQueueCount } from "../src/audioQueue";
-import { encryptAudio } from "../src/crypto/MindPatternCrypto";
+import { encryptAudio } from "../src/crypto/journalCrypto";
 import { buildAad, encrypt } from "../src/crypto/envelope";
 const USER = "11111111111111111111111111111111", OTHER = "22222222222222222222222222222222", KEY = Buffer.alloc(32, 5);
 function deferred<T = void>() { let resolve!: (value: T | PromiseLike<T>) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }

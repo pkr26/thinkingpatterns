@@ -1,5 +1,5 @@
 /**
- * Decrypt-and-play for kept recordings (VOICE_PLAN P4, 2026-09-29).
+ * Decrypt and play kept recordings through a temporary native cache file.
  *
  * Fetch the encrypted attachment → decrypt in memory → write an app-private
  * cache file expo-audio can play → release the plaintext buffer. `release`
@@ -7,7 +7,7 @@
  * account erasure, and origin retirement also scrub the owned cache roots.
  */
 import * as FileSystem from "expo-file-system/legacy";
-import { decryptAudio } from "../crypto/MindPatternCrypto";
+import { decryptAudio } from "../crypto/journalCrypto";
 import { createPlaybackScratchUri } from "./voiceScratch";
 
 export interface PlayingVoice {

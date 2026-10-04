@@ -1,51 +1,15 @@
 /**
- * Analysis-generation rollback guard (2026-09-19 contract).
+ * Reject replayed analysis generations before rendering decrypted results.
+ * The encrypted state_seq must match the response and cannot move below the
+ * highest generation observed on this device. Once a mark exists, missing
+ * generation fields also fail closed; legacy responses are accepted only
+ * when there is no previous mark.
  *
- * AES-GCM authenticates WHO and WHAT a ciphertext belongs to, never WHICH
- * VERSION it is: without this check a compromised server could replay an
- * earlier, cryptographically valid patterns blob and the app would render
- * it as today's truth. The server now (a) embeds a monotonic
- * ``state_seq`` inside the encrypted payload and (b) echoes the same value
- * in the plaintext response. Two device-local checks make every rollback
- * loud:
- *
- *   1. payload.state_seq === response.state_seq  — a replayed-older blob
- *      disagrees with the row's echoed generation.
- *   2. payload.state_seq >= device high-water mark — even a both-copies
- *      rollback (column AND blob rewound together) moves the value
- *      backwards. The high-water mark lives in device-local storage the
- *      server cannot reach, which is exactly what makes it trustworthy
- *      against a server-side attacker.
- *
- * 2026-09-20 (audit fix M-1): absent values now FAIL CLOSED once a
- * high-water mark exists for the user. The old "absent passes silently"
- * rule was a protocol downgrade a compromised server controlled: replay a
- * pre-2026-09-19 blob and omit the echoed field, and both sides read
- * undefined while week-old analysis rendered as today's truth. Only a
- * user with NO mark yet (genuinely old server, fresh install) still
- * passes — there is nothing to compare against. A process-lifetime
- * in-memory mirror of the mark additionally survives on-device tampering
- * with the stored copy for the duration of the session (the same idiom
- * crisisDialog.ts uses); wiping the persisted mark and killing the app
- * before the next launch remains the documented residual.
- *
- * 2026-09-26 (audit LOW): the persisted mark is no longer plaintext in
- * AsyncStorage. It lives in secureStore — AES-256-GCM under the per-install
- * Keychain/Keystore device key (secureStore.ts) — so a local attacker who
- * LOWERS the stored bytes cannot forge a valid record: the GCM tag check
- * (the envelope primitive's own constant-time verification; no
- * attacker-controlled bytes are compared in the clear here) fails and the
- * tampered record reads as ABSENT, with the in-memory mirror remaining the
- * in-session authority and the self-heal rewrite re-pinning the true
- * value. A v1 plaintext decimal mark migrates sealed read-through, once.
- * Deleting the record outright is still possible and still the documented
- * residual: the next process degrades to "no memory" until the next
- * honest generation re-pins (M-1 then re-arms from there). The data-key
- * lane entryVersions.ts uses was NOT chosen here: this guard's callers
- * (InsightsScreen) hold the data key, but the mark must also survive a
- * data-key rotation without a rebind step and stay readable by the same
- * origin-bound key wipe in api/client.ts — the per-install device key
- * gives both for free.
+ * Marks use secureStore's per-install key so they survive account data-key
+ * rotation. An in-memory mirror preserves the current process's high-water
+ * mark if storage is removed or corrupted; later writes repair the record.
+ * Legacy plaintext marks migrate on read. Deleting storage and restarting
+ * can remove this history, a limitation of device-local rollback detection.
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { secureStore } from "./secureStore";

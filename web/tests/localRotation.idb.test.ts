@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { afterEach,beforeEach,describe,expect,it,vi } from "vitest";
 import { IDBFactory } from "fake-indexeddb";
 import { kv,resetKvConnectionForTests,setKvBackendForTests,writeGenerationKey } from "../src/kvstore";

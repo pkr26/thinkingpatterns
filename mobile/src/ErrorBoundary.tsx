@@ -1,10 +1,7 @@
 /**
- * Root ErrorBoundary (2026-10-01 audit L-4): the mobile app had NO
- * componentDidCatch anywhere — any render-time throw (a hostile or simply
- * unexpected payload shape) white-screened the whole app. For this user
- * population the fallback must stay usable: a calm message, a restart
- * affordance, and — load-bearing — a crisis-resources escape hatch that
- * never depends on the crashed tree.
+ * Render-error recovery with a restart action and offline crisis resources.
+ * The fallback lives outside the failed screen tree so support remains
+ * available when a child component cannot render.
  */
 import React from "react";
 import { Linking, Pressable, StyleSheet, Text, View } from "react-native";

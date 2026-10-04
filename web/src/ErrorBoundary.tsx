@@ -1,22 +1,10 @@
 /**
- * Error boundaries (deep audit 2026-09-29, HIGH): before this, ANY uncaught
- * render exception unmounted the whole SPA — a white screen mid-journal,
- * the worst possible failure mode for a distressed user, and the draft
- * seal (`preserveActiveDraft`) only ever ran on lock paths, never on
- * crashes. Two layers:
+ * App-level and view-level render boundaries.
  *
- *  - `<ErrorBoundary>` (main.tsx): the last resort. Full-page calm copy.
- *  - `<ViewBoundary>` (App.tsx, keyed by view): a crash inside ONE view
- *    falls back to a calm panel while the app frame, navigation and the
- *    crisis overlay stay alive — the user keeps every way out.
- *
- * Both seal the active entry draft before showing the fallback: the words
- * on screen must never be eaten by a rendering bug. The seal is
- * fire-and-forget with a swallow — it must never turn a UI crash into a
- * dropped draft.
+ * The app boundary offers a reload; the view boundary preserves navigation
+ * and crisis resources. Both attempt to seal the active journal draft and
+ * safety plan. Persistence failures must not prevent the fallback UI.
  */
-// @ts-nocheck
-
 import { Component, type ReactNode } from "react";
 import { Button, Card, Note } from "./ui";
 import { preserveActiveDraft } from "./entryDraft";

@@ -65,30 +65,13 @@ async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
     from .api._audit import flush_audit_journal
 
     async with request.app.state.sessionmaker() as session:
-        # Independent audit 2026-09-27: the audit journal must be appended
-        # strictly AFTER the handler's commit (a pre-commit journal line
-        # could outlive a rolled-back transaction and read as tail
-        # truncation). Track the outcome via session events, then flush the
-        # staged journal entries once the request handler has finished.
-        # No-op unless an audit row was appended AND the journal path is
-        # configured. Post-commit I/O cannot roll back the action, but a
-        # failure flips readiness unhealthy until a later successful flush.
-        #
-        # Deep audit 2026-09-28 (C-1): "committed" is sticky — require_user
-        # commits its auth read on EVERY authenticated request, and a
-        # handler that fails without an explicit rollback() is rolled back
-        # by the session close WITHOUT firing after_rollback. The old
-        # `committed and not rolled_back` guard therefore flushed staged
-        # lines for rows that never committed (e.g. a therapist read whose
-        # audit row was appended just before a 413 refusal), and the daily
-        # sweep then read the phantom journal-ahead state as "tail
-        # truncation" tamper evidence. The fix snapshots the staged-line
-        # count at each COMMIT: at request end only the prefix that rode a
-        # committed transaction is flushed; anything staged after the last
-        # commit belongs to a transaction that never committed and is
-        # dropped. A dropped committed line (explicit rollback after a
-        # later commit) leaves the journal BEHIND the DB head, which
-        # verification treats as benign crash-window semantics.
+        # Flush only journal entries belonging to committed transactions.
+        # Authentication can commit before a handler stages its audit rows;
+        # session-close rollback does not fire after_rollback. Capture the
+        # committed prefix on each commit so an uncommitted tail never
+        # appears in the journal as evidence of database tampering.
+        # A post-commit I/O failure cannot undo the request, but keeps
+        # readiness unhealthy until a successful flush.
         committed = False
         rolled_back = False
         staged_at_commit = 0

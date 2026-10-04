@@ -1,6 +1,6 @@
 """Regression tests for the 2026-09-21 audit, Part 1.3 (backend correctness).
 
-Each test names its finding (audit IDs from AUDIT_2026-09-21.md):
+Each test names its finding (audit IDs from docs/archive/audits/AUDIT_2026-09-21.md):
 
 * A-1: rekey mutates every entry/measure blob without advancing the
   collection revision — mid-pagination clients must see collection_changed.
@@ -38,9 +38,9 @@ from sqlalchemy.orm.exc import ObjectDeletedError, StaleDataError
 
 from app.api import account as account_module
 from app.api.measures import MEASURE_PAGE_BLOB_BYTES
+from app.cache import SlidingWindowCounter
 from app.deps import ApiError
 from app.models import Consent, Insight, Measure
-from app.cache import SlidingWindowCounter
 from tests.helpers import ClientEmulator, TherapistEmulator, patient_wrap_for
 
 TODAY = date.today()

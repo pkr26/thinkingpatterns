@@ -1,6 +1,6 @@
 """Regression tests for the Spanish theme lexicon (2026-09-21).
 
-AUDIT_2026-09-21.md Phase 2 workstream 1 demanded "ES theme lexicon
+docs/archive/audits/AUDIT_2026-09-21.md Phase 2 workstream 1 demanded "ES theme lexicon
 (temporal/mood_correlation/link cards in Spanish)" — delivered by the
 independent verification follow-up (finding V-2). The engine's nine
 canonical themes now carry a Spanish word set, and theme lookups are

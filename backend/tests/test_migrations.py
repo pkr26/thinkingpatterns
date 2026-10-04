@@ -19,8 +19,8 @@ from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from sqlalchemy import create_engine, inspect, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import IntegrityError
 
 from app.config import Settings
 from app.db import SCHEMA_HEAD, build_engine, build_sessionmaker, init_models

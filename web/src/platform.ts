@@ -1,12 +1,8 @@
 /**
- * Browser-platform seam. Views and services never touch `window`,
- * `document`, `navigator` or `URL` directly: under the node test runtime
- * there is no DOM, and a private-mode browser can throw on storage or
- * downloads — every capability degrades to an inert default instead of
- * crashing the app (WEB_PLAN P1.3, R-7).
+ * Browser capability adapters for storage, events, locks, and downloads.
+ * DOM-free tests and restricted browser contexts use explicit fallback behavior
+ * at each adapter. Durable record storage is handled separately by kvstore.
  */
-// @ts-nocheck
-
 
 /** Randomness goes through the seam so tests can observe (and a future
  *  non-browser host can override) it. */

@@ -10,22 +10,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
   var reactNativeDelegate: ReactNativeDelegate?
   var reactNativeFactory: RCTReactNativeFactory?
 
-  /// Opaque cover placed over the window the moment the app resigns
-  /// active (audit F-3, 2026-09-26). The JS shield in App.tsx renders
-  /// asynchronously through the bridge and can lose the race against the
-  /// app-switcher snapshot; these notification observers run
-  /// synchronously on the main thread BEFORE iOS captures the
-  /// transition snapshot, so decrypted journal content can never appear
-  /// in the switcher thumbnail. The JS overlay stays as belt-and-braces
-  /// and for the themed color.
+  /// Cover the window synchronously before iOS takes an app-switcher
+  /// snapshot. The JavaScript overlay cannot guarantee that timing.
   private var snapshotShield: UIView?
 
-  /// S-7 (pentest 2026-09-26): iOS has no FLAG_SECURE — while the app is
-  /// FOREGROUND-ACTIVE, a QuickTime/AirPlay/screen-recording capture
-  /// sees decrypted journal text live. UIScreen.isCaptured is the one
-  /// signal the platform offers; when it turns on, the same opaque cover
-  /// goes up until recording stops. A deliberate cover beats hoping the
-  /// user notices the red status-bar pill.
+  /// Hide journal content while the screen is being recorded or mirrored.
+  /// Keep this cover independent from the app-transition cover.
   private var captureShield: UIView?
 
   func application(
@@ -59,7 +49,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
       name: UIApplication.didBecomeActiveNotification,
       object: nil
     )
-    // S-7: screen recording / mirroring of the foreground app.
+    // Track recording and mirroring while the app is in the foreground.
     NotificationCenter.default.addObserver(
       self,
       selector: #selector(captureStateChanged),
@@ -96,9 +86,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     captureStateChanged()
   }
 
-  // S-7: the recording cover is INDEPENDENT of the transition shield so
-  // the two lifecycles (capture on/off, active/resigned) can overlap
-  // freely without one removing the other's cover.
+  // Independent lifecycles prevent one transition from removing the
+  // other privacy cover while recording or mirroring is still active.
   @objc private func captureStateChanged() {
     if UIScreen.main.isCaptured {
       guard let window = window, captureShield == nil else { return }
@@ -106,8 +95,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
       shield.backgroundColor = UIColor(red: 0.11, green: 0.14, blue: 0.19, alpha: 1.0)
       shield.autoresizingMask = [.flexibleWidth, .flexibleHeight]
       shield.isAccessibilityElement = true
-    shield.accessibilityLabel = "Fathom privacy screen"
-    shield.accessibilityViewIsModal = true
+      shield.accessibilityLabel = "Fathom privacy screen"
+      shield.accessibilityViewIsModal = true
       window.addSubview(shield)
       captureShield = shield
     } else {

@@ -1,10 +1,8 @@
-"""The "mini-brain": deterministic pattern extraction over decrypted entries.
+"""Shared journal and pattern models, plus the v1 reference analyzer.
 
-v1 ships the rule-based analyzer (lexicon themes, weekday histogram, mood
-deltas, recurring phrases). It is fully deterministic, which is what makes
-both product claims testable and mutation testing meaningful. An
-LLM-backed analyzer implementing the same interface can be enabled via
-MINDPATTERN_LLM_URL (see llm.py); it never runs in tests.
+Production analysis runs in services.brain. The original deterministic
+analyzer remains here for regression comparisons and must not be called
+from production routes. Pattern.describe supplies the shared display copy.
 """
 
 from __future__ import annotations
@@ -173,26 +171,17 @@ class JournalEntry:
     text: str
     entry_date: date
     sentiment: float | None = None  # optional client-computed override
-    # --- structured channels (entry payload v2, 2026-09-17) ------------------
-    # Optional, client-supplied, within-person by construction: the user's
-    # own ratings/tags for the day, never a model inference. All optional —
-    # a v1 payload simply leaves them None/empty and the engine behaves
-    # exactly as before.
+    # Optional self-reported channels; v1 payloads retain their defaults.
     energy: float | None = None  # [-1, 1]: drained → energized
     sleep_quality: int | None = None  # 1..5: rough → rested
     tags: tuple[str, ...] = ()  # short activity tags ("family", "run")
-    # P3 (2026-09-21): coarse LOCAL writing window ("morning"/"afternoon"/
-    # "evening"/"night") — a bucket, never a clock time. Powers the
-    # "Sunday evening" temporal refinement; None on v1 payloads (the
-    # engine behaves exactly as before).
+    # Local writing window: morning, afternoon, evening, or night.
     tod: str | None = None
 
 
 @dataclass(frozen=True)
 class Pattern:
-    kind: str  # the engine's kind taxonomy lives in brain.py (see
-    # STATISTICAL_KINDS and the _Signal constructions); 17 kinds as of
-    # 2026-09-20 — never enumerate them here, this field only carries them
+    kind: str  # Valid kinds are defined by services.brain.KNOWN_PATTERN_KINDS.
     label: str
     occurrences: int
     confidence: float
@@ -208,9 +197,7 @@ class Pattern:
         }
 
     def describe(self) -> str:
-        # Structured-channel copy (2026-09-17): sleep-quality patterns are
-        # about the user's own RATING, not a word they wrote — quoting it as
-        # a phrase would read wrong.
+        # Sleep-quality patterns describe self-reported ratings.
         if self.detail.get("channel") == "sleep_quality":
             if self.kind == "link":
                 direction = self.detail.get("direction", "lower")
@@ -434,15 +421,11 @@ def recurring_phrases(
 
 
 def analyze(entries: list[JournalEntry]) -> Analysis:
-    """TEST-ONLY v1 reference implementation — never call from production.
+    """Run the v1 reference analyzer for regression comparisons only.
 
-    The v1 statistics (pooled moods, no within-person residuals, no
-    multiple-comparison control) are the documented false-positive failure
-    mode the deterministic brain (services/brain.py) replaced. This
-    function survives for test comparison and historical reference only;
-    tests/test_llm.py greps app/ to keep it out of the production import
-    graph, and llm.py has had its analyzer interface (which fell back to
-    this) removed for the same reason (2026-09-17).
+    It uses pooled moods without within-person residuals or multiple-test
+    correction. Production uses services.brain; test_llm.py guards that
+    boundary to prevent reintroducing the reference model's false positives.
     """
     per_entry: list[tuple[JournalEntry, float, set[str]]] = []
     for entry in entries:

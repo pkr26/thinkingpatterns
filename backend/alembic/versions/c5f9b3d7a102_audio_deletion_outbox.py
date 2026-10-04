@@ -1,7 +1,7 @@
 """Durable audio object deletion and nonsecret storage locators."""
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "c5f9b3d7a102"
 down_revision = "b4e8a2c6f091"

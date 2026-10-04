@@ -14,18 +14,17 @@ import hmac
 import json
 import os
 from datetime import date
+from unittest.mock import MagicMock
 
 import pytest
-from unittest.mock import MagicMock
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.cache import EVICTION_BATCH, SlidingWindowCounter, MAX_TRACKED_KEYS, client_key
+from app.cache import EVICTION_BATCH, MAX_TRACKED_KEYS, SlidingWindowCounter, client_key
 from app.config import _bool_env
+from app.middleware import HardeningMiddleware
 from app.security import crypto
 from app.security.tokens import TokenError, _b64url_encode, verify_token
-from app.middleware import HardeningMiddleware
 from tests.helpers import ClientEmulator, daterange
-
 
 # ---------------------------------------------------------------------------
 # middleware: raw ASGI edges the HTTP-level tests cannot express

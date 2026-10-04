@@ -1,8 +1,6 @@
 /** The authenticated endpoint surface: every method hits the documented
  *  path with the documented payload/headers (the shapes P5–P7 screens and
  *  the interop harness lean on). */
-// @ts-nocheck
-
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, auth, MINIMUM_AGE_ATTESTATION, SHARING_DISCLOSURE_VERSION } from "../src/api/client";
 import { installSession, jsonResponse, resetTestState, stubFetch } from "./helpers/api";

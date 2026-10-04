@@ -48,8 +48,6 @@ the retention cutoff; a later append continues from that high-water mark.
 
 from __future__ import annotations
 
-import anyio
-
 import hashlib
 import hmac
 import json
@@ -57,14 +55,15 @@ import logging
 import os
 import re
 import sqlite3
-import threading
 import tempfile
+import threading
+from collections.abc import Callable, Mapping
 from contextlib import closing
-from functools import lru_cache
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from collections.abc import Callable, Mapping
+from functools import lru_cache
 
+import anyio
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession

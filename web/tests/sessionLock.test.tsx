@@ -3,8 +3,6 @@
  *  pageshow, and the hidden-tab guard locks the moment the tab goes to
  *  the background (mobile background-lock parity, W-1). Driven through
  *  the platform seam's window shim. */
-// @ts-nocheck
-
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useBfcacheGuard, useHiddenTabLock, useIdleLock, IDLE_LOCK_MS } from "../src/sessionLock";
@@ -34,7 +32,7 @@ describe("useIdleLock", () => {
 
   it("locks after 5 idle minutes (mobile parity)", async () => {
     const onLock = vi.fn();
-    const root = await render(<Probe active={true} onLock={onLock} />);
+    await render(<Probe active={true} onLock={onLock} />);
     expect(onLock).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(IDLE_LOCK_MS - 1);
     expect(onLock).not.toHaveBeenCalled();

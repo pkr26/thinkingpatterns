@@ -1,11 +1,7 @@
 /**
- * Transient inline confirmations — the fix for the save-feedback inversion
- * the audit found (online save = silent clear, offline save = interruptive
- * modal). Success is now a small status line that appears where the user is
- * already looking and clears itself; Alert stays reserved for failures the
- * user must act on.
+ * Inline confirmations for completed and queued actions. The parent clears
+ * transient messages; failures that require a decision use an alert.
  */
-import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useTheme } from "../theme";
 

@@ -6,7 +6,6 @@
  *  display-only — passwordPolicyError remains the enforced contract
  *  (pinned in views.test.tsx and the mutation pins). */
 import { describe, expect, it, vi } from "vitest";
-import React from "react";
 import { PasswordStrengthMeter } from "../src/ui";
 import { passwordPolicyError, passwordStrength } from "../src/views/LoginView";
 import { render, textOf, press, typeInto } from "./helpers/rtr";

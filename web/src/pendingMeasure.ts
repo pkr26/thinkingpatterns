@@ -1,33 +1,11 @@
 /**
- * Pending measure persistence (audit 2026-09-26 LOW) — the web port of
- * mobile/src/pendingMeasure.ts onto the kvstore seam + async WebCrypto.
+ * Encrypted persistence for one completed, unsent questionnaire.
  *
- * A COMPLETED questionnaire used to live only in MeasuresView state: a
- * submit that failed offline (status 0) surfaced an error banner and every
- * answer died with the view. The completed record now survives here —
- * {kind, clientMeasureId, picks, date}, encrypted under the data key
- * exactly like the mood log (AES-GCM, AAD binds the user; a wrong key or
- * tampered record reads as absent) — and MeasuresView restores + retries
- * it on its next mount.
- *
- * WHY A PENDING RECORD, NOT AN OFFLINE-QUEUE ENTRY (mobile's deliberate
- * call, kept): offlineQueue.ts is entry-shaped — content_version
- * semantics, per-row origin pinning, reject/requeue machinery — and wiring
- * a second payload type into it for one row buys nothing: the retry needs
- * exactly one property, IDEMPOTENCY, and the server provides it natively.
- * POST /measures is idempotent by client_measure_id (backend
- * app/api/measures.py: a retry of a send that landed-but-was-never-acked
- * answers 409 conflict, which the view already treats as "recorded"). That
- * is also why the client id is persisted BEFORE the first send and reused
- * by every retry: a status-0 failure can be a timeout AFTER the server
- * committed, and a fresh id per attempt would record the same answers
- * twice. The record clears on the first 201 or 409.
- *
- * Item 6 (same audit): the picks are option VALUES, never option array
- * indexes — validated as membership in the instrument's option scale.
+ * The record includes answers, completion date, and a stable client measure id.
+ * Persisting that id before sending makes retries idempotent when a response
+ * is lost after the server commits. Answers store validated option values,
+ * not display indexes. The Measures view owns retry and acknowledgement.
  */
-// @ts-nocheck
-
 import { buildAad } from "./crypto/aad";
 import { decrypt, encrypt, fromBase64, toBase64, zeroize, type Bytes } from "./crypto/core";
 import { kv,type WritePermit } from "./kvstore";
@@ -108,15 +86,4 @@ export async function loadPendingMeasure(dataKey: Bytes, userId: string): Promis
  *  not outlive its questionnaire. */
 export async function clearPendingMeasure(userId: string,permit?:WritePermit): Promise<void> {
   await kv.removeItem(key(userId),permit);
-}
-
-/** Rotation parity with the B-7 rewrap family: re-seal an in-flight
- *  questionnaire under the incoming key so it survives a v1 password
- *  change. A failure propagates so the rotation falls back to clearing
- *  (the record is disposable metadata around one form, never worth an
- *  error that blocks the rotation). */
-export async function rewrapPendingMeasure(oldKey: Bytes, newKey: Bytes, userId: string): Promise<void> {
-  const record = await loadPendingMeasure(oldKey, userId);
-  if (record === null) return;
-  await savePendingMeasure(newKey, userId, record);
 }

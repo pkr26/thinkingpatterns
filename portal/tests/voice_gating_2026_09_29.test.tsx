@@ -11,7 +11,6 @@
  * against the real WebCrypto).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import React from "react";
 
 vi.mock("../src/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/api")>();

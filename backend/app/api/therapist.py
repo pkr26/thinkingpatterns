@@ -30,8 +30,8 @@ import base64
 import binascii
 import hmac
 import os
-from datetime import date as date_type, timedelta
 from contextlib import AsyncExitStack, asynccontextmanager
+from datetime import date as date_type, timedelta
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from fastapi.responses import JSONResponse
@@ -42,8 +42,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..cache import check_keyed_limit_without_count, make_rate_limiter, record_keyed_failure
 from ..db import rowcount as db_rowcount
 from ..deps import (
-    ensure_no_rekey,
     ApiError,
+    ensure_no_rekey,
     get_session,
     require_sharing_enabled,
     require_therapist,
@@ -71,23 +71,23 @@ from ..models import (
     utcnow,
 )
 from ..schemas import (
-    MeasureOut,
+    AudioAttachmentOut,
+    EntryOut,
     InsightsResponse,
+    MeasureOut,
     NoteCreateRequest,
     NoteOut,
     NoteRekeyRequest,
+    NoteRevisionOut,
     NoteUpdateRequest,
-    EntryOut,
-    PatientOut,
     PairingCodeResponse,
+    PatientOut,
+    TherapistAccessLogOut,
     TherapistMeResponse,
     TherapistPairingSasResponse,
     TherapistRegisterRequest,
     TokenResponse,
-    TherapistAccessLogOut,
-    NoteRevisionOut,
     WrapKeyRotateRequest,
-    AudioAttachmentOut,
     entry_out,
 )
 from ..security import sharing, tokens
@@ -112,16 +112,8 @@ from ._sharing_state import (
     advance_sharing_revisions,
 )
 from .account import _require_verifier
-from .auth import SALT_BYTES, AUTH_KEY_SIZE, _auth_limiter, auth_work_slot, hash_verifier_off_loop
+from .auth import AUTH_KEY_SIZE, SALT_BYTES, _auth_limiter, auth_work_slot, hash_verifier_off_loop
 from .consents import MAX_PATIENTS_PER_THERAPIST, SHARING_DISCLOSURE_VERSION
-from .measures import (
-    MEASURE_PAGE_BLOB_BYTES,
-    MEASURE_PAGE_LIMIT,
-    MEASURES_REVISION_HEADER,
-    _measure_blob_length,
-    _measure_out,
-    current_measures_revision,
-)
 from .entries import (
     ENTRIES_REVISION_HEADER,
     MAX_COLLECTION_REVISION,
@@ -130,6 +122,14 @@ from .entries import (
     current_entries_revision,
 )
 from .insights import _entry_dates, _latest_insight
+from .measures import (
+    MEASURE_PAGE_BLOB_BYTES,
+    MEASURE_PAGE_LIMIT,
+    MEASURES_REVISION_HEADER,
+    _measure_blob_length,
+    _measure_out,
+    current_measures_revision,
+)
 
 router = APIRouter(
     prefix="/therapist",
@@ -150,9 +150,6 @@ PAIRING_TTL_SECONDS = sharing.PAIRING_TTL_SECONDS
 # are deleted lazily once they are past this age (the digest row itself is
 # worthless, but rows should not accumulate forever).
 PAIRING_RETENTION = timedelta(days=1)
-# 2026-09-17: audit rows age out after two years (time-based; account
-# deletion still never touches them — they simply live out their window).
-ACCESS_LOG_RETENTION = timedelta(days=730)
 
 # Notes are encrypted but still attacker-controlled storage. Keep one
 # therapist/patient chart bounded independently of the journal quota so a
@@ -1657,10 +1654,10 @@ async def read_patient_audio(
     from ..models import AudioAttachment
     from ..services.audio_store import (
         AudioStoreError,
-        get_audio_store_cached,
-        enqueue_audio_delete,
-        store_for_object,
         advance_audio_revision,
+        enqueue_audio_delete,
+        get_audio_store_cached,
+        store_for_object,
     )
 
     settings = request.app.state.settings

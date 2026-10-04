@@ -15,8 +15,6 @@
  * crisis resources stay one tap away from here too: the Get help button
  * in this view opens the same static dialog.
  */
-// @ts-nocheck
-
 import { useEffect, useRef, useState } from "react";
 import { EMPTY_SAFETY_PLAN, FIELD_MAX, loadSafetyPlan, saveSafetyPlan, type SafetyPlan } from "../safetyPlan";
 import { displayError } from "../errors";

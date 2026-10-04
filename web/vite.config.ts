@@ -24,18 +24,9 @@ const securityHeaders = {
   "X-Robots-Tag": "noindex, nofollow",
 };
 
-/** Dev-only repair for the CSP-vs-fast-refresh conflict (E2E 2026-09-26,
- * finding F1): @vitejs/plugin-react boots HMR by injecting an INLINE
- * module script (the react-refresh preamble) into index.html, which
- * `script-src 'self'` — enforced by BOTH the meta tag and the dev
- * server's header copy — blocks, leaving `npm run dev` a permanently
- * blank page. The fix refuses 'unsafe-inline' (banned by
- * tests/securityConfig.test.ts, rightly): it hashes whatever inline
- * module scripts the dev server actually serves and appends those
- * hashes to the meta CSP. The production triple (index.html file,
- * public/_headers, nginx) is untouched — this plugin applies only to
- * `vite dev`, and the dev server drops its CSP header so the hashed
- * meta policy is the one that governs. */
+/** Permit Vite's inline React-refresh preamble with content hashes in development.
+ * The dev response omits its CSP header so it cannot override the hashed
+ * meta policy. This plugin never changes production policies. */
 function devInlineScriptHashes(): Plugin {
   return {
     name: "dev-inline-script-hashes",

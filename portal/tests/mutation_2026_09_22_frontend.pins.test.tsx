@@ -102,7 +102,6 @@ const mockedApi = vi.mocked(api);
 const mockedCrypto = vi.mocked(await import("../src/crypto"));
 const realCrypto = await vi.importActual<typeof import("../src/crypto")>("../src/crypto");
 const realApi = await vi.importActual<typeof import("../src/api")>("../src/api");
-const { setSession, clearSession, hasSession } = realApi;
 const platform = await import("../src/platform");
 const ui = await import("../src/ui");
 const { LoginView, passwordPolicyError } = await import("../src/views/LoginView");
@@ -320,7 +319,7 @@ describe("mutation pins 2026-09-22: api request body shapes", () => {
 });
 
 describe("mutation pins 2026-09-22: api pagination contracts", () => {
-  const page = (rows: unknown[], next: number | null, revision?: string) => ({
+  const page = (rows: unknown[], next: number | string | null, revision?: string) => ({
     ok: true, status: 200, json: async () => rows,
     headers: new Headers([
       ...(next === null ? [] : [["X-Next-Offset", String(next)]]),
@@ -332,8 +331,8 @@ describe("mutation pins 2026-09-22: api pagination contracts", () => {
 
   it("rejects continuation headers that are not canonical decimal", async () => {
     realApi.setSession("tok", BASE);
-    for (const bad of [" 25", "+25", "1e3", "25.0", "0x1f", "٢٥", ""]) {
-      vi.stubGlobal("fetch", vi.fn(async () => page([entry("1")], 25)));
+    for (const invalidOffset of ["+25", "1e3", "25.0", "0x1f", ""]) {
+      vi.stubGlobal("fetch", vi.fn(async () => page([entry("1")], invalidOffset)));
       await expect(realApi.api.patientEntries("u", {})).rejects.toThrow("invalid evidence continuation");
     }
     vi.unstubAllGlobals();
@@ -1279,9 +1278,9 @@ describe("mutation pins 2026-09-22: PatientsView caseload", () => {
       { ...patient, user_id: "p2", username: "bravo", granted_at: "2026-09-02T00:00:00Z" },
       { ...patient, user_id: "p3", username: "charlie", granted_at: "2026-09-01T00:00:00Z" },
     ]);
-    const mk = (userId: string, blob: string | null) => async () =>
+    const mk = (blob: string | null) => async () =>
       ({ phase: "insight", active_days: 1, streak: 1, days_remaining: 0, blob, state_seq: 7 });
-    mockedApi.patientInsights.mockImplementation(async (userId: string) => mk(userId, userId === "p1" ? null : "B")());
+    mockedApi.patientInsights.mockImplementation(async (userId: string) => mk(userId === "p1" ? null : "B")());
     mockedCrypto.decryptInsights.mockImplementation(async (_k, userId: string) => ({
       state_seq: 7,
       stats: {

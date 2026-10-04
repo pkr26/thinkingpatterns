@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from app.services.crisis import matches_dialog, matches_suppress
 
-
 METHOD_PHRASES = (
     # The exact audit corpus: every row fired neither tier before.
     "i want to hang myself",

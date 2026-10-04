@@ -5,8 +5,6 @@
  * byte-identical to the pre-change walk — that is separately pinned by
  * the shared brain vectors; these pins cover the new surface.
  */
-// @ts-nocheck
-
 import { describe, expect, it } from "vitest";
 
 import { detectLanguage, sentimentScore } from "../src/brain/sentiment";

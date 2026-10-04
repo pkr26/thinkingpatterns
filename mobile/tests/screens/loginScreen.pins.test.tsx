@@ -16,7 +16,7 @@
  *    shares {color: muted, fontSize: 14} — so overlays are pinned to their
  *    own Text nodes here.
  */
-// @ts-nocheck
+// @ts-nocheck -- Mutation cases omit navigation and call Alert mock methods absent from native types.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
@@ -28,8 +28,8 @@ vi.mock("../../src/api/client", async (importOriginal) => {
   return { ...actualApi, ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
 });
 
-vi.mock("../../src/crypto/MindPatternCrypto", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/crypto/MindPatternCrypto")>();
+vi.mock("../../src/crypto/journalCrypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/crypto/journalCrypto")>();
   return {
     ...actual,
     deriveKeysAsync: vi.fn(async (password: string, salt: Buffer) => ({
@@ -49,7 +49,7 @@ vi.mock("../../src/store", async (importOriginal) => {
 });
 
 const { api } = await import("../../src/api/client");
-const { deriveKeysAsync } = await import("../../src/crypto/MindPatternCrypto");
+const { deriveKeysAsync } = await import("../../src/crypto/journalCrypto");
 const { LoginScreen, passwordStrength } = await import("../../src/screens/LoginScreen");
 const { takePendingOnboarding } = await import("../../src/onboarding");
 const { vault } = await import("../../src/vault");

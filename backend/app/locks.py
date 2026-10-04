@@ -1,9 +1,7 @@
-"""Per-user asyncio locks shared across routers.
+"""Bounded per-user asyncio locks shared across API routers.
 
-Entries serialize quota-check + insert; insights serialize recompute
-read-modify-write. Both need the same bounded per-user lock registry, which
-used to live (private) inside the entries router — insights imported a
-private name across module boundaries. This module is the shared home.
+Locks serialize quota checks, recomputations, consent changes, and other
+read-modify-write operations within the single-process deployment.
 """
 
 from __future__ import annotations
@@ -21,14 +19,8 @@ class _LockEntry:
     refs: int = 0
 
 
-# 2026-09-26 audit item 7: overflow fallback locks are SHARDED. When every
-# per-key entry is live, new keys used to serialize on ONE global overflow
-# lock — an adversarial unique-key flood past the registry cap stalled every
-# unrelated overflow user behind one queue. 16 shards keyed by a stable hash
-# of the key preserve the semantics exactly (a given key ALWAYS maps to the
-# same shard, so all of that key's overflow holders still serialize with
-# each other) while removing the global cliff: a flood only congests the
-# shard(s) its keys land in, and ordinary keys in other shards proceed.
+# Full registries use stable hash shards so one overflow queue cannot stall
+# every unrelated user. The same key always selects the same shard.
 OVERFLOW_SHARDS = 16
 
 

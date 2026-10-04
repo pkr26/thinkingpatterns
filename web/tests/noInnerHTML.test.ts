@@ -2,8 +2,6 @@
  *  raw-HTML sinks are forbidden outright in src/. React's escaping is the
  *  only path from data to markup; this scan keeps it that way and the P9
  *  red-team corpus builds on it. */
-// @ts-nocheck
-
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";

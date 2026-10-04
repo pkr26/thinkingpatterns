@@ -19,7 +19,7 @@ import {
   decryptInsights,
   decryptQuestion,
   type Keys,
-} from "../src/crypto/MindPatternCrypto";
+} from "../src/crypto/journalCrypto";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const vectors = JSON.parse(readFileSync(join(here, "..", "..", "shared", "vectors.json"), "utf8")).vectors;
@@ -251,7 +251,7 @@ describe("envelope", () => {
   });
 });
 
-describe("MindPatternCrypto payload helpers", () => {
+describe("journalCrypto payload helpers", () => {
   // Derived lazily INSIDE tests: a module- or suite-scope derivation would
   // turn many crypto mutants into collection-time failures, which mutation
   // runners classify as "no tests ran" rather than kills.
@@ -282,7 +282,7 @@ describe("MindPatternCrypto payload helpers", () => {
   });
 
   it("P3: timeOfDayBucket boundaries are pinned", async () => {
-    const { timeOfDayBucket } = await import("../src/crypto/MindPatternCrypto");
+    const { timeOfDayBucket } = await import("../src/crypto/journalCrypto");
     expect(timeOfDayBucket(4)).toBe("night");
     expect(timeOfDayBucket(5)).toBe("morning");
     expect(timeOfDayBucket(11)).toBe("morning");

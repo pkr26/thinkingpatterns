@@ -1,13 +1,11 @@
 /** Funnel coverage for the P6 views: the honest error/lock paths the
  *  happy-path suites skip — offline refresh, session-locked, freshness and
  *  rotation funnels, empty-pattern state, edit cancel. */
-// @ts-nocheck
-
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PatternsView } from "../src/views/Patterns";
 import { QuestionView } from "../src/views/Question";
 import { HistoryView } from "../src/views/History";
-import { encrypt, toBase64, fromBase64 } from "../src/crypto/core";
+import { encrypt, toBase64 } from "../src/crypto/core";
 import { buildAad } from "../src/crypto/aad";
 import { setKvBackendForTests, type KvBackend } from "../src/kvstore";
 import { vault } from "../src/vault";

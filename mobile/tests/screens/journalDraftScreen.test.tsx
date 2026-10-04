@@ -27,7 +27,7 @@ import { takeStashedDraft, stashDraft } from "../../src/store";
 import { journalDraftScope, saveJournalDraft, newJournalDraft, loadJournalDraft, waitJournalDraftWrites, __resetJournalDraftRuntimeForTests, type JournalDraftScope } from "../../src/journalDraft";
 import { __resetLocalKeyLifecycleForTests } from "../../src/localRekey";
 import { changeLocalSessionOwner, freezeLocalKeyWrites, installLocalDataKey } from "../../src/localWriteGuard";
-import { decryptEntry } from "../../src/crypto/MindPatternCrypto";
+import { decryptEntry } from "../../src/crypto/journalCrypto";
 import { render as renderRaw, flush, act, typeInto, pressLabel, firePress, inputByPlaceholder, touchableByLabel, textOf } from "../helpers/rtr";
 const user = "user-1", nav = { navigate: vi.fn() }, placeholder = "What's going on today?";
 let key: Buffer, scope: JournalDraftScope;

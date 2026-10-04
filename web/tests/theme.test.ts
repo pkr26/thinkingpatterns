@@ -1,8 +1,6 @@
 /** Theme module (hardening 2026-09-26 ii): pure resolution logic, the
  *  storage-key contract shared with the pre-paint script, and the
  *  palette-change notification that keeps JS-drawn charts in sync. */
-// @ts-nocheck
-
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";

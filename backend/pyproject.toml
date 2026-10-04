@@ -1,30 +1,33 @@
 [project]
 name = "mindpattern-backend"
 version = "1.0.0"
-description = "MindPattern API — zero-knowledge mental pattern recognition"
+description = "Encrypted journaling API and deterministic pattern analysis"
 requires-python = ">=3.12"
 dependencies = [
-    # 2026-09-26 audit (LOW, batch item h): direct dependencies are pinned
-    # EXACT to requirements.in (the reviewable intent file — its header
-    # documents that exact pins are deliberate) so `uv lock` and the
-    # pip-compile closure can never drift apart again; the lock had
-    # resolved alembic 1.20.0 / asyncpg 0.31.0 against requirements.in's
-    # 1.19.2 / 0.30.0. Bump BOTH files together.
-    "fastapi>=0.115",
-    "uvicorn[standard]>=0.30",
-    "sqlalchemy>=2.0,<2.1",
+    # Keep direct pins aligned with requirements.in; update both together.
+    "aiosqlite==0.22.1",
     "alembic==1.19.2",
-    "aiosqlite>=0.20",
-    "cryptography>=43",
-    "httpx>=0.27",
+    "boto3==1.40.11",
+    "cryptography==50.0.1",
+    "fastapi==0.141.1",
+    "greenlet==3.3.2",
+    "httpx==0.28.1",
+    "sqlalchemy==2.0.52",
+    "uvicorn[standard]==0.52.4",
 ]
 
 [project.optional-dependencies]
 postgres = ["asyncpg==0.30.0"]
 dev = [
-    "pytest>=8",
-    "pytest-asyncio>=0.24",
-    "mutmut>=2.4",
+    # Keep development pins aligned with requirements.dev.in.
+    "hypothesis==6.168.2",
+    "mypy==2.3.1",
+    "mutmut==2.4.4",
+    "pip-audit==2.10.1",
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "pytest-cov==7.1.0",
+    "ruff==0.16.6",
 ]
 
 [tool.ruff]
@@ -32,18 +35,17 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-# Hard CI gate: import/format hygiene and real bugs (unused vars, syntax
-# class). Candidates to add later, one at a time, each with its own cleanup
-# pass: I (import sorting), UP (pyupgrade), B (bugbear), SIM.
-select = ["E4", "E7", "E9", "F", "W"]
+# CI checks syntax, unused names, whitespace, and consistent import ordering.
+select = ["E4", "E7", "E9", "F", "I", "W"]
 
 [tool.ruff.lint.per-file-ignores]
-# tests/ keeps deliberate unused imports (fixture-style modules). The
-# former F811 exemption is history: the duplicate
-# test_rate_limiter_buckets_clients_independently in test_mutation_pins.py
-# was un-shadowed by the 2026-09-17 audit (renamed to
-# test_unlimited_endpoints_create_no_rate_buckets — both tests run now).
+# Some test modules intentionally import fixtures without referencing them.
 "tests/**" = ["F401"]
+
+[tool.ruff.lint.isort]
+# The local migration directory is not the installed Alembic package.
+known-third-party = ["alembic"]
+combine-as-imports = true
 
 [tool.mypy]
 python_version = "3.12"
@@ -55,36 +57,21 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 check_untyped_defs = true
 strict_equality = true
-# Hard CI gate: mypy 2.3.1 checks all application modules cleanly. Keep
-# tightening annotations rather than adding broad ignores if new code trips
-# this gate.
+# Type checking covers every application module.
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 addopts = "-q"
-# CONVENTION (2026-09-21 audit H.9d, documented 2026-09-22 round 3): the
-# `slow` marker exists ONLY for the byte-for-byte cross-platform crypto
-# pins that genuinely need minutes (600k-iteration KDF, fixed-nonce
-# encrypt vectors). Those slow pins are grandfathered into the marker by
-# tests/test_audit_round3_2026_09_22.py, which fails if any OTHER test
-# file acquires a slow marker — a slow-marked test never runs inside the
-# mutation campaigns (scripts/mutmut_runner.sh deselects -m 'not slow'),
-# so silently marking a security pin slow would remove it from exactly
-# the runs that guard the code it pins. Add fast shape/round-trip pins
-# instead; if a new test truly needs the marker, move the grandfathered
-# set forward deliberately in that ratchet test.
+# Reserve `slow` for the cross-platform KDF and encryption vectors allowed
+# by tests/test_audit_round3_2026_09_22.py. Mutation runs exclude this marker,
+# so expanding it also requires updating that regression guard deliberately.
 markers = ["slow: slow tests excluded from mutation-testing runs"]
 
 [tool.mutmut]
-# Deep scope: the whole application except declarative schema wiring.
-# app/models.py is excluded deliberately: its SQLAlchemy Column definitions
-# are DDL-level constraints enforced by the database engine (VARCHAR lengths
-# are not enforced by the SQLite test rig), so mutants there are
-# structurally unkillable under unit tests rather than test gaps.
-# app/services/llm.py IS in scope: its HTTP seam (_post) is monkeypatched,
-# so the sanitization/fallback logic is fully unit-testable.
+# Exclude declarative models: SQLite cannot exercise every production DDL
+# constraint. LLM sanitization remains in scope through its mocked HTTP seam.
 paths_to_mutate = "app/security/,app/services/,app/api/,app/middleware.py,app/cache.py,app/config.py,app/deps.py,app/db.py,app/main.py,app/schemas.py"
 tests_dir = "tests/"
 runner = "bash scripts/mutmut_runner.sh"

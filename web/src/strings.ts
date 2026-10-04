@@ -1,31 +1,11 @@
 /**
- * The i18n module (2026-09-19) — the public seam for every user-visible
- * string in the app.
+ * English and Spanish message lookup with a persistent language preference.
  *
- * History: this file began (2026-09-17) as a 17-key English-only catalog
- * covering the safety-critical crisis/unlock copy. This wave rebuilds it
- * as the full two-locale module: every screen and component now resolves
- * its copy through t(), the catalogs live in src/locales/{en,es}.ts, and
- * the device locale (resolved ONCE at startup) picks the language. The
- * original 17 keys are folded in and RECONCILED against the shipped copy
- * — where the old catalog and the screens had drifted, the shipped screen
- * copy won and the screens now consume these keys for real.
- *
- * Contract:
- *  - `t()` is synchronous and total: it NEVER throws. A key missing in
- *    the active locale falls back to English; a key missing everywhere
- *    returns the key itself (visible in review, never a crash).
- *  - "{name}"-style placeholders interpolate from the optional vars bag;
- *    an unknown placeholder stays literal so gaps surface in review.
- *  - Locale selection: "auto" resolves from the device locale ("es-*" →
- *    es, else en); an explicit "en"/"es" override wins (the Language
- *    setting, audit 2026-09-26 LOW). The preference persists locally and
- *    applies on the next load AND live (subscribeLanguage).
- *  - Dates and numbers format through `dateLocaleTag()` so Intl calls
- *    ("es-ES" / "en-US") follow the same selection.
+ * Missing translations fall back to English, then to the key itself. Unknown
+ * interpolation placeholders remain visible. Auto mode follows the startup
+ * device locale; explicit preferences apply immediately through subscriptions.
+ * Date and number formatting use the same resolved locale.
  */
-// @ts-nocheck
-
 
 import { localStore } from "./platform";
 import { en, es } from "./locales/preauth";

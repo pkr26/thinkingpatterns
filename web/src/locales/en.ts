@@ -10,8 +10,6 @@
  *    every locale by design);
  *  - "{name}" placeholders are interpolated by t() in src/strings.ts.
  */
-// @ts-nocheck
-
 
 export const en: Record<string, string> = {
   // ---------------------------------------------------------------- common

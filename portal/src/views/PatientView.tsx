@@ -1,29 +1,18 @@
 /**
- * The patient view: pattern cards with their evidence, the drill-down
- * into the journal entries behind a pattern, and the therapist's notes.
+ * Read-only patient patterns, supporting entries, measures, and clinician notes.
  *
- * Read-only by construction: no endpoint here can write patient data.
- * The one write path is the therapist's OWN notes (encrypted under the
- * therapist's password-derived key — the patient's app never sees them).
+ * Patient data cannot be edited here. Clinician notes use the active notes
+ * keyring; historical keys keep older notes readable across key changes.
+ * Per-tab visit-date anchors identify newly observed patterns.
  *
- * "Since your last visit" is computed locally (localStorage holds only a
- * date stamp per patient, never content): patterns whose first_seen is
- * newer than the last visit are flagged — the pre-session delta.
- *
- * Item 9 (clinical review 2026-09-27): a decrypted phq9 payload carrying
- * an endorsed item 9 renders a clearly-visible bordered safety row in the
- * measures card AND the printed summary ("Item 9 endorsed (self-harm
- * question) — follow your clinical protocol · C-SSRS follow-up
- * recommended"). Surfacing a fact the clinician's workflow requires is
- * the app's charter; interpreting the score is not — the notice never
- * says anything about severity or diagnosis.
+ * An endorsed PHQ-9 item 9 appears in the measures card and printed summary
+ * as a follow-up prompt, without interpreting severity or making a diagnosis.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ApiError,
   api,
   THERAPIST_ENTRY_PAGE_SIZE,
-  THERAPIST_NOTE_PAGE_SIZE,
   type Note,
   type Patient,
   type PortalEntry,
@@ -32,7 +21,6 @@ import {
 import {
   decryptEntry,
   decryptInsights,
-  decryptNote,
   decryptNoteAny,
   encryptNote,
   decryptAudio,
@@ -49,11 +37,10 @@ import { displayError } from "../errors";
 export interface PortalSession {
   username: string;
   userId: string;
-  /** Legacy password-derived notes key — decrypt-only after the 2026-10-01
-   *  C3 migration; kept so pre-migration blobs stay readable. */
+  /** Legacy password-derived key retained for old note decryption. */
   noteKey: Uint8Array<ArrayBuffer>;
-  /** The v2 notes key (identity-derived): every NEW note seals under it and
-   *  survives password changes. */
+  /** Active notes key: identity-derived for older accounts, or the active
+   * key from independent notes custody when a keyring is installed. */
   noteKeyV2: Uint8Array<ArrayBuffer>;
   historicalNoteKeys?: Uint8Array<ArrayBuffer>[];
   custodyVersion?: number;
@@ -199,7 +186,6 @@ function useVoicePlayback(unwrapKey: () => Promise<Uint8Array<ArrayBuffer> | nul
 const ENTRY_PAGE_SIZE = THERAPIST_ENTRY_PAGE_SIZE;
 const MAX_ENTRY_PAGES = 8;
 const MAX_EVIDENCE_ENTRIES = ENTRY_PAGE_SIZE * MAX_ENTRY_PAGES;
-const NOTE_PAGE_SIZE = THERAPIST_NOTE_PAGE_SIZE;
 const MAX_NOTE_PAGES = 20;
 const MAX_NOTES_PER_LOAD = 1_000;
 // Measures (audit L-76, 2026-09-20): the server continues with validated

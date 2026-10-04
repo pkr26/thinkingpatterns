@@ -1,13 +1,8 @@
 /**
- * Decrypt-and-play for kept recordings (VOICE_PLAN P3, 2026-09-29).
- *
- * Fetch the encrypted attachment → decrypt with the audio AAD in memory →
- * play through a revocable object URL. Nothing is ever cached at rest
- * (the same rule as every other decrypted surface in this app), and the
- * URL dies on ended/error/unmount so the blob can be collected.
+ * Fetch and decrypt kept recordings in memory for playback.
+ * Object URLs are revoked on completion, failure, and unmount; decrypted
+ * audio is never written to persistent storage.
  */
-// @ts-nocheck
-
 import type { Bytes } from "../crypto/core";
 import { decryptAudio } from "../crypto/patient";
 

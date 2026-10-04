@@ -186,7 +186,7 @@ email addresses — use the in-app notice path) and policy version
 history.`
 
 
-## Voice journaling (added 2026-09-29, VOICE_PLAN.md)
+## Voice journaling (added 2026-09-29, docs/plans/voice-plan.md)
 
 If you record an entry instead of typing it:
 

@@ -1,9 +1,9 @@
 """Durable audit anchors, consent evidence, and privacy attestations."""
 
-from alembic import op
-import sqlalchemy as sa
 import uuid
 
+import sqlalchemy as sa
+from alembic import op
 
 revision = "e1b7c9d3a5f2"
 down_revision = "d6a0c4e8b213"

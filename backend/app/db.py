@@ -5,7 +5,7 @@ backend/alembic.ini) are the source of truth for schema change. The initial
 revision reproduces exactly what ``init_models`` creates, so:
 
 - fresh dev/test databases: ``init_models`` (create_all) builds the schema
-  directly — no alembic round-trip in the 250+-test hot loop;
+  directly without running migrations for each test;
 - production upgrade path: ``alembic upgrade head`` (see
   backend/alembic/README.md);
 - databases created before migrations existed: independently establish the

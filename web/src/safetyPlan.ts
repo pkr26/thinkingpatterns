@@ -1,24 +1,12 @@
 /**
- * The local safety plan (clinical review 2026-09-27) — a minimal,
- * Stanley-Brown-inspired set of structured fields the PATIENT writes and
- * keeps: warning signs, what helps, people/places, who to ask, who to
- * contact, making the environment safer. It is deliberately NOT a
- * clinical instrument: no scoring, no interpretation, no template text
- * beyond the field prompts.
+ * Patient-authored safety-plan fields stored only on this device.
  *
- * CUSTODY (the entryDraft/pendingMeasure idiom, exactly): the plan is
- * sealed under the account's data key — AES-GCM, AAD binds the user; a
- * wrong key or tampered record reads as absent — in ONE dedicated
- * kvstore slot per account. It is therefore ciphertext at rest, unreadable
- * pre-unlock (the crisis dialog's plan link renders only while the vault
- * is unlocked, and the static crisis resources always stay first and
- * complete), it survives idle/hidden-tab locks, and a v1 password
- * rotation re-seals it under the new key (the B-7 rewrap family in
- * Settings). LOCAL-ONLY BY DESIGN: never synced, never exported, never
- * shared with a therapist — the copy says so where the plan is edited.
+ * The plan is encrypted under the account data key and bound to its owner.
+ * It survives locks and participates in local data-key migration. Unreadable
+ * records throw so saved writing is retained for recovery. The plan is never
+ * synced, exported, or shared; static crisis resources remain available while
+ * it is locked.
  */
-// @ts-nocheck
-
 import { buildAad } from "./crypto/aad";
 import { decrypt, encrypt, fromBase64, toBase64, zeroize, type Bytes } from "./crypto/core";
 import { kv, StorageReadError, type WritePermit } from "./kvstore";
@@ -118,9 +106,6 @@ export async function clearSafetyPlan(userId: string,permit?:WritePermit): Promi
   await kv.removeItem(key(userId),permit);
 }
 
-/** Rotation parity with the B-7 rewrap family: re-seal an existing plan
- *  under the incoming key so it survives a v1 password change. A failure
- *  propagates without clearing the recoverable original. */
 /** Rotation parity with the B-7 rewrap family: re-seal an existing plan
  *  under the incoming key so it survives a v1 password change. A failure
  *  propagates without clearing the recoverable original. */

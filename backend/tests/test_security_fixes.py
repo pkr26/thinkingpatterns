@@ -9,30 +9,32 @@ history (commits 2026-09-16 .. 2026-09-21).
 """
 
 from __future__ import annotations
+
+import asyncio
+import base64
+import hashlib
+import hmac
+import json
+import random
+import subprocess
+import sys
+import time
+from datetime import date, datetime, timedelta, timezone
+
+import anyio
+import pytest
+from httpx import ASGITransport, AsyncClient
+
 from app import singleprocess
 from app.api.auth import SCRYPT_N, decoy_salt
-from app.cache import SlidingWindowCounter, MAX_TRACKED_KEYS
+from app.cache import MAX_TRACKED_KEYS, SlidingWindowCounter
 from app.config import Settings
 from app.main import create_app
 from app.security import crypto, enclave, kdf
 from app.security.enclave import InMemoryKeyStore
 from app.services import brain, crisis, llm, phrases, questions, statsig
 from app.services.patterns import JournalEntry, Pattern
-from datetime import date, datetime, timedelta, timezone
-from httpx import ASGITransport, AsyncClient
 from tests.helpers import ClientEmulator, daterange
-import anyio
-import asyncio
-import base64
-import hashlib
-import hmac
-import json
-import pytest
-import random
-import subprocess
-import sys
-import time
-
 
 # ---------------------------------------------------------------------------
 # Pins from test_audit_fixes.py (renamed in the 2026-09-20 production

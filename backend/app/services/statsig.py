@@ -184,11 +184,6 @@ def student_t_sf_two_sided(t: float, dof: float) -> float:
     return min(1.0, _betainc(dof / 2.0, 0.5, x))
 
 
-def normal_two_sided_sf(z: float) -> float:
-    """Two-sided standard-normal tail P(|Z| >= z) — exact via erfc."""
-    return min(1.0, math.erfc(abs(z) / math.sqrt(2.0)))
-
-
 def f_sf(f: float, df1: int, df2: int) -> float:
     """Upper tail P(F >= f) for F ~ F(df1, df2), via the incomplete beta."""
     if df1 < 1 or df2 < 1:

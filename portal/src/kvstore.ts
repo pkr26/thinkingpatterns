@@ -1,12 +1,8 @@
 /**
- * Async key-value storage seam (AsyncStorage's contract over IndexedDB).
- * The portal's encrypted note drafts and exact pending create requests
- * persist through this seam. Keys are
- * observable metadata: never a username, never plaintext content
- * (WEB_PLAN D-4/R-7).
- *
- * Durable writes are acknowledged only after IndexedDB commits. Unavailable
- * storage or failed transactions throw; no volatile fallback can claim saved.
+ * IndexedDB storage for encrypted clinician drafts and pending note requests.
+ * Keys are observable metadata and must not contain usernames or plaintext
+ * content. Writes resolve only after commit; unavailable storage and failed
+ * transactions throw instead of reporting volatile data as saved.
  */
 
 export interface KvBackend {
@@ -20,17 +16,18 @@ export interface KvBackend {
    *  to carry a dead no-op where this call now stands. */
   keys?(): Promise<string[]>;
 }
-
 const DB_NAME = "mindpattern-portal";
 const STORE = "kv";
-
 let dbPromise: Promise<IDBDatabase | null> | null = null;
 
 function openDb(): Promise<IDBDatabase | null> {
-  if (dbPromise) return dbPromise;
+  if (dbPromise)
+    return dbPromise;
   dbPromise = new Promise((resolve) => {
     try {
-      const factory = (globalThis as { indexedDB?: IDBFactory }).indexedDB;
+      const factory = (globalThis as {
+        indexedDB?: IDBFactory;
+      }).indexedDB;
       if (!factory) {
         resolve(null);
         return;
@@ -38,7 +35,8 @@ function openDb(): Promise<IDBDatabase | null> {
       const request = factory.open(DB_NAME, 1);
       request.onupgradeneeded = () => {
         const db = request.result;
-        if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
+        if (!db.objectStoreNames.contains(STORE))
+          db.createObjectStore(STORE);
       };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => resolve(null);
@@ -50,29 +48,34 @@ function openDb(): Promise<IDBDatabase | null> {
   // A connection that later closes (user clears site data) must not wedge
   // the seam forever: allow one re-open.
   void dbPromise.then((db) => {
-    if (db) db.onclose = () => { dbPromise = null; };
-    else dbPromise = null;
+    if (db)
+      db.onclose = () => { dbPromise = null; };
+    else
+      dbPromise = null;
   });
   return dbPromise;
 }
-
 let overrideBackend: KvBackend | null = null;
 
 /** Tests inject an isolated backend here; the app never calls it. */
+
 export function setKvBackendForTests(backend: KvBackend | null): void {
   overrideBackend = backend;
 }
 
 /** Test hook: drop the memoized IndexedDB connection so a new fake factory
  *  takes effect (the app never needs this — its connection is for life). */
+
 export function resetKvConnectionForTests(): void {
   dbPromise = null;
 }
 
 async function backend(): Promise<KvBackend> {
-  if (overrideBackend) return overrideBackend;
+  if (overrideBackend)
+    return overrideBackend;
   const db = await openDb();
-  if (!db) throw new StorageCommitError("Durable storage is unavailable — keep this writing open and retry when storage is available.");
+  if (!db)
+    throw new StorageCommitError("Durable storage is unavailable — keep this writing open and retry when storage is available.");
   return {
     async getItem(key) {
       return new Promise((resolve, reject) => {
@@ -116,14 +119,14 @@ export class StorageCommitError extends Error {
 }
 
 export class StorageReadError extends Error {
-  constructor(message: string, options?: ErrorOptions) { super(message,options); this.name = "StorageReadError"; }
+  constructor(message: string, options?: ErrorOptions) { super(message, options); this.name = "StorageReadError"; }
 }
 export const kv = {
   async getItem(key: string): Promise<string | null> {
     try {
       return await (await backend()).getItem(key);
     } catch (cause) {
-      throw new StorageReadError("Local encrypted records could not be read. Keep this view open and retry before changing stored data.",{cause});
+      throw new StorageReadError("Local encrypted records could not be read. Keep this view open and retry before changing stored data.", { cause });
     }
   },
   async setItem(key: string, value: string): Promise<void> {
@@ -141,7 +144,8 @@ export const kv = {
     }
   },
   async multiRemove(keys: string[]): Promise<void> {
-    for (const key of keys) await kv.removeItem(key);
+    for (const key of keys)
+      await kv.removeItem(key);
   },
   /** Enumerate every key in the active backend ([] when the backend cannot
    *  or does not support it — see KvBackend.keys). */

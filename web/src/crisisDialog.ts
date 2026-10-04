@@ -1,25 +1,11 @@
 /**
- * Crisis-prompt throttle (audit 2026-09-26, LOW c): at most once per
- * LOCAL calendar day per account — ported from mobile's crisisDialog.ts.
+ * Limit the support prompt to once per local calendar day per account.
  *
- * The Entry prompt used to fire on EVERY crisis-flagged draft — dialog
- * fatigue trains dismissal, and the person who needs the resources most
- * stops reading them.
- *
- * independent audit 2026-09-27 (P2): the stamp used to persist a
- * PLAINTEXT DATE of a crisis-flagged interaction at
- * mindpattern.crisisDialog.v1.<userId> in localStorage. A date paired
- * with the account id is interaction metadata this app has no business
- * leaving on disk — the zero-knowledge posture keeps even device-local
- * content encrypted. The record is now SESSION-SCOPED, in memory only:
- * the once-per-day UX is unchanged within a session, and a page reload
- * can re-show the prompt the same day (fail toward showing — the stamp
- * is a fatigue guard, never a gate that can permanently silence
- * support). The legacy localStorage key is opportunistically removed
- * the first time this module is consulted.
+ * Stamps stay in session memory because a crisis-interaction date is sensitive
+ * metadata. Reloading may show the prompt again: throttling must never
+ * permanently suppress support. Legacy localStorage stamps are removed when
+ * this module is first consulted.
  */
-// @ts-nocheck
-
 import { localStore } from "./platform";
 
 /** The pre-fix localStorage prefix (the one-time cleanup target). */
@@ -58,12 +44,6 @@ export async function crisisDialogShownOn(userId: string, todayISO: string): Pro
 export async function recordCrisisDialogShown(userId: string, todayISO: string): Promise<void> {
   sweepLegacyStampOnce();
   sessionStamps.set(userId, todayISO);
-}
-
-/** Test/deletion hygiene: the stamp must not outlive its account. */
-export async function clearCrisisDialogStamp(userId: string): Promise<void> {
-  sessionStamps.delete(userId);
-  localStore.remove(`${LEGACY_PREFIX}${userId}`);
 }
 
 /** Test seam: the stamps are a module singleton, so tests reset them the

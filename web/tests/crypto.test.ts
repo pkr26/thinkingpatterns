@@ -8,8 +8,6 @@
  * payload-layer contracts (entry v1/v2, insights v2 + state_seq,
  * question).
  */
-// @ts-nocheck
-
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -22,7 +20,6 @@ import {
   encryptWithFixedNonce,
   fromBase64,
   toBase64,
-  type Bytes,
 } from "../src/crypto/core";
 import { derivePatientKeys } from "../src/crypto/keys";
 import {

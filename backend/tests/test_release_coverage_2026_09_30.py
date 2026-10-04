@@ -328,8 +328,9 @@ class TestAudioErrorBranches:
         r2 = await client.delete(f"/api/v1/audio/attachments/{att_id}", headers=emu.headers)
         assert r2.status_code == 204, r2.text
         # Object deletion failed, but the committed durable outbox retains it.
-        from app.models import AudioDeletion
         from sqlalchemy import select
+
+        from app.models import AudioDeletion
 
         async with client._transport.app.state.sessionmaker() as session:
             assert await session.scalar(select(AudioDeletion.id)) is not None

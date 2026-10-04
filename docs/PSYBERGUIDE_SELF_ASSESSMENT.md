@@ -15,7 +15,7 @@ see the October 3 audit and remediation plan at the project root.
   prediction. Enforced by tests (question templates must be questions;
   the word "should" is banned from the pool; crisis content never
   surfaces as prompts).
-- **Methods cited**: every detector maps to literature in RESEARCH.md
+- **Methods cited**: every detector maps to literature in docs/research.md
   (within-person centering per Bolger & Laurenceau 2013 with per-weekday
   deconfounding; sleep→affect per Bourke et al. 2026 meta-analysis and
   Konjarski et al. 2018 systematic review; EWMA charts per Snippe et
@@ -83,7 +83,7 @@ open until the operator completes them.
       (**Other Data Types**, or the operator's documented current-taxonomy
       mapping); no tracking or third-party analytics SDKs. Retain dated
       Store Connect/Play Console evidence for the candidate build.
-- [x] Research summary = RESEARCH.md *(exists; citations re-verified
+- [x] Research summary = docs/research.md *(exists; citations re-verified
       2026-09-26 and cross-checked against the shipped engine constants
       in `backend/app/services/brain.py`)*
 - [ ] Point of contact for the expert review. The tagged web release generates

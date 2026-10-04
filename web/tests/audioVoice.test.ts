@@ -2,8 +2,6 @@
  *  round-trips and back-compatibility, the audio envelope's AAD binding,
  *  the recorder's mime fallback chain, and the shared/audio_vectors.json
  *  pins (the repo's copy-and-pin discipline). */
-// @ts-nocheck
-
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";

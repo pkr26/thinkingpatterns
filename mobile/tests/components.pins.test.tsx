@@ -8,7 +8,7 @@
  * `false` entries the `&&` overlays produce — plus the accessibility-label
  * routing (`??` vs `&&`) and InlineStatus's null-message / tone gates.
  */
-// @ts-nocheck
+// @ts-nocheck -- Style snapshots inspect nodes exposed by the dynamically typed renderer helper.
 
 import { describe, expect, it, vi } from "vitest";
 import React from "react";

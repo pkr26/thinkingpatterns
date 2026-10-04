@@ -40,10 +40,9 @@ import pytest
 from sqlalchemy import literal, update
 from starlette.requests import Request
 
-from app.api import insights as insights_api
-from app.api import measures as measures_api
-from app.api.therapist import rotate_wrap_key
+from app.api import insights as insights_api, measures as measures_api
 from app.api.entries import MAX_COLLECTION_REVISION
+from app.api.therapist import rotate_wrap_key
 from app.models import AccessLog, Measure, TherapistNoteRevision, User
 from app.schemas import WrapKeyRotateRequest
 from app.security import crypto, totp
@@ -51,8 +50,7 @@ from app.services import brain
 from app.services.patterns import JournalEntry
 from tests.helpers import ClientEmulator, TherapistEmulator
 from tests.test_es_themes import WORK_ES, consecutive as es_consecutive
-from tests.test_time_of_day import _corpus as tod_corpus
-from tests.test_time_of_day import _surfaced as tod_surfaced
+from tests.test_time_of_day import _corpus as tod_corpus, _surfaced as tod_surfaced
 
 TODAY = date.today()
 

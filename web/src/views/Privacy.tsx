@@ -1,11 +1,6 @@
 /**
- * The privacy screen — plain-language account of what the server can and
- * cannot see (the README's "security model, honest version" distilled for
- * the person journaling). Static content; no network. M-W5 (audit
- * 2026-09-26): the copy resolves through the t() catalog.
+ * Localized privacy disclosures rendered without network access.
  */
-// @ts-nocheck
-
 import { t } from "../strings";
 import { Button, Card, Note } from "../ui";
 

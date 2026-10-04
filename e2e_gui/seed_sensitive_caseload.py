@@ -1,12 +1,12 @@
 """Audit seed addendum: an ACTIVE sensitive-pattern patient + date realism.
 
-  * audit-gina — 70 days with a recurring crisis-adjacent phrase (the
-    sensitive card), granted and left ACTIVE so the caseload sensitive
-    banner, sensitive-first triage sort, and the non-quoting sensitive
-    pattern card all render.
-  * Backdates consents (granted_at / revoked_at) and therapist note
-    timestamps so the caseload and notes list show varied, realistic
-    dates instead of everything "today".
+* audit-gina — 70 days with a recurring crisis-adjacent phrase (the
+  sensitive card), granted and left ACTIVE so the caseload sensitive
+  banner, sensitive-first triage sort, and the non-quoting sensitive
+  pattern card all render.
+* Backdates consents (granted_at / revoked_at) and therapist note
+  timestamps so the caseload and notes list show varied, realistic
+  dates instead of everything "today".
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "backend"))
 
-import audit_seed as s  # noqa: E402
+import seed_caseload as caseload  # noqa: E402
 
 GINA = "audit-gina"
 GINA_PW = "audit-gina-2026"
@@ -51,30 +51,37 @@ async def main() -> None:
 
         from app.security import kdf as keyderive
 
-        salt_resp = await client.post("/api/auth/salt", json={"username": s.THERAPIST})
+        salt_resp = await client.post(
+            "/api/auth/salt", json={"username": caseload.THERAPIST}
+        )
         salt = base64.b64decode(salt_resp.json()["salt"])
         master = hashlib.pbkdf2_hmac(
-            "sha256", s.THERAPIST_PW.encode(), salt, s.LIVE_ITERATIONS
+            "sha256", caseload.THERAPIST_PW.encode(), salt, caseload.LIVE_ITERATIONS
         )
         auth_key = keyderive.derive_auth_key(master)
         login = await client.post(
             "/api/auth/login",
-            json={"username": s.THERAPIST, "verifier": base64.b64encode(auth_key).decode()},
+            json={
+                "username": caseload.THERAPIST,
+                "verifier": base64.b64encode(auth_key).decode(),
+            },
         )
         assert login.status_code == 200, login.text
-        therapist = s.LiveTherapistEmulator(s.THERAPIST, s.THERAPIST_PW, "Dr. Audit Field")
+        therapist = caseload.LiveTherapistEmulator(
+            caseload.THERAPIST, caseload.THERAPIST_PW, "Dr. Audit Field"
+        )
         therapist.user_id = login.json()["user_id"]
         therapist.token = login.json()["token"]
-        print(f"  {s.THERAPIST}: logged in")
+        print(f"  {caseload.THERAPIST}: logged in")
 
-        gina = await s.register_patient(client, GINA, GINA_PW)
+        gina = await caseload.register_patient(client, GINA, GINA_PW)
         if gina:
-            await s.backdate_user(
+            await caseload.backdate_user(
                 f"sqlite+aiosqlite:///{args.db_file}", gina.user_id, 70
             )
-            await s.seed_journal(client, gina, 70, gina_text)
-            await s.grant(client, gina, therapist)
-            await s.recompute(client, gina)
+            await caseload.seed_journal(client, gina, 70, gina_text)
+            await caseload.grant(client, gina, therapist)
+            await caseload.recompute(client, gina)
 
     # --- date realism, directly in sqlite (server offline rules don't apply:
     #     created_at/granted_at are display fields for the drill) ----------

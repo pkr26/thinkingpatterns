@@ -1,32 +1,11 @@
 /**
- * Sign-in / registration — the zero-knowledge entry. Everything is derived
- * on-device: the password NEVER leaves this page; only the auth subkey
- * crosses the wire as the login verifier (the same contract as the mobile
- * app, pinned by shared/vectors.json). Keys land in the memory-only vault;
- * the master key is zeroized the moment the subkeys exist, and EVERY
- * failure path wipes all three.
+ * Patient sign-in and registration with client-side key derivation.
  *
- * v2 key scheme (2026-09-26): NEW accounts default to the random data-key
- * envelope — registration draws a random 32-byte data key, wraps it under
- * a KEK derived from the password master key, and uploads the 60-byte
- * blob with kdf_params. Sign-in branches on the login response's
- * key_scheme: v2 accounts fetch GET /auth/key-envelope and unwrap the
- * random data key locally (replacing the HKDF data derivation); v1
- * accounts derive exactly as before — byte-identical, no extra request.
- *
- * Redesign 2026-09-26: a centered brand panel opens the screen, the mode
- *  switch is a segmented control, the fields live in a real <form> (Enter
- *  submits — the old web card forgot the form), and registration shows a
- *  password-strength meter fed by the existing client-side policy checker.
- *
- * Age gate (clinical review 2026-09-27, DPIA-required control):
- * registration requires an honest "I am 18 or older" self-declaration
- * before the register action enables. The server records only the
- * versioned affirmative attestation and its server-side timestamp; no
- * birth date is collected.
+ * Passwords remain local; only derived verifiers cross the network. New
+ * accounts wrap a random data key in a v2 envelope. Existing v1 accounts keep
+ * their original derivation. Transient key material is erased on failure.
+ * Registration records an affirmative age attestation without a birth date.
  */
-// @ts-nocheck
-
 import { useState } from "react";
 import { ApiError, api, auth, clearSession, MINIMUM_AGE_ATTESTATION, setSession, type TokenResponse } from "../api/client";
 import { displayError } from "../errors";

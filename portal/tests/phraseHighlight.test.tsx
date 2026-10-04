@@ -5,7 +5,6 @@
  *  the mark-only-the-span rendering. */
 import { describe, expect, it } from "vitest";
 import React from "react";
-import RTR from "react-test-renderer";
 
 import { HighlightedEntry, rawMatchSpans } from "../src/views/PatientView";
 import { render } from "./helpers/rtr";

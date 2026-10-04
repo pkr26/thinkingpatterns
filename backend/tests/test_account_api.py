@@ -48,6 +48,7 @@ async def test_export_contains_ciphertext_only(client, app):
     # The server hands back exactly what it stored — the client can decrypt.
     import base64
     import json
+
     from app.security import crypto
 
     first = bundle["entries"][0]

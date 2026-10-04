@@ -125,9 +125,10 @@ class TestRecoveryV2:
         assert response.json()["code"] == "upgrade_required"
 
         # Simulate a kit enrolled before v1 retirement.
+        from sqlalchemy import select
+
         from app.api.auth import hash_verifier_off_loop
         from app.models import User, utcnow
-        from sqlalchemy import select
 
         salt = os.urandom(16)
         digest = await hash_verifier_off_loop(recovery_key, salt, n=app.state.settings.scrypt_n)

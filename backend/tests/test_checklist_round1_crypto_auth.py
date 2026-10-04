@@ -33,9 +33,9 @@ import pytest
 from sqlalchemy import select
 
 from app import deps as deps_module
-from app.api._custody import require_password_retry_therapist
 from app.api import insights as insights_api
-from app.models import Base, Measure, Entry
+from app.api._custody import require_password_retry_therapist
+from app.models import Base, Entry, Measure
 from app.security import crypto
 from app.security.enclave import SecureProcessingContext
 from tests.helpers import ClientEmulator, TherapistEmulator

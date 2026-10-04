@@ -1,21 +1,8 @@
 /**
- * Gentle writing starters for blank-page days (2026-09-17).
- *
- * Depression's blank-page paralysis is a documented journaling barrier;
- * three rotating starters above an empty editor give the first words
- * without steering content. The pool is deliberately non-clinical — no
- * CBT scaffolding, no "should" — matching the app's observation-only
- * voice. Selection is DETERMINISTIC per day (a seeded shuffle over the
- * date ordinal): no RNG, testable, and the same chips stay put within a
- * day so they don't visually flicker on re-renders.
- *
- * E-3 (2026-09-21 audit): the chips are LOCALIZED. Chips are seed text
- * for the user's own journal, not UI chrome — a Spanish speaker should
- * seed Spanish text — so the pools are parallel arrays (position-parity:
- * index i is the same starter) and `promptChipsFor` picks by locale.
+ * Localized writing starters selected deterministically by local date.
+ * The non-clinical pool avoids advice language. Parallel locale arrays preserve
+ * selection parity, and a daily seed keeps chips stable across rerenders.
  */
-// @ts-nocheck
-
 
 import type { Locale } from "./strings";
 

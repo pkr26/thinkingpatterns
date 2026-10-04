@@ -1,32 +1,10 @@
 /**
- * The daily journal editor (WEB_PLAN P4.1). Everything happens on-device
- * first: the crisis dialog tier runs PRE-encryption over what was just
- * typed (throttled to once per account-day); the mood check-in and streak
- * live in the device-local encrypted mood log. On save, the payload is
- * encrypted and either uploaded or parked in the ciphertext-only offline
- * queue (open-tab offline, WEB_PLAN D-6).
+ * Daily journal editor with local crisis detection and encrypted saves.
  *
- * H-5 (audit 2026-09-26): the encrypted payload's `sentiment` slot is the
- * user's EXPLICIT self-report — backend brain.py treats it as "the user's
- * own report, never a translation guess" and therapists read it. Only an
- * explicit mood pick rides in the payload (null otherwise, mobile
- * EntryScreen parity); the machine-derived sentimentScore stays
- * device-local (the on-device read line and the mood-log fallback).
- *
- * Drafts live in this tab's memory while the session is live; a lock
- * (hidden tab / idle / expiry) SEALS the in-progress draft under the data
- * key before the keys die and the editor unmounts (entryDraft.ts, audit
- * 2026-09-26) — no plaintext at rest, ever, and no lost half-written
- * entry either (disclosed in the UI).
- *
- * Redesign 2026-09-26: the check-in is a visible one-tap visual card
- * (faces for mood and energy, dots for sleep, chips for activities) —
- * no longer hidden behind a "Show details" toggle — and selection is
- * aria-pressed sage, never the danger color. A time-aware greeting and
- * streak chip open the screen.
+ * Only explicit mood selections enter the shared payload; machine-derived
+ * sentiment stays device-local. Saves upload ciphertext or queue it offline.
+ * Session locks seal unfinished writing before the editor unmounts.
  */
-// @ts-nocheck
-
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "../api/client";
 import { displayError } from "../errors";

@@ -1,22 +1,14 @@
 /**
- * Web API client. The token lives in memory only (the app's whole key
- * material — derived keys included — never touches storage, WEB_PLAN D-4).
+ * Same-origin API client with an in-memory bearer token.
  *
- * Server URL: SAME-ORIGIN ONLY, by design — there is no configurable
- * server field and there must not be one. Deployment routes /api through
- * the app's TLS origin and development uses Vite's same-origin proxy. A
- * maintainer "restoring" a configurable server field would reopen the
- * verifier-collection vector: a user-typed HTTPS endpoint can be an
- * attacker's server that chooses the salt and harvests the derived
- * verifier for offline guessing.
+ * The API origin is fixed: a configurable sign-in endpoint could choose a
+ * salt and harvest password-derived verifiers. Production routes /api through
+ * the app's HTTPS origin; development uses Vite's same-origin proxy.
  *
- * Request core (hardening identical to the portal's client): 15 s
- * deadline, credentials omitted, redirects refused, no-store, no
- * referrer, post-fetch origin re-check, session-scoped AbortController,
- * and a one-shot 401/410 expiry latch per session.
+ * Requests omit cookies and referrers, reject redirects and foreign response
+ * origins, bypass caches, and use session-scoped cancellation. A one-shot
+ * 401/410 handler locks the session. Bulk operations have separate deadlines.
  */
-// @ts-nocheck
-
 
 import { currentOrigin } from "../platform";
 
@@ -105,7 +97,7 @@ export class ApiError extends Error {
   }
 }
 
-/** The complete backend error-code contract (README "API surface"), as the
+/** The backend error-code contract (docs/api.md), as the
  *  mobile client carries it. A code is attacker-controllable text like
  *  `detail`, but it feeds BRANCH logic, not dialogs: accept only the known
  *  slugs (anything else degrades to undefined, and the caller falls back

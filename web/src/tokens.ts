@@ -1,22 +1,10 @@
 /**
- * The JS mirror of the CSS token layer (public/app.css). SVG charts and
- * the mood heatmap need CONCRETE color values at draw time (SVG fills
- * cannot reference a CSS class cleanly for dynamically generated marks),
- * so the palette lives here too and tests/designTokens.test.ts pins the
- * two sources together, token by token, light and dark.
+ * JavaScript palette values for SVG charts and the mood calendar.
  *
- * Redesign 2026-09-26 — warm & calming: sage primary, cream canvas,
- * lavender secondary. Chart/heatmap values below must stay in lockstep
- * with the custom properties in app.css.
- *
- * Hardening 2026-09-26 (ii): mood fills now carry PER-FILL ink colors
- * (mid-tone fills pass AA with neither white nor black text alone), the
- * check-in face palette became theme-aware (the old single-table labels
- * failed AA on dark cards), and palette changes are observable
- * (subscribePalette) so JS-drawn charts re-render when the theme flips.
+ * tests/designTokens.test.ts pins these values to public/app.css in both
+ * themes. Each mood fill carries a contrast-appropriate text color. Palette
+ * subscriptions redraw charts when the resolved theme changes.
  */
-// @ts-nocheck
-
 
 import { useSyncExternalStore } from "react";
 

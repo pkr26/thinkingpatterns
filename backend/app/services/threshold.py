@@ -11,12 +11,7 @@ DEFAULT_UNLOCK_DAYS = 30
 
 
 def _utc_today() -> date:
-    """Server-UTC calendar day (2026-09-20 audit fix L-1).
-
-    The streak's "today" anchor must be the same UTC calendar the entry-date
-    bounds use; ``date.today()`` answers in the host's local timezone and let
-    the streak flip at local midnight on non-UTC hosts.
-    """
+    """Return today in the UTC calendar used by entry-date validation."""
     return datetime.now(timezone.utc).date()
 
 
@@ -34,24 +29,20 @@ class ThresholdState:
 
 
 def count_active_days(dates: Iterable[date]) -> int:
-    """Number of distinct calendar days with at least one entry.
+    """Count distinct writing days, including the accepted forward grace day.
 
-    Future-dated entries COUNT (deliberate, pinned by
-    test_checklist_round2_threshold_sync): entries.py admits server-today
-    + 1 for UTC+14 clients, and for them that entry IS today — the grace
-    window must apply to the unlock the same way it applies to storage.
-    The STREAK anchor below is where the future-date handling matters
-    (2026-09-28 deep audit)."""
+    UTC+14 clients may submit server-today + 1; that date counts toward
+    unlocking insights just as it counts toward stored history.
+    """
     return len({d for d in dates if d is not None})
 
 
 def current_streak(dates: Iterable[date], today: date | None = None) -> int:
-    """Consecutive-day writing streak ending today (or yesterday, with grace).
+    """Count consecutive writing days ending today or yesterday.
 
-    The walk anchors at the latest date NOT in the future (2026-09-28 deep
-    audit): a single forward-grace entry (server-today + 1, admitted for
-    UTC+14 clients) used to become the anchor, and "tomorrow not in (today,
-    yesterday)" zeroed the streak of a user who had written every day."""
+    Anchor at the latest nonfuture date so a forward-grace entry cannot
+    reset an otherwise continuous streak.
+    """
     distinct = sorted({d for d in dates if d is not None})
     if not distinct:
         return 0

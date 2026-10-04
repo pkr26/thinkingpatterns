@@ -46,8 +46,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import httpx
 
-from app.security import crypto
-from app.security import kdf as keyderive
+from app.security import crypto, kdf as keyderive
 
 FILLERS = [
     "read a few pages of the novel before lights out",
@@ -345,6 +344,7 @@ def main() -> int:
         from datetime import datetime, timezone as tz
 
         from sqlalchemy import update
+
         from app.db import build_sessionmaker
         from app.models import User
 

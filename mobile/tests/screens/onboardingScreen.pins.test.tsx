@@ -13,7 +13,7 @@
  *  - the full style contract pinned per node (container / counter / title /
  *    body / 13+ line), as exact style arrays so base+overlay both hold.
  */
-// @ts-nocheck
+// @ts-nocheck -- Style assertions inspect nodes exposed by the dynamically typed renderer helper.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";

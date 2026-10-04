@@ -1,24 +1,11 @@
 /**
- * Local journaling reminders — the PREFERENCE side (2026-09-19).
+ * Per-account preferences for opt-in local journaling reminders.
+ * nativeFeatures.ts schedules notifications and reminderSync.ts reconciles
+ * the saved preference with the native schedule.
  *
- * Design contract (nativeFeatures.ts header): LOCAL notifications only, at
- * most one per day, opt-in (onboarding or Settings), no streak-shaming copy.
- * This module owns the per-account preference record; the native seam in
- * nativeFeatures.ts turns it into (or removes) an actual scheduled
- * notification, and reminderSync.ts reconciles the two.
- *
- * Storage: a plain AsyncStorage record — a non-sensitive preference (the
- * onboarding.ts / components/keyConsent.ts idiom). It holds an opt-in flag
- * and a clock time, never journal content, so it does not need the
- * encrypted store. Key: @mindpattern/reminders_<userId>; account deletion
- * must wipe it (clearReminderPrefs rides the SettingsScreen deletion flow).
- *
- * Failure direction is toward SILENCE: an unreadable or corrupt record
- * reads as the disabled default. A reminder is a nudge — losing it to a
- * storage fault costs nothing, while a phantom "enabled" that cannot be
- * read back honestly would be worse. Values coming back from storage are
- * validated in full (a hostile or half-written record must never produce
- * hour 99 or a notification at 3:47 the user never chose).
+ * The AsyncStorage record contains only an enabled flag and a local clock
+ * time. Invalid or unreadable records use the disabled default. Account
+ * erasure removes the record through the shared account-storage registry.
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { accountStorageKey } from "./accountStorage";

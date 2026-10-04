@@ -1,24 +1,11 @@
 /**
- * Therapist sharing (WEB_PLAN P7.2): the patient side of the zero-knowledge
- * consent. Pairing shows the therapist's NAME, their key FINGERPRINT, and
- * — since the 2026-09-26 wave — the pairing session's SAS ("123 456") plus
- * the server's wrap-key fingerprint: the out-of-band checks the two humans
- * read to each other (a matching SAS is the human proof the key was not
- * substituted; the therapist's portal derives the identical string for the
- * same live pairing session). Granting requires BOTH attestations — an
- * explicit "fingerprints matched" confirmation (mobile C-7 parity, fix
- * W-4, audit 2026-09-25) and the disclosure terms — then wraps the data
- * key to the therapist's public key (ECDH→HKDF→AES-GCM) with the
- * fresh-password-derived, one-use action proof: a stolen token cannot
- * share. Revoke uses its own action-bound proof and says plainly what
- * revocation can and cannot do.
+ * Patient consent and key wrapping for therapist access.
  *
- * Redesign 2026-09-26: styled checkboxes, the fingerprint in a mono block
- * with a copy affordance, grants as cards with initials avatars, and a
- * two-step revoke confirm.
+ * Pairing displays the therapist identity, key fingerprint, and short
+ * authentication string for out-of-band verification. Granting requires
+ * fingerprint and disclosure attestations plus a fresh, action-bound proof.
+ * Revocation uses its own proof and explains the limits of withdrawing access.
  */
-// @ts-nocheck
-
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, sessionAbortSignal, type ListedConsent } from "../api/client";
 import { zeroize } from "../crypto/core";
@@ -27,7 +14,7 @@ import { freshStepUp } from "../reauth";
 import { t } from "../strings";
 import { displayError } from "../errors";
 import { vault } from "../vault";
-import { Avatar, Button, Card, Checkbox, ErrorBanner, Field, Icon, Note, PillNote, Toggle } from "../ui";
+import { Avatar, Button, Card, Checkbox, ErrorBanner, Field, Note, PillNote, Toggle } from "../ui";
 
 interface LookupState {
   code: string;

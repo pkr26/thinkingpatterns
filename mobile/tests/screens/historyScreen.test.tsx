@@ -28,7 +28,7 @@ const { api, ApiError } = await import("../../src/api/client");
 const { HistoryScreen, formatEntryDate } = await import("../../src/screens/HistoryScreen");
 const { vault } = await import("../../src/vault");
 const { buildAad, encrypt } = await import("../../src/crypto/envelope");
-const { decryptEntry } = await import("../../src/crypto/MindPatternCrypto");
+const { decryptEntry } = await import("../../src/crypto/journalCrypto");
 const { recordMood, recentMoods } = await import("../../src/moodLog");
 const {
   render,

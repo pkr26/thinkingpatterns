@@ -1,16 +1,8 @@
 /**
- * Session-lock machinery (WEB_PLAN P2.7, portal App.tsx patterns lifted
- * into testable hooks): a 5-minute idle auto-lock that resets on real
- * interaction, a back/forward-cache guard that locks synchronously when
- * the browser restores a persisted page, and a hidden-tab guard that locks
- * the moment the tab goes to the background — the web equivalent of the
- * mobile app locking its vault on AppState "background" (parity fix W-1,
- * audit 2026-09-25). All are inert until a session exists (`active`), and
- * all route every event through the platform seam so the node test
- * runtime can drive them.
+ * Session locks for five minutes of inactivity, hidden tabs, and pages
+ * restored from the back/forward cache. Hooks stay inactive until a session
+ * exists and route browser events through the platform adapters.
  */
-// @ts-nocheck
-
 import { useEffect } from "react";
 import { onWindowEvent, pageHidden } from "./platform";
 

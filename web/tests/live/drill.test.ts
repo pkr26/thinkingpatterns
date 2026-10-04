@@ -8,8 +8,6 @@
  * The api client's same-origin policy accepts the explicit loopback origin
  * in the test build; the drill repoints the shim's origin at :8000.
  */
-// @ts-nocheck
-
 import { afterEach, describe, expect, it } from "vitest";
 import { api, auth, clearSession, hasSession, MINIMUM_AGE_ATTESTATION, setSession } from "../../src/api/client";
 import { deriveMasterKey, fromBase64, toBase64 } from "../../src/crypto/core";

@@ -2,8 +2,6 @@
  * local trend, pattern cards with evidence panels, the sensitive
  * non-quoting contract, mutes, the explicit-only recompute, and the
  * feedback blob's encrypted ride. Real crypto; fetch stubs at the edge. */
-// @ts-nocheck
-
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PatternsView } from "../src/views/Patterns";
 import { QuestionView } from "../src/views/Question";
@@ -16,12 +14,11 @@ import { getLocale } from "../src/strings";
 import { setKvBackendForTests, type KvBackend } from "../src/kvstore";
 import { vault } from "../src/vault";
 import { installSession, jsonResponse, resetTestState, stubFetch } from "./helpers/api";
-import { flush, press, render, settle, textOf } from "./helpers/rtr";
+import { press, render, settle, textOf } from "./helpers/rtr";
 
 const ORIGIN = "http://localhost:5173";
 const DATA_KEY = new Uint8Array(new ArrayBuffer(32)).fill(6);
 const USER = "user-1";
-const NONCE = fromBase64("AAAAAAAAAAAAAAAA");
 
 const memoryBackend = (): KvBackend => {
   const map = new Map<string, string>();
@@ -214,7 +211,7 @@ describe("PatternsView", () => {
         { kind: "topic", label: "'work' on Sundays", occurrences: 4, confidence: 0.8, detail: { pattern_pid: "topic:work", pattern_state: "confirmed" } },
         ]),
     });
-    const root = await render(<PatternsView onCrisis={() => undefined} />);
+    await render(<PatternsView onCrisis={() => undefined} />);
     await settle(40, 4);
     // The legacy plaintext is gone...
     expect(win?.localStorage?.getItem("mindpattern.mutedPids.v1.user-1")).toBeNull();

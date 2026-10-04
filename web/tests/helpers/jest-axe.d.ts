@@ -2,8 +2,6 @@
  *  the two exports the a11y suite uses. (The portal's older install
  *  resolved types transitively; declaring them locally is honest either
  *  way.) */
-// @ts-nocheck
-
 declare module "jest-axe" {
   export function axe(
     container: HTMLElement | string | Node,

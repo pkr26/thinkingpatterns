@@ -22,7 +22,6 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-
 revision: str = "c8d2f6b1a9e4"
 down_revision: str | Sequence[str] | None = "d7c1f4a8e2b9"
 branch_labels: str | Sequence[str] | None = None

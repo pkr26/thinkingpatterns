@@ -19,7 +19,7 @@ from app.api._audit import read_journal_head, verify_access_log_chain
 from app.db import build_engine, build_sessionmaker
 from app.deps import ApiError, require_user
 from app.locks import lifecycle_locks
-from app.models import Base, AccessLog, AudioDeletion, Entry, Insight, RekeyJournal, User, utcnow
+from app.models import AccessLog, AudioDeletion, Base, Entry, Insight, RekeyJournal, User, utcnow
 from app.services import audio_store
 from tests.helpers import ClientEmulator
 

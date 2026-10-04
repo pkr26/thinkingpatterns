@@ -2,8 +2,6 @@
  *  classification, the M-5 duplicate verification, the 401 keep-everything
  *  path, the generation fence, quarantine, and recovery. Uses the
  *  injectable kv backend + fetch stubs. */
-// @ts-nocheck
-
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   abortInFlightFlush,

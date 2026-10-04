@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildAad, decrypt } from "../src/crypto/envelope";
-import { decryptEntry, decryptInsights, decryptQuestion } from "../src/crypto/MindPatternCrypto";
+import { decryptEntry, decryptInsights, decryptQuestion } from "../src/crypto/journalCrypto";
 import { deriveWrapKek, therapistKeyFingerprint } from "../src/crypto/sharing";
 import { engine } from "../src/crypto/engine";
 

@@ -17,8 +17,6 @@
  * same contract is pinned by mobile/tests/twoWriter.test.ts plus the
  * byte-level interop fixtures.
  */
-// @ts-nocheck
-
 import { afterEach, describe, expect, it } from "vitest";
 import { auth, clearSession, MINIMUM_AGE_ATTESTATION, setSession, setSessionExpiredHandler, type TokenResponse } from "../../src/api/client";
 import { decryptEntry, encryptEntry } from "../../src/crypto/patient";

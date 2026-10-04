@@ -1,6 +1,4 @@
 /** RFC 9116 release-value validation and placeholder rejection. */
-// @ts-nocheck
-
 import { describe, expect, it } from "vitest";
 
 import {

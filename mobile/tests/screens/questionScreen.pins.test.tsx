@@ -10,7 +10,7 @@
  *    fine print/day counter, insight card, caption, left-aligned ghosts),
  *  - the consent dialog button contract and the bridge's exact failure copy.
  */
-// @ts-nocheck
+// @ts-nocheck -- Mutation cases omit navigation and call Alert mock methods absent from native types.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";

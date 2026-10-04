@@ -11,8 +11,10 @@ from ..api.consents import SHARING_DISCLOSURE_VERSION
 from ..cache import make_rate_limiter
 from ..schemas import MetaResponse
 from ..services.llm import LLM_DISCLOSURE_VERSION, processing_policy_fingerprint
-from ..services.stt import STT_DISCLOSURE_VERSION
-from ..services.stt import processing_policy_fingerprint as stt_policy_fingerprint
+from ..services.stt import (
+    STT_DISCLOSURE_VERSION,
+    processing_policy_fingerprint as stt_policy_fingerprint,
+)
 
 router = APIRouter(prefix="/meta", tags=["meta"])
 

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import "fake-indexeddb/auto";
 await import("../../src/strings").then(module => Promise.all([
   module.loadFullCatalogs("en"),

@@ -17,7 +17,7 @@
  *  - node-exact style contracts (rejected card, re-auth card + title,
  *    left-aligned ghost buttons) and the About else-branch.
  */
-// @ts-nocheck
+// @ts-nocheck -- Mutation cases replace native APIs and verification outcomes with partial test doubles.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";

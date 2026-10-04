@@ -1,25 +1,12 @@
 /**
- * Settings: third-party analysis consent, sync recovery, ciphertext export,
- * re-authenticated hard delete, sign out — with the developer-only server
- * URL tucked into an "Advanced" section at the bottom (a consumer screen
- * must not lead with it) and an honest About section.
+ * Account preferences, processing consent, local recovery, and deletion.
+ * Sensitive changes require the typed password through reauth.ts. A rejected
+ * verifier leaves the password card open; an expired session returns to
+ * unlock. The server selector lives in the Advanced section.
  *
- * DESTRUCTIVE ACTIONS RE-AUTHENTICATE FOR REAL: "confirm with your sign-in
- * key" used to read the authKey from the unlocked vault — two taps on an
- * unattended phone deleted the journal. The delete flow and the LLM
- * consent toggle now demand the PASSWORD, re-derive the key, and compare
- * it to the vault's key before anything is sent (see reauth.ts). Failures
- * branch honestly: a 403 verifier rejection means "that password didn't
- * match — try again" (the card stays up); a 401 means the session died
- * (the vault is already locked; the only path is re-unlock).
- *
- * EXPORT SAFETY: full-account export is intentionally unavailable until a
- * reviewed native streaming-to-file component exists; buffering a capped
- * account in JS before invoking Share is not safe on a phone.
- *
- * RECOVERY: entries the server permanently rejected are preserved in the
- * offline queue's rejected store (never destroyed); a "Recovered entries"
- * row appears when any exist and requeues them in one tap.
+ * Full-account export stays disabled until a native streaming-to-file path
+ * is available. Saved recordings have a separate export action. Rejected
+ * entry uploads are retained and can be requeued from the recovery section.
  */
 import { audioQueueStatus, retryAudioQueue, listSavedAudio, exportSavedAudio, removeSavedAudio } from "../audioQueue";
 import { eraseDeletedAccountLocals } from "../accountErasure";
@@ -27,9 +14,9 @@ import React, { useEffect, useRef, useState } from "react";
 import { Alert, AppState, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { api, getBaseUrl, parseServerUrl, setBaseUrl } from "../api/client";
 import { ThemeMode, themeStorageKey, useSetThemeMode } from "../theme";
-import { hapticsEnabled, loadHapticsSetting, setHapticsEnabled } from "../haptics";
-import { cancelDailyReminder, cancelMeasureReminder, reminderCapability } from "../nativeFeatures";
-import { getReminderPrefs, setReminderEnabled, setReminderTime, clearReminderPrefs } from "../reminders";
+import { loadHapticsSetting, setHapticsEnabled } from "../haptics";
+import { reminderCapability } from "../nativeFeatures";
+import { getReminderPrefs, setReminderEnabled, setReminderTime } from "../reminders";
 import { readLanguageChoice, writeLanguageChoice, type LanguageChoice } from "../languagePref";
 import {
   generateRecoveryKey,
@@ -39,16 +26,12 @@ import {
 } from "../crypto/recovery";
 import { syncReminderSchedule, syncMeasureReminderSchedule } from "../reminderSync";
 import {
-  clearMeasureReminderPrefs,
-  clearLastMeasureDate,
   getMeasureReminderPrefs,
   MEASURE_INTERVAL_WEEKS,
   setMeasureReminderEnabled,
   setMeasureReminderInterval,
 } from "../measureReminders";
-import { clearSafetyPlan } from "../safetyPlan";
 import {
-  clearMoodMirrorPref,
   ensureStateOfMindWriteAccess,
   getMoodMirrorPref,
   healthKitCapability,
@@ -75,30 +58,17 @@ import {
   flushQueue,
   hasLegacyQueueRecovery,
 } from "../offlineQueue";
-import { clearKeyShipConsent } from "../components/keyConsent";
-import { clearOnboardingSeen } from "../onboarding";
-import { clearCrisisDialogStamp } from "../crisisDialog";
-import { clearFeedback } from "../questionFeedback";
-import { clearThresholdNotice } from "../thresholdNotice";
 import { useTheme } from "../theme";
 import { PrimaryButton, GhostButton, CrisisHelpButton } from "../components/buttons";
 import { requestFailureCopy, calmFallbackCopy } from "../components/errors";
 import { t as tr, dateLocaleTag } from "../strings";
 
-/** The React Native build-time constant: babel.config.cjs inlines this
- *  identifier as the package.json version at bundle time, and the vitest
- *  environment defines the same global from the same manifest — so the
- *  About line and the shipped version can never drift apart (2026-09-26
- *  audit LOW; this used to be a hardcoded "1.0.0"). The server still
- *  reports its own version via /api/meta next to it. */
+/** App version injected from package.json by Babel and the test setup. */
 declare const __APP_VERSION__: string;
 const APP_VERSION: string = __APP_VERSION__;
 
-/** The offered reminder times — an evening default, never a morning alarm.
- *  A custom stored time appears as its own extra chip. Labels resolve at
- *  module load (the app locale is resolved once at startup).
- *  2026-09-26 audit (i18n guard): startup-fixed locale — these module-load
- *  tr() lookups MUST be revisited if runtime language switching ever ships. */
+/** Resolve preset labels at render time so language changes update them.
+ * Custom stored times appear as an additional option. */
 const reminderPresets = (): readonly { label: string; hour: number; minute: number }[] => [
   { label: tr("settings.reminderMorning"), hour: 9, minute: 0 },
   { label: tr("settings.reminderMidday"), hour: 12, minute: 0 },
@@ -107,20 +77,14 @@ const reminderPresets = (): readonly { label: string; hour: number; minute: numb
 
 type PendingAction =
   | { kind: "llm"; enabled: boolean }
-  // Voice journaling consent (VOICE_PLAN 2026-09-29): the same standing as
-  // the LLM toggle — this is where recordings leave the device, so the
-  // change demands the typed password, never the bare bearer.
+  // Voice consent permits uploading recordings, so it requires the password.
   | { kind: "voice"; enabled: boolean }
   | { kind: "delete" }
   | { kind: "recovery-create" }
   | { kind: "recovery-remove" }
-  // M-4 (2026-09-20): enabling the biometric wrap persists the data key in
-  // the Keychain indefinitely — the same standing as grant/delete, so it
-  // takes the same typed-password card instead of one confirm tap.
+  // Persisting a biometric data-key wrap requires password verification.
   | { kind: "bio" }
-  // v1→v2 key-envelope upgrade (2026-09-26): ships the data key to the
-  // server (inside the password-wrapped envelope), so it takes the same
-  // typed-password card.
+  // Uploading a password-wrapped data key requires password verification.
   | { kind: "upgrade" }
   | null;
 
@@ -135,17 +99,12 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
   const [llmProvider, setLlmProvider] = useState("");
   const [llmRetention, setLlmRetention] = useState("");
   const [llmFingerprint, setLlmFingerprint] = useState("");
-  // null = the server could not be reached, so availability is UNKNOWN —
-  // a very different message from an authoritative "disabled by this
-  // server". Confusing the two erodes trust in a mental-health app.
+  // Unknown availability must remain distinct from an explicit server refusal.
   const [sharingAvailable, setSharingAvailable] = useState<boolean | null>(null);
   const [llmEnabled, setLlmEnabled] = useState(false);
   const [llmStale, setLlmStale] = useState(false);
-  // Voice journaling consent (VOICE_PLAN 2026-09-29), mirroring web's
-  // Settings voice section: availability + provider from meta, the switch's
-  // state + policy currency from the account's consent record. Availability
-  // is null until meta answers — unreachable must not read as "offered" or
-  // "not offered".
+  // Metadata supplies voice availability/provider; the consent record supplies
+  // the opt-in and policy version. Availability stays unknown until metadata loads.
   const [voiceAvailable, setVoiceAvailable] = useState<boolean | null>(null);
   const [voiceProvider, setVoiceProvider] = useState("");
   const [voiceRetention, setVoiceRetention] = useState("");
@@ -161,19 +120,14 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
   const [legacyQueueRecovery, setLegacyQueueRecovery] = useState(false);
   const [pending, setPending] = useState<PendingAction>(null);
   const [password, setPassword] = useState("");
-  // H-1/M-3 (2026-09-20): the change-password (rotation) card. Two fields —
-  // the CURRENT password (the card's usual reauth field) and the new one.
+  // Password rotation has its own current/new password fields.
   const [showRotate, setShowRotate] = useState(false);
   const [newPassword, setNewPassword] = useState("");
-  // 2026-09-26 audit LOW: the rotation card's CURRENT-password field has its
-  // OWN state. It used to share `password` with the re-auth card above, so
-  // text typed into one silently appeared in the other (a password entered
-  // for rotation could satisfy a later destructive re-auth card unseen).
+  // Keep rotation and destructive-action passwords separate so one card cannot
+  // satisfy another action with a password entered earlier.
   const [rotateCurrentPassword, setRotateCurrentPassword] = useState("");
-  // The account's key scheme (2026-09-26): "v1" shows the upgrade card and
-  // the rekey-style rotation copy; "v2" shows the O(1) rotation copy. null
-  // = unknown (unreachable server / old server) — neither card claims
-  // anything it cannot prove.
+  // The key scheme controls upgrade availability and rotation copy.
+  // An unavailable server leaves it unknown.
   const [keyScheme, setKeyScheme] = useState<KeyScheme | null>(null);
   const captureSensitiveOwnership = (): SensitiveOwnership => ({ scope: localWriteScopeEpoch(), owner: vault.ownerUserId(), sensitive: sensitiveEpoch.current });
   const ownsSensitiveScope = (operation: SensitiveOwnership) => operation.scope === localWriteScopeEpoch() && operation.sensitive === sensitiveEpoch.current;
@@ -185,8 +139,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
 
 
   React.useEffect(() => {
-    // Audit 2026-09-28 (INFO): a storage failure in getBaseUrl left an
-    // unhandled rejection; the field simply stays empty.
+    // Leave the field empty if the stored origin cannot be read.
     getBaseUrl().then(setUrl).catch(() => {});
     api.meta()
       .then((m) => {
@@ -253,8 +206,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
     }).catch(() => {});
     hasLegacyQueueRecovery().then(setLegacyQueueRecovery).catch(() => {});
     biometricsSupported().then(setBioSupported).catch(() => {});
-    // Key scheme (2026-09-26): one quiet read decides which rotation copy
-    // and whether the upgrade card appears. Failures leave it unknown.
+    // One envelope read selects the upgrade card and password-rotation copy.
     fetchEnvelope()
       .then((fetched) => {
         if (fetched.status === "ok") setKeyScheme(fetched.envelope.scheme);
@@ -351,9 +303,6 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         // the foregrounded unlocked session (M-4).
         const userId = await api.getUserId().catch(() => null);
         if (!userId) {
-          // Audit 2026-09-28 (INFO): two-argument Alert with a proper title
-          // (the single-argument form rendered the body as a title-only
-          // alert on Android).
           Alert.alert(tr("common.couldNotVerifyTitle"), tr("common.reauthNoAccount"));
           retry();
           return;
@@ -366,11 +315,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       } else if (pending.kind === "recovery-remove") {
         await removeRecoveryKit(reauth.verifierB64, operation);
       } else if (pending.kind === "upgrade") {
-        // Audit 2026-09-28 (LOW): runUpgrade returns true when the typed
-        // password was rejected server-side and the card must STAY UP for a
-        // corrected retry — the same retry contract the verifier-rejection
-        // paths honor. done() unconditionally cleared it, so a wrong
-        // password dismissed the card instead of waiting for the fix.
+        // A rejected password keeps the card open for a corrected retry.
         if (await runUpgrade(password, reauth.verifierB64, operation)) {
           retry();
           return;
@@ -424,11 +369,8 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         (failures.length ? `\n\n${tr("settings.localCleanupIncomplete")}` : ""));
     } catch (err) {
       if (operation.scope !== localWriteScopeEpoch()) return;
-      // A VERIFIER rejection (403) must RETHROW to the outer handler so the
-      // password card STAYS UP for one corrected retry (audit L-62: this
-      // inner catch used to swallow it, clearing the card only on the
-      // delete path — the documented retry contract applied to the LLM
-      // toggle alone). Nothing was deleted: the account still exists.
+      // Propagate verifier rejection so the outer handler keeps the password card
+      // open. The server still holds the account.
       if (isVerificationFailedError(err)) throw err;
       // The server still holds the account — keep the local session intact
       // so the user can retry instead of believing it worked.
@@ -558,9 +500,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       { text: tr("common.cancel"), style: "cancel" },
       {
         text: tr("settings.bioEnable"),
-        // M-4: the explainer is step one; the password card is the gate —
-        // a foregrounded unlocked phone must not be enough to persist the
-        // data key in the Keychain forever.
+        // Require the typed password before persisting a biometric data-key wrap.
         onPress: () => setPending({ kind: "bio" }),
       },
     ]);
@@ -586,10 +526,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
     if (busy || !rotateCurrentPassword || !newPassword) return;
     const policyError = passwordPolicyError(newPassword);
     if (policyError) {
-      // Audit 2026-09-28 (INFO): pick the title like LoginScreen's policy
-      // alert does — short-password failures say "too short", variety
-      // failures say the variety title (the fixed variety title mislabeled
-      // a 8-character attempt).
+      // Match the alert title to the failed password-policy rule.
       Alert.alert(
         newPassword.length < 12 ? tr("login.policyShortTitle") : tr("login.policyVarietyTitle"),
         policyError,
@@ -618,12 +555,8 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
             : outcome.rewrapFailures.length > 0
             ? `\n\n${tr("settings.rotateRewrapFailed", { names: outcome.rewrapFailures.join(", ") })}`
             : "";
-        // Audit fix 7 (2026-09-21): rotatePassword itself already locked the
-        // vault and removed the biometric wrap BEFORE this alert — the
-        // security cleanup no longer hangs off this OK button (Android can
-        // dismiss an alert without firing it). The button's signOut is
-        // idempotent-safe belt-and-braces: it revokes tokens and clears the
-        // session so the next unlock goes through the NEW password's login.
+        // Rotation performs required key cleanup before this dismissible alert.
+        // The confirmation also signs out so login uses the new credentials.
         Alert.alert(
           tr("settings.rotateSuccessTitle"),
           `${outcome.scheme === "v2" ? tr("settings.rotateSuccessBodyV2") : tr("settings.rotateSuccessBody")}${rewrapNote}${outcome.scheme === "v1" ? "\n\n" + tr("settings.rotationRecoveryReset") : ""}`,
@@ -637,8 +570,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       } else if (outcome.reason === "wrong-password") {
         Alert.alert(tr("settings.rotateFailedTitle"), tr("settings.rotateWrongOld"));
       } else if (outcome.reason === "queue-blocked") {
-        // independent audit 2026-09-27 (P2): queued entries are sealed under
-        // the OLD data key — the rotation refused to strand them.
+        // Rotation must not strand queued entries encrypted under the old data key.
         Alert.alert(tr("settings.rotateFailedTitle"), tr("settings.rotateQueueBlocked"));
       } else if (outcome.reason === "offline") {
         Alert.alert(tr("settings.rotateFailedTitle"), tr("common.reauthOffline"));
@@ -650,11 +582,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       }
     } catch (err) {
       if (!ownsSensitiveScope(operation)) return;
-      // 2026-09-26 audit M-M5: an unexpected throw (anything outside the
-      // typed RotationOutcome surface) used to escape as an unhandled
-      // rejection while the finally cleared the fields — no feedback at all.
-      // Same discipline as confirmWithPassword's fallback branch: calm
-      // copy, never raw error text.
+      // Unexpected rotation errors use localized fallback copy.
       Alert.alert(tr("settings.rotateFailedTitle"), calmFallbackCopy(err, tr("errors.generic")));
     } finally {
       setRotateCurrentPassword("");
@@ -663,10 +591,8 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
     }
   };
 
-  /** v1→v2 key-envelope upgrade (2026-09-26): runs after the typed password
-   *  passed reauth. Returns true when the password card should STAY UP for
-   *  a corrected retry (the typed password was rejected server-side);
-   *  false when the flow concluded either way. */
+  /** Upgrade a legacy account after password verification. Return true to
+   * keep the password card open for a corrected retry. */
   const runUpgrade = async (password: string, verifierB64: string, operation: SensitiveOwnership): Promise<boolean> => {
     assertSensitiveOwnership(operation);
     const userId = await api.getUserId().catch(() => null); assertSensitiveOwnership(operation);
@@ -728,14 +654,10 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
     ]);
   };
 
-  // Appearance state (2026-09-17). The radio starts at the provider's own
-  // default and takes the PERSISTED preference from storage below — never a
-  // value derived from the active palette (a "system" preference on a
-  // dark-OS device must not select "Dark" as if it were the override).
+  // Select the saved theme preference, not the resolved palette: system mode
+  // must remain selected even when the device currently uses a dark palette.
   const setThemeMode = useSetThemeMode();
   const [themeMode, setThemeModeState] = useState<ThemeMode>("system");
-  // 2026-09-29 deep audit (P2): the in-app language override — a bilingual
-  // user on an English-locale device gets the app in their language.
   const [audioStatus, setAudioStatus] = useState({ total: 0, needsAttention: 0 });
   const [savedAudio, setSavedAudio] = useState<Awaited<ReturnType<typeof listSavedAudio>>>([]);
   const savedAudioOwnership = useRef<SensitiveOwnership | null>(null);
@@ -774,29 +696,29 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       setBusy(true);
       const recoveryKey = generateRecoveryKey();
       try {
-      // 2026-10-01 audit C1: v2 — seal under the never-sent seal label and
-      // transmit ONLY the domain-separated verifier (the raw key used to
-      // be sent as the verifier, and it WAS the seal-KEK input: a server
-      // that observed one request could open the journal).
-      const sealed = sealDataKeyForRecoveryV2(recoveryKey, keys.dataKey, userId);
-      const verifierKey = recoveryVerifierKeyV2(recoveryKey);
-      try {
-        await api.setupRecoveryKit(
-          verifierB64,
-          verifierKey.toString("base64"),
-          sealed.toString("base64"),
-          "v2",
-        );
+        // Use separate recovery derivation labels for sealing and verification.
+        // Only the verifier leaves the device; it cannot decrypt the journal.
+        const sealed = sealDataKeyForRecoveryV2(recoveryKey, keys.dataKey, userId);
+        const verifierKey = recoveryVerifierKeyV2(recoveryKey);
+        try {
+          await api.setupRecoveryKit(
+            verifierB64,
+            verifierKey.toString("base64"),
+            sealed.toString("base64"),
+            "v2",
+          );
+        } finally {
+          verifierKey.fill(0);
+        }
+        assertSensitiveOwnership(operation);
+        setRecoveryEnabled(true);
+        if (sensitiveEpoch.current === operationEpoch) setRecoveryKeyShown(recoveryKitText(recoveryKey));
+        recoveryKey.fill(0);
+        const status = await api.recoveryStatus().catch(() => null);
+        if (status && ownsSensitiveScope(operation)) setRecoverySetAt(status.set_at);
       } finally {
-        verifierKey.fill(0);
+        recoveryKey.fill(0);
       }
-      assertSensitiveOwnership(operation);
-      setRecoveryEnabled(true);
-      if (sensitiveEpoch.current === operationEpoch) setRecoveryKeyShown(recoveryKitText(recoveryKey));
-      recoveryKey.fill(0);
-      const status = await api.recoveryStatus().catch(() => null);
-      if (status && ownsSensitiveScope(operation)) setRecoverySetAt(status.set_at);
-      } finally { recoveryKey.fill(0); }
     } catch {
       if (!ownsSensitiveScope(operation)) return;
       Alert.alert(tr("settings.recoveryTitle"), tr("settings.recoverySetupFailed"));
@@ -822,8 +744,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       setBusy(false);
     }
   };
-  // Wave 3 (2026-09-30): the recovery-kit status (create/replace/remove
-  // below). The kit's key is generated ON DEVICE and shown exactly once.
+  // Recovery keys are generated on-device and shown once after creation.
   const [recoveryEnabled, setRecoveryEnabled] = useState<boolean | null>(null);
   const [recoverySetAt, setRecoverySetAt] = useState<string | null>(null);
   const [recoveryKeyShown, setRecoveryKeyShown] = useState<string | null>(null);
@@ -845,9 +766,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
   // disabled then, never hidden-with-a-guess.
   const [reminderOn, setReminderOn] = useState(false);
   const [reminderTime, setReminderTimeState] = useState({ hour: 20, minute: 0 });
-  // The MBC check-in reminder preference (2026-09-27): opt-in + cadence
-  // (2/4/8 weeks, default 4) — readable even when the native side is
-  // unavailable in this build, the daily-reminder honesty rules.
+  // Check-in preferences remain readable when native reminders are unavailable.
   const [measureReminderOn, setMeasureReminderOn] = useState(false);
   const [measureInterval, setMeasureIntervalState] = useState(4);
   // The Health mirror preference (healthkit.ts) — same honesty rules.
@@ -859,9 +778,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
   React.useEffect(() => {
     void loadHapticsSetting().then(setHaptics);
   }, []);
-  // The persisted theme preference (audit L-63: this used to exist twice,
-  // byte-for-byte — one dead duplicate). One read, cancellation-guarded;
-  // a missing/invalid value leaves the provider's default selected.
+  // Read the persisted theme once; missing/invalid values keep the default.
   React.useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -871,10 +788,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         if (!cancelled && (stored === "dark" || stored === "light" || stored === "system")) {
           setThemeModeState(stored);
         }
-        // 2026-10-01 audit M8: the language preference and recovery-kit
-        // status used to load ONLY when a theme had ever been stored — a
-        // fresh install (stored === null) permanently showed "recovery
-        // unknown" and hid the kit-removal UI. Both load unconditionally.
+        // Load language and recovery status even when no theme preference was saved.
         if (!cancelled) {
           setLanguageState(await readLanguageChoice());
           try {
@@ -1186,8 +1100,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       <View style={[styles.card, { backgroundColor: t.colors.card, borderRadius: t.radius.lg, gap: 8 }]}>
         <View style={{ flexDirection: "row", gap: 8 }}>
           {(["system", "dark", "light"] as ThemeMode[]).map((mode) => {
-            // L-64: the radio's a11y label interpolates the LOCALIZED mode
-            // name — a Spanish screen reader heard "Tema: dark" before.
+            // Use the localized mode name in the accessibility label.
             const modeLabel = tr(mode === "system" ? "settings.themeSystem" : mode === "dark" ? "settings.themeDark" : "settings.themeLight");
             return (
               <TouchableOpacity
@@ -1197,8 +1110,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
                   {
                     backgroundColor: themeMode === mode ? t.colors.primary : t.colors.cardDeep,
                     borderRadius: t.radius.md,
-                    // Fix 23 (2026-09-21): radios meet the 44pt touch
-                    // contract (40pt before).
+                    // Keep the 44pt minimum touch target.
                     minHeight: t.minTouch,
                   },
                 ]}
@@ -1274,8 +1186,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
                     {
                       backgroundColor: selected ? t.colors.primary : t.colors.cardDeep,
                       borderRadius: t.radius.md,
-                      // Fix 23 (2026-09-21): time chips meet the 44pt touch
-                      // contract (40pt before).
+                      // Keep the 44pt minimum touch target.
                       minHeight: t.minTouch,
                     },
                   ]}

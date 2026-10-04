@@ -21,8 +21,6 @@
  * passes. A process-lifetime in-memory mirror survives on-device tampering
  * with the stored copy for the session's duration.
  */
-// @ts-nocheck
-
 import { kv } from "./kvstore";
 import { withLock } from "./platform";
 

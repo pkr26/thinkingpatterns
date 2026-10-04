@@ -38,7 +38,6 @@ sys.path.insert(0, str(REPO / "backend"))
 os.environ.setdefault("MINDPATTERN_ENV", "development")
 
 import httpx  # noqa: E402
-
 from app.security import crypto  # noqa: E402
 from app.security import kdf as keyderive  # noqa: E402
 from app.security import sharing as sharing_crypto  # noqa: E402
@@ -99,8 +98,12 @@ class LiveTherapistEmulator:
             "sha256", password.encode("utf-8"), self.salt, LIVE_ITERATIONS
         )
         self.auth_key = keyderive.derive_auth_key(self.master_key)
-        self.wrap_kek = hkdf_sha256(self.master_key, None, sharing_crypto.PORTAL_WRAP_INFO)
-        self.notes_key = hkdf_sha256(self.master_key, None, sharing_crypto.PORTAL_NOTES_INFO)
+        self.wrap_kek = hkdf_sha256(
+            self.master_key, None, sharing_crypto.PORTAL_WRAP_INFO
+        )
+        self.notes_key = hkdf_sha256(
+            self.master_key, None, sharing_crypto.PORTAL_NOTES_INFO
+        )
         self.private_key = ec.generate_private_key(ec.SECP256R1())
         self.wrap_pub_key = base64.b64encode(
             self.private_key.public_key().public_bytes(
@@ -116,9 +119,12 @@ class LiveTherapistEmulator:
         return {"Authorization": f"Bearer {self.token}"}
 
     async def register(self, client: httpx.AsyncClient) -> dict:
-        pkcs8 = self.private_key.private_bytes(Encoding.DER, PrivateFormat.PKCS8, NoEncryption())
+        pkcs8 = self.private_key.private_bytes(
+            Encoding.DER, PrivateFormat.PKCS8, NoEncryption()
+        )
         blob = crypto.encrypt(
-            self.wrap_kek, pkcs8,
+            self.wrap_kek,
+            pkcs8,
             crypto.build_aad(sharing_crypto.THERAPIST_KEY_CONTEXT, self.username),
         )
         response = await client.post(
@@ -139,23 +145,32 @@ class LiveTherapistEmulator:
         return response.json()
 
     def wrap_key_blob_b64(self) -> str:
-        pkcs8 = self.private_key.private_bytes(Encoding.DER, PrivateFormat.PKCS8, NoEncryption())
+        pkcs8 = self.private_key.private_bytes(
+            Encoding.DER, PrivateFormat.PKCS8, NoEncryption()
+        )
         blob = crypto.encrypt(
-            self.wrap_kek, pkcs8,
+            self.wrap_kek,
+            pkcs8,
             crypto.build_aad(sharing_crypto.THERAPIST_KEY_CONTEXT, self.username),
         )
         return base64.b64encode(blob).decode("ascii")
 
-    def encrypt_note(self, patient: LiveClientEmulator, client_note_id: str, text: str) -> str:
+    def encrypt_note(
+        self, patient: LiveClientEmulator, client_note_id: str, text: str
+    ) -> str:
         payload = {"v": 1, "text": text}
         aad = crypto.build_aad(
-            sharing_crypto.NOTE_CONTEXT, self.user_id or "", patient.user_id or "", client_note_id
+            sharing_crypto.NOTE_CONTEXT,
+            self.user_id or "",
+            patient.user_id or "",
+            client_note_id,
         )
         blob = crypto.encrypt(self.notes_key, json.dumps(payload).encode("utf-8"), aad)
         return base64.b64encode(blob).decode("ascii")
 
 
 # --------------------------------------------------------------- corpora
+
 
 def days_ending_yesterday(days: int) -> list[date]:
     end = date.today() - timedelta(days=1)
@@ -185,6 +200,7 @@ def dave_text(day: date) -> str:
 
 EVE_TEXT = "Quiet day, some reading, a little gardening. Feeling neutral."
 
+
 def frank_text(day: date) -> str:
     if day.day % 9 == 0:
         return "Rough week. cutting again after the fight, numb for hours afterwards. Skipped dinner."
@@ -192,6 +208,7 @@ def frank_text(day: date) -> str:
 
 
 # --------------------------------------------------------------- helpers
+
 
 async def register_patient(client, username: str, password: str):
     emu = LiveClientEmulator(username, password)
@@ -222,7 +239,9 @@ async def seed_journal(client, emu, days: int, text_for) -> None:
                 headers=emu.headers,
                 json={
                     "client_entry_id": f"e-{day.isoformat()}",
-                    "blob": emu.encrypt_entry(text, day, f"e-{day.isoformat()}", None, 1),
+                    "blob": emu.encrypt_entry(
+                        text, day, f"e-{day.isoformat()}", None, 1
+                    ),
                     "entry_date": day.isoformat(),
                     "content_version": 1,
                 },
@@ -236,7 +255,8 @@ async def seed_journal(client, emu, days: int, text_for) -> None:
 
 async def record_measure(emu, client, mid: str, payload: dict, day: date) -> None:
     blob = crypto.encrypt(
-        emu.data_key, json.dumps(payload).encode("utf-8"),
+        emu.data_key,
+        json.dumps(payload).encode("utf-8"),
         crypto.build_aad("measure", emu.user_id or "", mid),
     )
     response = await client.post(
@@ -263,7 +283,8 @@ async def recompute(client, emu) -> dict:
     if not blob:
         return {"stats": {"patterns": []}}
     plain = crypto.decrypt(
-        emu.data_key, base64.b64decode(blob),
+        emu.data_key,
+        base64.b64decode(blob),
         crypto.build_aad("insights", emu.user_id, "patterns"),
     )
     payload = json.loads(plain.decode("utf-8"))
@@ -274,7 +295,9 @@ async def recompute(client, emu) -> dict:
 async def grant(client, patient, therapist) -> None:
     from app.api.consents import SHARING_DISCLOSURE_VERSION
 
-    code_resp = await client.post("/api/therapist/pairing-codes", headers=therapist.headers)
+    code_resp = await client.post(
+        "/api/therapist/pairing-codes", headers=therapist.headers
+    )
     assert code_resp.status_code == 201, code_resp.text
     code = code_resp.json()["code"]
     lookup = await client.post(
@@ -299,7 +322,9 @@ async def grant(client, patient, therapist) -> None:
     print(f"  {patient.username} → {therapist.username}: consent granted")
 
 
-async def add_note(client, therapist, patient, text: str, pattern_pid: str | None = None):
+async def add_note(
+    client, therapist, patient, text: str, pattern_pid: str | None = None
+):
     cid = f"n-{os.urandom(6).hex()}"
     blob = therapist.encrypt_note(patient, cid, text)
     response = await client.post(
@@ -311,7 +336,9 @@ async def add_note(client, therapist, patient, text: str, pattern_pid: str | Non
     return response.json()
 
 
-async def edit_note(client, therapist, patient, note: dict, text: str, base_version: int):
+async def edit_note(
+    client, therapist, patient, note: dict, text: str, base_version: int
+):
     cid = note["client_note_id"]
     blob = therapist.encrypt_note(patient, cid, text)
     response = await client.patch(
@@ -326,7 +353,9 @@ async def edit_note(client, therapist, patient, note: dict, text: str, base_vers
 async def revoke(client, patient) -> None:
     consents = await client.get("/api/consents", headers=patient.headers)
     rows = consents.json()
-    items = rows if isinstance(rows, list) else rows.get("consents", rows.get("items", []))
+    items = (
+        rows if isinstance(rows, list) else rows.get("consents", rows.get("items", []))
+    )
     target = next(r for r in items if r.get("status") == "active")
     response = await client.delete(
         f"/api/consents/{target['id']}",
@@ -337,9 +366,9 @@ async def revoke(client, patient) -> None:
 
 
 async def backdate_user(db_url: str, user_id: str, days: int) -> None:
+    from app.models import User
     from sqlalchemy import update
     from sqlalchemy.ext.asyncio import create_async_engine
-    from app.models import User
 
     engine = create_async_engine(db_url)
     try:
@@ -347,7 +376,9 @@ async def backdate_user(db_url: str, user_id: str, days: int) -> None:
             await conn.execute(
                 update(User)
                 .where(User.id == user_id)
-                .values(created_at=datetime.now(timezone.utc) - timedelta(days=days + 2))
+                .values(
+                    created_at=datetime.now(timezone.utc) - timedelta(days=days + 2)
+                )
             )
     finally:
         await engine.dispose()
@@ -393,35 +424,78 @@ async def main() -> None:
             await backdate_user(args.db_url, carol.user_id, 70)
             await seed_journal(client, carol, 70, carol_text)
             await record_measure(
-                carol, client, "m-phq9-flag",
-                {"v": 1, "measure": "phq9", "score": 14, "item9": 2,
-                 "completed_at": date.today().isoformat()}, date.today())
+                carol,
+                client,
+                "m-phq9-flag",
+                {
+                    "v": 1,
+                    "measure": "phq9",
+                    "score": 14,
+                    "item9": 2,
+                    "completed_at": date.today().isoformat(),
+                },
+                date.today(),
+            )
             await record_measure(
-                carol, client, "m-gad7",
-                {"v": 1, "measure": "gad7", "score": 9,
-                 "completed_at": (date.today() - timedelta(days=3)).isoformat()},
-                date.today() - timedelta(days=3))
+                carol,
+                client,
+                "m-gad7",
+                {
+                    "v": 1,
+                    "measure": "gad7",
+                    "score": 9,
+                    "completed_at": (date.today() - timedelta(days=3)).isoformat(),
+                },
+                date.today() - timedelta(days=3),
+            )
             await record_measure(
-                carol, client, "m-phq9-old",
-                {"v": 1, "measure": "phq9", "score": 5, "item9": 0,
-                 "completed_at": (date.today() - timedelta(days=10)).isoformat()},
-                date.today() - timedelta(days=10))
+                carol,
+                client,
+                "m-phq9-old",
+                {
+                    "v": 1,
+                    "measure": "phq9",
+                    "score": 5,
+                    "item9": 0,
+                    "completed_at": (date.today() - timedelta(days=10)).isoformat(),
+                },
+                date.today() - timedelta(days=10),
+            )
             await grant(client, carol, therapist)
             payload = await recompute(client, carol)
-            pids = [p["detail"].get("pattern_pid") for p in payload["stats"]["patterns"]]
+            pids = [
+                p["detail"].get("pattern_pid") for p in payload["stats"]["patterns"]
+            ]
             anchored_pid = next((p for p in pids if p), None)
-            await add_note(client, therapist, carol,
-                           "Session focus: work stress cycle — Sunday dread before Monday deadlines. "
-                           "Explored the anticipation vs. the actual day.")
-            anchored = await add_note(
-                client, therapist, carol,
+            await add_note(
+                client,
+                therapist,
+                carol,
+                "Session focus: work stress cycle — Sunday dread before Monday deadlines. "
+                "Explored the anticipation vs. the actual day.",
+            )
+            await add_note(
+                client,
+                therapist,
+                carol,
                 "Pattern note: the sleep-interference phrase keeps recurring with the Sunday entries.",
-                pattern_pid=anchored_pid)
-            edited = await add_note(client, therapist, carol,
-                                    "First contact — intake summary, presenting concerns.")
-            await edit_note(client, therapist, carol, edited,
-                            "First contact — intake summary. Updated: PHQ-9 14 today, item 9 endorsed "
-                            "(see measures). C-SSRS scheduled.", 1)
+                pattern_pid=anchored_pid,
+            )
+            edited = await add_note(
+                client,
+                therapist,
+                carol,
+                "First contact — intake summary, presenting concerns.",
+            )
+            await edit_note(
+                client,
+                therapist,
+                carol,
+                edited,
+                "First contact — intake summary. Updated: PHQ-9 14 today, item 9 endorsed "
+                "(see measures). C-SSRS scheduled.",
+                1,
+            )
             print(f"  {CAROL}: 3 notes (1 anchored, 1 with revision history)")
 
         dave = await register_patient(client, DAVE, DAVE_PW)
@@ -429,22 +503,42 @@ async def main() -> None:
             await backdate_user(args.db_url, dave.user_id, 70)
             await seed_journal(client, dave, 70, dave_text)
             await record_measure(
-                dave, client, "m-gad7-dave",
-                {"v": 1, "measure": "gad7", "score": 6,
-                 "completed_at": (date.today() - timedelta(days=2)).isoformat()},
-                date.today() - timedelta(days=2))
+                dave,
+                client,
+                "m-gad7-dave",
+                {
+                    "v": 1,
+                    "measure": "gad7",
+                    "score": 6,
+                    "completed_at": (date.today() - timedelta(days=2)).isoformat(),
+                },
+                date.today() - timedelta(days=2),
+            )
             await grant(client, dave, therapist)
             await recompute(client, dave)
-            await add_note(client, therapist, dave, "Sleep hygiene discussion planned for next session.")
+            await add_note(
+                client,
+                therapist,
+                dave,
+                "Sleep hygiene discussion planned for next session.",
+            )
 
         eve = await register_patient(client, EVE, EVE_PW)
         if eve:
             await backdate_user(args.db_url, eve.user_id, 10)
             await seed_journal(client, eve, 10, lambda d: EVE_TEXT)
             await record_measure(
-                eve, client, "m-gad7-eve",
-                {"v": 1, "measure": "gad7", "score": 4,
-                 "completed_at": date.today().isoformat()}, date.today())
+                eve,
+                client,
+                "m-gad7-eve",
+                {
+                    "v": 1,
+                    "measure": "gad7",
+                    "score": 4,
+                    "completed_at": date.today().isoformat(),
+                },
+                date.today(),
+            )
             await grant(client, eve, therapist)
             print(f"  {EVE}: baseline patient (no recompute)")
 
@@ -454,13 +548,23 @@ async def main() -> None:
             await seed_journal(client, frank, 70, frank_text)
             await grant(client, frank, therapist)
             payload = await recompute(client, frank)
-            pids = [p["detail"].get("pattern_pid") for p in payload["stats"]["patterns"]]
+            pids = [
+                p["detail"].get("pattern_pid") for p in payload["stats"]["patterns"]
+            ]
             anchored_pid = next((p for p in pids if p), None)
-            await add_note(client, therapist, frank,
-                           "Safety plan reviewed; crisis line on the fridge.")
-            await add_note(client, therapist, frank,
-                           "Discussed the returning self-harm urges — see the flagged pattern.",
-                           pattern_pid=anchored_pid)
+            await add_note(
+                client,
+                therapist,
+                frank,
+                "Safety plan reviewed; crisis line on the fridge.",
+            )
+            await add_note(
+                client,
+                therapist,
+                frank,
+                "Discussed the returning self-harm urges — see the flagged pattern.",
+                pattern_pid=anchored_pid,
+            )
             await revoke(client, frank)
 
     print(

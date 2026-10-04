@@ -1,42 +1,20 @@
 /**
- * Today's single reflective question.
+ * Daily reflective questions with explicit consent for server processing.
+ * Before the analysis threshold, the built-in pool answers on-device. An
+ * offline phase check uses the same pool; authentication and server errors
+ * remain visible.
  *
- * PRE-THRESHOLD (day one onward): the card shows today's question from the
- * built-in generic pool (genericQuestions.ts) — computed on-device, so
- * NOTHING leaves the phone for it: no processing session, no key shipment,
- * and therefore no consent explainer. The pool hands over to the server's
- * pattern-based questions after the threshold, and the card says so. If the
- * phase check itself fails OFFLINE (status 0 — no response at all), the
- * same on-device pool still answers: an offline user gets a question with
- * the baseline caption, never an error card for a question that never
- * needed the network. Server errors (401/500) keep the honest error path.
+ * Mounting may fetch phase information and decrypt a stored question, but
+ * never opens a processing session. Creating a personalized question needs
+ * an explicit button press and per-account consent before the data key is
+ * sent to the server's single-use, memory-only processing session.
  *
- * POST-THRESHOLD: unchanged. Order of operations (fixed after the audit):
- * the phase is checked FIRST — GET /api/insights needs no key. A stored
- * question decrypts locally. Only when there is none does step 3 open a
- * processing session — the ONE moment the data key travels to the server
- * (single-use, memory-only, destroyed within minutes). That step is
- * consent-gated: the first time per account a plain explainer appears
- * BEFORE anything is sent (components/keyConsent.ts), and a shorter
- * version of the same honesty sits under the button in the insight phase.
- * Errors are surfaced, never swallowed.
- *
- * AUTO-LOAD (2026-09-19): the screen loads on mount — but only the
- * key-free steps (phase check, stored question, baseline generic). When
- * the load would reach the key-bearing step 3 it STOPS and leaves the
- * "Show today's question" button: shipping the data key stays an explicit
- * act of the user's finger (the red-team contract — no screen ships it
- * automatically), so the mount effect never fires the consent explainer
- * or a processing session either.
- *
- * "Write about this" bridges question → journal: the text is stashed as
- * the draft (account-bound, memory-only) and EntryScreen's focus listener
- * restores it even while the editor stays mounted underneath.
+ * "Write about this" stashes an account-bound draft for EntryScreen.
  */
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from "react-native";
 import { api, ApiError } from "../api/client";
-import { decryptQuestion } from "../crypto/MindPatternCrypto";
+import { decryptQuestion } from "../crypto/journalCrypto";
 import { buildFeedbackBlob, clearFeedback, recordFeedbackTap } from "../questionFeedback";
 import { lightHaptic } from "../haptics";
 import { vault } from "../vault";

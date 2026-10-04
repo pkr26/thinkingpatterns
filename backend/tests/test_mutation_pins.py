@@ -8,6 +8,25 @@ against is live again. Campaign reports are preserved in git history.
 """
 
 from __future__ import annotations
+
+import asyncio
+import base64
+import hashlib
+import hmac
+import json
+import logging
+import random
+import re
+from dataclasses import asdict, dataclass, replace
+from datetime import date, datetime, timedelta, timezone
+from types import SimpleNamespace
+
+import pytest
+from fastapi.routing import APIRoute
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import event, insert, select
+from sqlalchemy.exc import IntegrityError
+
 from app import cache as cache_module
 from app.api import (
     account as account_api,
@@ -17,17 +36,17 @@ from app.api import (
     meta as meta_api,
 )
 from app.cache import (
-    SlidingWindowCounter,
-    HitResult,
     MAX_TRACKED_KEYS,
+    HitResult,
     RateLimitCheck,
+    SlidingWindowCounter,
     client_key,
     make_rate_limiter,
 )
 from app.config import DEFAULT_INSECURE_SECRET, Settings, _bool_env, _cors_origins
 from app.locks import UserLocks
-from app.main import create_app, app as module_level_app
-from app.middleware import HardeningMiddleware, SECURITY_HEADERS
+from app.main import app as module_level_app, create_app
+from app.middleware import SECURITY_HEADERS, HardeningMiddleware
 from app.models import Insight
 from app.schemas import InsightOut
 from app.security import crypto as crypto_module, tokens as tokens_module
@@ -44,29 +63,12 @@ from app.services import (
 from app.services.brain import JournalEntry, StoredPattern, dump_state, load_state
 from app.services.llm import LLMAnalyzer, get_enricher, sanitize_pattern
 from app.services.patterns import Pattern
-from dataclasses import asdict, dataclass, replace
-from datetime import date, datetime, timedelta, timezone
-from fastapi.routing import APIRoute
-from httpx import ASGITransport, AsyncClient
-from sqlalchemy import event, insert, select
-from sqlalchemy.exc import IntegrityError
 from tests.helpers import (
     ClientEmulator,
     TherapistEmulator,
     daterange,
     production_secret_settings,
 )
-from types import SimpleNamespace
-import asyncio
-import base64
-import hashlib
-import hmac
-import json
-import logging
-import pytest
-import random
-import re
-
 
 # ---------------------------------------------------------------------------
 # Pins from test_mutation_pins.py (renamed in the 2026-09-20 production
@@ -210,7 +212,7 @@ def test_settings_defaults_are_pinned(clean_env):
         "audit_mac_key_version": 1,
         "audit_mac_previous_secrets_explicit": "",
         "audit_journal_path": "",
-        # Voice journaling (2026-09-29, VOICE_PLAN.md): dev-defaults-on
+        # Voice journaling (2026-09-29, docs/plans/voice-plan.md): dev-defaults-on
         # like therapist sharing; every other default documented in the
         # plan's config table.
         "audio_enabled": True,
@@ -1662,8 +1664,7 @@ def test_llm_sends_the_last_entries_within_the_slice_and_budget():
 def test_recurring_phrase_detection_survives_earlier_short_sentences():
     """The sentence scanner must SKIP sub-minimum sentences and keep scanning,
     not abandon the entry (continue vs break)."""
-    from app.services.patterns import analyze as analyze_patterns
-    from app.services.patterns import JournalEntry
+    from app.services.patterns import JournalEntry, analyze as analyze_patterns
 
     long_sentence = "I keep worrying about the same deadline every single week"
     entries = [
@@ -2342,8 +2343,7 @@ async def test_streamed_body_one_over_cap_is_rejected():
 
 
 def test_phrase_scan_skips_rare_sentences_and_finds_later_ones():
-    from app.services.patterns import JournalEntry
-    from app.services.patterns import analyze as analyze_patterns
+    from app.services.patterns import JournalEntry, analyze as analyze_patterns
 
     rare = "this sentence shows up twice only"
     recurring = "the same long deadline worry keeps returning every week"
@@ -2360,8 +2360,7 @@ def test_phrase_scan_skips_rare_sentences_and_finds_later_ones():
 
 
 def test_theme_scan_skips_rare_themes_and_finds_later_ones():
-    from app.services.patterns import JournalEntry
-    from app.services.patterns import analyze as analyze_patterns
+    from app.services.patterns import JournalEntry, analyze as analyze_patterns
 
     """'food' (alphabetically before 'work') appears only twice and must be
     SKIPPED, not abort the scan that later finds the Sunday-work pattern."""
@@ -2459,7 +2458,7 @@ class TestEffectSizeFloor:
         assert abs(work[0].detail["cohens_d"]) < 0.5
 
     def test_floor_value_is_pinned(self):
-        """The 0.5 Cohen's d floor is a product decision (RESEARCH.md):
+        """The 0.5 Cohen's d floor is a product decision (docs/research.md):
         smaller effects are honest noise at journal scale. Changes must be
         deliberate, not a silent constant edit — which is exactly mutant A5."""
         assert brain.MOOD_MIN_EFFECT == 0.5

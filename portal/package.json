@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "MindPattern therapist portal — zero-knowledge read access to shared patient patterns.",
+  "description": "Fathom therapist portal for consented patient insights and encrypted notes.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build && node tools/add-sri.mjs",

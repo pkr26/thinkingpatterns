@@ -1,19 +1,8 @@
 /**
- * The persistent bottom navigation bar (2026-09-17).
- *
- * The audit's top mobile finding: navigation lived INSIDE the Entry
- * screen's scroll content — type a 300-word entry and reaching History
- * meant scrolling past your entire text. Every main screen now renders
- * this pinned bar below its scrolling content: same five destinations
- * plus the always-present "Get help" end-cap (crisis help stays one tap
- * from every screen, matching the navigation contract in
- * src/navigation.tsx).
- *
- * With no icon library available, hierarchy stays typographic: the active
- * destination carries the accent color and a heavier weight; "Get help"
- * keeps its distinct help surface. Labels cap their font multiplier so
- * large text cannot break the row. (The retired NavRow this replaced was
- * deleted — audit 2026-09-28 INFO.)
+ * Persistent navigation below each main screen's scrolling content.
+ * The active destination uses the accent color and weight; crisis help has
+ * a distinct surface and stays one tap away. Font scaling is bounded to
+ * keep every destination reachable.
  */
 import React from "react";
 import { KeyboardAvoidingView, Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";

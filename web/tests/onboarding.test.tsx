@@ -1,7 +1,5 @@
 /** Onboarding panels + the per-account completion stamp, and the static
  *  privacy screen. */
-// @ts-nocheck
-
 import { describe, expect, it, vi } from "vitest";
 import { hasSeenOnboarding, markOnboardingSeen, Onboarding } from "../src/views/Onboarding";
 import { Privacy } from "../src/views/Privacy";

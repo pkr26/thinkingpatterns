@@ -17,16 +17,16 @@ import pytest
 
 from app.config import Settings
 from app.services.llm import (
-    _clean_label,
-    LLMAnalyzer,
     LLM_CONNECT_TIMEOUT_SECONDS,
     LLM_MAX_RESPONSE_BYTES,
-    LLMResponseTooLarge,
     LLM_TOTAL_TIMEOUT_SECONDS,
-    get_enricher,
-    sanitize_pattern,
     MAX_LABEL_CHARS,
     MAX_OCCURRENCES,
+    LLMAnalyzer,
+    LLMResponseTooLarge,
+    _clean_label,
+    get_enricher,
+    sanitize_pattern,
 )
 from app.services.patterns import JournalEntry
 

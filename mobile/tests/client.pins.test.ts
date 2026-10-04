@@ -14,7 +14,6 @@
  *  - Retry-After read ONLY on 429 and only through a real headers object,
  *  - getCachedSalt refusing a non-string s, and clearCachedSalt really wiping.
  */
-// @ts-nocheck
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 

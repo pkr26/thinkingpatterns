@@ -7,7 +7,7 @@ vi.mock("../src/api/client", async importOriginal => {
 vi.mock("../src/offlineQueue", () => ({ prepareQueueRekey: vi.fn(async () => []), abortInFlightFlush: vi.fn(), flushQueue: vi.fn(async () => 0), pendingEntryIds: vi.fn(async () => []) }));
 const { api } = await import("../src/api/client");
 const { enqueueAudio, flushAudioQueue, retryAudioQueue, listSavedAudio, exportSavedAudio, removeSavedAudio, clearAudioQueue } = await import("../src/audioQueue");
-const { encryptAudio, decryptAudio, deriveKeysAsync } = await import("../src/crypto/MindPatternCrypto");
+const { encryptAudio, decryptAudio, deriveKeysAsync } = await import("../src/crypto/journalCrypto");
 const { __resetLocalKeyLifecycleForTests } = await import("../src/localRekey");
 const { resetApi, SALT_B64 } = await import("./helpers/apiMock");
 const storage = (await import("./helpers/storageMock")).default;

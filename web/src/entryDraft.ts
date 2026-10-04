@@ -1,21 +1,11 @@
 /**
- * The active journal draft's lock-time preservation (audit 2026-09-26,
- * MEDIUM — the worst user-data-loss path). The hidden-tab/idle/bfcache
- * locks unmount the editor while the draft lives only in component state,
- * destroying a half-written entry outright. This module seals whatever the
- * editor holds AT LOCK TIME under the account's data key — exactly the
- * entryVersions/moodLog idiom (AES-GCM, AAD binds the user; unreadable records throw typed errors) — into ONE dedicated kvstore slot, and
- * the editor restores it on its next mount.
+ * Encrypted preservation of the active journal draft across session locks.
  *
- * Custody: the draft is ciphertext at rest, never plaintext; the slot
- * clears on a successful save (sent OR parked in the offline queue), on an
- * explicit discard, and whenever a lock lands with an EMPTY editor (the
- * user started over). A password rotation re-seals it under the new key
- * (the B-7 rewrap family); account deletion clears it with the rest of
- * the per-account stores.
+ * The editor seals its draft under the account data key before unmounting
+ * and restores it on the next mount. Unreadable records throw typed errors.
+ * Successful save, explicit discard, or an empty editor clears the slot.
+ * Account erasure removes it; localRotation migrates it when the data key changes.
  */
-// @ts-nocheck
-
 import { buildAad } from "./crypto/aad";
 import { decrypt, encrypt, fromBase64, toBase64, zeroize, type Bytes } from "./crypto/core";
 import { kv, StorageReadError, type WritePermit } from "./kvstore";

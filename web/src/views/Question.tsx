@@ -1,23 +1,10 @@
 /**
- * The daily reflective question + the EXPLICIT recompute (WEB_PLAN P6.4).
- * Nothing ships the data key automatically, ever: the "Refresh patterns"
- * button is the only path that opens the single-use processing session —
- * the posture mobile settled after the red-team audit. Question feedback
- * ("resonated / not me") is encrypted locally and rides the next
- * recompute as an opaque blob.
+ * Daily reflection and explicit consent to refresh patterns.
  *
- * M-W5 (audit 2026-09-26): the built-in generic question pool finally has
- * a consumer — the 404 (baseline, no question yet) and offline branches
- * render today's on-device question (localized) instead of dead code,
- * exactly like mobile QuestionScreen's baseline/offline captions.
- *
- * Redesign 2026-09-26: the question renders as a calm hero card; the
- * feedback buttons are real aria-pressed toggles with check icons (the
- * "✓ " label-prefix hack is retired); the refresh consent card leads
- * with a shield cue.
+ * Only the refresh action opens a processing session with the data key.
+ * Encrypted feedback joins the next refresh. Baseline and offline states
+ * use a deterministic, localized question from the device's built-in pool.
  */
-// @ts-nocheck
-
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api/client";
 import { toBase64,zeroize } from "../crypto/core";

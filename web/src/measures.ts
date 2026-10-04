@@ -1,24 +1,11 @@
 /**
- * The measurement-based-care instrument registry (Phase 3, 2026-09-21).
+ * PHQ-9, GAD-7, and PHQ-2 structure and score calculation.
  *
- * PHQ-9 shipped first (2026-09-19); the audit's Phase 3 MBC-depth item
- * adds GAD-7 (anxiety, 7 items, 0-21) and PHQ-2 (the two-item depression
- * core, 0-6) alongside it. All three are public-domain-style instruments
- * (the Kroenke/Spitzer Pfizer no-permission-required note) and all three
- * ride the EXISTING zero-knowledge measure path: the payload
- * ({"v":1,"measure":id,"score":N,["item9":R],"completed_at":date} —
- * item9 rides phq9 only, the clinical review 2026-09-27) is stored
- * as an encrypted blob and shared per consent — the server and portal
- * remain unable to interpret anything beyond it (and so does this app:
- * no severity bands, no advice; interpretation belongs to a clinician).
- *
- * STRUCTURE vs COPY (audit M-16 discipline): this module owns structure
- * only — item counts, option values, score ceilings, the one safety
- * item. Display copy lives in the locale catalogs
- * (measures.<id>.itemN / shared optionN).
+ * Display copy lives in the locale catalogs; this module owns item counts,
+ * option values, score ceilings, and PHQ-9's safety item. Completed responses
+ * travel as encrypted measure payloads. The UI presents scores without
+ * severity bands, diagnosis, or treatment advice.
  */
-// @ts-nocheck
-
 
 export type MeasureId = "phq9" | "gad7" | "phq2";
 

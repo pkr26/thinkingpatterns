@@ -29,7 +29,7 @@ the date each processor was enabled; when a processor is removed,
 verify deletion per its contract and close the row with a date.
 
 
-## Voice journaling subprocessors (added 2026-09-29, VOICE_PLAN.md)
+## Voice journaling subprocessors (added 2026-09-29, docs/plans/voice-plan.md)
 
 | Subprocessor | Purpose | Data disclosed | Retention | BAA status |
 |---|---|---|---|---|

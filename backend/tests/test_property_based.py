@@ -28,8 +28,7 @@ from __future__ import annotations
 import json
 from datetime import date, timedelta
 
-from hypothesis import HealthCheck, given, settings
-from hypothesis import strategies as st
+from hypothesis import HealthCheck, given, settings, strategies as st
 
 from app.api.insights import _parse_entries
 from app.security.crypto import build_aad

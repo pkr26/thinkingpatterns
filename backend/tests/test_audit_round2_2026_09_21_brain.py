@@ -1,7 +1,7 @@
 """Regression tests for the independent audit, round 2 (2026-09-21).
 
 Each test names its finding (F-2/F-3/F-5 from
-INDEPENDENT_AUDIT_ROUND_2_2026-09-21.md) and pins the fixed behavior:
+docs/archive/audits/INDEPENDENT_AUDIT_ROUND_2_2026-09-21.md) and pins the fixed behavior:
 
 * F-2: the D-3 fabrication class survived in ``stats.avg_sentiment`` —
   blank-text untagged (budget-truncated) entries averaged in a fabricated
@@ -21,8 +21,7 @@ import re
 from datetime import date, timedelta
 from pathlib import Path
 
-from app.services import brain, patterns
-from app.services import sentiment_lexicon_es as _MODULE
+from app.services import brain, patterns, sentiment_lexicon_es as _MODULE
 from app.services.patterns import JournalEntry
 from app.services.sentiment_lexicon_es import INTENSIFIERS_ES, VADER_BASE_ES
 

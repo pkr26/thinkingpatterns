@@ -1,27 +1,11 @@
 /**
- * The i18n module (2026-09-19) — the public seam for every user-visible
- * string in the app.
+ * English and Spanish catalogs with synchronous fallback and interpolation.
+ * Missing translations fall back to English, then to the key. Unknown
+ * {name} placeholders remain visible for review.
  *
- * History: this file began (2026-09-17) as a 17-key English-only catalog
- * covering the safety-critical crisis/unlock copy. This wave rebuilds it
- * as the full two-locale module: every screen and component now resolves
- * its copy through t(), the catalogs live in src/locales/{en,es}.ts, and
- * the device locale (resolved ONCE at startup) picks the language. The
- * original 17 keys are folded in and RECONCILED against the shipped copy
- * — where the old catalog and the screens had drifted, the shipped screen
- * copy won and the screens now consume these keys for real.
- *
- * Contract:
- *  - `t()` is synchronous and total: it NEVER throws. A key missing in
- *    the active locale falls back to English; a key missing everywhere
- *    returns the key itself (visible in review, never a crash).
- *  - "{name}"-style placeholders interpolate from the optional vars bag;
- *    an unknown placeholder stays literal so gaps surface in review.
- *  - Locale selection starts with the device default ("es-*" → es, else
- *    en), then applies the saved Language setting. Subscribers refresh
- *    open screens without unmounting their drafts.
- *  - Dates and numbers format through `dateLocaleTag()` so Intl calls
- *    ("es-ES" / "en-US") follow the same selection.
+ * The device locale provides the default; the saved language preference can
+ * override it. Subscribers refresh open screens without unmounting drafts.
+ * Date and number formatting use the same locale through dateLocaleTag().
  */
 
 import { useSyncExternalStore } from "react";
@@ -57,8 +41,7 @@ export function setLocale(locale: Locale): void {
   for (const listener of localeListeners) listener();
 }
 
-/** 2026-09-29 deep audit (P2): the in-app language override's "Device"
- * option returns to the startup detection. */
+/** Restore the current device locale when the user selects Device. */
 export function resetToDeviceLocale(): void {
   setLocale(detectLocale());
 }

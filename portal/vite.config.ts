@@ -5,10 +5,8 @@ import react from "@vitejs/plugin-react";
 // The portal talks only to its own origin (`/api` is proxied locally in dev),
 // so a credential-bearing page never needs broad HTTPS egress. Keep the CSP
 // aligned with LoginView's immutable same-origin API boundary.
-// 2026-09-26 CSP hardening: style-src no longer allows inline styles — the
-// views' former inline style objects are portal.css classes now and the
-// print rules live in public/print.css (a real <link media="print">
-// stylesheet), so no <style> tag or style= attribute ships anywhere.
+// Stylesheets and print rules are local assets. Keep style-src restricted
+// to this origin rather than allowing inline style tags.
 const securityHeaders = {
   "Content-Security-Policy": "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'",
   "Referrer-Policy": "no-referrer",
@@ -20,14 +18,9 @@ const securityHeaders = {
   "Cross-Origin-Resource-Policy": "same-origin",
 };
 
-/** Dev-only repair for the CSP-vs-fast-refresh conflict (E2E 2026-09-26,
- * finding F1 — same fix as the patient web client): @vitejs/plugin-react
- * boots HMR with an INLINE module script (the react-refresh preamble)
- * that `script-src 'self'` blocks, blanking `npm run dev`. Instead of
- * widening script-src, hash the inline module scripts actually served
- * and append those hashes to the meta CSP. Production configs are
- * untouched; applies only to `vite dev`, where the CSP header is
- * dropped so the hashed meta policy governs. */
+/** Permit Vite's inline React-refresh preamble with content hashes in development.
+ * The dev response omits its CSP header so it cannot override the hashed
+ * meta policy. This plugin never changes production policies. */
 function devInlineScriptHashes(): Plugin {
   return {
     name: "dev-inline-script-hashes",

@@ -1,32 +1,44 @@
-# Fathom web client (patient)
+# Fathom patient web client
 
-The patient-facing web app — the mobile app's journaling experience in
-the browser, against the same FastAPI backend, with the same
-zero-knowledge contract (keys derived in the client; the server only
-ever stores opaque blobs). Built phase by phase per [`../WEB_PLAN.md`](../WEB_PLAN.md).
+React 19, Vite, and strict TypeScript client for the FastAPI backend.
+Journal entries and local drafts are encrypted in the browser. Unlocked
+keys remain in session memory; pattern processing requires an explicit
+user action. See the [architecture guide](../docs/architecture.md) for the security model
+and backend setup.
 
-## Status
-
-Shipped — see WEB_PLAN.md's status dashboard (all ten phases done
-2026-09-25; P7/P10 independently E2E-verified by the black-box browser
-pass of 2026-09-26). This package mirrors the therapist portal's stack and
-discipline: React 19 + Vite + TypeScript strict, Vitest with coverage
-thresholds, security headers pinned in three aligned places
-(`index.html` meta, `public/_headers`, the nginx template) by test.
-
-## Commands
+## Development
 
 ```bash
 npm ci
-npm run dev        # :5173 with /api proxied to localhost:8000
-npm test           # vitest + coverage thresholds
-npm run typecheck  # tsc --noEmit
-npm run build      # typecheck gates the production bundle
+npm run dev        # http://localhost:5173
+npm run typecheck  # strict checking, including unused declarations
+npm test           # unit and regression suites with coverage gates
+npm run build      # typecheck, production bundle, and integrity hashes
+npm run preview    # serve the production bundle locally
 ```
 
-`WEB_API_PROXY` overrides the vite dev proxy target (default
-`http://localhost:8000` — see `vite.config.ts`) for machines where the
-backend port is taken.
+The app calls its own `/api` origin. Vite proxies development requests to
+`http://localhost:8000`; set `WEB_API_PROXY` to change the local backend
+target. Production must serve the app and API through one HTTPS origin.
 
-The backend for local dev: see the root README's "Running" section
-(`MINDPATTERN_ENV=development uvicorn app.main:app --port 8000`).
+## Structure
+
+- `src/views/`: patient-facing workflows.
+- `src/api/` and `src/crypto/`: authenticated transport and encryption.
+- `src/kvstore.ts`, `src/ownerStorage.ts`: durable storage and account ownership.
+- `src/localRotation.ts`, `src/localErasure.ts`: resumable account operations.
+- `src/locales/`: English and Spanish copy.
+- `tests/`: regression, accessibility, cryptographic, and integration checks.
+
+Live backend drills and fixture generation are opt-in and skipped by the
+normal test command; their files document the required environment variables.
+
+## Release
+
+`npm run build:release` also generates `.well-known/security.txt` from
+`SECURITY_TXT_CONTACT`, `SECURITY_TXT_CANONICAL`, and `SECURITY_TXT_EXPIRES`.
+Supply the real deployment values; placeholders fail validation.
+
+Configure the static host with `public/_headers`. The fallback CSP in
+`index.html` does not replace HTTP response headers. Security configuration
+tests keep the client and deployment policies aligned.

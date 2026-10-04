@@ -12,7 +12,7 @@ import {
   decryptEntry,
   encryptAudio,
   encryptEntry,
-} from "../src/crypto/MindPatternCrypto";
+} from "../src/crypto/journalCrypto";
 import { MAX_RECORDING_SECONDS } from "../src/audio/recorder";
 // The mobile fixed-nonce seam: production encrypt() draws a fresh random
 // nonce by design, so byte-pins go through encryptWithFixedNonce — the

@@ -25,7 +25,7 @@ from __future__ import annotations
 import base64
 import binascii
 
-from fastapi import APIRouter, Depends, Header, Request, Query, Response
+from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,8 +34,8 @@ from sqlalchemy.orm.exc import ObjectDeletedError, StaleDataError
 from ..cache import make_rate_limiter
 from ..db import rowcount as db_rowcount
 from ..deps import (
-    ensure_no_rekey,
     ApiError,
+    ensure_no_rekey,
     get_session,
     require_regular_user,
     require_sharing_enabled,

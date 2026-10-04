@@ -51,8 +51,8 @@ vi.mock("../../src/offlineQueue", () => ({
 // The rotation flow derives keys four times per attempt; the node tests
 // mock the derivation (loginScreen/unlockScreen idiom) so the flow runs
 // without the real 600k-iteration PBKDF2.
-vi.mock("../../src/crypto/MindPatternCrypto", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/crypto/MindPatternCrypto")>();
+vi.mock("../../src/crypto/journalCrypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/crypto/journalCrypto")>();
   return {
     ...actual,
     deriveKeysAsync: vi.fn(async () => ({
@@ -233,7 +233,7 @@ describe("therapist-sharing availability copy", () => {
 describe("saved recording custody controls", () => {
   async function seedRecording(): Promise<void> {
     const { enqueueAudio } = await import("../../src/audioQueue");
-    const { encryptAudio } = await import("../../src/crypto/MindPatternCrypto");
+    const { encryptAudio } = await import("../../src/crypto/journalCrypto");
     await enqueueAudio({ userId: "user-1", clientEntryId: "recording:one", ...encryptAudio({ dataKey: vault.get().dataKey }, "user-1", "recording:one", Buffer.from("private voice")), mime: "audio/m4a", durationSeconds: 5 });
   }
 
@@ -244,7 +244,7 @@ describe("saved recording custody controls", () => {
     let release!: (value: string) => void;
     vi.mocked(api.getUserId).mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
     await firePress(root, "Export encrypted recording 1"); await flush();
-    const { enqueueAudio } = await import("../../src/audioQueue"), { encryptAudio } = await import("../../src/crypto/MindPatternCrypto");
+    const { enqueueAudio } = await import("../../src/audioQueue"), { encryptAudio } = await import("../../src/crypto/journalCrypto");
     const replacementKey = Buffer.alloc(32, 9);
     await enqueueAudio({ userId: "replacement-account", clientEntryId: "recording:one", ...encryptAudio({ dataKey: replacementKey }, "replacement-account", "recording:one", Buffer.from("replacement account's private voice")), mime: "audio/m4a", durationSeconds: 5 });
     vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 2), dataKey: replacementKey }, "replacement-account");

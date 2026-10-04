@@ -1,6 +1,6 @@
 """Regression tests for the 2026-09-26 full-codebase audit remediations.
 
-Each test maps to a finding in AUDIT_FULL_CODEBASE_2026-09-26.md and is
+Each test maps to a finding in docs/archive/audits/AUDIT_FULL_CODEBASE_2026-09-26.md and is
 annotated with its finding id, mirroring the repo's convention of pinning
 every fix to the audit that demanded it:
 
@@ -1266,21 +1266,22 @@ async def test_low_create_note_releases_its_read_txn_before_the_chart_lock(
 
 
 def test_low_pyproject_pins_match_requirements_in():
-    """LOW item h: the direct-dependency pins pyproject hands to uv stay
-    aligned with requirements.in — the drift this audit found (alembic
-    1.20.0/asyncpg 0.31.0 locked against 1.19.2/0.30.0) cannot silently
-    return."""
-    import re
+    """Packaging and hashed-install inputs must declare the same direct pins."""
+    import tomllib
     from pathlib import Path
 
     backend = Path(__file__).resolve().parents[1]
-    req = (backend / "requirements.in").read_text()
-    pyproject = (backend / "pyproject.toml").read_text()
-    for package in ("alembic", "asyncpg"):
-        m = re.search(rf"^{package}==(\S+)", req, re.MULTILINE)
-        assert m, f"{package} missing from requirements.in"
-        pin = re.search(rf'"{package}==([^"]+)"', pyproject)
-        assert pin, f"{package} missing (or not exact-pinned) in pyproject.toml"
-        assert pin.group(1) == m.group(1), (
-            f"{package} drift: requirements.in pins {m.group(1)} but pyproject pins {pin.group(1)}"
-        )
+    project = tomllib.loads((backend / "pyproject.toml").read_text())["project"]
+
+    def direct_requirements(filename: str) -> set[str]:
+        return {
+            line.strip()
+            for line in (backend / filename).read_text().splitlines()
+            if line.strip() and not line.lstrip().startswith(("#", "-r"))
+        }
+
+    production = set(project["dependencies"]) | set(project["optional-dependencies"]["postgres"])
+    assert production == direct_requirements("requirements.in")
+    assert set(project["optional-dependencies"]["dev"]) == direct_requirements(
+        "requirements.dev.in"
+    )

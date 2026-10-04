@@ -1,19 +1,11 @@
 /**
- * Escalating offline-unlock failure throttle (2026-09-26 pentest S-5).
+ * Persistent exponential backoff for failed offline-unlock attempts.
+ * The per-account counter uses the encrypted secure store, doubles the delay
+ * up to a cap, and resets after a successful unlock.
  *
- * The unlock flow's failure feedback used to pause a CONSTANT 500 ms — a
- * thief holding a locked device could grind password guesses through the
- * app at the PBKDF2-600k rate forever, throttled by nothing but that flat
- * pad. This module persists a per-account consecutive-failure counter in
- * the encrypted secure store and doubles the pause per failure, capped.
- *
- * Honest scope, same as the old constant's: an attacker script that
- * bypasses this UI does not honor any client-side sleep — the real
- * protection of the offline oracle is PBKDF2-600k plus the 12-character
- * registration policy. What the escalating pad buys is that the on-device
- * UI path (the only path a casual attacker has without tooling) gets
- * expensive fast, and stays expensive across app restarts (the counter is
- * durable, not in-memory). The counter resets on any successful unlock.
+ * This limits guesses through the UI. It cannot constrain an attacker who
+ * bypasses the app; offline cryptographic protection comes from the password
+ * policy and the key-derivation cost.
  */
 
 import { secureStore } from "./secureStore";

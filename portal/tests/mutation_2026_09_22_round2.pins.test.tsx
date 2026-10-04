@@ -106,7 +106,7 @@ const { LoginView, passwordPolicyError } = await import("../src/views/LoginView"
 const { App } = await import("../src/App");
 const { act } = await import("react");
 const rtr = await import("./helpers/rtr");
-const { render, flush, textOf, press, buttonByLabel, typeInto } = rtr;
+const { render, flush, textOf, press, typeInto } = rtr;
 
 const BASE = "http://localhost:5173";
 

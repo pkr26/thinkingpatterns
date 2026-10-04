@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { afterEach,beforeEach,describe,it,expect,vi } from 'vitest';
 import { act } from 'react';
 import { EntryView } from '../src/views/Entry';

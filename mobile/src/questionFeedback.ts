@@ -1,19 +1,11 @@
 /**
- * Question feedback (2026-09-17): "did this land?" taps.
+ * Encrypted question feedback and pattern-mute events.
+ * Events are scoped to the account and queued locally under its data key.
+ * The next explicit recompute sends an opaque blob through the existing
+ * single-use processing session; a successful recompute clears the queue.
  *
- * One tap per question ("This resonated" / "Not me"), stored ENCRYPTED on
- * this device under the session data key (AAD-bound to the account), and
- * shipped as an opaque blob WITH THE NEXT RECOMPUTE — the same
- * single-use-session moment that already carries the data key, so the
- * server never sees plaintext pids and never learns what was answered
- * except inside the secure processing context. The brain's question
- * ranking reads the taps; after a successful recompute the queue clears.
- *
- * Pattern mutes (2026-09-19) ride the exact same channel: "stop showing me
- * this" / unmute events queue locally, travel encrypted with the next
- * recompute, and land in the brain's per-pattern muted set. Until that
- * recompute runs, a mute is optimistic client state only — the pattern
- * reappears if the queue is lost, which is the honest failure direction.
+ * Until recompute succeeds, a pattern mute is optimistic local state.
+ * Losing the queue can make that pattern visible again.
  */
 import { captureLocalWritePermit, captureOpaqueLocalWritePermit, assertLocalWritePermit, commitLocalWrite, type LocalWritePermit } from "./localRekey";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -41,12 +33,8 @@ function isTap(event: FeedbackEvent): event is FeedbackTap {
   return typeof (event as FeedbackTap).resonated === "boolean";
 }
 
-/** Serializes the queue's read-modify-write cycles (audit M-35,
- *  2026-09-20): two taps landing in the same frame (or a tap racing a
- *  mute) used to read the same pending list, each append its own event,
- *  and the last write to storage silently dropped the other — a lost
- *  answer the user believed was recorded. The moodLog.ts idiom: chain the
- *  operation onto the tail of the previous one. */
+/** Serialize read-modify-write cycles so concurrent taps/mutes cannot
+ * overwrite each other when appending to the same pending queue. */
 let feedbackMutex: Promise<unknown> = Promise.resolve();
 function serialized<T>(operation: () => Promise<T>): Promise<T> {
   const run = feedbackMutex.then(operation, operation);
@@ -90,8 +78,7 @@ async function appendEvent(dataKey: Buffer, userId: string, event: FeedbackEvent
   const permit = captureLocalWritePermit(userId, dataKey);
   const keyCopy = Buffer.from(dataKey);
   try {
-    // Serialized (M-35): same-frame taps must not read the same pending
-    // list and overwrite each other's event.
+    // Serialize appends to prevent lost feedback during concurrent taps.
     await serialized(async () => {
       assertLocalWritePermit(permit);
       const pending = await readPending(keyCopy, userId);
@@ -137,10 +124,8 @@ export async function buildFeedbackBlob(
         }),
         "utf8",
       ),
-      // C-5 (2026-09-21): the AAD carries the seal DATE (UTC), so a blob
-      // captured by a hostile server cannot be replayed across recomputes.
-      // The server accepts today or yesterday to tolerate clocks that
-      // straddle UTC midnight between seal and verify.
+      // Bind feedback to its UTC seal date to limit replay across recomputes.
+      // The server accepts today or yesterday to tolerate midnight crossings.
       buildAad("feedback", userId, new Date().toISOString().slice(0, 10)),
     );
     return blob.toString("base64");

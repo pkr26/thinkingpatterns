@@ -1,4 +1,4 @@
-"""Voice attachments (VOICE_PLAN.md P2, 2026-09-29): audio_attachments
+"""Voice attachments (docs/plans/voice-plan.md P2, 2026-09-29): audio_attachments
 table + consents.share_voice.
 
 audio_attachments stores OPAQUE client-side ciphertext for kept voice

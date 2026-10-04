@@ -1,63 +1,52 @@
-"""The mini-brain endpoints.
+"""Processing sessions, deterministic pattern analysis, and encrypted insights.
 
-Flow: the client opens a processing session (delivering its data key over
-TLS into the memory-only keystore), then triggers a recompute. Inside the
-secure processing context entries AND the previous brain state are
-decrypted, the stateful brain folds the corpus into its persistent
-pattern store (lifecycle, decayed evidence, statistically gated
-detectors), and the updated state plus the surfaced patterns are
-re-encrypted under the same key. Buffers the enclave owns are zeroized,
-and the API-layer copy of the data key is scrubbed in a ``finally`` on
-every recompute exit (success or error); immutable str copies the parser
-and analyzer produce still linger until GC — see the enclave module for
-the honest scope. Sessions are single-use: the key is destroyed the
-moment a recompute consumes it.
+The client opens a single-use processing session by sending its data key
+into the memory-only keystore over TLS. Recompute consumes that key,
+decrypts entries and prior state inside the processing context, updates the
+pattern lifecycle, and encrypts the resulting state and surfaced cards.
+Owned plaintext buffers and the data-key copy are zeroized on every exit;
+immutable parser strings may remain until garbage collection, as documented
+in security.enclave.
 
-Two encrypted insight rows come out of a recompute:
-  * kind=KIND_BRAIN    — the mini-brain's persistent state (carried forward),
-  * kind=KIND_PATTERNS — the surfaced-pattern payload clients decrypt/render.
+Baseline accounts decrypt nothing and run no analysis. A supplied pending
+session is discarded to avoid retaining an unused key. Analysis starts only
+after the active-day threshold and uses deterministic findings throughout;
+provider narration is disabled. The account lifecycle lock protects the
+fresh authorization check and subsequent processing from concurrent changes.
 
-Threshold honesty (this is the claim the old code broke): while the account
-is in the baseline phase NOTHING is decrypted — no key is required, no
-analyzer runs, no processing session is consumed. Pattern analysis (brain
-or LLM) only ever happens after the configured active-day threshold, and
-the LLM path additionally requires the user's explicit per-account consent.
-
-Database-transaction discipline: a recompute never holds a transaction
-across analysis. Reads (threshold dates, the capped corpus, the prior brain
-state) run in one short transaction that is closed BEFORE the CPU work;
-results are written in a second short transaction opened after it. Seconds
-of analysis with an open transaction would pin a pooled connection per
-in-flight recompute (and on PostgreSQL could hold locks/snapshot state the
-vacuum and other requests wait behind).
+Corpus and state reads use a short transaction closed before CPU work.
+Results are written in a second transaction afterward, avoiding long-lived
+database snapshots and connections during analysis. KIND_BRAIN stores the
+persistent engine state, KIND_PATTERNS stores the displayed cards, and the
+daily question is pinned on its first write.
 """
 
 from __future__ import annotations
 
 import base64
 import binascii
-import json
-import math
 import hashlib
 import hmac
+import json
+import math
 import os
 import re
 import time
-from dataclasses import replace
 from contextlib import AsyncExitStack
+from dataclasses import replace
 from datetime import date as date_type, datetime, timedelta, timezone
 from typing import NamedTuple, cast
 
 import anyio.to_thread
-from fastapi import APIRouter, Depends, Header, Request, Body
+from fastapi import APIRouter, Body, Depends, Header, Request
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..cache import make_rate_limiter
 from ..deps import (
-    ensure_no_rekey,
     ApiError,
+    ensure_no_rekey,
     get_session,
     require_regular_user,
     require_rekey_retry_user,
@@ -70,13 +59,13 @@ from ..locks import (
     sharing_therapist_lock_key,
 )
 from ..models import (
+    KEY_SCHEME_V2,
     KIND_BRAIN,
     KIND_PATTERNS,
     KIND_QUESTION,
-    Consent,
-    KEY_SCHEME_V2,
     AudioAttachment,
     AudioDeletion,
+    Consent,
     Entry,
     Insight,
     Measure,
@@ -93,8 +82,8 @@ from ..schemas import (
     ProcessingSessionResponse,
     QuestionResponse,
     RecomputeResponse,
-    RekeyResponse,
     RekeyRequest,
+    RekeyResponse,
 )
 from ..security import crypto, sharing
 from ..security.crypto import TamperError
@@ -105,14 +94,16 @@ from ..security.enclave import (
     SecureProcessingContext,
     zeroize,
 )
-from ..services import brain, llm, questions, threshold
+from ..services import brain, questions, threshold
 from ..services.patterns import JournalEntry
 from ..services.threshold import Phase
-from .entries import _blob_length as _entry_blob_length
-from .entries import _increment_entries_revision
-from .entries import _user_locks as _entry_locks
-from .consents import SHARING_DISCLOSURE_VERSION
 from ._sharing_state import advance_sharing_revisions
+from .consents import SHARING_DISCLOSURE_VERSION
+from .entries import (
+    _blob_length as _entry_blob_length,
+    _increment_entries_revision,
+    _user_locks as _entry_locks,
+)
 from .measures import _increment_measures_revision
 
 router = APIRouter(tags=["insights"])
@@ -485,8 +476,8 @@ async def _preflight_legacy_rotation(
     No row/object is changed here. A third key or unavailable object refuses
     adoption, so a repair cannot add another generation to unknown custody.
     """
-    from .account import _authenticate_blob_only
     from ..services.audio_store import store_for_object
+    from .account import _authenticate_blob_only
 
     for model in (Entry, Insight, Measure, AudioAttachment):
         cursor = None
@@ -681,21 +672,21 @@ async def rekey(
     signed epoch authorizes that response only. Legacy unbound journals undergo
     full bounded old-or-new-key authentication before adoption.
     """
-    from .account import _require_verifier
-    from .auth import (
-        AUTH_KEY_SIZE,
-        SALT_BYTES,
-        auth_work_slot,
-        _auth_limiter,
-        hash_verifier_off_loop,
-    )
-    from ._audit import append_access_log, flush_audit_journal
     from ..security import envelope
     from ..security.kdf import (
         KDF_PARAMS_MIN_PBKDF2_ITERATIONS,
         KdfParamsError,
-        validate_kdf_params,
         canonical_kdf_params_json,
+        validate_kdf_params,
+    )
+    from ._audit import append_access_log, flush_audit_journal
+    from .account import _require_verifier
+    from .auth import (
+        AUTH_KEY_SIZE,
+        SALT_BYTES,
+        _auth_limiter,
+        auth_work_slot,
+        hash_verifier_off_loop,
     )
 
     key_store = request.app.state.key_store
@@ -1833,15 +1824,9 @@ async def recompute(
     # signal an operator most needs to see (2026-09-17 audit: only the
     # success path used to be counted).
     metrics = getattr(request.app.state, "metrics", None)
-    enricher: llm.LLMAnalyzer | None = None
-    # Set (from the worker thread; a plain bool store is atomic under the
-    # GIL) the moment the enricher is actually invoked — a recompute that
-    # dies before enrichment must not count an LLM outcome it never ran.
-    enricher_invoked = False
     started = time.monotonic()
-    # Fence external-processing lifecycle changes. The account consent/delete
-    # paths take this same lock, so a stale authenticated User object cannot
-    # authorize plaintext dispatch after withdrawal has returned.
+    # Account changes take the same lifecycle lock. Re-authorize inside it
+    # before decrypting the corpus or storing analysis results.
     lifecycle_guard = lifecycle_locks.hold(f"llm-lifecycle:{user.id}")
     lifecycle_entered = False
     try:
@@ -1863,11 +1848,7 @@ async def recompute(
                         code="account_deleted",
                     )
                 if fresh_user.token_epoch != expected_epoch:
-                    # M-2 (2026-09-20): the fence's re-authorization used
-                    # to check only is_active, so a bearer retired by logout
-                    # could still complete a recompute — decrypting the
-                    # corpus and, with consent, dispatching plaintext to
-                    # the LLM — after the logout's key purge had returned.
+                    # A token retired while this request waited cannot authorize analysis.
                     raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
                 await ensure_no_rekey(session, user.id)
                 # Re-read the threshold inputs and re-evaluate the phase
@@ -1894,10 +1875,6 @@ async def recompute(
                         question_stored=False,
                         analyzer="none",
                     )
-                # This is deliberately re-read under the lifecycle fence,
-                # immediately before the analysis path is constructed. A
-                # previously accepted policy becomes inert if the operator
-                # changes provider/endpoint/model/retention terms.
                 rows = await _load_rows(
                     session,
                     user.id,
@@ -1969,10 +1946,9 @@ async def recompute(
                     if prior
                     else None
                 )
-            # Provider narratives have no validated semantic safety boundary.
-            # Deterministic observations remain; no journal egress for narration.
-            enricher = None
 
+            # Recompute uses deterministic findings only. Provider narration
+            # has no validated semantic safety boundary.
             def make_analyze_fn(with_state: bool, with_feedback: bool):
                 # A factory, not a plain closure: the tamper-retry below passes
                 # different item TAILS (without the state blob, or without the
@@ -1980,7 +1956,6 @@ async def recompute(
                 # strip the wrong plaintexts as "state"/"feedback" on those
                 # paths.
                 def analyze_fn(plains: list[bytearray]):
-                    nonlocal enricher_invoked
                     tail = (1 if with_state else 0) + (1 if with_feedback else 0)
                     entry_plains = plains[:-tail] if tail else plains
                     state_plain = bytes(plains[-tail]) if with_state and tail else None
@@ -1995,38 +1970,7 @@ async def recompute(
                         muted=events.muted if events else None,
                         unmuted=events.unmuted if events else None,
                     )
-                    merged = list(result.surfaced)
-                    if enricher is not None:
-                        enricher_invoked = True
-                        # Brain-first inversion (2026-09-17): the model
-                        # receives the deterministic findings and can only
-                        # attach a sanitized narrative to them — its output
-                        # replaces a finding's detail (narrative added),
-                        # never mints a new claim.
-                        narrated = {
-                            (p.kind, p.label): p
-                            for p in enricher.extract_patterns(entries, findings=merged)
-                        }
-                        merged = [narrated.get((p.kind, p.label), p) for p in merged]
-                        # Cap the UNMUTED portion only (2026-09-20 audit fix
-                        # M-5): the brain appends muted cards AFTER the live
-                        # top-N, so the flat [:MAX_SURFACED] slice that used
-                        # to run only on this branch cut exactly the muted
-                        # cards — the unmute affordance disappeared whenever
-                        # enrichment ran, and the card count drifted from
-                        # brain-only recomputes. Muted cards ride along
-                        # behind the capped live cards (the brain already
-                        # capped them at its own MUTED_SURFACED_CAP).
-                        capped: list = []
-                        unmuted_seen = 0
-                        for p in merged:
-                            if not questions.pattern_is_muted(p):
-                                if unmuted_seen >= brain.MAX_SURFACED:
-                                    continue
-                                unmuted_seen += 1
-                            capped.append(p)
-                        merged = capped
-                    return result, merged
+                    return result, list(result.surfaced)
 
                 return analyze_fn
 
@@ -2092,7 +2036,7 @@ async def recompute(
                 # Decryption + analysis is synchronous, potentially slow CPU (or an
                 # LLM round-trip); run it in a worker thread so the event loop that
                 # serves every other request never stalls behind a recompute.
-                result, merged = await anyio.to_thread.run_sync(
+                result, surfaced = await anyio.to_thread.run_sync(
                     run_encrypted,
                     encrypted,
                     make_analyze_fn(state_item is not None, feedback_item is not None),
@@ -2114,7 +2058,7 @@ async def recompute(
                 # capped entry corpus) — if an ENTRY blob is the culprit the
                 # retry fails the same way and surfaces the real error.
                 try:
-                    result, merged = await anyio.to_thread.run_sync(
+                    result, surfaced = await anyio.to_thread.run_sync(
                         run_encrypted,
                         entry_items + ([state_item] if state_item else []),
                         make_analyze_fn(state_item is not None, False),
@@ -2125,7 +2069,7 @@ async def recompute(
                     # blob or the state itself — the amnesia retry (entries
                     # only) distinguishes them exactly as before.
                     try:
-                        result, merged = await anyio.to_thread.run_sync(
+                        result, surfaced = await anyio.to_thread.run_sync(
                             run_encrypted,
                             entry_items,
                             make_analyze_fn(False, False),
@@ -2173,7 +2117,7 @@ async def recompute(
                 "v": 2,
                 "phase": state.phase.value,
                 "state_seq": state_seq,
-                "stats": {**result.stats, "patterns": [p.to_dict() for p in merged]},
+                "stats": {**result.stats, "patterns": [p.to_dict() for p in surfaced]},
             }
             blob = crypto.encrypt(
                 data_key,
@@ -2186,7 +2130,7 @@ async def recompute(
                 crypto.build_aad("insights", user.id, KIND_BRAIN),
             )
             question_blob = None
-            if merged and not question_pinned:
+            if surfaced and not question_pinned:
                 # H-12 (2026-09-20): skip generation entirely when today's
                 # row already exists — recomputing the rotation over a NEW
                 # pool is exactly how an already-served (possibly already-
@@ -2201,7 +2145,7 @@ async def recompute(
                 if question_language not in ("en", "es"):
                     question_language = "en"
                 question = questions.question_for_today(
-                    user.id, merged, today, language=question_language
+                    user.id, surfaced, today, language=question_language
                 )
                 question_payload = {
                     "for_date": today.isoformat(),
@@ -2210,7 +2154,7 @@ async def recompute(
                     # from a pattern): routes the "did this land?" taps back
                     # to the right brain record. Absent for generic days.
                     "pattern_pid": _chosen_pattern_pid(
-                        today, merged, user.id, language=question_language
+                        today, surfaced, user.id, language=question_language
                     ),
                 }
                 question_blob = crypto.encrypt(
@@ -2233,12 +2177,12 @@ async def recompute(
             summary_json = json.dumps(
                 {
                     "v": 1,
-                    "patterns": len(merged),
-                    "sensitive": any(bool(p.detail.get("sensitive")) for p in merged),
+                    "patterns": len(surfaced),
+                    "sensitive": any(bool(p.detail.get("sensitive")) for p in surfaced),
                     "newest": max(
                         (
                             p.detail.get("last_seen")
-                            for p in merged
+                            for p in surfaced
                             if isinstance(p.detail.get("last_seen"), str)
                         ),
                         default=None,
@@ -2370,44 +2314,23 @@ async def recompute(
                 active_days=state.active_days,
                 streak=state.streak,
                 days_remaining=state.days_remaining,
-                patterns_stored=len(merged),
+                patterns_stored=len(surfaced),
                 question_stored=question_stored,
                 state_seq=state_seq,
-                # Honest analyzer reporting: "llm" only when the enricher
-                # exists AND its last call actually succeeded (a failed
-                # endpoint contributed nothing — the response must not
-                # claim it ran).
-                analyzer=(
-                    "llm"
-                    if enricher is not None
-                    and enricher.last_error is None
-                    and getattr(enricher, "requests_made", 0) > 0
-                    else "brain"
+                analyzer="brain",
+                # Derive lifecycle counters from the encrypted payload's cards.
+                patterns_new=sum(1 for p in surfaced if p.detail.get("is_new")),
+                patterns_fading=sum(
+                    1 for p in surfaced if p.detail.get("pattern_state") == "fading"
                 ),
-                # Lifecycle counters are recomputed over the FINAL STORED
-                # list (2026-09-20 audit fix M-5): the brain's own counters
-                # describe its pre-merge surfaced set, and the enricher
-                # branch used to truncate that set — the response then
-                # claimed new/fading patterns that were not in the payload
-                # the client decrypted. The per-pattern flags the brain
-                # embeds (detail.is_new / detail.pattern_state) are the same
-                # ones its own counting loop uses, so brain-only recomputes
-                # report identical numbers.
-                patterns_new=sum(1 for p in merged if p.detail.get("is_new")),
-                patterns_fading=sum(1 for p in merged if p.detail.get("pattern_state") == "fading"),
             )
     finally:
         # Scrub before any awaited cleanup. A cancellation during context
         # manager exit must never skip the only deterministic data-key wipe.
         zeroize(data_key)
-        # Observability on EVERY exit (2026-09-17 audit): failed recomputes
-        # used to be invisible in the histogram — a corpus that 400s after
-        # seconds of real analysis work is exactly the spike an operator
-        # needs to see. The LLM outcome rides the same path.
+        # Record failed analyses as well as successful recomputations.
         if metrics is not None:
             metrics.observe_recompute(time.monotonic() - started)
-            if enricher is not None and enricher_invoked:
-                metrics.observe_llm(failed=enricher.last_error is not None)
         if lifecycle_entered:
             await lifecycle_guard.__aexit__(None, None, None)
 

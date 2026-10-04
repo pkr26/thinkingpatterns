@@ -1,31 +1,21 @@
-"""Optional consent-gated LLM ENRICHMENT layer on top of the deterministic brain.
+"""Bounded chat-completions transport and reference enrichment helpers.
 
-2026-09-17 rework (audit finding): this module previously also carried the
-v1 analyzer interface (``RuleBasedAnalyzer``/``LLMAnalyzer.analyze``, whose
-failure fallback ran the v1 ``patterns.analyze`` statistics — the pooled,
-uncorrected pre-brain engine). That path was dead in production (recompute
-calls ``brain.update`` + ``extract_patterns``) but remained importable and
-one wiring mistake away from surfacing v1's demonstrated false-positive-
-prone correlations to a consented user. It is gone: the only production
-surface is ``get_enricher()`` → ``LLMAnalyzer.extract_patterns``, and an
-endpoint failure now means "no model additions" — logged, and reported to
-the caller via ``last_error`` so the recompute response never claims the
-LLM ran when it did not.
+Transcript translation uses LLMAnalyzer's transport through services.stt.
+Its callers enforce current provider consent before dispatch. Transport
+calls bound response sizes and deadlines and ignore ambient proxy settings.
 
-Guardrails (this is the module that can ship journal plaintext off-server,
-so it gets no benefit of the doubt):
-  * The caller (insights API) only reaches this path post-threshold and
-    with consent recorded — enforced there, not trusted here.
-  * Model output is treated as hostile: labels are length-capped and
-    control-character-stripped, recurring-phrase labels must actually occur
-    in the corpus, numeric fields are clamped, counts capped.
+The enrichment helpers remain covered by regression tests, but production
+insight recomputation uses deterministic findings without provider narration.
+They treat model output as untrusted: labels and numbers are bounded,
+control characters are stripped, and recurring phrases must exist in the
+corpus. Provider failures contribute no additions and set last_error.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import hashlib
+import json
 import logging
 import math
 import re
@@ -67,9 +57,7 @@ class LLMResponseTooLarge(ValueError):
     """The configured enrichment endpoint exceeded its response contract."""
 
 
-# The kinds the model may claim. The analyze()/extract_patterns() prompt is
-# BUILT from this tuple, so the endpoint can never be asked for (or
-# rewarded for) a kind the sanitizer would drop.
+# Prompt and sanitizer share the same allowed finding kinds.
 _ALLOWED_KINDS = ("temporal", "mood_correlation", "recurring_phrase", "mood_shift")
 _BASE_PROMPT = (
     "You REFINE deterministic statistical findings about a journal, never "

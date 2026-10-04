@@ -1,16 +1,9 @@
 /**
- * Portal API client. The token lives in memory only (the portal's whole
- * key material — derived keys included — never touches localStorage).
+ * Same-origin portal API client with an in-memory bearer token.
  *
- * Server URL: SAME-ORIGIN ONLY, by design — there is no configurable
- * server field and there must not be one (see LoginView: the login form
- * renders the portal's own origin and refuses to change it). Deployment
- * routes /api through the portal's TLS origin and development uses
- * Vite's same-origin proxy. A maintainer "restoring" a configurable
- * server field would reopen the verifier-collection vector: a
- * user-typed HTTPS endpoint can be an attacker's server that chooses
- * the salt and harvests the derived verifier (or an enrollment token)
- * for offline guessing.
+ * The sign-in destination is fixed to prevent an attacker-controlled server
+ * from collecting password-derived verifiers or enrollment tokens. Production
+ * routes /api through the portal's HTTPS origin; development uses Vite's proxy.
  */
 
 const API_PREFIX = "/api/v1";

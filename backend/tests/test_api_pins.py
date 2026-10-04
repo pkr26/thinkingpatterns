@@ -18,8 +18,8 @@ measures/therapist/consents + services findings.)
   * M-2/M-3 — the in-fence re-authorization includes token_epoch.
   * M-4  — measures reads page deterministically by offset on both the
            patient and therapist paths (cap raised to 500).
-  * M-5  — the LLM enricher branch keeps muted cards behind the capped
-           unmuted cards (a flat [:MAX_SURFACED] cut removed them).
+  * M-5  — recompute keeps muted cards behind the capped unmuted cards
+           (the former LLM branch's flat [:MAX_SURFACED] cut removed them).
   * M-11 — the threshold phase is re-evaluated INSIDE the lifecycle fence;
            entries deleted while the recompute waited return baseline.
   * M-30 — audit rows survive the 409 paths raised AFTER ciphertext was
@@ -48,8 +48,7 @@ import pytest
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
-from app.api import insights as insights_api
-from app.api import measures as measures_api
+from app.api import insights as insights_api, measures as measures_api
 from app.deps import ApiError
 from app.models import AccessLog, Consent, User
 from app.security import crypto
@@ -454,26 +453,11 @@ async def test_measures_page_deterministically_on_both_paths(client):
     assert [r["id"] for r in mirror] == [r["id"] for r in collected]
 
 
-# --- M-5: the enricher branch keeps muted cards ---------------------------------
+# --- M-5: recompute preserves muted cards behind the visible-card cap -----------
 
 
-class _EchoEnricher:
-    """A stand-in enricher that 'narrates' nothing (returns findings as-is):
-    its mere presence selects the LLM merge branch under test."""
-
-    name = "llm"
-    last_error = None
-    # 2026-09-28: the analyzer-name gate requires evidence of an actual
-    # round-trip; this echo stand-in reports one (the branch under test is
-    # the enricher-present merge path, which it genuinely exercises).
-    requests_made = 1
-
-    def extract_patterns(self, _entries, findings=None):
-        return list(findings or [])
-
-
-async def test_enricher_branch_keeps_muted_cards_behind_the_cap(client, monkeypatch):
-    from app.services import brain
+async def test_recompute_preserves_muted_cards_without_provider_enrichment(client, monkeypatch):
+    from app.services import brain, llm
 
     emu = ClientEmulator("m5-mute", "deep-password")
     await emu.register(client)
@@ -497,16 +481,18 @@ async def test_enricher_branch_keeps_muted_cards_behind_the_cap(client, monkeypa
     victim = next(p for p in patterns if p["detail"].get("pattern_pid"))
     pid = victim["detail"]["pattern_pid"]
 
-    # Mute one card through the encrypted feedback channel, then recompute
-    # WITH an enricher present and the surfaced cap squeezed to ONE unmuted
-    # card — the old flat [:MAX_SURFACED] slice removed exactly the muted
-    # cards (the brain appends them last).
+    # Restrict visible cards to one; muted cards must retain their unmute
+    # affordance, and recompute must never construct a provider enricher.
     feedback = crypto.encrypt(
         emu.data_key,
         json.dumps({"feedback": [], "muted": [pid]}).encode("utf-8"),
         crypto.build_aad("feedback", emu.user_id or "", insights_api._utc_today().isoformat()),
     )
-    monkeypatch.setattr(insights_api.llm, "get_enricher", lambda *_a, **_k: _EchoEnricher())
+
+    def reject_enricher(*_args, **_kwargs):
+        raise AssertionError("recompute must not dispatch journal text for enrichment")
+
+    monkeypatch.setattr(llm, "get_enricher", reject_enricher)
     monkeypatch.setattr(brain, "MAX_SURFACED", 1)
     token = await emu.open_processing_session(client)
     recompute = await client.post(
@@ -522,7 +508,7 @@ async def test_enricher_branch_keeps_muted_cards_behind_the_cap(client, monkeypa
     unmuted = [p for p in stored if not p["detail"].get("muted")]
     muted = [p for p in stored if p["detail"].get("muted")]
     assert len(unmuted) == 1  # the cap applies to the UNMUTED portion only
-    assert muted, "the muted card (and its unmute affordance) must survive enrichment"
+    assert muted, "the muted card and its unmute affordance must survive recompute"
     assert any(p["detail"].get("pattern_pid") == pid for p in muted)
     # Response counters describe the FINAL stored list (M-5's second half).
     assert recompute.json()["patterns_stored"] == len(stored)

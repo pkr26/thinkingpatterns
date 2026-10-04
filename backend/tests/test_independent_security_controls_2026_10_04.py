@@ -19,13 +19,13 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.schema import CreateTable
 
 from app.models import (
-    AccountDeletionTombstone,
+    KIND_QUESTION,
     AccessLog,
-    AuditChainState,
+    AccountDeletionTombstone,
     AudioDeletion,
     AudioInventoryCursor,
+    AuditChainState,
     Insight,
-    KIND_QUESTION,
     PairingCode,
     RekeyJournal,
     TokenRevocation,

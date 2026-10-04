@@ -1,4 +1,4 @@
-"""Voice-journaling red-team campaign (VOICE_PLAN.md P6; EXECUTABLE since the
+"""Voice-journaling red-team campaign (docs/plans/voice-plan.md P6; EXECUTABLE since the
 2026-09-29 remediation — the audit found this file was a docstring that had
 never been wired into run_all.sh, so the P6 "triaged to zero highs" gate was
 satisfied by a no-op).

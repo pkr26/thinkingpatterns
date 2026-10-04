@@ -16,7 +16,7 @@
  *    keyboard-avoiding flex), the crisis-alert button contract,
  *  - operation without a navigation prop (the optional-chained listener).
  */
-// @ts-nocheck
+// @ts-nocheck -- Mutation cases omit navigation and access native mock-only methods and renderer props.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
@@ -28,8 +28,8 @@ vi.mock("../../src/api/client", async (importOriginal) => {
   return { ...actualApi, ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
 });
 
-vi.mock("../../src/crypto/MindPatternCrypto", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/crypto/MindPatternCrypto")>();
+vi.mock("../../src/crypto/journalCrypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/crypto/journalCrypto")>();
   return { ...actual, encryptEntry: vi.fn(() => ({ blobB64: "QkxPQg==" })) };
 });
 
@@ -73,7 +73,7 @@ vi.mock("../../src/store", async (importOriginal) => {
 });
 
 const { api, ApiError } = await import("../../src/api/client");
-const { encryptEntry } = await import("../../src/crypto/MindPatternCrypto");
+const { encryptEntry } = await import("../../src/crypto/journalCrypto");
 const { enqueue, flushQueue } = await import("../../src/offlineQueue");
 const { localDateISO } = await import("../../src/moodLog");
 const { peekDraft } = await import("../../src/store");

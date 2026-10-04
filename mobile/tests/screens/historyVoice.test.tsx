@@ -18,8 +18,8 @@ vi.mock("../../src/api/client", async (importOriginal) => {
 
 // Spied, real implementation preserved: the decrypted replacement blob is
 // asserted end to end AND the voice argument is observable per call.
-vi.mock("../../src/crypto/MindPatternCrypto", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/crypto/MindPatternCrypto")>();
+vi.mock("../../src/crypto/journalCrypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/crypto/journalCrypto")>();
   return { ...actual, encryptEntry: vi.fn(actual.encryptEntry) };
 });
 
@@ -30,7 +30,7 @@ vi.mock("../../src/store", async (importOriginal) => {
 });
 
 const { api } = await import("../../src/api/client");
-const { encryptEntry, decryptEntry, encryptAudio } = await import("../../src/crypto/MindPatternCrypto");
+const { encryptEntry, decryptEntry, encryptAudio } = await import("../../src/crypto/journalCrypto");
 const { HistoryScreen } = await import("../../src/screens/HistoryScreen");
 const { vault } = await import("../../src/vault");
 const { buildAad, encrypt } = await import("../../src/crypto/envelope");

@@ -15,8 +15,6 @@
  * not produce a blob no future read can open) and zeroizes the copy in
  * finally.
  */
-// @ts-nocheck
-
 import { buildAad } from "./crypto/aad";
 import { decrypt, encrypt, fromBase64, toBase64, zeroize, type Bytes } from "./crypto/core";
 import { kv,type WritePermit } from "./kvstore";
@@ -92,18 +90,6 @@ async function write(dataKey: Bytes, userId: string, days: MoodDay[],permit:Writ
   }
 }
 
-/** 2026-09-26 audit follow-up (B-7): rotation REWRAPS the mood log under
- *  the incoming data key instead of clearing it — the trend/streak history
- *  is journal-adjacent state the user expects to survive a password
- *  change. Full-fidelity via the private read/write (recentMoods slices).
- *  A failure propagates so the rotation falls back to the old clear. */
-export async function rewrapMoodLog(oldKey: Bytes, newKey: Bytes, userId: string): Promise<void> {
-  const permit=await kv.captureWritePermit(userId,newKey);
-  const days = await read(oldKey, userId);
-  if (days.length === 0) return;
-  await write(newKey, userId, days,permit);
-}
-
 /** Record (or same-day replace) one mood value, optionally with energy. */
 export async function recordMood(
   dataKey: Bytes,
@@ -117,7 +103,7 @@ export async function recordMood(
   try {
     const permit=await kv.captureWritePermit(userId,keyCopy);
     await serialized(async () => {
-      const { days } = { days: await read(keyCopy, userId) };
+      const days = await read(keyCopy, userId);
       const clean = Math.max(-1, Math.min(1, value));
       const existing = days.findIndex((d) => d.date === date);
       const prior = existing >= 0 ? days[existing] : undefined;

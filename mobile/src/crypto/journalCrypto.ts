@@ -8,7 +8,7 @@ import { deriveAuthKey, deriveDataKey, deriveMasterKey, deriveMasterKeyAsync, KD
 
 export interface Keys {
   masterKey: Buffer;
-  authKey: Buffer; // only this ever crosses the network (as the login verifier)
+  authKey: Buffer; // authentication verifier sent during login
   dataKey: Buffer; // encrypts everything
 }
 
@@ -21,14 +21,11 @@ export interface EntryPayload {
   energy?: number;
   sleep?: number; // 1..5 quality rating
   tags?: string[];
-  /** Coarse local writing window (P3, 2026-09-21): "morning" | "afternoon"
-   *  | "evening" | "night". Deliberately a BUCKET, never a clock time —
-   *  the entry contract stays date-granular for privacy; the bucket is
-   *  enough for the "Sunday evening" analysis refinement. */
+  /** Coarse local writing window: morning, afternoon, evening, or night.
+   * A bucket supports timing analysis without storing an exact clock time. */
   tod?: string;
-  /** v3 voice channels (VOICE_PLAN 2026-09-29): how this entry was made
-   *  and, for voice entries, the detected language + the English
-   *  translation of the SAVED text. */
+  /** v3 voice metadata: input mode, detected language, and translation of
+   * the saved text. */
   input_mode?: "typed" | "voice";
   transcript_lang?: string;
   english_text?: string | null;
@@ -51,11 +48,9 @@ export function deriveKeys(password: string, salt: Buffer): Keys {
   return { masterKey, authKey: deriveAuthKey(masterKey), dataKey: deriveDataKey(masterKey) };
 }
 
-/** deriveKeys without the JS-thread freeze (see deriveMasterKeyAsync) —
- *  the login/unlock screens' preferred path. `iterations` defaults to the
- *  600k contract; the v2 password rotation passes the account envelope's
- *  OWN kdf_params count so the re-wrap KEK can never disagree with the AAD
- *  the wrap declares (re-audit 2026-09-27). */
+/** Derive keys without blocking the JS thread. Defaults to the fixed
+ * authentication cost; envelope rewrapping uses its declared KDF cost so
+ * the wrapping key agrees with the envelope AAD. */
 export async function deriveKeysAsync(password: string, salt: Buffer, iterations = KDF_ITERATIONS): Promise<Keys> {
   const masterKey = await deriveMasterKeyAsync(password, salt, iterations);
   return { masterKey, authKey: deriveAuthKey(masterKey), dataKey: deriveDataKey(masterKey) };
@@ -74,14 +69,10 @@ export function encryptEntry(
     tags?: string[];
     tod?: string;
   },
-  /** Content generation for the version-bound v2 AAD (audit fix M-2,
-   *  2026-09-20): binds ("entry", userId, id, version) so a compromised
-   *  server cannot pair a stale-but-valid ciphertext with a truthful
-   *  version echo. Omitted → the legacy three-part AAD (pre-2026-09-20
-   *  blobs and cross-platform vectors keep decrypting unchanged). */
+  /** Bind content generation into v2 AAD so an older ciphertext cannot be
+   * paired with a newer version. Omit only for legacy three-part AAD. */
   contentVersion?: number,
-  /** Voice channels (VOICE_PLAN 2026-09-29): presence upgrades the payload
-   *  to v3 — typed entries keep the byte-identical v1/v2 shapes. */
+  /** Voice metadata selects v3; typed entries retain the v1/v2 shapes. */
   voice?: {
     inputMode: "voice";
     transcriptLang?: string;

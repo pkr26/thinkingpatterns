@@ -15,7 +15,7 @@
  * Only provably-equivalent mutant left to a source suppression: the
  * match?.[1] optional chain (see src/screens/CrisisScreen.tsx).
  */
-// @ts-nocheck
+// @ts-nocheck -- Assertions use renderer internals and Alert mock methods absent from native types.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";

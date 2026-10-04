@@ -1,7 +1,7 @@
 """Atomic clinician encrypted-key custody and rotation retry markers."""
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "b4e8a2c6f091"
 down_revision = "a3f7c1d9b5e2"

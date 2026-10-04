@@ -1,10 +1,9 @@
 /**
- * App shell: a four-state machine — login → key unlock → patients → one
- * patient. All key material lives in React state (memory only): closing
- * the tab forgets everything; there is nothing sensitive in storage
- * beyond per-patient visit-date stamps (see PatientView — since 2026-09-20
- * those live in per-tab sessionStorage, or in lock-scrubbed localStorage
- * where sessionStorage is unavailable).
+ * Portal navigation and session lifecycle.
+ *
+ * Unlocked keys remain in memory and are cleared on lock. Patient visit-date
+ * anchors use per-tab sessionStorage with a lock-scrubbed localStorage fallback.
+ * Encrypted note drafts persist separately through noteDrafts and kvstore.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { clearSession, api, hasSession, setUnauthorizedHandler, type Patient } from "./api";

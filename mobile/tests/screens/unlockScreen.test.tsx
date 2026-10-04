@@ -48,8 +48,8 @@ vi.mock("../../src/biometricUnlock", () => ({
   disableBiometricUnlock: (userId: string) => disableBiometricUnlock(userId),
 }));
 
-vi.mock("../../src/crypto/MindPatternCrypto", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/crypto/MindPatternCrypto")>();
+vi.mock("../../src/crypto/journalCrypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/crypto/journalCrypto")>();
   return {
     ...actual,
     deriveKeysAsync: vi.fn(async () => ({
@@ -72,7 +72,7 @@ vi.mock("../../src/store", async (importOriginal) => {
 
 const { api, ApiError } = await import("../../src/api/client");
 const { storeUnlockProof, verifyUnlockProof } = await import("../../src/unlockProof");
-const { deriveKeysAsync } = await import("../../src/crypto/MindPatternCrypto");
+const { deriveKeysAsync } = await import("../../src/crypto/journalCrypto");
 const { UnlockScreen } = await import("../../src/screens/UnlockScreen");
 const { vault } = await import("../../src/vault");
 const {

@@ -5,8 +5,6 @@
  *  is guarded, the 5-minute cap finalizes, and onerror finalizes with the
  *  mic released. Plus the H3 pins: voice calls ride a deadline strictly
  *  longer than the global 15 s one. */
-// @ts-nocheck
-
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import RTR from "react-test-renderer";
@@ -67,9 +65,7 @@ class MockMediaRecorder {
   stoppedByTrackEnd = false;
   /** Test knob: make stop() itself throw (the L-6 finalize guard). */
   forceStopError = false;
-  private readonly stream: MockMediaStream;
   constructor(stream: MockMediaStream, _options?: { mimeType?: string }) {
-    this.stream = stream;
     stream.attach(this);
     MockMediaRecorder.instances.push(this);
   }

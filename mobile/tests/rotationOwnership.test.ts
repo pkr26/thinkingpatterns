@@ -8,7 +8,7 @@ import { vault } from "../src/vault";
 import { localWriteScopeEpoch, __resetLocalKeyLifecycleForTests } from "../src/localWriteGuard";
 import * as localRekey from "../src/localRekey";
 import * as reauth from "../src/reauth";
-import * as crypto from "../src/crypto/MindPatternCrypto";
+import * as crypto from "../src/crypto/journalCrypto";
 import { rotatePassword } from "../src/rotation";
 import { deriveMasterKey } from "../src/crypto/kdf";
 import { envelopeKek, wrapDataKey, defaultKdfParams } from "../src/crypto/keyEnvelope";

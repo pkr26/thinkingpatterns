@@ -10,8 +10,6 @@
  *
  * Entries and attachments are encrypted with the REAL patient crypto; the
  * fetch edge and URL.createObjectURL are stubbed. */
-// @ts-nocheck
-
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactTestInstance } from "react-test-renderer";
 import { encryptAudio, encryptEntry } from "../src/crypto/patient";

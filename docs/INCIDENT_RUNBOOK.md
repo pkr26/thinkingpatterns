@@ -46,7 +46,7 @@ lives in exactly one place.
 **Manual operator levers (v1):** account deactivation
 (`UPDATE users SET is_active = false WHERE ...` via direct database
 access) is reserved for incident response — every auth path checks
-`is_active`, but no API or job exposes it (see README "Scope decisions").
+`is_active`, but no API or job exposes it (see [deployment boundary](architecture.md#deployment-boundary)).
 Token invalidation is rotation of the dedicated `auth_token_secret` file
 (`MINDPATTERN_AUTH_TOKEN_SECRET_FILE`), not the root compatibility secret.
 

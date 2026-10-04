@@ -11,8 +11,6 @@
  * must check that binding: without it, a session/vault desync would
  * deliver one account's data key into another account's session.
  */
-// @ts-nocheck
-
 import { zeroize, type Bytes } from "./crypto/core";
 
 type Listener = () => void;

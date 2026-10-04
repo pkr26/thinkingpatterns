@@ -4,7 +4,6 @@
  * and a ≥ 44pt touch target. Visual language comes from the theme — no hex
  * literals here.
  */
-import React from "react";
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity } from "react-native";
 import { useTheme } from "../theme";
 import { t } from "../strings";

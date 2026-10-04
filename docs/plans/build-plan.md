@@ -77,7 +77,7 @@ takes voice input through the OS keyboard's dictation (see mobile/README.md).
     *(Historical drift, recorded 2026-09-26: this plan's λ=0.3/±2.7σ was
     never what shipped. The engine first shipped λ=0.18 (inside the
     0.05–0.25 recommended range per the Smit/Schat/Ceulemans 2023
-    tutorial — see RESEARCH.md §2.2) with ±2.7σ, and the 2026-09-26
+    tutorial — see docs/research.md §2.2) with ±2.7σ, and the 2026-09-26
     statistical review then recalibrated the limit to ±3.1σ by Monte
     Carlo simulation of the exact rule (≤5% per-recompute false-alarm
     probability at φ=0.5; run-of-3 in the last 5 unchanged). Shipped

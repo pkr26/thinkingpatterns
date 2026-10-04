@@ -18,7 +18,6 @@
  * the two password-derived KEKs apart.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import React from "react";
 
 const h = vi.hoisted(() => {
   /** Every key set derivePortalKeys has handed out, so tests can assert

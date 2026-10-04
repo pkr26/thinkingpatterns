@@ -1,8 +1,6 @@
 /** App state machine (P3): booting → login → onboarding → home, sign-out,
  *  privacy, the epoch-death funnel, and the crisis overlay from every
  *  state. Sign-in drives REAL crypto against fetch stubs. */
-// @ts-nocheck
-
 import { act } from "react";
 import type { ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

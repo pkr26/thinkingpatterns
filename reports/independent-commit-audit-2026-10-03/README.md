@@ -1,6 +1,6 @@
 # Independent latest-commit audit evidence
 
-This directory records the independent audit of commit `ad797b060ac5de986e2eac6a044da8d6439a1c03` and the resulting fixes included in this follow-up commit. The findings, current verification and limits are in [the audit report](../../AUDIT_LAST_COMMIT_2026-10-03.md).
+This directory records the independent audit of commit `ad797b060ac5de986e2eac6a044da8d6439a1c03` and the resulting fixes included in this follow-up commit. The findings, current verification and limits are in [the audit report](../../docs/archive/audits/AUDIT_LAST_COMMIT_2026-10-03.md).
 
 - `backend/`: authentic original-HEAD negative controls, focused dual-dialect regressions, full-suite verification and source checks. Any pre-follow-up full run is explicitly labeled; it must be paired with the later focused checks.
 - `mobile/`: owner/session, biometric, audio, native-wrapper and signed-summary regressions; final clean-install suite and actual native/bundle evidence.

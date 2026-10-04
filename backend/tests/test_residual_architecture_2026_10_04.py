@@ -15,9 +15,7 @@ from fastapi import Response
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api import _audit as audit_mod
-from app.api import consents as consents_mod
-from app.api import therapist as therapist_mod
+from app.api import _audit as audit_mod, consents as consents_mod, therapist as therapist_mod
 from app.api._audit import (
     append_access_log,
     close_reusable_journal_evidence_index,
@@ -27,7 +25,10 @@ from app.api._audit import (
 )
 from app.config import Settings
 from app.deps import ApiError
+from app.main import _purge_deleted_account_once
+from app.metrics import MetricsRegistry
 from app.models import (
+    ROLE_THERAPIST,
     AccessLog,
     AccountDeletionJob,
     AudioDeletion,
@@ -35,13 +36,10 @@ from app.models import (
     Base,
     Consent,
     Entry,
-    ROLE_THERAPIST,
     User,
     new_id,
     utcnow,
 )
-from app.metrics import MetricsRegistry
-from app.main import _purge_deleted_account_once
 from app.services.account_deletion import (
     ACCOUNT_PURGE_ROW_BATCH,
     account_deletion_status,

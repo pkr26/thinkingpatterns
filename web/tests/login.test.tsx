@@ -5,8 +5,6 @@
  *  covers the 2026-09-26 key envelope: registration default, the
  *  register→login→unlock roundtrip, the unchanged v1 path, response
  *  tolerance, and both fail-closed envelope failures. */
-// @ts-nocheck
-
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactTestRenderer } from "react-test-renderer";
 import { LoginView, passwordPolicyError } from "../src/views/LoginView";

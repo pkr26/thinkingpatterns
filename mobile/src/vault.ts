@@ -11,7 +11,7 @@
  * must check that binding: without it, a session/vault desync would
  * deliver one account's data key into another account's session.
  */
-import type { Keys } from "./crypto/MindPatternCrypto";
+import type { Keys } from "./crypto/journalCrypto";
 import { zeroize } from "./crypto/kdf";
 
 type Listener = () => void;

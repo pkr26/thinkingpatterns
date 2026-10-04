@@ -1,4 +1,3 @@
-// @ts-nocheck
 import {afterEach,describe,it,expect,vi} from 'vitest';
 afterEach(()=>vi.unstubAllGlobals());
 describe('browser channel object ownership',()=>{

@@ -1,24 +1,12 @@
 /**
- * The encrypted local pattern-mute store (audit 2026-09-26, M-W4) — ported
- * onto the same seam contract as moodLog/questionFeedback: "never plaintext
- * content in observable storage".
+ * Encrypted local storage for content-derived pattern identifiers.
  *
- * A pattern id is CONTENT-DERIVED ("topic:divorce", "rumination:<the
- * phrase>") — storing the muted set in plaintext localStorage handed a
- * device-storage reader a list of exactly the themes the user found
- * heaviest. The set now lives in the kvstore (IndexedDB) as one
- * AES-256-GCM blob under the account's DATA key, AAD-bound to the account
- * id — the same standing as the mood log. The server-side mute sync
- * (questionFeedback's recordPatternMute → recompute blob) is unchanged.
- *
- * Key custody: callers pass the vault's SHARED dataKey buffer; every call
- * snapshots the bytes at call time and zeroizes the copy in finally (a
- * lock mid-await must not produce a blob no future read can open). A
- * corrupt/tampered blob degrades to an empty set — disposable metadata,
- * never a crash.
+ * Pattern ids may disclose journal themes, so the muted set is AES-GCM sealed
+ * under the account data key and bound to its owner. Calls snapshot shared
+ * key bytes before awaiting work and erase the copy afterward. Unreadable
+ * optional metadata falls back to an empty set. Feedback synchronizes changes
+ * only during an explicit recompute.
  */
-// @ts-nocheck
-
 import { buildAad } from "./crypto/aad";
 import { decrypt, encrypt, fromBase64, toBase64, zeroize, type Bytes } from "./crypto/core";
 import { kv } from "./kvstore";

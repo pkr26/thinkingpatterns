@@ -1,21 +1,13 @@
 /**
- * Onboarding / login. The password exists in component state for the minimum
- * time: keys are derived, the master key is zeroized, and only the auth key
- * ever crosses the network. The password itself is stored nowhere — on
- * failure every derived buffer is zeroized before the retry.
+ * Registration and sign-in with client-side key derivation.
+ * Passwords stay in component state only; derived buffers are zeroized on
+ * failure, and the master key is cleared when the vault takes ownership.
+ * Only the authentication verifier crosses the network.
  *
- * REGISTRATION HONESTY (audit fix): there is NO password reset — a forgotten
- * password means permanent journal loss (zero-knowledge cuts both ways).
- * Registration says so in plain sight, asks for the password twice, and
- * shows a simple strength hint (length + variety heuristic, on-device only).
- *
- * PASSWORD POLICY: identical to the therapist portal (portal/src/views/
- * LoginView.tsx) so both clients share one contract — and this password
- * derives the MORE valuable key, the patient data key. Minimum 12
- * characters; at 12–15 characters, at least three of the four character
- * types. A 16+ character passphrase is accepted without symbol rules.
- *
- * Errors never leak raw server text: ApiError maps to calm copy by status.
+ * The password policy matches the therapist portal: at least 12 characters,
+ * with three character classes required for 12–15 characters. Passphrases
+ * of 16 or more characters need no class rule. Registration confirms the
+ * password and explains the recovery-key requirement for a forgotten one.
  */
 import { localWriteScopeEpoch } from "../localWriteGuard";
 import { resumeLocalRekey, pendingLocalRekey } from "../localRekey";
@@ -31,10 +23,9 @@ import {
   TextInput,
   View,
 } from "react-native";
-import qcrypto from "react-native-quick-crypto"; // registers the Buffer global used below
 import { api, ApiError, getBaseUrl, MINIMUM_AGE_ATTESTATION, parseServerUrl, setBaseUrl } from "../api/client";
-import { deriveKeysAsync } from "../crypto/MindPatternCrypto";
-import type { Keys } from "../crypto/MindPatternCrypto";
+import { deriveKeysAsync } from "../crypto/journalCrypto";
+import type { Keys } from "../crypto/journalCrypto";
 import { engine } from "../crypto/engine";
 import { KDF_ITERATIONS, zeroize } from "../crypto/kdf";
 import { buildRegistrationEnvelope, cachedEnvelope, cacheEnvelope, fetchEnvelope, unwrapSessionDataKey, type EnvelopeInfo } from "../keyScheme";

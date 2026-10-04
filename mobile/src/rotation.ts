@@ -6,7 +6,7 @@
  * credential/envelope transaction. */
 import { prepareLocalRekey, resumeLocalRekey, markLocalRekeyPhase, localRekeyRequest, storeLocalRekeyTokens, storeLocalRekeyRequest, pendingLocalRekey, pendingLocalRekeyOldSalt } from "./localRekey";
 import { api, ApiError } from "./api/client";
-import { deriveKeysAsync } from "./crypto/MindPatternCrypto";
+import { deriveKeysAsync } from "./crypto/journalCrypto";
 import { engine } from "./crypto/engine";
 import { envelopeKek, TamperError, unwrapDataKey, validateKdfParams, wrapDataKey } from "./crypto/keyEnvelope";
 import { deriveMasterKeyAsync, zeroize } from "./crypto/kdf";

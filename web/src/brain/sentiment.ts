@@ -1,28 +1,10 @@
 /**
- * The on-device graded sentiment engine (2026-09-19): a faithful port of
- * backend/app/services/brain.py's sentiment walk — tokenization, emoji
- * valences counted per occurrence, deterministic morphological candidates
- * ("working"→"work"), intensifier boosting, damped negation (VADER's
- * x-0.74), "but" re-weighting — over the SAME merged lexicon the server
- * looks up (mobile/src/brain/lexicon.ts, generated from
- * shared/brain_lexicon.json by tests on both sides).
+ * Local port of the backend sentiment scorer: tokenization, emoji valences,
+ * morphological candidates, intensifiers, negation, and contrast weighting.
  *
- * Why this exists: it is the first slice of the on-device brain. The
- * device-local mood estimate used to be a 20-word regex hack; it now runs
- * the real engine, byte-identical to the server's scoring (pinned by
- * shared/brain_vectors.json). The full port — themes, phrases, lifecycle —
- * is the roadmap; the contract this file establishes is that the pieces
- * that DO run locally are the same deterministic math, not an
- * approximation.
- *
- * Pinned behaviors (tests/brainVectors.test.ts + tests/brainPort.test.ts):
- *  - sentimentScore returns the Python compound exactly (float equality
- *    after the same rounding points),
- *  - sentimentComponents sums the same walk by sign,
- *  - both are pure functions of the input string.
+ * Both platforms use shared/brain_lexicon.json. The pure scoring functions
+ * must match the Python-generated cases in shared/brain_vectors.json.
  */
-// @ts-nocheck
-
 import { LEXICON } from "./lexicon";
 
 /** Lazily-derived engine tables. Module-scope derivation proved fragile

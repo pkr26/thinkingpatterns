@@ -19,7 +19,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { api } from "../api/client";
-import { decryptInsights } from "../crypto/MindPatternCrypto";
+import { decryptInsights } from "../crypto/journalCrypto";
 import { checkAnalysisGeneration } from "../stateSeqGuard";
 import { vault } from "../vault";
 import { useSession } from "../store";

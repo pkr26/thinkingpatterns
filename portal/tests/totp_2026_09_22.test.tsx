@@ -9,7 +9,6 @@
  */
 import { act } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import React from "react";
 
 vi.mock("../src/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/api")>();

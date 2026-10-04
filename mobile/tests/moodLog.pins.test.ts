@@ -6,7 +6,6 @@
  * own -days slice. The localDateISO timezone block lives in moodLog.test.ts
  * and is deliberately not duplicated here.
  */
-// @ts-nocheck
 
 import { beforeEach, describe, expect, it } from "vitest";
 import storage from "./helpers/storageMock";
@@ -85,8 +84,8 @@ describe("moodLog pins: MAX_DAYS write cap", () => {
     }
     const days = await recentMoods(keyA, "u1", 500);
     expect(days).toHaveLength(400);
-    expect(days[0].date).toBe(day(-399));
-    expect(days[399].date).toBe(day(0));
+    expect(days[0]!.date).toBe(day(-399));
+    expect(days[399]!.date).toBe(day(0));
   });
 });
 

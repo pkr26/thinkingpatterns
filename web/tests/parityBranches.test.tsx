@@ -1,8 +1,6 @@
 /** Branch completion for the P7 views: the full grant flow, instrument
  *  switching, queue recovery, the LLM-unavailable branch, blocked-export
  *  fallback, access-log pagination, and the rotation failure paths. */
-// @ts-nocheck
-
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MeasuresView } from "../src/views/Measures";
 import { ShareView } from "../src/views/Share";
@@ -10,7 +8,7 @@ import { SettingsView } from "../src/views/Settings";
 import { decrypt, fromBase64 } from "../src/crypto/core";
 import { buildAad } from "../src/crypto/aad";
 import { setKvBackendForTests, type KvBackend } from "../src/kvstore";
-import { enqueue, rejectedEntries } from "../src/offlineQueue";
+import { rejectedEntries } from "../src/offlineQueue";
 import { vault } from "../src/vault";
 import { installSession, jsonResponse, resetTestState, stubFetch } from "./helpers/api";
 import { press, pressSwitch, render, settle, textOf, textOfNode, typeInto } from "./helpers/rtr";

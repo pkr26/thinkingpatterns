@@ -12,8 +12,8 @@ vi.mock("../../src/api/client", async (importOriginal) => {
   return { ...actualApi, ApiError, api: makeApiMock(), getBaseUrl: async () => "http://localhost:8000" };
 });
 
-vi.mock("../../src/crypto/MindPatternCrypto", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/crypto/MindPatternCrypto")>();
+vi.mock("../../src/crypto/journalCrypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/crypto/journalCrypto")>();
   return { ...actual, encryptEntry: vi.fn(() => ({ blobB64: "QkxPQg==" })) };
 });
 
@@ -77,7 +77,7 @@ vi.mock("../../src/store", async (importOriginal) => {
 });
 
 const { api, ApiError } = await import("../../src/api/client");
-const { encryptEntry } = await import("../../src/crypto/MindPatternCrypto");
+const { encryptEntry } = await import("../../src/crypto/journalCrypto");
 const { enqueue, flushQueue, QueueFullError: QFErr, QueueAbandonedError: QAErr } = await import("../../src/offlineQueue");
 const { localDateISO } = await import("../../src/moodLog");
 const { recordCrisisDialogShown } = await import("../../src/crisisDialog");

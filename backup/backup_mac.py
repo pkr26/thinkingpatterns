@@ -41,12 +41,16 @@ def _resolve_backup_key() -> str:
         return _validate_secret(raw)
     file_name = os.environ.get("BACKUP_KEY_FILE", "").strip()
     if not file_name:
-        raise RuntimeError("BACKUP_KEY is required (env BACKUP_KEY or file BACKUP_KEY_FILE)")
+        raise RuntimeError(
+            "BACKUP_KEY is required (env BACKUP_KEY or file BACKUP_KEY_FILE)"
+        )
     try:
         with open(file_name, encoding="utf-8") as handle:
             content = handle.read().strip()
     except OSError as exc:
-        raise RuntimeError(f"BACKUP_KEY_FILE={file_name!r} could not be read: {exc}") from exc
+        raise RuntimeError(
+            f"BACKUP_KEY_FILE={file_name!r} could not be read: {exc}"
+        ) from exc
     if not content:
         raise RuntimeError(f"BACKUP_KEY_FILE={file_name!r} is empty")
     return _validate_secret(content)
@@ -56,7 +60,9 @@ def _validate_secret(secret: str) -> str:
     # OpenSSL's fd passphrase reader is line-based. Reject values it would
     # silently truncate instead of authenticating under a different key.
     if any(char in secret for char in "\r\n\x00") or len(secret.encode()) > 256:
-        raise RuntimeError("backup key must be a single line of at most 256 UTF-8 bytes")
+        raise RuntimeError(
+            "backup key must be a single line of at most 256 UTF-8 bytes"
+        )
     return secret
 
 
@@ -70,9 +76,23 @@ def _openssl(secret: str, source, destination, *, decrypt: bool) -> int:
         env = os.environ.copy()
         env.pop("BACKUP_KEY", None)
         result = subprocess.run(
-            ["openssl", "enc", "-d" if decrypt else "-e", "-aes-256-cbc",
-             "-salt", "-pbkdf2", "-iter", "600000", "-pass", f"fd:{read_fd}"],
-            stdin=source, stdout=destination, env=env, pass_fds=(read_fd,), check=False,
+            [
+                "openssl",
+                "enc",
+                "-d" if decrypt else "-e",
+                "-aes-256-cbc",
+                "-salt",
+                "-pbkdf2",
+                "-iter",
+                "600000",
+                "-pass",
+                f"fd:{read_fd}",
+            ],
+            stdin=source,
+            stdout=destination,
+            env=env,
+            pass_fds=(read_fd,),
+            check=False,
         )
         return result.returncode
     finally:
@@ -81,7 +101,9 @@ def _openssl(secret: str, source, destination, *, decrypt: bool) -> int:
             os.close(write_fd)
 
 
-def _crypt_file(action: str, ciphertext: Path, sidecar: Path, *, seal: bool = False) -> int:
+def _crypt_file(
+    action: str, ciphertext: Path, sidecar: Path, *, seal: bool = False
+) -> int:
     secret = _resolve_backup_key()
     if action == "encrypt":
         fd = os.open(ciphertext, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -96,7 +118,10 @@ def _crypt_file(action: str, ciphertext: Path, sidecar: Path, *, seal: bool = Fa
     # scratch beside the backup by default: dumps can exceed /tmp's tmpfs cap.
     # A read-only source may use an explicit writable BACKUP_SNAPSHOT_DIR.
     scratch = os.environ.get("BACKUP_SNAPSHOT_DIR") or str(ciphertext.parent)
-    with ciphertext.open("rb") as source, tempfile.TemporaryFile(dir=scratch) as snapshot:
+    with (
+        ciphertext.open("rb") as source,
+        tempfile.TemporaryFile(dir=scratch) as snapshot,
+    ):
         mac_key = hmac.new(secret.encode("utf-8"), DOMAIN, hashlib.sha256).digest()
         digest = hmac.new(mac_key, digestmod=hashlib.sha256)
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
@@ -148,7 +173,10 @@ def _prune(directory: Path, days: str) -> int:
     for child in directory.iterdir():
         if not (
             child.name.startswith("mindpattern-")
-            and (child.name.endswith(".dump.enc") or child.name.endswith(".dump.enc.hmac"))
+            and (
+                child.name.endswith(".dump.enc")
+                or child.name.endswith(".dump.enc.hmac")
+            )
         ):
             continue
         if child.stat().st_mtime <= cutoff:
@@ -160,12 +188,20 @@ def _prune(directory: Path, days: str) -> int:
 def main(argv: list[str]) -> int:
     if argv[1:2] in (["encrypt"], ["decrypt"]):
         if len(argv) not in (3, 4):
-            print("usage: mindpattern-backup-mac {encrypt CIPHERTEXT [SIDECAR]|decrypt CIPHERTEXT [SIDECAR]}", file=sys.stderr)
+            print(
+                "usage: mindpattern-backup-mac {encrypt CIPHERTEXT [SIDECAR]|decrypt CIPHERTEXT [SIDECAR]}",
+                file=sys.stderr,
+            )
             return 64
         ciphertext = Path(argv[2])
         sidecar = Path(argv[3]) if len(argv) == 4 else Path(f"{ciphertext}.hmac")
         try:
-            return _crypt_file(argv[1], ciphertext, sidecar, seal=argv[1] == "encrypt" and len(argv) == 4)
+            return _crypt_file(
+                argv[1],
+                ciphertext,
+                sidecar,
+                seal=argv[1] == "encrypt" and len(argv) == 4,
+            )
         except (OSError, RuntimeError) as exc:
             print(f"backup {argv[1]} failed: {exc}", file=sys.stderr)
             return 1

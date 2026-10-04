@@ -7,7 +7,7 @@
  * global expectStyle matcher only proves SOME node renders an object, which
  * is why the overlays survived).
  */
-// @ts-nocheck
+// @ts-nocheck -- Style assertions inspect nodes exposed by the dynamically typed renderer helper.
 
 import { describe, expect, it, vi } from "vitest";
 import React from "react";

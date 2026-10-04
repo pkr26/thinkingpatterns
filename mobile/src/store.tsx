@@ -1,14 +1,8 @@
 /**
- * Tiny app state: auth tri-state, vault-unlock flag, and the 30-day progress
- * counter (memory-only — journaling-frequency metadata does not belong on
- * disk in plaintext). All heavy state lives encrypted on the server and is
- * decrypted on demand.
- *
- * The context value is MEMOIZED and every function is a stable useCallback:
- * consumers like InsightsScreen depend on them in useCallback/useEffect
- * dependency lists, and a provider that re-published fresh function
- * identities every render used to refire those effects — double fetch and
- * double decrypt per mount.
+ * Session state, vault-unlock status, and in-memory writing progress.
+ * Durable journal state is encrypted; frequency metadata is not persisted
+ * in plaintext. Stable callbacks and a memoized context value keep consumers
+ * from repeating fetch/decrypt effects on unrelated provider renders.
  */
 import { eraseDeletedAccountLocals, retryPendingAccountErasures } from "./accountErasure";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";

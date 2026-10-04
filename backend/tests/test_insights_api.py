@@ -233,6 +233,7 @@ async def test_tampered_entry_blob_fails_authentication(client):
 
     # Corrupt one stored blob directly (a malicious server or bit rot).
     from sqlalchemy import select
+
     from app.models import Entry
 
     app = client._transport.app  # noqa: SLF001 — test reachability into state

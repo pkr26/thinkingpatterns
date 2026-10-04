@@ -7,7 +7,10 @@
  * metadata after confirmed erasure.
  */
 
-export interface AccountKeyPolicy { owner: string; keyBound: boolean }
+export interface AccountKeyPolicy {
+  owner: string;
+  keyBound: boolean;
+}
 
 /** Values authenticated/encrypted under the account data key. Producers
  * must carry a write-generation permit once a generation exists. */
@@ -40,7 +43,8 @@ export const METADATA_OWNER_PREFIXES = [
 
 function queuePolicy(key: string): AccountKeyPolicy | null {
   const match = /^mindpattern\/queue\.v1\.(items|rejected|quarantine|evictions)\.([A-Za-z0-9_-]+)$/.exec(key);
-  if (!match) return null;
+  if (!match)
+    return null;
   try {
     const binary = atob(match[2]!.replace(/-/g, "+").replace(/_/g, "/"));
     const scope = new TextDecoder().decode(Uint8Array.from(binary, (char) => char.charCodeAt(0)));

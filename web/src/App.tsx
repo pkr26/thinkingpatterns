@@ -1,23 +1,10 @@
 /**
- * App shell: a state machine — booting → login → (onboarding) → the app
- * views (today / history / privacy), with the crisis overlay reachable
- * from every state. All key material lives in the memory-only vault
- * (WEB_PLAN D-4): refresh or a new tab forgets everything and asks for
- * the password again.
+ * Patient app navigation, session lifecycle, and crisis resources.
  *
- * Account-wide death is lazy and honest (D-8): a 401 (token expired, or
- * signed out / password rotated on ANOTHER device) and a 410 (account
- * deleted from another device) each funnel the whole UI back to sign-in
- * with an explanation — never a banner over live keys.
- *
- * Redesign 2026-09-26: navigation is real tabs on desktop (Today /
- * History / Patterns / Question + a More menu) and a bottom tab bar on
- * phones; save/refresh confirmations surface as gentle toasts; the
- * crisis resources open as an overlay dialog. The view state machine,
- * session funnels, and privacy posture are untouched.
+ * Keys remain in the memory-only vault. Session expiry and remote account
+ * deletion lock the interface and clear keys before returning to sign-in.
+ * Crisis resources remain reachable from every state.
  */
-// @ts-nocheck
-
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { api, clearSession, setSessionExpiredHandler } from "./api/client";
 import { abortInFlightFlush, flushQueueOnReconnect } from "./offlineQueue";
@@ -181,7 +168,7 @@ export function App(): React.JSX.Element {
   // Session-expiry funnel: any 401/410 from the client fires once per
   // session and lands here with the reason.
   useEffect(() => {
-    setSessionExpiredHandler((err, context) => {
+    setSessionExpiredHandler((_error, context) => {
       if (!context.accountDeleted) {
         lockDown(noticeFor("expired"));
         return;

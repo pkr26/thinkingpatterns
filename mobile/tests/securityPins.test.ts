@@ -124,8 +124,8 @@ vi.mock("../src/reauth", () => ({
 // PBKDF2 path); the typed-catch test rejects once to prove a local throw
 // before the server flow becomes {ok:false} instead of an escaped rejection.
 const deriveKeysAsync = vi.hoisted(() => vi.fn());
-vi.mock("../src/crypto/MindPatternCrypto", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../src/crypto/MindPatternCrypto")>();
+vi.mock("../src/crypto/journalCrypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/crypto/journalCrypto")>();
   const real = actual.deriveKeysAsync;
   deriveKeysAsync.mockImplementation((...args: Parameters<typeof real>) => real(...args));
   return { ...actual, deriveKeysAsync: (...args: Parameters<typeof real>) => deriveKeysAsync(...args) };
@@ -146,7 +146,7 @@ import {
   resetEntryVersionMirrors,
 } from "../src/entryVersions";
 import { api, ApiError } from "../src/api/client";
-import { decryptEntry, deriveKeysAsync, encryptEntry } from "../src/crypto/MindPatternCrypto";
+import { decryptEntry, deriveKeysAsync, encryptEntry } from "../src/crypto/journalCrypto";
 import { rotatePassword } from "../src/rotation";
 import { vault } from "../src/vault";
 import { enableBiometricUnlock, hasBiometricUnlock } from "../src/biometricUnlock";

@@ -190,8 +190,8 @@ def test_verify_token_signed_but_malformed_payload():
     """A correctly-SIGNED token whose payload is not JSON: the signature
     tier passed, the payload tier refused — 'malformed payload'."""
     import base64
-    import hmac
     import hashlib
+    import hmac
 
     secret = "secret"
     header = base64.urlsafe_b64encode(b'{"alg":"HS256"}').rstrip(b"=").decode()

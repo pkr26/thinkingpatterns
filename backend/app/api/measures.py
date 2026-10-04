@@ -37,7 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..cache import make_rate_limiter
 from ..db import rowcount as db_rowcount
-from ..deps import ensure_no_rekey, ApiError, get_session, require_regular_user
+from ..deps import ApiError, ensure_no_rekey, get_session, require_regular_user
 from ..locks import UserLocks, lifecycle_locks
 from ..models import Measure, User
 from ..schemas import MeasureCreate, MeasureDeleteResponse, MeasureOut

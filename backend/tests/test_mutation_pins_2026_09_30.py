@@ -36,8 +36,7 @@ import re
 
 import pytest
 
-from app.services import brain, sentiment_lexicon as lexicon_en
-from app.services import sentiment_lexicon_es as lexicon_es
+from app.services import brain, sentiment_lexicon as lexicon_en, sentiment_lexicon_es as lexicon_es
 
 # -- canonical form + digest (mirror of the module-main regenerator) ------
 
@@ -180,7 +179,7 @@ MODULE_CONSTANTS_DIGESTS = {
     "app.security.enclave": "a430522a897ac462",
     "app.security.envelope": "d53ebc6d8ab2b46b",
     "app.security.kdf": "59fbabc75041d1f1",
-    "app.security.sharing": "647c6968345282e5",
+    "app.security.sharing": "506bedd6153453e3",
     "app.security.step_up": "527887e1a38f5fb8",
     "app.security.tokens": "9fd35793a68932a7",
     "app.security.totp": "764e7437fd20e644",
@@ -299,7 +298,7 @@ PRIVATE_TABLE_DIGESTS = {
     "app.api.insights": "0ab61ee8acc09c3b",
     "app.cache": "85e3c8868decda83",
     "app.schemas": "a11fc3560db59c8f",
-    "app.services.crisis": "075fb9e3c7671d0f",
+    "app.services.crisis": "b9d5bea07e1c719e",
     "app.services.phrases": "5cad465e4f3299b5",
     "app.services.questions": "07fcf97d72adc879",
     "app.services.stt": "9da07b88205d933e",

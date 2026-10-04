@@ -11,8 +11,6 @@
  *   auth_key  = HKDF-SHA256(master, salt=zeros, info="mindpattern/auth/v1")
  *   data_key  = HKDF-SHA256(master, salt=zeros, info="mindpattern/data/v1")
  */
-// @ts-nocheck
-
 
 const subtle = (): SubtleCrypto => {
   const c = globalThis.crypto;
@@ -38,20 +36,18 @@ export function zeroize(...buffers: Array<Uint8Array | null | undefined>): void 
   for (const buffer of buffers) buffer?.fill(0);
 }
 
-const b64 = (bytes: Bytes): string => {
+export const toBase64 = (bytes: Bytes): string => {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary);
 };
 
-const unb64 = (text: string): Bytes => {
+export const fromBase64 = (text: string): Bytes => {
   const binary = atob(text);
   const out = new Uint8Array(new ArrayBuffer(binary.length));
   for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
   return out;
 };
-
-export { b64 as toBase64, unb64 as fromBase64 };
 
 async function hkdf(ikm: BufferSource, salt: BufferSource, info: BufferSource, length: number): Promise<Bytes> {
   const key = await subtle().importKey("raw", ikm, "HKDF", false, ["deriveBits"]);
