@@ -469,7 +469,7 @@ async def test_rewrap_scoping_and_revoked_consents():
     try:
         emu, _old, _auth, therapist, consent = await _seed_rotation_fixture(http)
 
-        # No verifier -> 422.
+        # No verifier or one-time step-up proof fails closed before mutation.
         wrap = sharing_crypto.wrap_data_key(
             emu.data_key, therapist.wrap_pub_key, emu.user_id, therapist.user_id
         )
@@ -478,7 +478,8 @@ async def test_rewrap_scoping_and_revoked_consents():
             headers=emu.headers,
             json={"ephemeral_pub": wrap[0], "wrapped_key": wrap[1]},
         )
-        assert response.status_code == 422
+        assert response.status_code == 403
+        assert response.json()["code"] == "step_up_required"
 
         # Someone else's consent id -> flat 404.
         stranger = ClientEmulator("stranger", "pw-stranger-123")

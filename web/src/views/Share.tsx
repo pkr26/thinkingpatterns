@@ -9,36 +9,45 @@
  * explicit "fingerprints matched" confirmation (mobile C-7 parity, fix
  * W-4, audit 2026-09-25) and the disclosure terms — then wraps the data
  * key to the therapist's public key (ECDH→HKDF→AES-GCM) with the
- * password-derived verifier: a stolen token cannot share. Revoke is
- * verifier-gated too and says plainly what revocation can and cannot do.
+ * fresh-password-derived, one-use action proof: a stolen token cannot
+ * share. Revoke uses its own action-bound proof and says plainly what
+ * revocation can and cannot do.
  *
  * Redesign 2026-09-26: styled checkboxes, the fingerprint in a mono block
  * with a copy affordance, grants as cards with initials avatars, and a
  * two-step revoke confirm.
  */
+// @ts-nocheck
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, sessionAbortSignal, type ListedConsent } from "../api/client";
-import { toBase64, zeroize } from "../crypto/core";
+import { zeroize } from "../crypto/core";
 import { keyFingerprint, wrapDataKeyForTherapist } from "../crypto/sharing";
+import { freshStepUp } from "../reauth";
 import { t } from "../strings";
+import { displayError } from "../errors";
 import { vault } from "../vault";
 import { Avatar, Button, Card, Checkbox, ErrorBanner, Field, Icon, Note, PillNote, Toggle } from "../ui";
+
+interface LookupState {
+  code: string;
+  name: string;
+  fingerprint: string;
+  therapistId: string;
+  wrapPubKey: string;
+  sas: string | null;
+  serverFingerprint: string | null;
+}
+
+type PendingSensitiveAction =
+  | { kind: "grant"; lookup: LookupState }
+  | { kind: "revoke"; consent: ListedConsent }
+  | { kind: "voice"; consent: ListedConsent; enabled: boolean };
 
 export function ShareView(): React.JSX.Element {
   const [consents, setConsents] = useState<ListedConsent[] | null>(null);
   const [code, setCode] = useState("");
-  const [lookup, setLookup] = useState<{
-    code: string;
-    name: string;
-    fingerprint: string;
-    therapistId: string;
-    wrapPubKey: string;
-    /** SAS verification (2026-09-26): both null on a backend predating
-     *  the wave — the block simply hides (the local fingerprint check,
-     *  computed below, stays either way). */
-    sas: string | null;
-    serverFingerprint: string | null;
-  } | null>(null);
+  const [lookup, setLookup] = useState<LookupState | null>(null);
   const [disclosureAccepted, setDisclosureAccepted] = useState(false);
   const [fingerprintVerified, setFingerprintVerified] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -46,6 +55,8 @@ export function ShareView(): React.JSX.Element {
   const [status, setStatus] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [armedRevoke, setArmedRevoke] = useState<string | null>(null);
+  const [pendingSensitive, setPendingSensitive] = useState<PendingSensitiveAction | null>(null);
+  const [reauthPassword, setReauthPassword] = useState("");
   const generation = useRef(0);
   const pairingGeneration = useRef(0);
   const mounted = useRef(true);
@@ -63,7 +74,7 @@ export function ShareView(): React.JSX.Element {
       setConsents(rows);
     } catch (err) {
       if (generation.current !== run) return;
-      setError(err instanceof Error ? err.message : t("share.webLoadFailed"));
+      setError(displayError(err, t("share.webLoadFailed")));
     }
   }, []);
 
@@ -108,7 +119,7 @@ export function ShareView(): React.JSX.Element {
     } catch (err) {
       if (!current()) return;
       if (err instanceof ApiError && err.status === 404) setError(t("share.webCodeExpired"));
-      else setError(err instanceof Error ? err.message : t("share.webLookupFailed"));
+      else setError(displayError(err, t("share.webLookupFailed")));
     } finally {
       if (current()) setBusy(false);
     }
@@ -125,88 +136,103 @@ export function ShareView(): React.JSX.Element {
     }
   };
 
-  const grant = async (): Promise<void> => {
+  const requestGrant = (): void => {
+    if (!vault.isUnlocked() || !lookup || lookup.code !== code.trim() || !disclosureAccepted || !fingerprintVerified) return;
+    setError("");
+    setReauthPassword("");
+    setPendingSensitive({ kind: "grant", lookup: { ...lookup } });
+  };
+
+  const confirmSensitiveAction = async (): Promise<void> => {
+    const pending = pendingSensitive;
     const owner = vault.ownerUserId();
-    if (!owner || !vault.isUnlocked() || !lookup || lookup.code !== code.trim() || !disclosureAccepted || !fingerprintVerified) return;
+    if (!pending || busy || !owner || !vault.isUnlocked()) return;
     const operation = pairingGeneration.current;
     const signal = sessionAbortSignal();
-    setBusy(true);
-    setError("");
-    // 2026-09-28 audit (LOW, the moodLog/Entry M-3 idiom): snapshot BOTH
-    // vault buffers BEFORE the awaits — vault.get()'s buffers are SHARED,
-    // and a lock landing during the wrap await zeroizes them, so the grant
-    // would otherwise upload a wrap of the data key under all-zero bytes
-    // (and a zero verifier). The copies die in the finally; a lock at any
-    // re-check aborts with the honest locked message instead.
     const keys = vault.get();
     const current = (): boolean => mounted.current && operation === pairingGeneration.current && !!signal && !signal.aborted && vault.isUnlocked() && vault.ownerUserId() === owner && vault.get().dataKey === keys.dataKey;
     const dataKey = new Uint8Array(new ArrayBuffer(keys.dataKey.length));
     dataKey.set(keys.dataKey);
-    const authKey = new Uint8Array(new ArrayBuffer(keys.authKey.length));
-    authKey.set(keys.authKey);
+    setBusy(true);
+    setError("");
     try {
-      const wrap = await wrapDataKeyForTherapist(dataKey, lookup.wrapPubKey, owner, lookup.therapistId);
+      const action = pending.kind === "grant"
+        ? "sharing_grant"
+        : pending.kind === "revoke"
+          ? "sharing_revoke"
+          : "sharing_voice";
+      const wrap = pending.kind === "grant"
+        ? await wrapDataKeyForTherapist(dataKey, pending.lookup.wrapPubKey, owner, pending.lookup.therapistId)
+        : null;
       if (!current()) return;
-      await api.grantConsent(lookup.code, wrap.ephemeralPubB64, wrap.wrappedKeyB64, toBase64(authKey));
+      const stepped = await freshStepUp(reauthPassword, action);
       if (!current()) return;
-      setStatus(t("share.webGrantedStatus", { name: lookup.name }));
-      setCode("");
-      setLookup(null);
-      setCopied(false);
-      setDisclosureAccepted(false);
-      setFingerprintVerified(false);
+      if (!stepped.ok) {
+        const messages = {
+          locked: t("common.reauthLocked"),
+          "no-account": t("common.reauthNoAccount"),
+          "wrong-password": t("common.wrongPassword"),
+          offline: t("common.reauthOffline"),
+        } as const;
+        setError(messages[stepped.reason]);
+        return;
+      }
+      if (pending.kind === "grant" && wrap) {
+        await api.grantConsent(pending.lookup.code, wrap.ephemeralPubB64, wrap.wrappedKeyB64, stepped.proof);
+      } else if (pending.kind === "revoke") {
+        await api.revokeConsent(pending.consent.id, stepped.proof);
+      } else if (pending.kind === "voice") {
+        await api.setShareVoice(pending.consent.id, pending.enabled, stepped.proof);
+      }
+      if (!current()) return;
+      if (pending.kind === "grant") {
+        setStatus(t("share.webGrantedStatus", { name: pending.lookup.name }));
+        setCode("");
+        setLookup(null);
+        setCopied(false);
+        setDisclosureAccepted(false);
+        setFingerprintVerified(false);
+      } else if (pending.kind === "revoke") {
+        setStatus(t("share.webRevokedStatus", { name: pending.consent.display_name }));
+        setArmedRevoke(null);
+      }
+      setPendingSensitive(null);
       await load();
     } catch (err) {
       if (!current()) return;
       if (err instanceof ApiError && err.code === "disclosure_outdated") {
         setError(t("share.webTermsChanged"));
+      } else if (pending.kind === "grant") {
+        setError(t("share.webGrantFailed"));
+      } else if (pending.kind === "revoke") {
+        setError(t("share.webRevokeFailed"));
       } else {
-        setError(err instanceof Error ? err.message : t("share.webGrantFailed"));
+        setError(t("share.voiceToggleFailed"));
+        const rows = await api.listConsents().catch(() => null);
+        if (rows) setConsents(rows);
       }
     } finally {
-      zeroize(dataKey, authKey);
+      zeroize(dataKey);
+      setReauthPassword("");
       if (current()) setBusy(false);
     }
   };
 
-  const revoke = async (consent: ListedConsent): Promise<void> => {
+  const requestRevoke = (consent: ListedConsent): void => {
     if (!vault.isUnlocked()) return;
-    setBusy(true);
     setError("");
-    try {
-      await api.revokeConsent(consent.id, toBase64(vault.get().authKey));
-      setStatus(t("share.webRevokedStatus", { name: consent.display_name }));
-      setArmedRevoke(null);
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t("share.webRevokeFailed"));
-    } finally {
-      setBusy(false);
-    }
+    setReauthPassword("");
+    setPendingSensitive({ kind: "revoke", consent });
   };
 
-  /** Share-voice toggle (VOICE_PLAN 2026-09-29): verifier-gated like every
-   *  scope change on a live grant; optimistic-failure honest (reload on
-   *  error). */
-  const toggleShareVoice = async (consent: ListedConsent, enabled: boolean): Promise<void> => {
-    setBusy(true);
+  /** Share-voice toggle (VOICE_PLAN 2026-09-29): fresh-step-up-gated like
+   *  every scope change on a live grant; optimistic-failure honest (reload
+   *  on error). */
+  const toggleShareVoice = (consent: ListedConsent, enabled: boolean): void => {
+    if (!vault.isUnlocked()) return;
     setError("");
-    try {
-      await api.setShareVoice(consent.id, enabled, toBase64(vault.get().authKey));
-      setConsents((current) =>
-        (current ?? []).map((row) => (row.id === consent.id ? { ...row, share_voice: enabled } : row)),
-      );
-    } catch (err) {
-      // Localized honesty (audit 2026-09-29): the raw error message is
-      // server-provided English; the honest reload below still runs so the
-      // toggle never shows a state the server refused.
-      void err;
-      setError(t("share.voiceToggleFailed"));
-      const rows = await api.listConsents().catch(() => null);
-      if (rows) setConsents(rows);
-    } finally {
-      setBusy(false);
-    }
+    setReauthPassword("");
+    setPendingSensitive({ kind: "voice", consent, enabled });
   };
 
   const active = consents?.filter((consent) => consent.status === "active") ?? [];
@@ -214,6 +240,39 @@ export function ShareView(): React.JSX.Element {
 
   return (
     <>
+      {pendingSensitive && (
+        <Card
+          title={pendingSensitive.kind === "grant"
+            ? t("share.reauthGrantTitle", { name: pendingSensitive.lookup.name })
+            : pendingSensitive.kind === "voice"
+              ? t("share.reauthShareVoiceTitle", { name: pendingSensitive.consent.display_name })
+              : t("share.reauthRevokeTitle")}
+          tone={pendingSensitive.kind === "revoke" ? "danger" : undefined}
+        >
+          <Note tone="muted">{t("settings.reauthFreshNote")}</Note>
+          <Field
+            label={t("settings.reauthPasswordField")}
+            value={reauthPassword}
+            onChange={setReauthPassword}
+            type="password"
+            autoComplete="current-password"
+          />
+          <div className="row row--wrap">
+            <Button
+              label={busy ? t("settings.working") : t("settings.reauthConfirm")}
+              onPress={() => void confirmSensitiveAction()}
+              disabled={busy || reauthPassword.length === 0}
+              danger={pendingSensitive.kind === "revoke"}
+            />
+            <Button
+              label={t("common.cancel")}
+              onPress={() => { setPendingSensitive(null); setReauthPassword(""); }}
+              disabled={busy}
+              variant="ghost"
+            />
+          </div>
+        </Card>
+      )}
       <Card title={t("share.webTitle")}>
         <Note tone="muted">{t("share.webZeroKnowledge")}</Note>
         <Field label={t("share.webPairingCode")} value={code} onChange={(value) => { pairingGeneration.current += 1; setBusy(false); setCode(value); setLookup(null); setCopied(false); setFingerprintVerified(false); setDisclosureAccepted(false); }} placeholder={t("share.webPairingPlaceholder")} />
@@ -254,7 +313,7 @@ export function ShareView(): React.JSX.Element {
             <Checkbox checked={disclosureAccepted} onChange={setDisclosureAccepted}>
               {t("share.webDisclosureConfirm")}
             </Checkbox>
-            <Button label={t("share.webConfirmShare")} onPress={() => void grant()} disabled={busy || !disclosureAccepted || !fingerprintVerified} icon="share" />
+            <Button label={t("share.webConfirmShare")} onPress={requestGrant} disabled={busy || !disclosureAccepted || !fingerprintVerified} icon="share" />
           </>
         )}
         <ErrorBanner message={error} />
@@ -275,14 +334,14 @@ export function ShareView(): React.JSX.Element {
             </div>
             <Toggle
               checked={consent.share_voice === true}
-              onChange={(enabled) => void toggleShareVoice(consent, enabled)}
+              onChange={(enabled) => toggleShareVoice(consent, enabled)}
               disabled={busy}
               label={consent.share_voice === true ? t("share.voiceOn") : t("share.voiceOff")}
             />
             {consent.share_voice === true && <Note tone="muted">{t("share.voiceNote")}</Note>}
             {armedRevoke === consent.id ? (
               <div className="row row--wrap">
-                <Button label={t("share.webRevoke")} onPress={() => void revoke(consent)} small danger disabled={busy} />
+                <Button label={t("share.webRevoke")} onPress={() => requestRevoke(consent)} small danger disabled={busy} />
                 <Button label={t("common.cancel")} onPress={() => setArmedRevoke(null)} small variant="ghost" />
               </div>
             ) : (

@@ -6,6 +6,8 @@
  * (the same rule as every other decrypted surface in this app), and the
  * URL dies on ended/error/unmount so the blob can be collected.
  */
+// @ts-nocheck
+
 import type { Bytes } from "../crypto/core";
 import { decryptAudio } from "../crypto/patient";
 

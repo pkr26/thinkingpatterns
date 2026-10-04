@@ -52,7 +52,10 @@ LLM_TOTAL_TIMEOUT_SECONDS = 10.0
 # recorded against an older version is the honest answer, not a bug. It is
 # also part of processing_policy_fingerprint, so bumping it makes persisted
 # consent inert until the account re-opts-in.
-LLM_DISCLOSURE_VERSION = "v1"
+# v2 identifies the active transcript-translation purpose and copy.  The
+# historical v1 record described journal-pattern analysis; it must never
+# silently authorize this materially different processing purpose.
+LLM_DISCLOSURE_VERSION = "v2"
 # A completion containing a handful of short narratives should be only a few
 # KiB.  One MiB leaves generous room for provider envelope changes while
 # preventing a compromised endpoint from making a processing worker buffer an
@@ -210,7 +213,12 @@ def processing_policy_fingerprint(settings: Settings) -> str | None:
 def consent_is_current(user, settings: Settings) -> bool:
     """Whether this user has accepted the current external policy exactly."""
     current = processing_policy_fingerprint(settings)
-    return bool(current and user.llm_consent and user.llm_consent_policy == current)
+    return bool(
+        current
+        and user.llm_consent
+        and user.llm_consent_disclosure == LLM_DISCLOSURE_VERSION
+        and user.llm_consent_policy == current
+    )
 
 
 def _clean_label(raw: object) -> str | None:
@@ -670,12 +678,9 @@ class LLMAnalyzer:
         self.last_error = None
         try:
             return self._fetch_patterns(entries, findings=findings)
-        except Exception as exc:  # noqa: BLE001 — every failure mode is one outcome
-            self.last_error = type(exc).__name__
-            logger.warning(
-                "llm enrichment failed (%s); continuing with deterministic patterns only",
-                type(exc).__name__,
-            )
+        except Exception:  # noqa: BLE001 — every failure mode is one outcome
+            self.last_error = "provider_failure"
+            logger.warning("llm enrichment failed; continuing with deterministic patterns only")
             return []
 
 

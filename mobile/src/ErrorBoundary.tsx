@@ -9,6 +9,7 @@
 import React from "react";
 import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { useTheme } from "./theme";
+import { t as tr } from "./strings";
 
 interface Props {
   children: React.ReactNode;
@@ -25,12 +26,11 @@ export class ErrorBoundary extends React.Component<Props, State> {
     return { failed: true };
   }
 
-  componentDidCatch(error: unknown): void {
-    // Local, best-effort diagnostics only: the message string never
-    // contains journal plaintext (it is a render exception), and nothing
-    // is transmitted anywhere.
+  componentDidCatch(): void {
+    // A render exception can contain decrypted journal text, account ids,
+    // or hostile payload fragments. Emit only a fixed local diagnostic.
     // eslint-disable-next-line no-console
-    console.warn("render crashed; ErrorBoundary engaged:", String(error));
+    console.warn("render_error_boundary");
   }
 
   render(): React.JSX.Element {
@@ -44,25 +44,24 @@ function ErrorFallback({ onRetry }: { onRetry: () => void }): React.JSX.Element 
   return (
       <View style={[styles.root, { backgroundColor: t.colors.bg }]}>
         <Text style={[styles.title, { color: t.colors.text }]}>
-          Something went wrong
+          {tr("app.crashTitle")}
         </Text>
         <Text style={[styles.body, { color: t.colors.muted }]}>
-          Your journal is safe and encrypted on this device. The screen
-          failed to draw — restarting the app usually resolves it.
+          {tr("app.crashBody")}
         </Text>
         <Pressable
           accessibilityRole="button"
           onPress={onRetry}
           style={[styles.button, { backgroundColor: t.colors.card }]}
         >
-          <Text style={{ color: t.colors.text, fontWeight: "700" }}>Try again</Text>
+          <Text style={{ color: t.colors.text, fontWeight: "700" }}>{tr("app.crashRetry")}</Text>
         </Pressable>
         <Pressable
           accessibilityRole="link"
           onPress={() => Linking.openURL("https://findahelpline.com").catch(() => undefined)}
           style={[styles.button, { backgroundColor: t.colors.card }]}
         >
-          <Text style={{ color: t.colors.muted }}>Crisis resources</Text>
+          <Text style={{ color: t.colors.muted }}>{tr("app.crashCrisis")}</Text>
         </Pressable>
       </View>
   );

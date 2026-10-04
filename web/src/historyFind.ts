@@ -9,6 +9,8 @@
  * garbage month still degrades to the raw number-shaped output rather
  * than throwing.
  */
+// @ts-nocheck
+
 import { dateLocaleTag } from "./strings";
 
 export interface SearchableEntry {

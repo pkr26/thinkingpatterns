@@ -20,7 +20,7 @@ from app.config import Settings
 from app.main import create_app
 from app.middleware import HardeningMiddleware
 from app.security import crypto, tokens
-from tests.helpers import ClientEmulator
+from tests.helpers import ClientEmulator, production_secret_settings
 
 TODAY = date.today()
 
@@ -227,7 +227,8 @@ async def test_deleted_account_bearer_token_is_dead(client):
     )
     assert response.status_code == 204
     stale = await client.get("/api/entries", headers=emu.headers)
-    assert stale.status_code == 401
+    assert stale.status_code == 410
+    assert stale.json()["code"] == "account_deleted"
 
 
 # --- consistency between endpoints (config drift) ------------------------------
@@ -302,6 +303,7 @@ def _production_app(monkeypatch) -> object:
         environment="production",
         database_url="postgresql+asyncpg://u:p@h/db",
         token_secret="x" * 48,
+        **production_secret_settings(),
     )
     return create_app(settings)
 

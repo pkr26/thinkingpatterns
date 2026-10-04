@@ -50,7 +50,7 @@ from typing import NamedTuple, cast
 
 import anyio.to_thread
 from fastapi import APIRouter, Depends, Header, Request, Body
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -112,6 +112,7 @@ from .entries import _blob_length as _entry_blob_length
 from .entries import _increment_entries_revision
 from .entries import _user_locks as _entry_locks
 from .consents import SHARING_DISCLOSURE_VERSION
+from ._sharing_state import advance_sharing_revisions
 from .measures import _increment_measures_revision
 
 router = APIRouter(tags=["insights"])
@@ -852,11 +853,22 @@ async def rekey(
         async with sessionmaker() as grant_session:
             grant_rows = (
                 await grant_session.execute(
-                    select(Consent.id, Consent.therapist_id).where(
-                        Consent.user_id == user.id, Consent.status == "active"
+                    select(Consent.id, Consent.therapist_id)
+                    .join(User, Consent.therapist_id == User.id)
+                    .where(
+                        Consent.user_id == user.id,
+                        Consent.status == "active",
+                        User.is_active.is_(True),
                     )
+                    .limit(101)
                 )
             ).all()
+            if len(grant_rows) > 100:
+                raise ApiError(
+                    status_code=413,
+                    detail="active sharing exceeds the supported rotation size",
+                    code="payload_too_large",
+                )
         for therapist_id in sorted({row.therapist_id for row in grant_rows}):
             await sharing_guards.enter_async_context(
                 sharing_locks.hold(sharing_therapist_lock_key(therapist_id))
@@ -887,12 +899,18 @@ async def rekey(
                             detail="a corpus rotation requires a different new data key",
                             code="validation_error",
                         )
-                    owned_ids = set(
-                        (
-                            await session.scalars(
-                                select(Consent.id).where(Consent.user_id == user.id)
+                    owned_wrap_count = (
+                        int(
+                            await session.scalar(
+                                select(func.count(Consent.id)).where(
+                                    Consent.user_id == user.id,
+                                    Consent.id.in_(list(wraps)),
+                                )
                             )
-                        ).all()
+                            or 0
+                        )
+                        if wraps
+                        else 0
                     )
                     pending_rotation = await session.scalar(
                         select(RekeyJournal).where(RekeyJournal.user_id == user.id).limit(1)
@@ -906,12 +924,23 @@ async def rekey(
                         await session.execute(
                             select(Consent, User.wrap_pub_key)
                             .join(User, Consent.therapist_id == User.id)
-                            .where(Consent.user_id == user.id, Consent.status == "active")
+                            .where(
+                                Consent.user_id == user.id,
+                                Consent.status == "active",
+                                User.is_active.is_(True),
+                            )
+                            .limit(101)
                         )
                     ).all()
+                    if len(active) > 100:
+                        raise ApiError(
+                            status_code=413,
+                            detail="active sharing exceeds the supported rotation size",
+                            code="payload_too_large",
+                        )
                     if (
                         not {row[0].id for row in active}.issubset(wraps)
-                        or (not bound_resume and not set(wraps).issubset(owned_ids))
+                        or (not bound_resume and owned_wrap_count != len(wraps))
                         or not {row[0].therapist_id for row in active}.issubset(
                             {row.therapist_id for row in grant_rows}
                         )
@@ -1148,6 +1177,7 @@ async def rekey(
                         async with sessionmaker() as session:
                             pending = AudioDeletion(
                                 id=new_id(),
+                                owner_id=fresh_user.id,
                                 backend=store.backend,
                                 storage_key=key,
                                 storage_locator=locator,
@@ -1198,20 +1228,31 @@ async def rekey(
                         final_user.wrapped_data_key = wrapped_data_key
                         final_user.kdf_params = params_json
                     final_user.token_epoch += 1
-                    result = RekeyResponse(
-                        entries=entries_done,
-                        insights=insights_done,
-                        measures=measures_done,
-                        audio=audio_done,
-                        recovery_invalidated=recovery_invalidated,
-                        operation_id=body.operation_id,
-                        consents_rewrapped=len(active),
-                    )
-                    final_user.rekey_operation_id = body.operation_id
-                    final_user.rekey_operation_digest = digest
-                    final_user.rekey_operation_epoch = final_user.token_epoch
-                    final_user.rekey_operation_result = result.model_dump_json()
+                    # Therapist retirement can complete during the long,
+                    # batched corpus rewrite. Rebuild and lock the bounded
+                    # live relationship set at finalization; never recreate
+                    # wrap state for a retired therapist, and never let that
+                    # dead relationship block the patient's rotation.
+                    final_active_rows = (
+                        await session.execute(
+                            select(Consent.id, Consent.therapist_id)
+                            .join(User, Consent.therapist_id == User.id)
+                            .where(
+                                Consent.user_id == final_user.id,
+                                Consent.id.in_(list(wraps)),
+                                Consent.status == "active",
+                                User.is_active.is_(True),
+                            )
+                            .with_for_update()
+                        )
+                    ).all()
+                    final_active = {
+                        str(consent_id): str(therapist_id)
+                        for consent_id, therapist_id in final_active_rows
+                    }
                     for consent_id, (item, blob) in wraps.items():
+                        if consent_id not in final_active:
+                            continue
                         await session.execute(
                             update(Consent)
                             .where(
@@ -1221,6 +1262,26 @@ async def rekey(
                             )
                             .values(ephemeral_pub=item.ephemeral_pub, wrapped_key=blob)
                         )
+                    changed_therapists = list(final_active.values())
+                    if changed_therapists:
+                        await advance_sharing_revisions(
+                            session,
+                            patient_ids=[final_user.id],
+                            therapist_ids=changed_therapists,
+                        )
+                    result = RekeyResponse(
+                        entries=entries_done,
+                        insights=insights_done,
+                        measures=measures_done,
+                        audio=audio_done,
+                        recovery_invalidated=recovery_invalidated,
+                        operation_id=body.operation_id,
+                        consents_rewrapped=len(final_active),
+                    )
+                    final_user.rekey_operation_id = body.operation_id
+                    final_user.rekey_operation_digest = digest
+                    final_user.rekey_operation_epoch = final_user.token_epoch
+                    final_user.rekey_operation_result = result.model_dump_json()
                     await append_access_log(
                         session,
                         actor_id=final_user.id,
@@ -1246,7 +1307,11 @@ async def rekey(
                     # reaches get_session's post-commit journal hook. Anchor
                     # the committed security event outside the DB too; an
                     # exact response-loss retry must not append it again.
-                    await flush_audit_journal(session, settings.audit_journal_path)
+                    await flush_audit_journal(
+                        session,
+                        settings.audit_journal_path,
+                        failure_observer=request.app.state.metrics.observe_audit_journal_failure,
+                    )
         return result
     except _RekeyMismatch:
         raise ApiError(
@@ -2164,7 +2229,7 @@ async def recompute(
             # card is discoverable without opening every chart. A malformed
             # or missing therapist key only skips that consent — it must
             # never fail the patient's recompute.
-            summary_wraps: list[tuple[str, str, bytes]] = []
+            summary_wraps: list[tuple[str, str, str, bytes]] = []
             summary_json = json.dumps(
                 {
                     "v": 1,
@@ -2200,9 +2265,17 @@ async def recompute(
                             Consent.user_id == user.id,
                             Consent.status == "active",
                             Consent.disclosure == SHARING_DISCLOSURE_VERSION,
+                            User.is_active.is_(True),
                         )
+                        .limit(101)
                     )
                 ).all()
+                if len(consent_rows) > 100:
+                    raise ApiError(
+                        status_code=413,
+                        detail="active sharing exceeds the supported summary size",
+                        code="payload_too_large",
+                    )
             for consent_id, therapist_id, wrap_pub in consent_rows:
                 if not isinstance(wrap_pub, str) or not wrap_pub:
                     continue
@@ -2212,7 +2285,9 @@ async def recompute(
                     )
                 except sharing.SharingError:
                     continue
-                summary_wraps.append((consent_id, eph_b64, base64.b64decode(wrapped_b64)))
+                summary_wraps.append(
+                    (consent_id, therapist_id, eph_b64, base64.b64decode(wrapped_b64))
+                )
 
             # WRITE phase: a second short transaction, opened only after the
             # analysis and encryption are done. Nothing here decrypts.
@@ -2233,44 +2308,50 @@ async def recompute(
                         # the existing same-day row (question and rotation
                         # index chosen by the FIRST recompute of the day)
                         # is served unchanged for the rest of the day.
-                    # Retention: age out dated question history past the
-                    # window (today's upsert above is never affected).
-                    await session.execute(
-                        delete(Insight).where(
-                            Insight.user_id == user.id,
-                            Insight.kind == KIND_QUESTION,
-                            Insight.for_date < today - timedelta(days=QUESTION_RETENTION_DAYS),
-                        )
-                    )
+                    # Dated-question retention is handled by the bounded,
+                    # cooperative maintenance sweep.  Request latency never
+                    # scales with global or per-account historical rows.
                     # The status guard keeps a revoke that raced between the
                     # summary read above and this write from resurrecting a
                     # cleared row. 2026-09-26 audit item 14: the DISCLOSURE
                     # version is bound into the same WHERE clause. A
                     # revoke→re-grant between the read (which selected
-                    # v2-disclosure consents) and this write lands a consent
+                    # current-disclosure consents) and this write lands a consent
                     # that is active again but granted under whatever
                     # disclosure the patient answered THEN — writing the
-                    # summary onto a v1 grant would resurrect v2-shaped
-                    # triage data that grant never covered. Accepted
+                    # summary onto an older grant would resurrect triage
+                    # data that grant never fully covered. Accepted
                     # residual, documented: a revoke→re-grant under the
                     # CURRENT disclosure version still receives this
                     # summary immediately — but that grant's terms are
                     # exactly the ones the summary was disclosed under, so
                     # the write is within the patient's standing consent;
                     # the next recompute refreshes it in order.
-                    for consent_id, eph_b64, wrapped_bytes in summary_wraps:
-                        await session.execute(
+                    changed_therapists: list[str] = []
+                    for consent_id, therapist_id, eph_b64, wrapped_bytes in summary_wraps:
+                        changed = await session.execute(
                             update(Consent)
                             .where(
                                 Consent.id == consent_id,
                                 Consent.status == "active",
                                 Consent.disclosure == SHARING_DISCLOSURE_VERSION,
+                                Consent.therapist_id.in_(
+                                    select(User.id).where(User.is_active.is_(True))
+                                ),
                             )
                             .values(
                                 summary_blob=wrapped_bytes,
                                 summary_eph_pub=eph_b64,
                                 summary_updated_at=utcnow(),
                             )
+                            .returning(Consent.id)
+                        )
+                        if changed.scalar_one_or_none() is not None:
+                            changed_therapists.append(therapist_id)
+                    if changed_therapists:
+                        await advance_sharing_revisions(
+                            session,
+                            therapist_ids=changed_therapists,
                         )
                     await session.commit()
                 except IntegrityError as exc:

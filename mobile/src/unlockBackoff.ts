@@ -17,9 +17,11 @@
  */
 
 import { secureStore } from "./secureStore";
+import { accountStorageKey } from "./accountStorage";
+import { commitActiveAccountWrite } from "./localWriteGuard";
 
 /** Per-account key under the encrypted secure-store envelope. */
-const key = (username: string): string => `mindpattern.unlockFail.${username}`;
+const key = accountStorageKey.unlockFailure;
 
 /** Base pause after the FIRST failure — identical to the old constant, so
  *  an honest first typo feels exactly as calm as before. */
@@ -48,13 +50,19 @@ export async function unlockFailureCount(username: string): Promise<number> {
 }
 
 /** Record one more failure; returns the NEW consecutive count. */
-export async function recordUnlockFailure(username: string): Promise<number> {
+export async function recordUnlockFailure(username: string, userId: string): Promise<number> {
   const next = Math.min((await unlockFailureCount(username)) + 1, MAX_TRACKED_UNLOCK_FAILURES);
-  await secureStore.setItem(key(username), String(next));
+  await commitActiveAccountWrite(userId, () => secureStore.setItem(key(username), String(next)));
   return next;
 }
 
 /** A successful unlock forgives everything. */
-export async function clearUnlockFailures(username: string): Promise<void> {
+export async function clearUnlockFailures(username: string, userId: string): Promise<void> {
+  await commitActiveAccountWrite(userId, () => secureStore.removeItem(key(username)));
+}
+
+/** Administrative-erasure primitive. The caller owns the tombstoned-user
+ * commit lane, so no active-session permit is required here. */
+export async function eraseUnlockFailures(username: string): Promise<void> {
   await secureStore.removeItem(key(username));
 }

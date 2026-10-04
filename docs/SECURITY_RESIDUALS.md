@@ -100,6 +100,25 @@ recorded decision rather than an oversight:
   device access with the user watching. Accepted for v1; revisit with
   any native networking change.
 
+## Mobile plaintext voice-scratch boundary (2026-10-04)
+
+Recording and playback necessarily expose plaintext to the pinned native audio
+stack. Expo Audio records into its app-private cache, and playback requires a
+short-lived plaintext cache URI after in-memory decryption. MindPattern uses
+cryptographically random, owner-pseudonymous playback names; deletes them on
+normal release/unmount; scrubs the app-owned playback root and Expo Audio's
+recording roots before cold-start credential hydration; and repeats cleanup on
+confirmed account erasure and API-origin retirement. Unrelated cache content is
+not touched.
+
+The remaining boundary is the **live recording/playback window** and the period
+between a process kill and the next app cold start. JavaScript cannot erase a
+file while a killed process is not running, nor can it prove how the operating
+system's native decoder buffers plaintext. This control therefore relies on the
+mobile platform's application sandbox and configured device data protection
+while the process is dead. Real-device release testing must verify the pinned
+Expo Audio cache-directory assumptions whenever that native dependency changes.
+
 ## Patient deletion destroys therapist notes (2026-09-26, accepted pending counsel)
 
 `therapist_notes.user_id` carries `ondelete="CASCADE"`
@@ -167,11 +186,13 @@ because this file is the register reviewers read):
   a shorter window is an operator trade of accountability for
   minimisation.
 
-## Pentest 2026-09-29 accepted residuals (MED-2, T-3, T-4, I-6…I-9, INFRA-4)
+## Pentest 2026-09-29 accepted residuals (T-3, T-4, I-6…I-9, INFRA-4)
 
 Residuals from the 2026-09-29 deep pentest (PENTEST_DEEP_2026-09-29.md
 §2/§4/§5) that are DOCUMENTED TRADES rather than open bugs — registered
-here because this file is the register reviewers read. None is directly
+here because this file is the register reviewers read. MED-2 was subsequently
+closed: non-development boot now requires every purpose split plus a dedicated,
+versioned audit key and historical verification ring. None of the remaining items is directly
 exploitable; each names its precondition. MED-1 (the db password's env
 interpolation) and INFRA-2/INFRA-3 (the committed TOTP screenshot and the
 gitleaks `tests?/` path exemption) were FIXED that day and are
@@ -180,7 +201,6 @@ therefore not residuals — see the compose header, the redacted
 
 | ID | Severity | Standing verdict and written defense |
 |---|---|---|
-| `MED-2` | Medium (theor.) | By default the audit-chain MAC key is HKDF-derived from `MINDPATTERN_TOKEN_SECRET` (`backend/app/config.py`), so one exfiltrated env value would compromise bearer minting, 2FA wrapping, pairing AND the audit trail's tamper evidence together. Purpose-split exists per env var; a loud boot WARNING now names the coupling outside development. Operators should set `MINDPATTERN_AUDIT_MAC_SECRET` (32-byte hex) to decouple — deliberately, since existing chains verify only under the key that sealed them. |
 | `T-3` | Low (theor.) | AES-GCM's 96-bit random nonces under a long-lived per-account data key carry a birthday bound: collision risk becomes non-negligible only beyond ~2³² encryptions per key, far past any real account's volume. `POST /processing/rekey` mints a fresh key and is the escape hatch if that assumption ever erodes. |
 | `T-4` | Low (residual) | Python `str` residuals: journal plaintext (≤150k chars) and the data key's base64 form linger in process memory past the enclave's zeroization — GC-owned strings cannot be scrubbed deterministically. The processing window stays single-use and TTL-bounded; a real TEE is the deferred closing path (`docs/TEE_ATTESTATION_DESIGN.md`). |
 | `I-6` | Info | TOTP brute-force economics: with a stolen verifier, full-throttle guessing at the 10/min limit yields ~2.9%/day success — bounded by the per-username failure bucket, deliberately not a hard lockout (which would hand the attacker a lockout oracle). The keystore's 4-session-per-owner cap is the flip side: a stolen bearer can block NEW session creation for ≤5 min (availability nuisance, no confidentiality impact). |
@@ -205,9 +225,10 @@ in place; future captures must be redacted at capture time.
 Hardening the audit plan asked for that shipped as "next" rather than v1,
 recorded here so they are not silently dropped (audit round 2, F-6):
 
-- **Optional TOTP/MFA for therapist accounts** — DELIVERED 2026-09-22
-  (final-verification remediation; see the README security section for
-  the full contract). Pentest 2026-09-26 remediation: (1) is FIXED —
+- **Therapist TOTP/MFA** — DELIVERED 2026-09-22 and now required before
+  any therapist patient-data route (account and enrollment routes remain
+  available long enough to enroll; see the README security section for the
+  full contract). Pentest 2026-09-26 remediation: (1) is FIXED —
   the replay fence is now an atomic conditional UPDATE
   (`totp_last_counter < matched`, rowcount authority), verified by a
   concurrent same-code test; a per-username second-factor failure bucket
@@ -220,10 +241,10 @@ recorded here so they are not silently dropped (audit round 2, F-6):
   window-scoped — a verifier-holding attacker with many source IPs
   still gets `limit` guesses per window forever (deliberate: an account
   hard-lockout would hand that same attacker a lockout oracle against
-  the legitimate user); (2) the wrapped secret and the recovery-code
-  digests are keyed to the server `token_secret`, so rotating that
-  secret invalidates enrollments — the same documented caveat as the
-  decoy salts (operators must also clear `users.totp_*` AND the
+  the legitimate user); (2) the wrapped secret and recovery-code digests
+  are keyed to the dedicated production `totp_wrap_secret`, so rotating
+  that purpose key without a rewrap/reset procedure invalidates enrollments
+  (operators must also clear `users.totp_*` AND the
   `totp_backup_codes` table, which POST /account/totp/disable already
   does in-transaction); (3) losing every recovery code AND the
   authenticator is still an operator database action (by the

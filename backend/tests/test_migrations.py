@@ -198,6 +198,71 @@ def test_consent_record_revision_roundtrips(tmp_path, monkeypatch):
     assert {"llm_consent_at", "llm_consent_disclosure"} <= consent_columns()
 
 
+def test_consent_event_backfill_does_not_invent_historical_voice_scope(tmp_path, monkeypatch):
+    """The legacy row stores only today's share_voice bit, not its value at
+    granted_at. Backfill therefore records unknown for the historic grant."""
+    db_file = tmp_path / "consent-event-provenance.db"
+    db_url = f"sqlite+aiosqlite:///{db_file}"
+    monkeypatch.setenv("MINDPATTERN_DB_URL", db_url)
+    cfg = Config(str(BACKEND_DIR / "alembic.ini"))
+    command.upgrade(cfg, "d6a0c4e8b213")
+    engine = create_engine(f"sqlite:///{db_file}")
+    with engine.begin() as conn:
+        for user_id, username in (("patient", "legacy-patient"), ("therapist", "legacy-th")):
+            conn.exec_driver_sql(
+                """
+                INSERT INTO users
+                    (id, username, salt, verifier, scrypt_salt, created_at,
+                     is_active, token_epoch, llm_consent)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user_id,
+                    username,
+                    "salt",
+                    b"verifier",
+                    b"scrypt-salt",
+                    "2026-01-01T00:00:00+00:00",
+                    1,
+                    1,
+                    0,
+                ),
+            )
+        conn.exec_driver_sql(
+            """
+            INSERT INTO consents
+                (id, user_id, therapist_id, status, scope, granted_at,
+                 disclosure, share_voice)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "legacy-consent",
+                "patient",
+                "therapist",
+                "active",
+                "full",
+                "2026-01-02T00:00:00+00:00",
+                "v2",
+                1,
+            ),
+        )
+    engine.dispose()
+
+    command.upgrade(cfg, "head")
+    engine = create_engine(f"sqlite:///{db_file}")
+    with engine.connect() as conn:
+        event = conn.exec_driver_sql(
+            """
+            SELECT kind, action, disclosure, share_voice
+              FROM consent_events
+             WHERE consent_id = ?
+            """,
+            ("legacy-consent",),
+        ).one()
+    engine.dispose()
+    assert event == ("sharing", "granted", "v2", None)
+
+
 def test_collection_snapshot_revision_migration_backfills_and_roundtrips(tmp_path, monkeypatch):
     """Existing accounts start at a usable zero marker and downgrade cleanly."""
     db_file = tmp_path / "collection-revisions.db"
@@ -502,13 +567,27 @@ def test_access_log_chain_migration_backfills_seqs_before_unique_index(tmp_path,
 
     # The migration's own genesis seals must satisfy the app's chain walker
     # (the same verification every read path can run post-deploy).
-    from app.api._audit import verify_access_log_chain
+    from app.api._audit import seal_legacy_audit_states, verify_access_log_chain
 
     async def _verify() -> None:
         eng = build_engine(db_url)
         try:
             async with build_sessionmaker(eng)() as session:
-                verdict = await verify_access_log_chain(session, "user-1")
+                # The migration snapshot is deliberately unsealed: startup
+                # must link-verify the retained legacy rows before trusting
+                # and authenticating its high-water mark.
+                mac_key = b"migration-test-audit-key" * 2
+                await seal_legacy_audit_states(
+                    session,
+                    mac_keys={1: mac_key},
+                    current_mac_key_version=1,
+                )
+                verdict = await verify_access_log_chain(
+                    session,
+                    "user-1",
+                    mac_keys={1: mac_key},
+                    current_mac_key_version=1,
+                )
                 assert verdict.ok, verdict
                 assert verdict.rows_checked == 3
         finally:

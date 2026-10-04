@@ -55,6 +55,7 @@ export function OnboardingScreen({ navigation }: { navigation: any }): React.JSX
   // The reminder opt-in (2026-09-19): off by default, one tap to say yes,
   // changeable later in Settings. Calm copy — an invitation, never a debt.
   const [remind, setRemind] = useState(false);
+  const [owner, setOwner] = useState<string | null>(null);
   // Double-tap guard: two presses inside one frame both pass a state-only
   // check — the ref is synchronous (the Entry screen's savingRef pattern).
   const busyRef = useRef(false);
@@ -68,17 +69,17 @@ export function OnboardingScreen({ navigation }: { navigation: any }): React.JSX
       .getUserId()
       .then(async (userId) => {
         if (!userId) return;
+        setOwner(userId);
         // Stryker disable next-line ArrowFunction: () => false vs () => undefined are indistinguishable — `seen` is only truthiness-tested in `!cancelled && seen`
         const seen = await hasSeenOnboarding(userId).catch(() => false);
         if (!cancelled && seen) navigation.replace("Entry");
+        const restored = await loadOnboardingPanel(panels().length, userId).catch(() => 0);
+        if (!cancelled && restored > 0) setIndex(restored);
       })
       .catch(() => {});
     // E-10 (2026-09-21): M-18's re-entry restored the screen but not the
     // dismissed-panel position — resume where the user left off instead
     // of restarting at panel 1.
-    void loadOnboardingPanel(panels().length).then((restored) => {
-      if (!cancelled && restored > 0) setIndex(restored);
-    });
     return () => {
       cancelled = true;
     };
@@ -163,7 +164,7 @@ export function OnboardingScreen({ navigation }: { navigation: any }): React.JSX
                 touchActivity();
                 // E-10 (2026-09-21): persist the position so a backgrounded
                 // onboarding resumes here (see loadOnboardingPanel above).
-                void saveOnboardingPanel(index + 1);
+                if (owner) void saveOnboardingPanel(index + 1, owner);
                 setIndex(index + 1);
               }
         }

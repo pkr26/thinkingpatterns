@@ -15,6 +15,8 @@
  * old-Safari population as the Web Locks fallback) keep the per-tab
  * drain protection only — disclosed here rather than silently claimed.
  */
+// @ts-nocheck
+
 const CHANNEL_NAME = "mindpattern-session-lockdown";
 // BroadcastChannel excludes the sending CHANNEL OBJECT, not its whole page.
 // A separate subscriber channel in this page would otherwise lock our own

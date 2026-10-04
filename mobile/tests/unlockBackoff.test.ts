@@ -18,11 +18,17 @@ import {
   unlockFailureCount,
   unlockFailureDelayMs,
 } from "../src/unlockBackoff";
+import { __resetLocalKeyLifecycleForTests } from "../src/localRekey";
+import { api } from "../src/api/client";
 
-beforeEach(() => {
+const USER = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+beforeEach(async () => {
   storage.__reset();
   (Keychain as unknown as { __reset: () => void }).__reset();
+  __resetLocalKeyLifecycleForTests();
   setSecureStoreBackend(null);
+  await api.setSession("token", USER, "alice");
 });
 
 describe("unlockFailureDelayMs (the curve)", () => {
@@ -53,7 +59,7 @@ describe("the durable per-account counter", () => {
     expect(await unlockFailureCount("alice")).toBe(0);
 
     for (let i = 1; i <= MAX_TRACKED_UNLOCK_FAILURES + 5; i += 1) {
-      const n = await recordUnlockFailure("alice");
+      const n = await recordUnlockFailure("alice", USER);
       expect(n).toBe(Math.min(i, MAX_TRACKED_UNLOCK_FAILURES));
     }
     expect(await unlockFailureCount("alice")).toBe(MAX_TRACKED_UNLOCK_FAILURES);
@@ -65,13 +71,13 @@ describe("the durable per-account counter", () => {
     expect(raw).not.toContain(String(MAX_TRACKED_UNLOCK_FAILURES));
     expect(await storage.getItem("@mindpattern/device_k")).toBeNull();
 
-    await clearUnlockFailures("alice");
+    await clearUnlockFailures("alice", USER);
     expect(await unlockFailureCount("alice")).toBe(0);
     expect(await storage.getItem("mindpattern.unlockFail.alice")).toBeNull();
   });
 
   it("counts are per-account and corrupt reads are zero (never a brick)", async () => {
-    await recordUnlockFailure("alice");
+    await recordUnlockFailure("alice", USER);
     expect(await unlockFailureCount("bob")).toBe(0);
     await storage.setItem("mindpattern.unlockFail.carol", "not-an-envelope");
     expect(await unlockFailureCount("carol")).toBe(0);

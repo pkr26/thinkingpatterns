@@ -45,16 +45,8 @@ services:
     image: rclone/rclone:1.69.1@sha256:600f51856285df1ae5d91c8bb2682cbbe31bf109ebeeef9ecead6ca8c0ff6138
     environment:
       # rclone remote:destination spec, e.g. s3-offsite:mindpattern/backups
-      # (the remote must exist in BACKUP_OFFSITE_RCLONE_CONFIG).
-      BACKUP_OFFSITE_REMOTE: ${BACKUP_OFFSITE_REMOTE:?set BACKUP_OFFSITE_REMOTE (rclone remote:destination, e.g. s3-offsite:mindpattern/backups) in the owner-only secrets file}
-      # The FULL rclone config INI (remote name + credentials) — the ENV
-      # FALLBACK (docker-inspect-visible; keep it in the owner-only secrets
-      # file, never the release env asset or the checkout; multi-line value
-      # wrapped in double quotes). The PREFERRED source since the
-      # 2026-09-26 infra audit is the mounted secret file
-      # deploy/secrets/rclone_config (see `secrets:` below) — when both are
-      # set the file wins.
-      BACKUP_OFFSITE_RCLONE_CONFIG: ${BACKUP_OFFSITE_RCLONE_CONFIG:-}
+      # (the remote must exist in the mounted rclone_config secret).
+      BACKUP_OFFSITE_REMOTE: ${BACKUP_OFFSITE_REMOTE:?set BACKUP_OFFSITE_REMOTE (rclone remote:destination, e.g. s3-offsite:mindpattern/backups) in the owner-only operator env}
       # Replication interval in seconds (default hourly; minimum 60).
       BACKUP_OFFSITE_INTERVAL_SECONDS: ${BACKUP_OFFSITE_INTERVAL_SECONDS:-3600}
       # One-shot recovery mode (docs/INCIDENT_RUNBOOK.md, Off-site
@@ -75,7 +67,7 @@ services:
     # G-5 (2026-09-21 audit): fetch mode is a ONE-SHOT (the runbook's
     # host-gone recovery). `unless-stopped` restarted the exited fetch
     # container forever, hammering the remote. Loop/push deployments set
-    # BACKUP_OFFSITE_RESTART=unless-stopped in the secrets file; the
+    # BACKUP_OFFSITE_RESTART=unless-stopped in the operator env; the
     # default stays "no" so the trap cannot re-arm by omission.
     restart: ${BACKUP_OFFSITE_RESTART:-no}
     # G-4 (2026-09-21 audit): the production hardening quartet — this
@@ -131,23 +123,15 @@ services:
             exit 1
             ;;
         esac
-        # Config source (2026-09-26 infra audit): the mounted secret file
-        # wins when present; the env fallback (multi-line INI) otherwise;
-        # neither -> refuse to start (no silent no-credentials replication).
-        if [ -s /run/secrets/rclone_config ]; then
-          mkdir -p /config
-          cp /run/secrets/rclone_config /config/rclone.conf
-          chmod 600 /config/rclone.conf
-        else
-          case "$$BACKUP_OFFSITE_RCLONE_CONFIG" in
-            '')
-              echo "no rclone config: mount deploy/secrets/rclone_config or set BACKUP_OFFSITE_RCLONE_CONFIG" >&2
-              exit 1
-              ;;
-          esac
-          mkdir -p /config
-          printf '%s\n' "$$BACKUP_OFFSITE_RCLONE_CONFIG" > /config/rclone.conf
-        fi
+        # Credential source is file-only: an env fallback would expose the
+        # complete provider INI through docker inspect.
+        [ -s /run/secrets/rclone_config ] || {
+          echo "no rclone config: mount the non-empty rclone_config secret" >&2
+          exit 1
+        }
+        mkdir -p /config
+        cp /run/secrets/rclone_config /config/rclone.conf
+        chmod 600 /config/rclone.conf
         interval=$${BACKUP_OFFSITE_INTERVAL_SECONDS:-3600}
         case "$$interval" in
           ''|*[!0-9]*) echo "BACKUP_OFFSITE_INTERVAL_SECONDS must be a positive whole number" >&2; exit 1 ;;

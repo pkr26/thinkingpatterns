@@ -13,6 +13,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { api, ApiError, canonicalOrigin, getBaseUrl, OriginPinnedError } from "./api/client";
 import { buildAad, decrypt, encrypt } from "./crypto/envelope";
 import { zeroize } from "./crypto/kdf";
+import { ACCOUNT_STORAGE_PREFIX } from "./accountStorage";
 
 const LEGACY_QUEUE_KEY = "@mindpattern/queue";
 const LEGACY_REJECTED_KEY = "@mindpattern/queue_rejected";
@@ -20,7 +21,7 @@ const LEGACY_QUARANTINE_KEY = "@mindpattern/queue_quarantine";
 /** Opaque preservation for old unscoped data. We never guess which origin it
  * belongs to and therefore never upload it to a potentially different one. */
 const LEGACY_RECOVERY_KEY = "@mindpattern/queue.legacy-unscoped.v1";
-const STORAGE_PREFIX = "@mindpattern/queue.v2";
+const STORAGE_PREFIX = ACCOUNT_STORAGE_PREFIX.queue;
 export const MAX_QUEUE_LENGTH = 200;
 /** M-13: serialized byte ceiling for one scope's queue value. Android's
  *  AsyncStorage cursor window tops out near 2 MB PER ROW — ~15 max-size

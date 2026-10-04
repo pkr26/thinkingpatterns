@@ -150,6 +150,187 @@ tests:
         summary: Blackbox probe of /readyz failing for 5m (DB path broken)
         runbook: "docs/INCIDENT_RUNBOOK.md \u2014 S2: API down, step 1 (/readyz 503\
           \ -> database)"
+- name: MindPatternAuditJournalFailure fires on a durable-I/O failure increment
+  interval: 1m
+  input_series:
+  - series: mindpattern_audit_journal_failures_total
+    values: 0+1x10
+  alert_rule_test:
+  - eval_time: 2m
+    alertname: MindPatternAuditJournalFailure
+    exp_alerts:
+    - exp_labels:
+        severity: S2
+      exp_annotations:
+        summary: Audit journal append or compaction failed in the last 5m
+        runbook: "docs/INCIDENT_RUNBOOK.md \u2014 Audit-journal failure (preserve the journal and chain evidence, restore the original durable volume, and require /readyz recovery)"
+- name: MindPatternAuditMaintenanceFailure fires on a failed authenticated pass
+  interval: 1m
+  input_series:
+  - series: mindpattern_audit_maintenance_failures_total
+    values: 0 0 1 1 1 1
+  alert_rule_test:
+  - eval_time: 1m
+    alertname: MindPatternAuditMaintenanceFailure
+    exp_alerts: []
+  - eval_time: 3m
+    alertname: MindPatternAuditMaintenanceFailure
+    exp_alerts:
+    - exp_labels:
+        severity: S2
+      exp_annotations:
+        summary: Authenticated audit maintenance failed in the last 15m
+        runbook: "docs/INCIDENT_RUNBOOK.md \u2014 Audit-maintenance backlog/failure (preserve evidence, restore the original key/journal/database inputs, and require a complete successful pass before reopening)"
+- name: MindPatternAuditPruneBacklogPersistent waits for sustained catch-up
+  interval: 1m
+  input_series:
+  - series: mindpattern_audit_prune_backlog
+    values: 1x40
+  alert_rule_test:
+  - eval_time: 29m
+    alertname: MindPatternAuditPruneBacklogPersistent
+    exp_alerts: []
+  - eval_time: 31m
+    alertname: MindPatternAuditPruneBacklogPersistent
+    exp_alerts:
+    - exp_labels:
+        severity: S3
+      exp_annotations:
+        summary: Audit-retention pruning has remained backlogged for 30m
+        runbook: "docs/INCIDENT_RUNBOOK.md \u2014 Audit-maintenance backlog/failure (confirm the bounded cursor is advancing; never bypass authenticated verification to drain faster)"
+- name: MindPatternAuditPruneOldestOverdue uses the two-hour retention boundary
+  interval: 1m
+  input_series:
+  - series: mindpattern_audit_prune_oldest_overdue_seconds
+    values: 7201x25
+  alert_rule_test:
+  - eval_time: 14m
+    alertname: MindPatternAuditPruneOldestOverdue
+    exp_alerts: []
+  - eval_time: 16m
+    alertname: MindPatternAuditPruneOldestOverdue
+    exp_alerts:
+    - exp_labels:
+        severity: S2
+      exp_annotations:
+        summary: Oldest access-audit row is over 2h beyond its retention cutoff
+        runbook: "docs/INCIDENT_RUNBOOK.md \u2014 Audit-maintenance backlog/failure (treat as a retention incident; preserve cursor and chain evidence while restoring bounded catch-up)"
+- name: MindPatternAuditVerificationBacklogPersistent waits for a sustained cycle
+  interval: 1m
+  input_series:
+  - series: mindpattern_audit_verification_backlog
+    values: 1x40
+  alert_rule_test:
+  - eval_time: 29m
+    alertname: MindPatternAuditVerificationBacklogPersistent
+    exp_alerts: []
+  - eval_time: 31m
+    alertname: MindPatternAuditVerificationBacklogPersistent
+    exp_alerts:
+    - exp_labels:
+        severity: S3
+      exp_annotations:
+        summary: Incremental audit verification has remained backlogged for 30m
+        runbook: "docs/INCIDENT_RUNBOOK.md \u2014 Audit-maintenance backlog/failure (confirm the verification cursor is advancing and the snapshot is not restarting continuously)"
+- name: MindPatternAuditVerificationCycleStalled uses the two-hour cycle boundary
+  interval: 1m
+  input_series:
+  - series: mindpattern_audit_verification_cycle_age_seconds
+    values: 7201x25
+  alert_rule_test:
+  - eval_time: 14m
+    alertname: MindPatternAuditVerificationCycleStalled
+    exp_alerts: []
+  - eval_time: 16m
+    alertname: MindPatternAuditVerificationCycleStalled
+    exp_alerts:
+    - exp_labels:
+        severity: S2
+      exp_annotations:
+        summary: Incremental audit verification cycle has remained incomplete over 2h
+        runbook: "docs/INCIDENT_RUNBOOK.md \u2014 Audit-maintenance backlog/failure (preserve the cursor/checkpoint and investigate repeated snapshot resets or insufficient catch-up capacity)"
+- name: MindPatternAudioDeletionBacklogPersistent fires only after a persistent queue
+  interval: 1m
+  input_series:
+  - series: mindpattern_audio_deletion_backlog
+    values: 1x40
+  alert_rule_test:
+  - eval_time: 29m
+    alertname: MindPatternAudioDeletionBacklogPersistent
+    exp_alerts: []
+  - eval_time: 31m
+    alertname: MindPatternAudioDeletionBacklogPersistent
+    exp_alerts:
+    - exp_labels:
+        severity: S3
+      exp_annotations:
+        summary: Encrypted audio deletions have remained queued for 30m
+        runbook: "docs/INCIDENT_RUNBOOK.md \u2014 Audio-deletion backlog (confirm object-store availability, preserve tombstones, and verify the queue drains)"
+- name: MindPatternAudioDeletionOldestTooOld uses the retry-derived two-hour boundary
+  interval: 1m
+  input_series:
+  - series: mindpattern_audio_deletion_oldest_seconds
+    values: 7201x25
+  alert_rule_test:
+  - eval_time: 14m
+    alertname: MindPatternAudioDeletionOldestTooOld
+    exp_alerts: []
+  - eval_time: 16m
+    alertname: MindPatternAudioDeletionOldestTooOld
+    exp_alerts:
+    - exp_labels:
+        severity: S2
+      exp_annotations:
+        summary: Oldest encrypted-audio deletion has been pending over 2h
+        runbook: "docs/INCIDENT_RUNBOOK.md \u2014 Audio-deletion backlog (treat as a retention/deletion incident; restore the original object-store target and drain the durable queue)"
+- name: MindPatternAccountDeletionBacklogPersistent requires a persistent queue
+  interval: 1m
+  input_series:
+  - series: mindpattern_account_deletion_pending_probe
+    values: 1x40
+  alert_rule_test:
+  - eval_time: 29m
+    alertname: MindPatternAccountDeletionBacklogPersistent
+    exp_alerts: []
+  - eval_time: 31m
+    alertname: MindPatternAccountDeletionBacklogPersistent
+    exp_alerts:
+    - exp_labels:
+        severity: S3
+      exp_annotations:
+        summary: Account-erasure physical purge has remained queued for 30m
+        runbook: "docs/INCIDENT_RUNBOOK.md \u2014 Account-deletion backlog (confirm bounded phase progress and object-store availability without removing durable jobs)"
+- name: MindPatternAccountDeletionOldestTooOld uses the two-hour rights-request boundary
+  interval: 1m
+  input_series:
+  - series: mindpattern_account_deletion_oldest_seconds
+    values: 7201x25
+  alert_rule_test:
+  - eval_time: 14m
+    alertname: MindPatternAccountDeletionOldestTooOld
+    exp_alerts: []
+  - eval_time: 16m
+    alertname: MindPatternAccountDeletionOldestTooOld
+    exp_alerts:
+    - exp_labels:
+        severity: S2
+      exp_annotations:
+        summary: Oldest account-erasure physical purge has been pending over 2h
+        runbook: "docs/INCIDENT_RUNBOOK.md \u2014 Account-deletion backlog (treat as a rights-request incident and restore bounded worker progress)"
+- name: MindPatternAccountDeletionFailure fires on a safe-category increment
+  interval: 1m
+  input_series:
+  - series: mindpattern_account_deletion_failures_total{category="database"}
+    values: 0+1x20
+  alert_rule_test:
+  - eval_time: 1m
+    alertname: MindPatternAccountDeletionFailure
+    exp_alerts:
+    - exp_labels:
+        severity: S2
+      exp_annotations:
+        summary: Account-erasure worker failed during the last 15m
+        runbook: "docs/INCIDENT_RUNBOOK.md \u2014 Account-deletion backlog (use the safe failure category and preserve the durable job before repair)"
 - name: Healthy traffic and exact keystore threshold do not alert
   interval: 1m
   input_series:
@@ -160,6 +341,34 @@ tests:
   - series: mindpattern_keystore_sessions
     values: 16x30
   - series: mindpattern_audit_chain_failures
+    values: '0x30'
+  - series: mindpattern_audit_journal_failures_total
+    values: '0x30'
+  - series: mindpattern_audit_maintenance_failures_total
+    values: '0x30'
+  - series: mindpattern_audit_prune_backlog
+    values: '0x30'
+  - series: mindpattern_audit_prune_oldest_overdue_seconds
+    values: 7200x30
+  - series: mindpattern_audit_verification_backlog
+    values: '0x30'
+  - series: mindpattern_audit_verification_cycle_age_seconds
+    values: 7200x30
+  - series: mindpattern_audio_deletion_backlog
+    values: '0x30'
+  - series: mindpattern_audio_deletion_oldest_seconds
+    values: 7200x30
+  - series: mindpattern_account_deletion_pending_probe
+    values: '0x30'
+  - series: mindpattern_account_deletion_oldest_seconds
+    values: 7200x30
+  - series: mindpattern_account_deletion_failures_total{category="database"}
+    values: '0x30'
+  - series: mindpattern_account_deletion_failures_total{category="object_store"}
+    values: '0x30'
+  - series: mindpattern_account_deletion_failures_total{category="state"}
+    values: '0x30'
+  - series: mindpattern_account_deletion_failures_total{category="unexpected"}
     values: '0x30'
   - series: mindpattern_requests_total{status="5xx"}
     values: '0x30'
@@ -195,5 +404,26 @@ tests:
     alertname: MindPatternAuditChainFailures
     exp_alerts: []
   - eval_time: 25m
+    alertname: MindPatternAuditMaintenanceFailure
+    exp_alerts: []
+  - eval_time: 25m
+    alertname: MindPatternAuditPruneBacklogPersistent
+    exp_alerts: []
+  - eval_time: 25m
+    alertname: MindPatternAuditPruneOldestOverdue
+    exp_alerts: []
+  - eval_time: 25m
+    alertname: MindPatternAuditVerificationBacklogPersistent
+    exp_alerts: []
+  - eval_time: 25m
+    alertname: MindPatternAuditVerificationCycleStalled
+    exp_alerts: []
+  - eval_time: 25m
     alertname: MindPatternReadyzProbeFailing
+    exp_alerts: []
+  - eval_time: 25m
+    alertname: MindPatternAudioDeletionBacklogPersistent
+    exp_alerts: []
+  - eval_time: 25m
+    alertname: MindPatternAudioDeletionOldestTooOld
     exp_alerts: []

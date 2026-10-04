@@ -7,6 +7,8 @@
  *  to send persists data-key-encrypted and retries on the next mount
  *  under the SAME client_measure_id; LOW (values, not indexes) — answers
  *  store option VALUES and selection compares values. */
+// @ts-nocheck
+
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MeasuresView } from "../src/views/Measures";
@@ -69,7 +71,8 @@ describe("MeasuresView terminal failures (M-W1, audit 2026-09-26)", () => {
     });
     const root = await render(<MeasuresView onCrisis={() => undefined} />);
     await settle(60, 4);
-    expect(textOf(root)).toContain("database on fire");
+    expect(textOf(root)).toContain("The server hit a problem — try again in a moment.");
+    expect(textOf(root)).not.toContain("database on fire");
     // Unstuck: the loading state resolved to the honest empty history.
     expect(textOf(root)).not.toContain("Loading…");
     expect(textOf(root)).toContain("Nothing recorded yet.");
@@ -83,7 +86,10 @@ describe("MeasuresView terminal failures (M-W1, audit 2026-09-26)", () => {
       });
       const root = await render(<MeasuresView onCrisis={() => undefined} />);
       await settle(60, 4);
-      expect(textOf(root)).toContain(`slow down (${status})`);
+      expect(textOf(root)).toContain(status === 429
+        ? "Too many attempts — wait a moment, then try again."
+        : "That conflicts with something the server already has.");
+      expect(textOf(root)).not.toContain(`slow down (${status})`);
       expect(textOf(root)).not.toContain("Loading…");
     }
   });

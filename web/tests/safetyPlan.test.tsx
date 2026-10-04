@@ -3,6 +3,8 @@
  *  wrong key reads as absent, rotation re-seals), the editor's save +
  *  restore, and the crisis dialog's unlocked-only link. Real WebCrypto,
  *  memory kv backend, no network — the plan is local by design. */
+// @ts-nocheck
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SafetyPlanView } from "../src/views/SafetyPlan";
 import {

@@ -101,6 +101,11 @@ class User(Base):
     scrypt_salt: Mapped[bytes] = mapped_column(LargeBinary)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     is_active: Mapped[bool] = mapped_column(default=True)
+    # Server-recorded, versioned proof that registration included the
+    # minimum-age affirmation.  Deliberately stores no date of birth: the
+    # service needs evidence of the gate, not another identifying datum.
+    age_attestation_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    age_attested_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     # Therapist sharing (2026-09-16): one account namespace, two roles. The
     # role gates which router an authenticated token may reach — journal
     # endpoints require "user", sharing endpoints require "therapist".
@@ -133,6 +138,9 @@ class User(Base):
     # Bumped on logout: stateless HMAC tokens embed the epoch they were issued
     # under, so one integer per account is a full revocation list.
     token_epoch: Mapped[int] = mapped_column(default=1)
+    # Cross-worker, database-backed proof that this subject has ever owned an
+    # audit chain.  A missing AuditChainState may be treated as a fresh chain
+    # only while this bit is false; no request-path journal scan is needed.
     # Optimistic snapshot markers for offset-paginated opaque collections.
     # Every successful entry mutation atomically advances entries_revision;
     # a therapist's successful note mutation atomically advances
@@ -149,6 +157,15 @@ class User(Base):
         BigInteger, nullable=False, default=0, server_default=text("0")
     )
     measures_revision: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default=text("0")
+    )
+    # Stable snapshots for retained sharing relationships.  Patient-facing
+    # consent history and therapist-facing lifetime patient history advance
+    # independently because rewraps/summaries can change only the latter.
+    consents_revision: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default=text("0")
+    )
+    patients_revision: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default=text("0")
     )
     # Per-user explicit opt-in before any journal text is sent to the
@@ -236,6 +253,54 @@ class User(Base):
     # client's envelope AAD. NULL for v1 accounts (the v1 contract's
     # implicit pbkdf2-sha256-600k).
     kdf_params: Mapped[str | None] = mapped_column(String(256), nullable=True)
+
+
+class AccountDeletionTombstone(Base):
+    """Short-lived proof that a formerly valid token subject was erased.
+
+    The row has no foreign key by design: it must survive deletion of the
+    account it describes.  Its MAC is verified before the authentication
+    layer returns the otherwise exceptional ``account_deleted`` response.
+    """
+
+    __tablename__ = "account_deletion_tombstones"
+    __table_args__ = (Index("ix_account_deletion_tombstones_expiry", "expires_at"),)
+
+    user_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    token_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    auth_secret_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    deleted_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
+    record_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
+    record_mac: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class AccountDeletionJob(Base):
+    """Durable bounded physical purge after immediate logical erasure."""
+
+    __tablename__ = "account_deletion_jobs"
+    __table_args__ = (
+        Index("ix_account_deletion_jobs_requested", "requested_at"),
+        Index("ix_account_deletion_jobs_phase", "phase"),
+        Index("ix_account_deletion_jobs_updated", "updated_at", "user_id"),
+    )
+
+    user_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    phase: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="note_revisions",
+        server_default=text("'note_revisions'"),
+    )
+    attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    requested_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 
 class TotpBackupCode(Base):
@@ -404,6 +469,31 @@ class Consent(Base):
     )
 
 
+class ConsentEvent(Base):
+    """Append-only evidence of consent and withdrawal decisions.
+
+    Mutable account/consent rows remain the fast authorization state.  This
+    table preserves the exact disclosure and provider-policy fingerprint
+    that the person accepted even after they withdraw that permission.
+    """
+
+    __tablename__ = "consent_events"
+    __table_args__ = (Index("ix_consent_events_user_at", "user_id", "occurred_at"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(16))
+    action: Mapped[str] = mapped_column(String(16))
+    disclosure: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    policy: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    consent_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    share_voice: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    event_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
+    occurred_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
 class Measure(Base):
     """A patient-recorded wellbeing measure (2026-09-19, MBC module): one
     opaque AES-GCM blob per completed questionnaire — e.g. a PHQ-9 the
@@ -441,6 +531,7 @@ class PairingCode(Base):
         # therapist's latest row.
         UniqueConstraint("code_hash", name="uq_pairing_codes_code_hash"),
         Index("ix_pairing_codes_expires_at", "expires_at"),
+        Index("ix_pairing_codes_therapist_id", "therapist_id"),
     )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
@@ -476,6 +567,7 @@ class TherapistNote(Base):
             "created_at",
             "id",
         ),
+        Index("ix_notes_user_id", "user_id"),
     )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
@@ -559,11 +651,31 @@ class AudioDeletion(Base):
 
     __tablename__ = "audio_deletions"
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    # Survives the User row so an asynchronous account purge can prove all
+    # provider objects are gone before retiring its deletion job.
+    owner_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     backend: Mapped[str] = mapped_column(String(8))
     storage_key: Mapped[str] = mapped_column(String(256))
     storage_locator: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     not_before: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
     attempts: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class AudioInventoryCursor(Base):
+    """Durable, privacy-safe cursor for bounded object-store reconciliation.
+
+    ``store_id`` is a SHA-256 digest of the backend plus locator, not the
+    bucket name or local path itself.  Persisting the cursor prevents a large
+    inventory's lexicographically early objects from starving later pages
+    across sweep cycles and process restarts.
+    """
+
+    __tablename__ = "audio_inventory_cursor"
+
+    store_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    after_key: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 
 class TherapistNoteRevision(Base):
@@ -575,7 +687,10 @@ class TherapistNoteRevision(Base):
     with their note (CASCADE) and with the therapist's account."""
 
     __tablename__ = "therapist_note_revisions"
-    __table_args__ = (Index("ix_note_revisions_note_created", "note_id", "created_at"),)
+    __table_args__ = (
+        Index("ix_note_revisions_note_created", "note_id", "created_at"),
+        Index("ix_note_revisions_therapist_id", "therapist_id"),
+    )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     note_id: Mapped[str] = mapped_column(ForeignKey("therapist_notes.id", ondelete="CASCADE"))
@@ -595,9 +710,9 @@ class AccessLog(Base):
     2026-09-26 audit item 16: forward hash chain for tamper evidence. The
     chain scope is ONE PATIENT (user_id): each new row's prev_hash is the
     entry_hash of that patient's previous row and entry_hash = SHA-256 over
-    (prev_hash, actor_id, user_id, action, occurred_at) in a canonical
-    encoding — see app/api/_audit.py for the one implementation both
-    writers and verification use. Scope rationale: the patient's access
+    (prev_hash, actor_id, user_id, action, occurred_at, actor_role) in the
+    current versioned canonical encoding — see app/api/_audit.py for the
+    one implementation both writers and verification use. Scope rationale: the patient's access
     trail is the compliance artifact that must survive every other row's
     deletion (accounts cascade away; audit rows deliberately do not), and a
     per-patient chain keeps verification a single patient-scoped walk — an
@@ -605,11 +720,11 @@ class AccessLog(Base):
     compromised database cannot rewrite one patient's history without
     recomputing every later hash in that same chain. chain_seq is the
     per-patient insertion order assigned by the append helper; a retention
-    sweep may prune the OLDEST rows (a pruned prefix is accepted by
-    verification, which anchors on the oldest surviving row).
+    sweep may prune the OLDEST rows only after full verification and after
+    advancing the HMAC-sealed retained-prefix anchor.
 
-    New rows are appended exclusively through security.audit_chain
-    .append_access_log (every historical insert site routes through it);
+    New rows are appended exclusively through api._audit.append_access_log
+    (every historical insert site routes through it);
     the columns below are otherwise write-once.
     """
 
@@ -658,6 +773,74 @@ class AccessLog(Base):
     # NULL (link-verified legacy; verification counts them honestly) —
     # they age out through retention like every pre-chain row.
     entry_mac: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Version of the out-of-database HMAC key that sealed this row.  Old
+    # versions stay verifiable through the configured audit key ring while
+    # new appends move to the current key without rewriting history.
+    mac_key_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
+    # v1 hashes the original five fields; v2 additionally authenticates
+    # actor_role.  Keeping the version on-row lets upgraded deployments
+    # verify historical v1 records without silently weakening new records.
+    record_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=2, server_default=text("2")
+    )
+
+
+class AuditChainState(Base):
+    """Durable, HMAC-sealed high-water mark for one patient's audit chain.
+
+    This row is intentionally not a foreign key: account deletion and log
+    retention must not reset the next sequence number or erase the retained
+    prefix anchor.
+    """
+
+    __tablename__ = "audit_chain_state"
+
+    user_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    head_seq: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    head_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    head_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
+    first_retained_seq: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    first_retained_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    state_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
+    mac_key_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
+    state_mac: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class AuditSweepCursor(Base):
+    """Independent durable cursors for audit verification and pruning."""
+
+    __tablename__ = "audit_sweep_cursor"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    last_user_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    prune_last_user_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Start times survive process restarts and let monitoring distinguish a
+    # healthy bounded catch-up from a traversal whose oldest work is stuck.
+    verification_cycle_started_at: Mapped[datetime | None] = mapped_column(
+        UTCDateTime, nullable=True
+    )
+    # Incremental full-chain verification checkpoint.  It is HMAC-sealed
+    # outside the database (including last_user_id), so a database writer
+    # cannot skip owners or splice a different page boundary into a walk.
+    verification_owner_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    verification_snapshot_head_seq: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    verification_snapshot_head_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    verification_next_seq: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    verification_previous_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    verification_rows_checked: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default=text("0")
+    )
+    verification_mac_key_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    verification_checkpoint_mac: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    prune_cycle_started_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 
 class TokenRevocation(Base):

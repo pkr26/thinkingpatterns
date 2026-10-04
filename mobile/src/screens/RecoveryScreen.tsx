@@ -28,6 +28,7 @@ import { useSession } from "../store";
 import { recoverAccountWithKey } from "../recoveryFlow";
 import { passwordPolicyError } from "./LoginScreen";
 import { localWriteScopeEpoch } from "../localWriteGuard";
+import { ApiError } from "../api/client";
 
 export function RecoveryScreen({ navigation }: { navigation: any }): React.JSX.Element {
   const t = useTheme();
@@ -104,7 +105,11 @@ export function RecoveryScreen({ navigation }: { navigation: any }): React.JSX.E
     } catch (err) {
       if (!ownsAttempt()) return;
       showStatus(
-        err instanceof Error && err.message ? err.message : tr("recovery.failedBody"),
+        err instanceof ApiError
+          ? tr("recovery.failedBody")
+          : err instanceof Error && err.message
+            ? err.message
+            : tr("recovery.failedBody"),
         "neutral",
       );
     } finally {

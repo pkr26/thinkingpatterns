@@ -705,11 +705,11 @@ class HardeningMiddleware:
                 )
             return
         except Exception:
-            # Last-ditch: log with traceback, answer without internals.
-            # Do not log raw paths: deployments may put identifiers in a
-            # legacy/unknown URL path and exception logs commonly have a much
-            # wider retention/access surface than application data.
-            logger.exception("unhandled error serving method=%s", scope.get("method"))
+            # Last-ditch: emit only a fixed aggregate class. Exception text,
+            # traceback locals, and raw paths can all contain user-linked
+            # identifiers and have a much wider retention/access surface than
+            # application data.
+            logger.error("unhandled request failure")
             if not response_started:
                 # M-26 (2026-09-20): a crash-class 500 used to be invisible
                 # to mindpattern_requests_total — the metrics layer sits

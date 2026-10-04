@@ -14,6 +14,7 @@ const {
 const storage = (await import("./helpers/storageMock")).default;
 
 const STAMP_KEY = "@mindpattern/crisis_dialog_user-1";
+const ITEM9_STAMP_KEY = "@mindpattern/crisis_dialog_phq9_item9_user-1";
 
 beforeEach(() => {
   storage.__reset();
@@ -40,6 +41,22 @@ describe("crisisDialog throttle", () => {
   it("throttles per account — a second account on the same device is unaffected", async () => {
     await recordCrisisDialogShown("user-1", "2026-09-14");
     expect(await crisisDialogShownOn("user-2", "2026-09-14")).toBe(false);
+  });
+
+  it("keeps journal and PHQ-9 item-9 triggers independent, and clear removes both", async () => {
+    await recordCrisisDialogShown("user-1", "2026-09-14", "journal");
+    expect(await crisisDialogShownOn("user-1", "2026-09-14", "journal")).toBe(true);
+    expect(await crisisDialogShownOn("user-1", "2026-09-14", "phq9-item9")).toBe(false);
+
+    await recordCrisisDialogShown("user-1", "2026-09-14", "phq9-item9");
+    expect(await crisisDialogShownOn("user-1", "2026-09-14", "phq9-item9")).toBe(true);
+    expect(await storage.getItem(ITEM9_STAMP_KEY)).not.toBeNull();
+
+    await clearCrisisDialogStamp("user-1");
+    expect(await storage.getItem(STAMP_KEY)).toBeNull();
+    expect(await storage.getItem(ITEM9_STAMP_KEY)).toBeNull();
+    expect(await crisisDialogShownOn("user-1", "2026-09-14", "journal")).toBe(false);
+    expect(await crisisDialogShownOn("user-1", "2026-09-14", "phq9-item9")).toBe(false);
   });
 
   it("a failed WRITE still throttles within the session (memory mirror)", async () => {

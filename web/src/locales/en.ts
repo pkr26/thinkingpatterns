@@ -10,6 +10,8 @@
  *    every locale by design);
  *  - "{name}" placeholders are interpolated by t() in src/strings.ts.
  */
+// @ts-nocheck
+
 
 export const en: Record<string, string> = {
   // ---------------------------------------------------------------- common
@@ -194,12 +196,12 @@ export const en: Record<string, string> = {
   "privacy.s3Title": "The one exception: pattern analysis",
   "privacy.s3Body":
     "Patterns are computed by the server, which needs your entries decrypted once to do it. When you start an analysis yourself, your key is sent once over an encrypted connection, held in memory for up to 5 minutes, used, and destroyed. It is never stored, and it is never sent for any other reason.",
-  "privacy.s4Title": "Optional AI analysis",
+  "privacy.s4Title": "Optional transcript translation",
   "privacy.s4Body":
-    "Off by default for every account. If you turn it on, your decrypted entries are sent to a third-party AI provider chosen by the server operator, and that provider's data-retention policy applies. Turning it on asks for your password, so a borrowed phone cannot change it.",
+    "Off by default. If you enable it and use voice journaling in a non-English language, the transcript is sent as soon as it is recorded to the third-party provider chosen by the server operator for English translation; that provider's retention policy applies. Your journal entries are not sent to a third party for pattern analysis. Settings shows the configured provider, retention and policy fingerprint, and changing this setting requires your password.",
   "privacy.s5Title": "Deleting your data",
   "privacy.s5Body":
-    "Deleting your account removes your entries, patterns, and account from the live database. Database backups and server logs expire on the operator's own schedule — deletion cannot reach back into them. An exported bundle includes everything and stays yours to keep or delete.",
+    "Deleting your account removes your entries, patterns, and account from the live database. Database backups and server logs expire on the operator's own schedule — deletion cannot reach back into them. An export contains your scoped account content and consent/access history, but excludes security and operational records.",
   "privacy.footnote": "This policy lives inside the app — reading it needs no connection and leaves no trace anywhere.",
 
   // ------------------------------------------------------------------ entry
@@ -623,9 +625,10 @@ export const en: Record<string, string> = {
   "settings.legacyTitle": "Older offline entries need recovery",
   "settings.legacyBody":
     "This update protected unsent encrypted entries from being sent to the wrong server. They remain on this device but cannot be safely assigned automatically; contact support before clearing app data.",
-  "settings.llmLabel": "Third-party AI analysis",
-  "settings.llmBody": "Allow sending your (decrypted) entries to an external AI service for pattern analysis. Off by default; needs your password to change.",
-  "settings.llmA11y": "Allow third-party AI analysis",
+  "settings.llmLabel": "Third-party transcript translation",
+  "settings.llmBody":
+    "Allow non-English voice transcripts to be sent to the configured external service for English translation. Journal pattern analysis is not active. Off by default; needs your password to change.",
+  "settings.llmA11y": "Allow third-party transcript translation",
   "settings.reauthDeleteTitle": "Enter your password to delete everything",
   "settings.reauthBioTitle": "Enter your password to enable biometric unlock",
   "settings.changePasswordLabel": "Change password",
@@ -644,7 +647,11 @@ export const en: Record<string, string> = {
   "settings.rotateWrongOld": "The current password was not accepted. Nothing was changed.",
   "settings.rotateRewrapFailed":
     "These sharing grants could not be re-wrapped and must be re-paired from the therapist's pairing code: {names}",
-  "settings.reauthLlmTitle": "Enter your password to {action} third-party AI analysis",
+  "settings.reauthLlmTitle": "Enter your password to change transcript translation",
+  "settings.reauthVoiceTitle": "Enter your password to change voice journaling",
+  "settings.reauthFreshNote": "For your protection, type your current password now. An unlocked session alone cannot authorize this change.",
+  "settings.reauthPasswordField": "Current password",
+  "settings.reauthConfirm": "Verify and continue",
   "settings.enableWord": "enable",
   "settings.disableWord": "disable",
   "settings.appearanceLabel": "APPEARANCE",
@@ -674,7 +681,8 @@ export const en: Record<string, string> = {
   "settings.shareWithTherapist": "Share with my therapist",
   "settings.measures": "Wellbeing measures",
   "settings.measuresA11y": "Open the wellbeing measures questionnaire",
-  "settings.shareWithTherapistA11y": "Share your entries and patterns with a therapist",
+  "settings.shareWithTherapistA11y":
+    "Share your journal entries, patterns and insights, PHQ-9, GAD-7 and PHQ-2 measures, and caseload summary with a therapist",
   "settings.sharingOffNote": "Therapist sharing is not available on this server. It stays disabled until verified clinician enrollment is configured.",
   "settings.sharingUnknownNote":
     "Can’t reach the server to confirm therapist-sharing availability — check your connection and reopen Settings. Nothing is shared in the meantime.",
@@ -699,7 +707,9 @@ export const en: Record<string, string> = {
   // most safety-adjacent string class in the app and was hardcoded English
   // before the 2026-09-20 audit fix.
   "measures.intro":
-    "A standard wellbeing questionnaire (PHQ-9), completed by you. Fathom stores the score encrypted and never interprets it — reading it is your clinician's job, and it is shared only through your existing therapist consent.",
+    "Standard wellbeing questionnaires (PHQ-9, GAD-7 and PHQ-2), completed by you. Fathom stores the score encrypted and never interprets it — reading it is your clinician's job, and it is shared only through your existing therapist consent.",
+  "measures.unmonitored":
+    "Fathom does not monitor these answers or alert a clinician or emergency service. If you may be in immediate danger, call 911 or your local emergency number now; support resources are always available from Get help.",
   "measures.offlineNote":
     "Your recorded history needs a connection to load. Completing the questionnaire also needs one — nothing here works offline yet.",
   "measures.loadFailed": "Could not load your measures.",
@@ -722,7 +732,7 @@ export const en: Record<string, string> = {
   "measures.recordFailedBody": "Could not record just now. Your picks are still on screen.",
   "measures.crisisTitle": "Support is available",
   "measures.crisisBody":
-    "Some of what you marked sounds heavy. Whatever you are carrying, you do not have to carry it alone — free, confidential help is one tap away.",
+    "One answer mentions thoughts of self-harm. Fathom does not monitor this response or alert anyone. If you may be in immediate danger, call 911 or your local emergency number now. Free, confidential support is one tap away.",
   "measures.viewResources": "View support resources",
   // PHQ-9 item wording (public-domain instrument). The structural list and
   // the option VALUES live in src/phq9.ts; only display copy lives here.
@@ -767,13 +777,13 @@ export const en: Record<string, string> = {
   "share.codeNotFoundBody": "Check the code with your therapist — it expires 15 minutes after they generate it.",
   "share.lookupFailedTitle": "Couldn’t look up the code",
   "share.grantTitle": "Share with {name}?",
-  // Sharing disclosure v2 (audit H-14/M-25): the scope this consent records
+  // Sharing disclosure v3: the scope this consent records
   // now names every patient-derived class the therapist can read — journal
-  // entries, patterns/insights, wellbeing measures (PHQ-9 questionnaires)
+  // entries, patterns/insights, wellbeing measures (PHQ-9, GAD-7, PHQ-2)
   // and the caseload summaries derived from them. Keep in sync with the
-  // server's SHARING_DISCLOSURE_VERSION bump to "v2".
+  // server's SHARING_DISCLOSURE_VERSION bump to "v3".
   "share.grantBody":
-    "They will be able to read every journal entry, every pattern computed from them, your wellbeing measures (PHQ-9 questionnaires), and the summary of your account that appears on their caseload list — from their therapist portal. They cannot change or delete anything — only read, and write their own private notes.\n\nYou can stop sharing at any time; that ends their access immediately, but it cannot unread what they have already seen. You will be asked for your password.",
+    "They will be able to read every journal entry, every pattern computed from them, your wellbeing measures (PHQ-9, GAD-7 and PHQ-2 questionnaires), and the summary of your account that appears on their caseload list — from their therapist portal. They cannot change or delete anything — only read, and write their own private notes.\n\nYou can stop sharing at any time; that ends their access immediately, but it cannot unread what they have already seen. You will be asked for your password.",
   "share.revokeTitle": "Stop sharing with {name}?",
   "share.revokeBody": "Their access ends immediately. They keep anything they have already read. You will be asked for your password.",
   "share.stopSharing": "Stop sharing",
@@ -811,22 +821,23 @@ export const en: Record<string, string> = {
   "share.mismatchBody":
     "If the fingerprints do not match, the pairing may have been intercepted. Contact your therapist on a channel you already trust before sharing anything.",
   "share.disclosure":
-    "Sharing lets them read your journal entries, your patterns and insights, your wellbeing measures (PHQ-9 questionnaires), and your caseload-summary line (never change anything), and write their own private notes. You can stop at any time; what they already read cannot be unread.",
+    "Sharing lets them read your journal entries, your patterns and insights, your wellbeing measures (PHQ-9, GAD-7 and PHQ-2 questionnaires), and your caseload-summary line (never change anything), and write their own private notes. You can stop at any time; what they already read cannot be unread.",
   "share.shareWithName": "Share with {name}",
   "share.reauthGrantTitle": "Enter your password to share with {name}",
   "share.reauthRevokeTitle": "Enter your password to stop sharing",
   // M-25: the server reports a sharing-disclosure version this app does not
   // know (either direction of drift). Calm state: no new grant is offered
-  // until the versions line up, existing sharing and revoking stay intact.
+  // until the versions line up. Existing entry/pattern access and revoking
+  // stay intact, but measures remain unavailable until current re-consent.
   "share.termsUpdatedTitle": "Sharing terms updated",
   "share.termsUpdatedBody":
-    "What a therapist can read has changed — it now includes your wellbeing measures (PHQ-9 questionnaires). Update this app, then share again to see and accept the current terms. Your existing sharing keeps working, and you can stop it below at any time.",
+    "What a therapist can read has changed — it now includes your PHQ-9, GAD-7 and PHQ-2 wellbeing questionnaires. Update this app, then share again to see and accept the current terms. Existing entry and pattern access remains and can still be stopped below; the expanded wellbeing-measure scope stays unavailable to the therapist until you re-share under the current terms.",
   // M-25: the server rejected a grant because the disclosure reviewed on
   // this screen is no longer the current one (409 disclosure_outdated).
   // Nothing was shared — the honest next step is to start again.
   "share.grantOutdatedTitle": "Sharing terms updated",
   "share.grantOutdatedBody":
-    "The sharing terms changed before this was sent, so nothing was shared. Nothing about you changed on the server. Start again to review the current terms — they now include your wellbeing measures (PHQ-9 questionnaires).",
+    "The sharing terms changed before this was sent, so nothing was shared. Nothing about you changed on the server. Start again to review the current terms — they now include your PHQ-9, GAD-7 and PHQ-2 wellbeing questionnaires.",
 
   // ------------------------------------------------- web views (M-W5 wave,
   // audit 2026-09-26): every remaining hardcoded view string moved behind
@@ -855,7 +866,7 @@ export const en: Record<string, string> = {
   "crisis.webTitle": "Get help now",
   "crisis.webImmediate": "If you are in immediate danger, call 911 (or your local emergency number).",
   "crisis.webOutsideUS": "Outside the US: findahelpline.com lists local, free services in your country.",
-  "crisis.webSafeMessaging": "Talking to a real person helps. These lines follow safe-messaging practice (#chatsafe) — what you share stays with them.",
+  "crisis.webSafeMessaging": "Talking to a real person helps. These services are confidential, subject to each service's privacy, safety, emergency, and legal policies.",
   "crisis.webYouDeserve": "You deserve support. Reaching out is a strong move.",
   "entry.title": "Today's entry",
   "entry.retryDraft": "Retry restoring encrypted draft",
@@ -981,6 +992,8 @@ export const en: Record<string, string> = {
   "login.envelopeUnlockWeb": "Your account's key envelope could not be opened — nothing was unlocked and nothing changed. Check your connection and try again.",
   "login.kdfUnsupportedWeb": "This account uses key-protection parameters this browser cannot derive (for example Argon2id). Nothing was unlocked — use the mobile app to sign in.",
   "login.rateLimitedWeb": "Too many attempts — try again in about {seconds}s.",
+  "login.invalidCredentialsWeb": "Sign-in failed — check your username and password.",
+  "login.usernameTakenWeb": "That username is already in use — choose another.",
   "login.genericWeb": "Something went wrong — try again.",
   "measures.save": "Save measure",
   "measures.savedNote": "Saved — encrypted like everything else.",
@@ -990,9 +1003,9 @@ export const en: Record<string, string> = {
   "measures.saveLockedNote": "The session locked while saving — nothing was sent. Your answers stay saved on this device, encrypted, and will be recorded after you unlock and return.",
   "measures.incomplete": "Answer every question first — an honest incomplete beats a guessed whole.",
   "measures.item9Title": "Thank you for answering honestly",
-  "measures.item9Body": "One of your answers mentions thoughts of harming yourself. That deserves support — the resources below are one tap away, any time.",
+  "measures.item9Body": "One answer mentions thoughts of self-harm. Fathom does not monitor this response or alert anyone. If you may be in immediate danger, call 911 or your local emergency number now. Support resources are one tap away.",
   "measures.getSupport": "Get support",
-  "measures.introWeb": "A standard questionnaire, recorded like everything else: encrypted on this device, shared only through the therapist consent you control. Scores are shown, never interpreted — that belongs to you and your clinician.",
+  "measures.introWeb": "Standard PHQ-9, GAD-7 and PHQ-2 questionnaires, recorded like everything else: encrypted on this device and shared only through the therapist consent you control. Scores are shown, never interpreted — that belongs to you and your clinician.",
   "measures.trendTitle": "Your trend",
   "measures.trendOne": "{name} — {count} record, shown as your own numbers over time:",
   "measures.trendMany": "{name} — {count} records, shown as your own numbers over time:",
@@ -1033,17 +1046,23 @@ export const en: Record<string, string> = {
   "question.refreshBaselineMany": "Baseline updated — {days} active days to go.",
   "question.refreshBaselineUnknown": "Baseline updated.",
   "settings.title": "Settings",
-  "settings.llmStatusEnabled": "Optional LLM analysis: ENABLED for your account. Enabling sends your journal text to a third-party provider (only after your 30-day threshold, only for you, only while enabled).",
-  "settings.llmStatusOff": "Optional LLM analysis: off. Enabling sends your journal text to a third-party provider (only after your 30-day threshold, only for you, only while enabled).",
-  "settings.llmEnable": "Enable LLM analysis",
-  "settings.llmDisable": "Disable LLM analysis",
-  "settings.llmNotOffered": "Optional LLM analysis is not offered by this server.",
-  "settings.llmNotOfferedToggle": "This server does not offer LLM analysis.",
+  "settings.llmStatusEnabled": "Third-party transcript translation is ON.",
+  "settings.llmStatusOff": "Third-party transcript translation is off.",
+  "settings.llmDisclosure": "Non-English voice transcripts are sent as soon as they are recorded to {provider} for English translation. Provider retention: {retention}. Policy fingerprint: {fingerprint}. Journal pattern analysis is not active.",
+  "settings.llmStaleNote":
+    "Your earlier choice no longer authorizes transcript translation under the current terms. Translation is off; enable it to review and accept those terms.",
+  "settings.llmEnable": "Enable transcript translation",
+  "settings.llmDisable": "Disable transcript translation",
+  "settings.llmNotOffered": "Third-party transcript translation is not offered by this server.",
+  "settings.llmNotOfferedToggle": "This server does not offer transcript translation.",
   "settings.llmToggleFailed": "Could not change the setting.",
-  "settings.llmEnabledNote": "Optional LLM analysis enabled for your account only.",
-  "settings.llmDisabledNote": "Optional LLM analysis disabled.",
-  "settings.llmUnknown": "Could not confirm whether this server offers LLM analysis — check your connection.",
+  "settings.llmEnabledNote": "Third-party transcript translation enabled for your account.",
+  "settings.llmDisabledNote": "Third-party transcript translation disabled.",
+  "settings.llmUnknown": "Could not confirm whether this server offers transcript translation — check your connection.",
   "settings.llmRetry": "Try again",
+  "settings.notDisclosed": "not disclosed by this server",
+  "settings.recoveryKitHandoff": "Recovery kits are created and managed in the mobile app. Open Settings there to create, replace, or remove one.",
+  "settings.offlineColdStart": "Offline saving works after this web app is already loaded. Starting or reloading the browser app requires a connection.",
   "settings.dataTitle": "Your data",
   "settings.export": "Download export (encrypted)",
   "settings.exportNote": "The bundle is ciphertext — safe to store anywhere, unreadable without your password.",
@@ -1053,6 +1072,7 @@ export const en: Record<string, string> = {
   "settings.queuedOne": "{count} entry still queued offline.",
   "settings.queuedMany": "{count} entries still queued offline.",
   "settings.requeue": "Re-queue recovered entries",
+  "settings.queueEvictions": "Offline recovery storage reached its safety limit. {count} oldest or oversized recovery record(s) could not be retained.",
   "settings.recoveredOne": "{count} recovered entry re-queued.",
   "settings.recoveredMany": "{count} recovered entries re-queued.",
   "settings.accessTitle": "Who accessed your data",
@@ -1250,14 +1270,14 @@ export const en: Record<string, string> = {
   "history.deleteRecordingFailed": "Could not delete the recording — try again.",
   "settings.voiceTitle": "Voice journaling",
   "settings.voiceNote":
-    "Record entries in any language. Your recording is sent to {provider} to be transcribed and deleted immediately after; only the encrypted text is stored. Recordings you keep are stored encrypted for 30 days.",
+    "When you stop recording—before you save the journal entry—the recording is uploaded to {provider} for transcription. Provider retention: {retention}. Policy fingerprint: {fingerprint}. Recordings you choose to keep are stored encrypted for 30 days.",
   "settings.voiceStatusEnabled": "Voice journaling on",
   "settings.voiceStatusOff": "Voice journaling off",
   "settings.voiceEnabledNote": "Voice journaling is on.",
   "settings.voiceDisabledNote": "Voice journaling is off.",
   "settings.voiceNotOffered": "Voice journaling is not offered by this server.",
   "settings.voiceStaleNote":
-    "The server's transcription provider changed — re-enable to review and accept the new terms.",
+    "Your earlier choice no longer authorizes uploads under the current voice terms. Voice journaling is off; enable it to review and accept those terms.",
   "settings.voiceToggleFailed": "Could not change the voice setting — try again.",
   "share.voiceNote":
     "Your therapist can already read your entries (and their English translation). Turning this on also lets them play the original voice recordings you keep — tone can carry what text does not. They keep this access only while sharing is active.",

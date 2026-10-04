@@ -115,7 +115,7 @@ async def _db_user(app, user_id: str) -> User:
 
 
 async def test_totp_full_lifecycle(client, app, totp_clock):
-    th = TherapistEmulator("totp-dr", "a-deep-therapist-password")
+    th = TherapistEmulator("totp-dr", "a-deep-therapist-password", auto_enroll_mfa=False)
     await th.register(client)
 
     # Setup without the verifier answers 403 — a stolen bearer must not
@@ -261,7 +261,7 @@ async def test_totp_full_lifecycle(client, app, totp_clock):
 
 
 async def test_totp_setup_refuses_while_enabled_and_replaces_pending(client, totp_clock):
-    th = TherapistEmulator("totp-swap-dr", "another-deep-password")
+    th = TherapistEmulator("totp-swap-dr", "another-deep-password", auto_enroll_mfa=False)
     await th.register(client)
     first = (
         await client.post(
@@ -299,7 +299,7 @@ async def test_totp_setup_refuses_while_enabled_and_replaces_pending(client, tot
 
     # From the PENDING state, a re-run simply replaces the not-yet-armed
     # secret: nothing is enforced at login until the new one is confirmed.
-    th2 = TherapistEmulator("totp-swap-dr-2", "third-deep-password")
+    th2 = TherapistEmulator("totp-swap-dr-2", "third-deep-password", auto_enroll_mfa=False)
     await th2.register(client)
     p1 = (
         await client.post(

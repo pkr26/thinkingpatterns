@@ -152,6 +152,28 @@ describe("catalog completeness (a partial Spanish build must never ship)", () =>
       expect(esCatalog[key]).toContain(needle);
     }
   });
+
+  it("describes only the active transcript-translation purpose and the complete v3 sharing scope", () => {
+    expect(enCatalog["privacy.s4Title"]).toContain("transcript translation");
+    expect(enCatalog["privacy.s4Body"]).toContain("journal entries are not sent to a third party for pattern analysis");
+    expect(enCatalog["settings.reauthLlmTitle"]).toContain("transcript translation");
+    expect(esCatalog["privacy.s4Title"]).toContain("Traducción");
+    expect(esCatalog["privacy.s4Body"]).toContain("entradas del diario no se envían a terceros para analizar patrones");
+    expect(esCatalog["settings.reauthLlmTitle"]).toContain("traducción de transcripciones");
+
+    for (const catalog of [enCatalog, esCatalog]) {
+      const sharingLabel = catalog["settings.shareWithTherapistA11y"]!;
+      expect(sharingLabel).toContain("PHQ-9");
+      expect(sharingLabel).toContain("GAD-7");
+      expect(sharingLabel).toContain("PHQ-2");
+      expect(sharingLabel.toLowerCase()).toMatch(/caseload|lista de casos/);
+    }
+
+    expect(enCatalog["share.termsUpdatedBody"]).toContain("scope stays unavailable");
+    expect(enCatalog["share.termsUpdatedBody"]).toContain("until you re-share");
+    expect(esCatalog["share.termsUpdatedBody"]).toContain("no estará disponible");
+    expect(esCatalog["share.termsUpdatedBody"]).toContain("hasta que vuelva a compartir");
+  });
 });
 
 describe("the locale seam", () => {
@@ -284,15 +306,19 @@ describe("2026-09-20 audit copy pins (L-72 / M-36 / M-25 / L-65)", () => {
     }
   });
 
-  it("M-25: the v2 sharing disclosure names every readable class in BOTH locales", () => {
+  it("M-25: the v3 sharing disclosure names every readable class in BOTH locales", () => {
     for (const key of ["share.grantBody", "share.disclosure"] as const) {
       const en = t(key);
-      expect(en).toContain("measures (PHQ-9 questionnaires)");
+      expect(en).toContain("PHQ-9");
+      expect(en).toContain("GAD-7");
+      expect(en).toContain("PHQ-2");
       expect(en.toLowerCase()).toContain("summary");
       __setLocaleForTests("es");
       try {
         const es = t(key);
-        expect(es).toContain("cuestionarios de bienestar (PHQ-9)");
+        expect(es).toContain("PHQ-9");
+        expect(es).toContain("GAD-7");
+        expect(es).toContain("PHQ-2");
         expect(es).toContain("resumen");
       } finally {
         __setLocaleForTests("en");

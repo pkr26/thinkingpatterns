@@ -108,9 +108,7 @@ describe("SafetyPlanScreen: load", () => {
     }
   });
 
-  it("a stored plan under a DIFFERENT key reads as absent — the new-plan prefill shows instead", async () => {
-    // The rotation/account-switch case: the slot exists but the vault's key
-    // cannot open it; the honest answer is a fresh plan, never a partial one.
+  it("a stored plan under a DIFFERENT key fails closed and cannot be overwritten", async () => {
     await saveSafetyPlan(Buffer.alloc(32, 42), USER, {
       warningSigns: "old key's plan",
       copingStrategies: "",
@@ -121,8 +119,10 @@ describe("SafetyPlanScreen: load", () => {
     });
     const root = await render(<SafetyPlanScreen navigation={nav} />);
     await flush();
-    expect(inputByLabel(root, "My warning signs").props.value).toBe("");
-    expect(inputByLabel(root, "Professionals and services").props.value).toContain("988");
+    expect(textOf(root)).toContain("could not be opened");
+    expect(textOf(root)).toContain("will not replace it");
+    expect(root.root.findAllByType(TextInput)).toHaveLength(0);
+    expect(await storage.getItem(SLOT)).not.toBeNull();
   });
 });
 

@@ -79,8 +79,10 @@ if (typeof (globalThis as { document?: unknown }).document === "undefined") {
 
 // Keep encrypted draft slots isolated per test; production has durable IndexedDB only.
 import { beforeEach } from "vitest";
+import { drainPortalDraftWritesForTests } from "../../src/noteDrafts";
 import { setKvBackendForTests } from "../../src/kvstore";
-beforeEach(() => {
+beforeEach(async () => {
+  await drainPortalDraftWritesForTests();
   const drafts = new Map<string,string>();
   setKvBackendForTests({ getItem: async key => drafts.get(key) ?? null, setItem: async (key,value) => { drafts.set(key,value); }, removeItem: async key => { drafts.delete(key); }, keys: async () => [...drafts.keys()] });
 });

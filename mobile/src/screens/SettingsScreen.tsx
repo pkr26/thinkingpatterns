@@ -132,11 +132,15 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [llmAvailable, setLlmAvailable] = useState(false);
+  const [llmProvider, setLlmProvider] = useState("");
+  const [llmRetention, setLlmRetention] = useState("");
+  const [llmFingerprint, setLlmFingerprint] = useState("");
   // null = the server could not be reached, so availability is UNKNOWN —
   // a very different message from an authoritative "disabled by this
   // server". Confusing the two erodes trust in a mental-health app.
   const [sharingAvailable, setSharingAvailable] = useState<boolean | null>(null);
   const [llmEnabled, setLlmEnabled] = useState(false);
+  const [llmStale, setLlmStale] = useState(false);
   // Voice journaling consent (VOICE_PLAN 2026-09-29), mirroring web's
   // Settings voice section: availability + provider from meta, the switch's
   // state + policy currency from the account's consent record. Availability
@@ -144,6 +148,8 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
   // "not offered".
   const [voiceAvailable, setVoiceAvailable] = useState<boolean | null>(null);
   const [voiceProvider, setVoiceProvider] = useState("");
+  const [voiceRetention, setVoiceRetention] = useState("");
+  const [voiceFingerprint, setVoiceFingerprint] = useState("");
   const [voiceEnabled, setVoiceEnabled] = useState(false);
   // enabled-but-stale: the server's transcription provider changed since
   // the consent was given; the toggle must be re-confirmed to accept the
@@ -186,6 +192,9 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       .then((m) => {
         // Stryker disable next-line OptionalChaining: a null/undefined meta makes m.llm_available throw inside this .then, and the chained .catch(() => {}) swallows it — llmAvailable stays false exactly as with the chain
         setLlmAvailable(Boolean(m?.llm_available));
+        setLlmProvider(typeof m?.llm_provider_name === "string" ? m.llm_provider_name : "");
+        setLlmRetention(typeof m?.llm_data_retention === "string" ? m.llm_data_retention : "");
+        setLlmFingerprint(typeof m?.llm_policy_fingerprint === "string" ? m.llm_policy_fingerprint : "");
         // Sharing is fail-closed: only a server that explicitly advertises
         // verified-clinician sharing may expose a pairing flow. On success
         // the answer is authoritative; a failure leaves the state UNKNOWN
@@ -196,18 +205,23 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         // audio_available never counts as offered (fail closed like sharing).
         setVoiceAvailable(m?.audio_available === true);
         setVoiceProvider(typeof m?.stt_provider_name === "string" ? m.stt_provider_name : "");
+        setVoiceRetention(typeof m?.stt_data_retention === "string" ? m.stt_data_retention : "");
+        setVoiceFingerprint(typeof m?.stt_policy_fingerprint === "string" ? m.stt_policy_fingerprint : "");
         // Stryker disable next-line OptionalChaining: with m null/undefined, typeof m.version throws into the same .catch(() => {}) — no observable difference (the typeof guard itself stays live)
         if (typeof m?.version === "string") setServerVersion(m.version);
       })
       .catch(() => setSharingAvailable(null));
     // Stryker disable next-line OptionalChaining: an undefined consent payload makes c.enabled throw into the .catch(() => {}) — setLlmEnabled is never reached either way
-    api.getLlmConsent().then((c) => setLlmEnabled(Boolean(c?.enabled))).catch(() => {});
+    api.getLlmConsent().then((c) => {
+      setLlmEnabled(c?.enabled === true && c.active_for_current_policy === true);
+      setLlmStale(c?.enabled === true && c.active_for_current_policy !== true);
+    }).catch(() => {});
     // The voice consent record (same read discipline as the LLM consent):
     // enabled + policy currency; a failed read leaves the switch OFF and
     // the stale note hidden — never a guessed state.
     api.getVoiceConsent()
       .then((c) => {
-        setVoiceEnabled(c?.enabled === true);
+        setVoiceEnabled(c?.enabled === true && c.active_for_current_policy === true);
         setVoiceStale(c != null && c.enabled === true && c.active_for_current_policy !== true);
       })
       .catch(() => {});
@@ -324,13 +338,13 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       if (pending.kind === "llm") {
         const result = await api.setLlmConsent(pending.enabled, reauth.verifierB64);
         assertSensitiveOwnership(operation);
-        setLlmEnabled(result.enabled);
+        setLlmEnabled(result.enabled === true && result.active_for_current_policy === true);
+        setLlmStale(result.enabled === true && result.active_for_current_policy !== true);
       } else if (pending.kind === "voice") {
         const result = await api.setVoiceConsent(pending.enabled, reauth.verifierB64);
         assertSensitiveOwnership(operation);
-        setVoiceEnabled(result.enabled);
-        // A fresh consent was just given under the CURRENT policy.
-        setVoiceStale(false);
+        setVoiceEnabled(result.enabled === true && result.active_for_current_policy === true);
+        setVoiceStale(result.enabled === true && result.active_for_current_policy !== true);
       } else if (pending.kind === "bio") {
         // The password proof just ran: enabling the biometric wrap now
         // proves the enabler knows the password, not merely that they hold
@@ -397,12 +411,14 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       vault.lock();
       let failures: string[] = [];
       if (userId) failures = await eraseDeletedAccountLocals(userId, username, { origin, preserveSession: true }).catch(() => ["device cleanup"]);
-      // Native local cleanup may await while a replacement login begins.
-      // Only the original API scope may be signed out by this continuation.
-      if (operation.scope !== localWriteScopeEpoch()) return;
+      // Erasure retires the credential tuple immediately and advances the
+      // local scope. Publish the matching logged-out UI even when a later
+      // native cleanup task failed and left a retry checkpoint.
+      const survivingOwner = await api.getUserId().catch(() => null);
+      if (survivingOwner !== null && survivingOwner !== userId) return;
       await signOut().catch(async () => {
         failures.push("session cleanup");
-        if (operation.scope === localWriteScopeEpoch()) await api.clearSession().catch(() => {});
+        await api.clearSession().catch(() => {});
       });
       Alert.alert(tr("settings.deletedTitle"), tr("settings.deletedBody") +
         (failures.length ? `\n\n${tr("settings.localCleanupIncomplete")}` : ""));
@@ -930,7 +946,11 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         <>
           <Text style={themed.label}>{tr("settings.llmLabel")}</Text>
           <View style={[styles.row, { backgroundColor: t.colors.card, borderRadius: t.radius.md }]}>
-            <Text style={themed.rowText}>{tr("settings.llmBody")}</Text>
+            <Text style={themed.rowText}>{tr("settings.llmBody", {
+              provider: llmProvider || tr("settings.notDisclosed"),
+              retention: llmRetention || tr("settings.notDisclosed"),
+              fingerprint: llmFingerprint || tr("settings.notDisclosed"),
+            })}</Text>
             <Switch
               value={llmEnabled}
               disabled={busy}
@@ -940,6 +960,11 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
               accessibilityState={{ checked: llmEnabled, disabled: busy }}
             />
           </View>
+          {llmStale && (
+            <Text style={[themed.footnote, { color: t.colors.error }]} accessibilityRole="alert">
+              {tr("settings.llmStaleNote")}
+            </Text>
+          )}
         </>
       )}
       {/* Voice journaling (VOICE_PLAN 2026-09-29): the mic's consent, the
@@ -965,6 +990,8 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
             <Text style={themed.footnote}>
               {tr("settings.voiceNote", {
                 provider: voiceProvider || tr("entry.voiceUnavailable"),
+                retention: voiceRetention || tr("settings.notDisclosed"),
+                fingerprint: voiceFingerprint || tr("settings.notDisclosed"),
               })}
             </Text>
             {voiceStale && (

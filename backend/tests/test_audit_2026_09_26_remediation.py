@@ -27,12 +27,13 @@ from sqlalchemy import select, update
 
 from app.api._audit import (
     append_access_log,
+    compute_chain_state_mac,
     compute_entry_hash,
     verify_access_log_chain,
 )
 from app.config import Settings
 from app.main import create_app
-from app.models import AccessLog, User, utcnow
+from app.models import AccessLog, AuditChainState, User, utcnow
 from tests.helpers import ClientEmulator, TherapistEmulator
 
 TODAY = date.today()
@@ -359,9 +360,7 @@ async def test_overflow_keys_in_different_shards_do_not_serialize():
 
 
 async def test_concurrent_totp_logins_resolve_to_exactly_one_winner(client, monkeypatch):
-    from app.security import totp as totp_mod
     from tests.helpers import install_totp_clock
-    from tests.test_totp import _b32_decode
 
     # Fake totp clock (2026-09-26 test-infrastructure audit, item 1): the
     # endpoint ladder reads time through app.security.totp's module-global
@@ -370,21 +369,9 @@ async def test_concurrent_totp_logins_resolve_to_exactly_one_winner(client, monk
     clock = install_totp_clock(monkeypatch)
     therapist = TherapistEmulator("fence-th", "deep-password")
     await therapist.register(client)
-    setup = await client.post(
-        "/api/account/totp/setup",
-        headers=therapist.headers,
-        json={"verifier": therapist.auth_key_b64},
-    )
-    assert setup.status_code == 200, setup.text
-    secret = _b32_decode(setup.json()["secret_base32"])
-    code = clock.current_code(secret)
-    enabled = await client.post(
-        "/api/account/totp/enable",
-        headers=therapist.headers,
-        json={"verifier": therapist.auth_key_b64, "code": code},
-    )
-    assert enabled.status_code == 200, enabled.text
-    # Burn the enable timestep so the login code below is genuinely fresh.
+    secret = therapist.totp_secret
+    # Registration now mandates MFA and already burns its enable timestep;
+    # advance so the raced login code is genuinely fresh.
     clock.advance_to_next_timestep()
     fresh = clock.current_code(secret)
 
@@ -564,8 +551,8 @@ async def test_access_log_chain_verifies_and_detects_tampering(client, app):
             )
         await session.commit()
         verification = await verify_access_log_chain(session, patient.user_id)
-    # 4 seeded rows + the grant flow's own chained audit row = 5, linked.
-    assert verification.ok and verification.rows_checked == 5
+    # Registration genesis + grant + 4 seeded rows = 6, linked.
+    assert verification.ok and verification.rows_checked == 6
 
     # Tamper: rewrite one row's action. The seal no longer matches.
     async with app.state.sessionmaker() as session:
@@ -645,10 +632,28 @@ async def test_access_log_chain_accepts_a_pruned_prefix(client, app):
             .scalars()
             .one()
         )
+        survivor = (
+            (
+                await session.execute(
+                    select(AccessLog).where(
+                        AccessLog.user_id == patient.user_id,
+                        AccessLog.chain_seq == 2,
+                    )
+                )
+            )
+            .scalars()
+            .one()
+        )
+        state = await session.get(AuditChainState, patient.user_id)
+        assert state is not None
         await session.delete(oldest)
+        state.first_retained_seq = survivor.chain_seq
+        state.first_retained_hash = survivor.entry_hash
+        mac_key = app.state.settings.audit_mac_keyring[state.mac_key_version]
+        state.state_mac = compute_chain_state_mac(mac_key, state)
         await session.commit()
         verification = await verify_access_log_chain(session, patient.user_id)
-    assert verification.ok and verification.rows_checked == 3
+    assert verification.ok and verification.rows_checked == 4
 
 
 def test_compute_entry_hash_is_deterministic_and_binds_every_field():
@@ -700,11 +705,11 @@ async def test_patient_hard_deletion_writes_a_surviving_terminal_audit_row(clien
             .scalars()
             .all()
         )
-        assert [row.action for row in rows] == ["account_deleted"]
-        # The row is chained (item 16 integration): it is its chain's head.
-        assert rows[0].entry_hash is not None
+        assert [row.action for row in rows] == ["account_created", "account_deleted"]
+        # The terminal row is chained (item 16 integration): it is the head.
+        assert rows[-1].entry_hash is not None
         verification = await verify_access_log_chain(session, patient.user_id)
-    assert verification.ok and verification.rows_checked == 1
+    assert verification.ok and verification.rows_checked == 2
 
 
 async def test_therapist_deletion_writes_the_same_terminal_row(client, app):
@@ -847,10 +852,11 @@ async def test_deactivated_patient_is_invisible_to_therapist_reads(client, app):
     ):
         response = await client.get(path, headers=therapist.headers)
         assert response.status_code == 404, path
-    # The list omits the deactivated patient entirely.
+    # The list refuses a torn snapshot until bounded deletion has advanced
+    # the sharing revision and removed the inactive relationship.
     listed = await client.get("/api/therapist/patients", headers=therapist.headers)
-    assert listed.status_code == 200
-    assert all(row["user_id"] != patient.user_id for row in listed.json())
+    assert listed.status_code == 409
+    assert listed.json()["code"] == "collection_changed"
 
 
 # --- item 21: the verifier-gated measure correction delete ------------------------------

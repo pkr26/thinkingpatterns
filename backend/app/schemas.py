@@ -56,6 +56,9 @@ class RegisterRequest(StrictRequestModel):
     verifier: str = Field(
         min_length=1, max_length=MAX_VERIFIER_B64
     )  # b64, exactly 32 decoded bytes
+    # Affirmative, versioned minimum-age gate; the backend stores only this
+    # version and server time, never a date of birth.
+    age_attestation: Literal["minimum_age_confirmed_v1"]
     # v2 registration (2026-09-26 envelope remediation) — BOTH fields come
     # together or neither does (the route enforces the pairing): the
     # versioned client KDF parameters blob (validated/canonicalized by
@@ -94,6 +97,7 @@ class TokenResponse(BaseModel):
     # "v2" = random data key behind a password-wrapped envelope (fetch the
     # envelope material via GET /auth/key-envelope and unwrap locally).
     key_scheme: str = "v1"
+    mfa_enrollment_required: bool = False
 
 
 class KeyEnvelopeResponse(BaseModel):
@@ -248,7 +252,29 @@ class AccountDeleteRequest(StrictRequestModel):
     """Account destruction requires the password-equivalent credential —
     a stolen bearer token alone must not be able to erase a journal."""
 
+    verifier: str | None = Field(default=None, min_length=1, max_length=MAX_VERIFIER_B64)
+
+
+StepUpAction = Literal[
+    "account_delete",
+    "llm_consent",
+    "voice_consent",
+    "sharing_grant",
+    "sharing_revoke",
+    "sharing_rewrap",
+    "sharing_voice",
+]
+
+
+class StepUpRequest(StrictRequestModel):
     verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
+    action: StepUpAction
+
+
+class StepUpResponse(BaseModel):
+    proof: str
+    action: StepUpAction
+    expires_in: int
 
 
 class CredentialRotateRequest(StrictRequestModel):
@@ -308,12 +334,11 @@ class PasswordChangeRequest(StrictRequestModel):
 class RecoverySetupRequest(StrictRequestModel):
     """PUT /account/recovery — create/replace the recovery envelope.
 
-    The verifier here is the RECOVERY KEY itself (a random 32 bytes the
-    client generated and showed once): like the login scheme, the server
-    stores only its scrypt hash. wrapped_key is the data key sealed
-    CLIENT-side under a key derived from the recovery key — the server
-    stores the blob and cannot open it. Setup additionally requires the
-    PASSWORD verifier proof (every destructive lifecycle action does).
+    Under the required v2 enrollment scheme, the verifier is a
+    domain-separated HKDF output from the random recovery key; the raw key
+    that opens wrapped_key never leaves the client. The server stores only
+    the verifier's scrypt hash and the opaque client-sealed data-key copy.
+    Setup additionally requires the PASSWORD verifier proof.
     """
 
     password_verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
@@ -321,31 +346,30 @@ class RecoverySetupRequest(StrictRequestModel):
     wrapped_key: str = Field(min_length=1, max_length=MAX_WRAPPED_DATA_KEY_B64)
     # 2026-10-01 audit C1: "v2" = the verifier is the domain-separated
     # HKDF(recovery_key, "…/recovery-verifier/v2") — the server never sees
-    # key material able to open wrapped_key. "v1" (default) is the legacy
-    # raw-key kit, kept verifiable until replaced.
-    scheme: Literal["v1", "v2"] = "v1"
+    # key material able to open wrapped_key. "v1" is accepted only when
+    # recovering an already-enrolled legacy kit; new setup requires v2.
+    scheme: Literal["v1", "v2"]
 
 
 class RecoveryStatusResponse(BaseModel):
     enabled: bool
     set_at: datetime | None = None
     # 2026-10-01 audit C1: which scheme the stored kit verifies under.
-    scheme: Literal["v1", "v2"] = "v1"
+    scheme: Literal["v1", "v2"]
 
 
 class RecoveryLoginRequest(StrictRequestModel):
     """POST /auth/recover — username + the scheme-appropriate verifier.
 
     scheme "v2": verifier = HKDF(recovery_key, "…/recovery-verifier/v2")
-    (the raw key never leaves the device). scheme "v1" (legacy kits):
-    verifier = the raw recovery key. A hint that mismatches the stored kit
-    answers 401 recovery_scheme_mismatch so the client can retry once
-    with the other scheme — protocol negotiation, not a credential miss.
+    (the raw key never leaves the device). scheme "v1" is accepted only
+    for an already-enrolled legacy kit. The scheme is mandatory, and every
+    mismatch returns the same invalid_credentials response as a bad proof.
     """
 
     username: str = Field(min_length=1, max_length=64)
     verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
-    scheme: Literal["v1", "v2"] = "v1"
+    scheme: Literal["v1", "v2"]
 
 
 class RecoveryLoginResponse(BaseModel):
@@ -400,11 +424,13 @@ class KeyEnvelopeUpgradeRequest(StrictRequestModel):
 
 
 class TotpSetupRequest(StrictRequestModel):
-    """Begin optional therapist TOTP enrollment (2026-09-21 audit C-2/F-4,
-    delivered 2026-09-22). Verifier-re-authenticated like every credential
-    lifecycle action: a stolen bearer must not be able to arm a second
-    factor on the account. The returned secret is PENDING until the
-    confirm endpoint proves the authenticator holds it."""
+    """Begin required therapist TOTP enrollment.
+
+    Verifier-re-authenticated like every credential lifecycle action: a
+    stolen bearer must not be able to arm a second factor on the account.
+    The returned secret is PENDING until the confirm endpoint proves the
+    authenticator holds it.
+    """
 
     verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
 
@@ -438,7 +464,7 @@ class LlmConsentRequest(StrictRequestModel):
     re-authenticated — it gates sending decrypted journal text off-server."""
 
     enabled: bool
-    verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
+    verifier: str | None = Field(default=None, min_length=1, max_length=MAX_VERIFIER_B64)
 
 
 class LlmConsentResponse(BaseModel):
@@ -463,7 +489,7 @@ class VoiceConsentRequest(StrictRequestModel):
     (VOICE_PLAN.md). Same shape as LlmConsentRequest."""
 
     enabled: bool
-    verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
+    verifier: str | None = Field(default=None, min_length=1, max_length=MAX_VERIFIER_B64)
 
 
 class VoiceConsentResponse(BaseModel):
@@ -562,6 +588,7 @@ class MetaResponse(BaseModel):
     llm_available: bool
     llm_provider_name: str | None = None
     llm_data_retention: str | None = None
+    llm_disclosure_version: str | None = None
     llm_policy_fingerprint: str | None = None
     sharing_available: bool = False
     sharing_disclosure_version: str | None = None
@@ -572,6 +599,7 @@ class MetaResponse(BaseModel):
     audio_available: bool = False
     stt_provider_name: str | None = None
     stt_data_retention: str | None = None
+    stt_disclosure_version: str | None = None
     stt_policy_fingerprint: str | None = None
 
 
@@ -618,6 +646,27 @@ class AudioExportRow(BaseModel):
     blob: str  # base64 of the stored ciphertext object
 
 
+class ConsentEventOut(BaseModel):
+    id: str
+    kind: str
+    action: str
+    disclosure: str | None = None
+    policy: str | None = None
+    consent_id: str | None = None
+    share_voice: bool | None = None
+    event_version: int = 1
+    occurred_at: datetime
+
+
+class AccessLogExportRow(BaseModel):
+    id: str
+    actor_id: str
+    actor_role: str
+    action: str
+    at: datetime
+    chain_seq: int
+
+
 class ExportBundle(BaseModel):
     version: int
     exported_at: datetime
@@ -625,15 +674,26 @@ class ExportBundle(BaseModel):
     username: str | None = None
     user_id: str
     salt: str
+    age_attestation_version: str | None = None
+    age_attested_at: datetime | None = None
+    recovery_enabled: bool = False
+    recovery_set_at: datetime | None = None
+    recovery_scheme: Literal["v1", "v2"] | None = None
     llm_consent: bool
     # Same Art. 7 record as the consent endpoint (additive; null when off).
     llm_consent_at: datetime | None = None
     llm_consent_disclosure: str | None = None
     llm_consent_policy: str | None = None
+    voice_consent: bool = False
+    voice_consent_at: datetime | None = None
+    voice_consent_disclosure: str | None = None
+    voice_consent_policy: str | None = None
     # Sharing records (metadata only — no wrapped keys; they are useless
     # without the therapist's private key anyway). Additive: old bundles
     # predate sharing and decrypt unchanged.
     shares: list[ShareRecord] = []
+    consent_events: list[ConsentEventOut] = []
+    access_log: list[AccessLogExportRow] = []
     entries: list[EntryOut]
     insights: list[InsightOut]
     # Kept voice recordings (2026-09-29 deep audit, additive): the export
@@ -721,6 +781,7 @@ class TherapistRegisterRequest(StrictRequestModel):
     username: str = Field(pattern=USERNAME_PATTERN)
     salt: str = Field(min_length=1, max_length=MAX_SALT_B64)
     verifier: str = Field(min_length=1, max_length=MAX_VERIFIER_B64)
+    age_attestation: Literal["minimum_age_confirmed_v1"]
     display_name: str = Field(pattern=DISPLAY_NAME_PATTERN)
     # b64 SPKI DER P-256 — validated server-side by security.sharing.
     wrap_pub_key: str = Field(min_length=1, max_length=MAX_SPKI_B64)
@@ -1066,8 +1127,13 @@ class ShareRecord(BaseModel):
     only (who, when, status) — the wrapped key is the therapist's to
     unwrap, not the patient's document."""
 
+    id: str
+    therapist_id: str
     therapist_username: str
     therapist_display_name: str
     status: str
     granted_at: datetime
     revoked_at: datetime | None = None
+    scope: str
+    disclosure: str | None = None
+    share_voice: bool = False

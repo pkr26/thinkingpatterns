@@ -9,7 +9,22 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { secureStore } from "../secureStore";
 import type { KdfParams } from "../crypto/keyEnvelope";
-import { changeLocalOrigin, changeLocalSessionOwner, advanceLocalWriteScope, localWriteScopeEpoch, assertLocalWritePermit, waitLocalWriteCommits, type LocalWritePermit } from "../localWriteGuard";
+import {
+  changeLocalOrigin,
+  changeLocalSessionOwner,
+  hydrateLocalSessionOwner,
+  advanceLocalWriteScope,
+  localWriteScopeEpoch,
+  assertLocalWritePermit,
+  waitLocalWriteCommits,
+  type LocalWritePermit,
+} from "../localWriteGuard";
+import {
+  ACCOUNT_STORAGE_PREFIX,
+  accountOwnersFromStorageKeys,
+  originBoundStorageInventory,
+  purgeAllOriginBoundAccountFiles,
+} from "../accountStorage";
 
 /** Every endpoint is versioned under /api/v1. The server still mounts the
  *  legacy /api tree during the transition, but new clients speak v1 — the
@@ -35,21 +50,29 @@ const USERNAME_KEY = "@mindpattern/username";
  *  metadata on a device, e.g. in backups). Encoded, not encrypted: the
  *  VALUE is unchanged. Reads migrate any legacy raw-username key across
  *  (see readThroughMigrate). */
-const scopeUser = (username: string): string => Buffer.from(username, "utf8").toString("base64url");
-const saltKey = (username: string): string => `@mindpattern/salt_${scopeUser(username)}`;
-const legacySaltKey = (username: string): string => `@mindpattern/salt_${username}`;
+const scopeUser = (username: string): string =>
+  Buffer.from(username, "utf8").toString("base64url");
+const saltKey = (username: string): string =>
+  `${ACCOUNT_STORAGE_PREFIX.salt}${scopeUser(username)}`;
+const legacySaltKey = (username: string): string =>
+  `${ACCOUNT_STORAGE_PREFIX.salt}${username}`;
 
 /** Per-username key-envelope cache key (the same origin-bound discipline
  *  and the same encoded-name form; see api.cacheKeyEnvelope). */
-const envelopeKey = (username: string): string => `@mindpattern/keyenvelope_${scopeUser(username)}`;
-const legacyEnvelopeKey = (username: string): string => `@mindpattern/keyenvelope_${username}`;
+const envelopeKey = (username: string): string =>
+  `${ACCOUNT_STORAGE_PREFIX.keyEnvelope}${scopeUser(username)}`;
+const legacyEnvelopeKey = (username: string): string =>
+  `${ACCOUNT_STORAGE_PREFIX.keyEnvelope}${username}`;
 
 /** Read-through key migration (audit 2026-09-28): when the encoded key is
  *  absent but the legacy raw-username key holds a value, move it across and
  *  retire the old key. Best-effort by constraint — if the rewrite fails the
  *  legacy value is still SERVED (a read must never fail because a cleanup
  *  could not complete); the next read retries the migration. */
-async function readThroughMigrate(legacy: string, next: string): Promise<string | null> {
+async function readThroughMigrate(
+  legacy: string,
+  next: string,
+): Promise<string | null> {
   const epoch = localWriteScopeEpoch();
   let value: string | null = null;
   try {
@@ -63,10 +86,13 @@ async function readThroughMigrate(legacy: string, next: string): Promise<string 
     if (old === null) return null;
     return await serializedCredentials(async () => {
       assertCredentialEpoch(epoch);
-      const current = await AsyncStorage.getItem(next); assertCredentialEpoch(epoch);
+      const current = await AsyncStorage.getItem(next);
+      assertCredentialEpoch(epoch);
       if (current !== null) return current;
-      await AsyncStorage.setItem(next, old); assertCredentialEpoch(epoch);
-      await AsyncStorage.removeItem(legacy); assertCredentialEpoch(epoch);
+      await AsyncStorage.setItem(next, old);
+      assertCredentialEpoch(epoch);
+      await AsyncStorage.removeItem(legacy);
+      assertCredentialEpoch(epoch);
       return old;
     });
   } catch {
@@ -104,7 +130,10 @@ declare const __DEV__: boolean;
  *  constant exists to end was a release build silently defaulting to a
  *  device-local dev server. */
 declare const __API_ORIGIN__: string | null;
-export const PRODUCTION_BASE_URL = typeof __API_ORIGIN__ === "string" ? __API_ORIGIN__ : "https://api.mindpattern.example";
+export const PRODUCTION_BASE_URL =
+  typeof __API_ORIGIN__ === "string"
+    ? __API_ORIGIN__
+    : "https://api.mindpattern.example";
 
 /** 2026-09-26 audit LOW: the default is selected by BUILD, not shipped
  *  once: dev builds keep the device-local loopback server, release builds
@@ -112,7 +141,9 @@ export const PRODUCTION_BASE_URL = typeof __API_ORIGIN__ === "string" ? __API_OR
  *  always wins over either default; LoginScreen's server disclosure reads
  *  the resolved URL, so it stays honest on both branches. */
 export const DEFAULT_BASE_URL =
-  typeof __DEV__ !== "undefined" && __DEV__ ? "http://localhost:8000" : PRODUCTION_BASE_URL;
+  typeof __DEV__ !== "undefined" && __DEV__
+    ? "http://localhost:8000"
+    : PRODUCTION_BASE_URL;
 
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_ERROR_MESSAGE_CHARS = 200;
@@ -164,12 +195,24 @@ const PINNED_ORIGIN_KEY = "@mindpattern/pinned_origin";
  *  consent row server-side (GDPR Art. 7 parity with the LLM consent).
  *  Keep in sync with backend/app/api/consents.py SHARING_DISCLOSURE_VERSION
  *  — bump BOTH when the disclosure copy changes.
- *  v2 (2026-09-20 audit H-14): the copy now names wellbeing measures
- *  (PHQ-9) and caseload summaries alongside entries and patterns — the
- *  Art. 7 record must state the real data scope. Legacy v1 consents stay
- *  active for entries/insights; the server gates measure reads on v2 and
+ *  v3 (2026-10-04): the copy names all supported wellbeing measures
+ *  (PHQ-9, GAD-7, and PHQ-2) plus caseload summaries — the Art. 7 record
+ *  must state the real data scope. Legacy grants remain recorded, while
+ *  the server gates measure reads on the current disclosure version and
  *  answers 409 disclosure_outdated, which the grant flow surfaces. */
-export const SHARING_DISCLOSURE_VERSION = "v2";
+export const SHARING_DISCLOSURE_VERSION = "v3";
+
+export const MINIMUM_AGE_ATTESTATION = "minimum_age_confirmed_v1" as const;
+export type MinimumAgeAttestation = typeof MINIMUM_AGE_ATTESTATION;
+
+/** A historic choice is distinct from an authorization that is current for
+ * the configured disclosure/provider policy. Both consent endpoints use
+ * this shape; their version/timestamp field names remain service-specific. */
+export interface ThirdPartyConsentState {
+  enabled: boolean;
+  active_for_current_policy: boolean;
+  [field: string]: unknown;
+}
 
 /** A sharing consent as the patient's app renders it (backend ConsentOut).
  *  The server is untrusted; unknown fields pass through untouched. */
@@ -187,6 +230,18 @@ export interface ListedConsent {
   /** Voice-sharing grant (VOICE_PLAN 2026-09-29): default false; additive
    *  for older backends — absence reads as OFF, never guessed as on. */
   share_voice?: boolean;
+}
+
+/** Patient-consent history is retained after revoke, so active grants may be
+ * displaced beyond the first server page. */
+export const CONSENT_LIST_PAGE_SIZE = 200;
+export const MAX_CONSENT_LIST_PAGES = 6;
+
+export interface ListedConsentsPage {
+  consents: ListedConsent[];
+  nextOffset: number | null;
+  /** null only for a headerless legacy server. */
+  revision: string | null;
 }
 
 /** The pairing-lookup answer: who the code belongs to, before any data
@@ -221,7 +276,12 @@ export interface KeyEnvelopeResponse {
  *  as `localhost.` or `127.0.0.2` must still require TLS. */
 function isExplicitLoopbackHost(hostname: string): boolean {
   const host = hostname.toLowerCase();
-  return host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1";
+  return (
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "[::1]" ||
+    host === "::1"
+  );
 }
 
 /** Localhost, 127.0.0.1 and [::1] address the same device-local loopback
@@ -248,7 +308,9 @@ export function canonicalOrigin(origin: string): string {
   }
 }
 
-export function parseServerUrl(candidate: string): { url: string; insecure: boolean } | null {
+export function parseServerUrl(
+  candidate: string,
+): { url: string; insecure: boolean } | null {
   const trimmed = candidate.trim();
   // Keep the intentionally narrow product grammar (lowercase http(s), no
   // userinfo, query or fragment) while delegating authority/port/IPv6
@@ -271,7 +333,8 @@ export function parseServerUrl(candidate: string): { url: string; insecure: bool
     const path = parsed.pathname.replace(/\/+$/, "");
     return {
       url: `${parsed.origin}${path}`,
-      insecure: parsed.protocol === "http:" && !isExplicitLoopbackHost(parsed.hostname),
+      insecure:
+        parsed.protocol === "http:" && !isExplicitLoopbackHost(parsed.hostname),
     };
   } catch {
     return null;
@@ -292,7 +355,9 @@ async function originOf(url: string): Promise<string> {
 function isLoopbackUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
-    return parsed.protocol === "http:" && isExplicitLoopbackHost(parsed.hostname);
+    return (
+      parsed.protocol === "http:" && isExplicitLoopbackHost(parsed.hostname)
+    );
   } catch {
     return false;
   }
@@ -305,42 +370,10 @@ function isLoopbackUrl(url: string): boolean {
  * hook here (instead of importing the store) avoids an api ↔ store cycle.
  */
 let onOriginChange: (() => void | Promise<void>) | null = null;
-export function setOriginChangeHandler(handler: (() => void | Promise<void>) | null): void {
+export function setOriginChangeHandler(
+  handler: (() => void | Promise<void>) | null,
+): void {
   onOriginChange = handler;
-}
-
-/** Every per-account and per-origin local value: salts, key envelopes,
- *  unlock proofs, recompute stamps, mood logs, pending question feedback,
- *  queue quarantine, analysis-generation marks, entry-version marks. All
- *  of it belongs to the origin it was created against. */
-function isOriginBoundKey(key: string): boolean {
-  return (
-    key.startsWith("@mindpattern/salt_") ||
-    // v2 key-envelope cache (2026-09-26): same origin-binding rule as the
-    // salt — one server's wrapped data key must never be unwrapped against
-    // another server's account (the AAD's username would match, the KEK's
-    // salt would not — but fail-closed by deletion is the cleaner wall).
-    key.startsWith("@mindpattern/keyenvelope_") ||
-    key.startsWith("@mindpattern/unlockproof_") ||
-    key.startsWith("@mindpattern/last_recompute_") ||
-    // Same prefix as questionFeedback.ts's key() — that module exports no
-    // constant to import, so the literal is duplicated here on purpose.
-    key.startsWith("@mindpattern/question_feedback.") ||
-    key.startsWith("mindpattern.moodlog.") ||
-    key.startsWith("@mindpattern/crisis_dialog_") ||
-    // Audit 2026-09-28 (LOW): the pending-measure draft (pendingMeasure.ts)
-    // and the safety plan (safetyPlan.ts) are per-account local state in the
-    // same class as the mood log — a draft keyed under origin A's account
-    // must not survive into origin B's fresh session. Same literal-prefix
-    // idiom as the mood log above (neither module exports its constant).
-    key.startsWith("@mindpattern/pending_measure_") ||
-    key.startsWith("@mindpattern/safety_plan_") ||
-    // M-1/M-2 (2026-09-20): both rollback guards fail closed once a mark
-    // exists — a mark remembered against origin A must never judge origin
-    // B's (perfectly honest, lower) generations.
-    key.startsWith("mindpattern.stateSeq.") ||
-    key.startsWith("mindpattern.entryVersions.")
-  );
 }
 
 // Credential slots and server selection share one physical transition queue.
@@ -349,23 +382,38 @@ function isOriginBoundKey(key: string): boolean {
 let credentialTransitions: Promise<unknown> = Promise.resolve();
 function serializedCredentials<T>(run: () => Promise<T>): Promise<T> {
   const pending = credentialTransitions.then(run, run);
-  credentialTransitions = pending.catch(() => {}); return pending;
+  credentialTransitions = pending.catch(() => {});
+  return pending;
 }
 function assertCredentialEpoch(epoch: number): void {
-  if (epoch !== localWriteScopeEpoch()) throw new ApiError(0, "A newer account/server transition superseded this operation", "stale_operation");
+  if (epoch !== localWriteScopeEpoch())
+    throw new ApiError(
+      0,
+      "A newer account/server transition superseded this operation",
+      "stale_operation",
+    );
 }
-async function currentCredentialCache<T>(operation: (check: () => void) => Promise<T>): Promise<T> {
+async function currentCredentialCache<T>(
+  operation: (check: () => void) => Promise<T>,
+): Promise<T> {
   const epoch = localWriteScopeEpoch();
   return serializedCredentials(async () => {
-    const check = () => assertCredentialEpoch(epoch); check();
-    const result = await operation(check); check(); return result;
+    const check = () => assertCredentialEpoch(epoch);
+    check();
+    const result = await operation(check);
+    check();
+    return result;
   });
 }
 
-export async function setBaseUrl(url: string, opts: { allowInsecure?: boolean } = {}): Promise<string | null> {
+export async function setBaseUrl(
+  url: string,
+  opts: { allowInsecure?: boolean } = {},
+): Promise<string | null> {
   void opts;
   const parsed = parseServerUrl(url);
-  if (!parsed) return "Enter a full URL like https://your-server:8000 (no credentials in the URL).";
+  if (!parsed)
+    return "Enter a full URL like https://your-server:8000 (no credentials in the URL).";
   // `allowInsecure` remains in the type for a source-compatible upgrade,
   // but cannot override the transport boundary. A user cannot meaningfully
   // consent away another app / Wi-Fi observer's ability to steal a bearer.
@@ -378,18 +426,23 @@ export async function setBaseUrl(url: string, opts: { allowInsecure?: boolean } 
   let epoch = advanceLocalWriteScope();
   await serializedCredentials(async () => {
     assertCredentialEpoch(epoch);
-    const previous = (await AsyncStorage.getItem(BASE_URL_KEY)) ?? DEFAULT_BASE_URL;
+    const previous =
+      (await AsyncStorage.getItem(BASE_URL_KEY)) ?? DEFAULT_BASE_URL;
     assertCredentialEpoch(epoch);
     let originChanged = false;
     try {
-      originChanged = (await originOf(previous)) !== (await originOf(parsed.url));
+      originChanged =
+        (await originOf(previous)) !== (await originOf(parsed.url));
     } catch {
       // An old/corrupt setting is never a reason to retain a live credential.
       originChanged = true;
     }
     assertCredentialEpoch(epoch);
     if (originChanged) {
-      changeLocalOrigin(); epoch = localWriteScopeEpoch();
+      const oldOwner = await secureStore.getItem(USER_ID_KEY);
+      assertCredentialEpoch(epoch);
+      changeLocalOrigin();
+      epoch = localWriteScopeEpoch();
       await waitLocalWriteCommits();
       // IMPORTANT ORDERING: erase the old credential BEFORE persisting the new
       // base URL. A request racing this function therefore either (a) reads the
@@ -408,18 +461,26 @@ export async function setBaseUrl(url: string, opts: { allowInsecure?: boolean } 
         // Credential erasure is complete even if a UI subscriber has already
         // unmounted. Do not leave a half-switched origin because of that.
       }
-      // KDF salts, unlock proofs, recompute stamps, mood logs and queue
-      // quarantine data are equally origin-bound: one server's salt must
-      // never be used to derive keys against another server's account.
-      try {
-        const keys = await AsyncStorage.getAllKeys();
-        const stale = keys.filter(isOriginBoundKey);
-        // Stryker disable next-line ConditionalExpression,EqualityOperator: stale is always an array (Array#filter), and multiRemove([]) is a documented no-op — an always-taken branch is unobservable
-        assertCredentialEpoch(epoch);
-        if (stale.length > 0) await AsyncStorage.multiRemove(stale);
-      } catch {
-        // getAllKeys unavailable: the session wipe above is the critical part.
+      // Retire the complete canonical account inventory before the new
+      // origin becomes visible. Native side effects go first: descriptors
+      // cannot be dropped while files/Keychain keys/notifications survive.
+      const stale = await originBoundStorageInventory();
+      const owners = new Set(accountOwnersFromStorageKeys(stale));
+      if (oldOwner) owners.add(oldOwner);
+      assertCredentialEpoch(epoch);
+      const [{ eraseOriginBiometricUnlocks }, notifications] = await Promise.all([
+        import("../biometricUnlock"),
+        import("../nativeFeatures"),
+      ]);
+      await eraseOriginBiometricUnlocks([...owners]);
+      assertCredentialEpoch(epoch);
+      if (!await notifications.cancelOriginNotifications()) {
+        throw new Error("Old-origin notification cancellation could not be verified");
       }
+      assertCredentialEpoch(epoch);
+      await purgeAllOriginBoundAccountFiles();
+      assertCredentialEpoch(epoch);
+      if (stale.length > 0) await AsyncStorage.multiRemove(stale);
     }
     assertCredentialEpoch(epoch);
     await AsyncStorage.setItem(BASE_URL_KEY, parsed.url);
@@ -486,15 +547,20 @@ function sanitizeDetail(text: string): string {
 /** FastAPI validation errors put a list of message objects in `detail`.
  *  Exported for tests: the sanitization is a security property. */
 export function detailToMessage(detail: unknown, status: number): string {
-  if (typeof detail === "string") return sanitizeDetail(detail) || `request failed (${status})`;
+  if (typeof detail === "string")
+    return sanitizeDetail(detail) || `request failed (${status})`;
   if (Array.isArray(detail)) {
     const parts = detail.map((d) =>
-      typeof d === "object" && d !== null && "msg" in d && typeof (d as { msg: unknown }).msg === "string"
+      typeof d === "object" &&
+      d !== null &&
+      "msg" in d &&
+      typeof (d as { msg: unknown }).msg === "string"
         ? (d as { msg: string }).msg
         : "invalid field",
     );
     // Stryker disable next-line ConditionalExpression,EqualityOperator: parts mirrors detail's length, so the only reachable false case is detail === []; [].join("; ") sanitizes to "" which falls to the identical `request failed (${status})` fallback
-    if (parts.length > 0) return sanitizeDetail(parts.join("; ")) || `request failed (${status})`;
+    if (parts.length > 0)
+      return sanitizeDetail(parts.join("; ")) || `request failed (${status})`;
   }
   return `request failed (${status})`;
 }
@@ -587,9 +653,6 @@ export const API_ERROR_CODES = [
   // the shipped recovery flow; without the code the Spanish locale fell
   // back to raw English detail.
   "recovery_not_configured",
-  // auth.py (2026-10-01 audit C1): the stored recovery kit verifies under
-  // the OTHER scheme — retry once with it (protocol negotiation).
-  "recovery_scheme_mismatch",
 ] as const;
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
 
@@ -598,7 +661,8 @@ export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
  *  to undefined, and the caller falls back to status/detail matching). */
 function sanitizeCode(code: unknown): ApiErrorCode | undefined {
   // Stryker disable next-line ConditionalExpression: Array#includes uses SameValueZero, so any non-string code is never equal to a string slug — the typeof arm is fully subsumed by the includes check
-  return typeof code === "string" && (API_ERROR_CODES as readonly string[]).includes(code)
+  return typeof code === "string" &&
+    (API_ERROR_CODES as readonly string[]).includes(code)
     ? (code as ApiErrorCode)
     : undefined;
 }
@@ -627,8 +691,19 @@ export function parseRetryAfter(header: string | null): number | undefined {
  *  growing its own handler. Set once by the session store, where the
  *  vault lives; a failed login/register 401 carries no token and does
  *  NOT trip it (that 401 means "bad credentials", not "session died"). */
-let onUnauthorized: (() => void) | null = null;
-export function setUnauthorizedHandler(handler: (() => void) | null): void {
+export interface AuthenticatedSessionDeath {
+  status: 401 | 410;
+  code: ApiErrorCode | undefined;
+  accountDeleted: boolean;
+  userId: string | null;
+  username: string | null;
+  origin: string;
+}
+let onUnauthorized:
+  ((death: AuthenticatedSessionDeath) => void | Promise<void>) | null = null;
+export function setUnauthorizedHandler(
+  handler: ((death: AuthenticatedSessionDeath) => void | Promise<void>) | null,
+): void {
   onUnauthorized = handler;
 }
 
@@ -668,7 +743,9 @@ interface RequestOptions {
  *  response. */
 export class OriginPinnedError extends Error {
   constructor(expected: string, actual: string) {
-    super(`refusing to send data pinned to ${expected} while ${actual} is selected`);
+    super(
+      `refusing to send data pinned to ${expected} while ${actual} is selected`,
+    );
     this.name = "OriginPinnedError";
   }
 }
@@ -685,9 +762,20 @@ async function request(
   const assertOwnership = (): void => {
     let stale = ownershipEpoch !== localWriteScopeEpoch();
     if (opts.localWritePermit) {
-      try { assertLocalWritePermit(opts.localWritePermit); } catch { stale = true; }
+      try {
+        assertLocalWritePermit(opts.localWritePermit);
+      } catch {
+        stale = true;
+      }
     }
-    if (stale) throw new ApiError(0, dispatched ? "The account or key generation changed. This request may already have committed; confirm its outcome before retrying." : "The account or key generation changed; no request was sent.", "stale_operation");
+    if (stale)
+      throw new ApiError(
+        0,
+        dispatched
+          ? "The account or key generation changed. This request may already have committed; confirm its outcome before retrying."
+          : "The account or key generation changed; no request was sent.",
+        "stale_operation",
+      );
   };
   assertOwnership();
   const base = await getBaseUrl();
@@ -700,7 +788,10 @@ async function request(
   // origin+path normalization.
   const configured = parseServerUrl(base);
   if (!configured || (configured.insecure && !isLoopbackUrl(configured.url))) {
-    throw new ApiError(0, "refusing to send data to an invalid or cleartext remote server URL");
+    throw new ApiError(
+      0,
+      "refusing to send data to an invalid or cleartext remote server URL",
+    );
   }
   const actualOrigin = new URL(configured.url).origin;
   // H-1: the offline queue pins uploads to the CANONICAL loopback spelling
@@ -716,13 +807,30 @@ async function request(
   }
   const token = opts.noBearer ? null : await secureStore.getItem(TOKEN_KEY);
   assertOwnership();
+  const authenticatedUserId =
+    token === null ? null : await secureStore.getItem(USER_ID_KEY);
+  assertOwnership();
+  const authenticatedUsername =
+    token === null ? null : await secureStore.getItem(USERNAME_KEY);
+  assertOwnership();
   if (opts.expectedUserId !== undefined) {
-    const owner = await secureStore.getItem(USER_ID_KEY);
-    assertOwnership();
-    if (owner !== opts.expectedUserId) throw new ApiError(0, "The queued ciphertext belongs to another account; no request was sent.", "stale_operation");
-    if (!token) throw new ApiError(0, "No authenticated session owns the queued ciphertext; no request was sent.", "stale_operation");
+    if (authenticatedUserId !== opts.expectedUserId)
+      throw new ApiError(
+        0,
+        "The queued ciphertext belongs to another account; no request was sent.",
+        "stale_operation",
+      );
+    if (!token)
+      throw new ApiError(
+        0,
+        "No authenticated session owns the queued ciphertext; no request was sent.",
+        "stale_operation",
+      );
   }
-  const headers: Record<string, string> = { "Content-Type": "application/json", ...extraHeaders };
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...extraHeaders,
+  };
   if (token) headers.Authorization = `Bearer ${token}`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -755,9 +863,15 @@ async function request(
     });
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
-      throw new ApiError(0, `request timed out after ${REQUEST_TIMEOUT_MS / 1000}s`);
+      throw new ApiError(
+        0,
+        `request timed out after ${REQUEST_TIMEOUT_MS / 1000}s`,
+      );
     }
-    throw new ApiError(0, "server unreachable — check the server URL or your connection");
+    throw new ApiError(
+      0,
+      "server unreachable — check the server URL or your connection",
+    );
     // A timer firing after the request settled only aborts an already-finished
     // signal — unobservable; skipping clearTimeout merely leaks one timer.
   } finally {
@@ -772,22 +886,32 @@ async function request(
   // silently trusted.
   const finalUrl = typeof response.url === "string" ? response.url : "";
   if (finalUrl === "" && opts.sensitive) {
-    throw new ApiError(0, "could not verify this request was not redirected — check your server URL");
+    throw new ApiError(
+      0,
+      "could not verify this request was not redirected — check your server URL",
+    );
   }
   if (finalUrl !== "") {
     try {
       if (new URL(finalUrl).origin !== (await originOf(base))) {
-        throw new ApiError(0, "server redirected the request off the configured origin — check your server URL");
+        throw new ApiError(
+          0,
+          "server redirected the request off the configured origin — check your server URL",
+        );
       }
     } catch (err) {
       // Stryker disable next-line ConditionalExpression: both arms throw an ApiError with status 0 and the identical redirected-origin message — rethrow vs re-wrap is indistinguishable
       if (err instanceof ApiError) throw err;
       // An unparseable final URL degrades to the same refusal.
-      throw new ApiError(0, "server redirected the request off the configured origin — check your server URL");
+      throw new ApiError(
+        0,
+        "server redirected the request off the configured origin — check your server URL",
+      );
     }
   }
   assertOwnership();
-  if (response.status === 204) return opts.includeResponse ? { data: null, response } : null;
+  if (response.status === 204)
+    return opts.includeResponse ? { data: null, response } : null;
   // BODY-READ TIMEOUT (audit 2026-09-28): the headers-phase timer above is
   // cleared the moment fetch() resolves — i.e. when the response HEADERS
   // arrived — which left the body read below unbounded: a server that
@@ -801,7 +925,10 @@ async function request(
     data = await response.json();
   } catch {
     if (controller.signal.aborted) {
-      throw new ApiError(0, `request timed out after ${REQUEST_TIMEOUT_MS / 1000}s`);
+      throw new ApiError(
+        0,
+        `request timed out after ${REQUEST_TIMEOUT_MS / 1000}s`,
+      );
     }
     data = {};
   } finally {
@@ -814,8 +941,14 @@ async function request(
     // A status-only check would spuriously lock the vault if a future
     // resource-level 410 endpoint appears; 401 stays unconditional.
     const deathCode = sanitizeCode((data as { code?: unknown }).code);
-    const isAccountDeath = response.status === 401
-      || (response.status === 410 && (deathCode === "account_deleted" || deathCode === "gone"));
+    const explicitAccountLifecycle =
+      path === `${API_PREFIX}/account` ||
+      path === `${API_PREFIX}/account/export`;
+    const accountDeleted =
+      response.status === 410 &&
+      (deathCode === "account_deleted" ||
+        (deathCode === "gone" && explicitAccountLifecycle));
+    const isAccountDeath = response.status === 401 || accountDeleted;
     if (isAccountDeath && token !== null) {
       // The bearer token we sent was rejected: the session is dead. A 401
       // is expiry/epoch death; a 410 is account deletion from another
@@ -824,7 +957,15 @@ async function request(
       // failure must never mask the ApiError itself.
       try {
         // Stryker disable next-line OptionalChaining: the call is wrapped in a catch that swallows everything, so onUnauthorized() on a null handler throws the same-swallowed TypeError
-        onUnauthorized?.();
+        const callback = onUnauthorized?.({
+          status: response.status as 401 | 410,
+          code: deathCode,
+          accountDeleted,
+          userId: authenticatedUserId,
+          username: authenticatedUsername,
+          origin: canonicalOrigin(actualOrigin),
+        });
+        void Promise.resolve(callback).catch(() => {});
       } catch {
         // a hook must never mask the ApiError below
       }
@@ -835,7 +976,8 @@ async function request(
     // as well as 429s; parsing only 429 made the offline queue fall back to
     // its 30 s+ exponential backoff on an explicit server advisory.
     const retryAfter =
-      (response.status === 429 || response.status === 503) && typeof response.headers?.get === "function"
+      (response.status === 429 || response.status === 503) &&
+      typeof response.headers?.get === "function"
         ? parseRetryAfter(response.headers.get("retry-after"))
         : undefined;
     throw new ApiError(
@@ -865,7 +1007,11 @@ export class ApiError extends Error {
 /** The owner-entry paging contract uses 409 for a stale snapshot token. It
  * is safe to retry from page zero, unlike an arbitrary mutation conflict. */
 function entriesRevisionConflict(): ApiError {
-  return new ApiError(409, "entries changed while paging; retry the request", "collection_changed");
+  return new ApiError(
+    409,
+    "entries changed while paging; retry the request",
+    "collection_changed",
+  );
 }
 
 /** The measures twin (audit 2026-09-28): the backend answers 409
@@ -873,7 +1019,19 @@ function entriesRevisionConflict(): ApiError {
  *  mismatch maps to the same retryable shape — one-restart semantics,
  *  exactly the entries contract. */
 function measuresRevisionConflict(): ApiError {
-  return new ApiError(409, "measures changed while paging; retry the request", "collection_changed");
+  return new ApiError(
+    409,
+    "measures changed while paging; retry the request",
+    "collection_changed",
+  );
+}
+
+function consentsRevisionConflict(): ApiError {
+  return new ApiError(
+    409,
+    "consents changed while paging; retry the request",
+    "collection_changed",
+  );
 }
 
 /** One entry row as the backend serializes it (EntryOut). The server is
@@ -957,8 +1115,13 @@ export interface ListMeasuresPageOptions {
   expectedRevision?: MeasuresRevision;
 }
 
-function invalidPageResponse(collection: "entry" | "measure"): never {
-  throw new ApiError(0, `invalid ${collection} page response — refusing the response`);
+function invalidPageResponse(
+  collection: "entry" | "measure" | "consent",
+): never {
+  throw new ApiError(
+    0,
+    `invalid ${collection} page response — refusing the response`,
+  );
 }
 
 /** Parse the paging signal as a strict, non-ambiguous integer. The modern
@@ -968,7 +1131,7 @@ function invalidPageResponse(collection: "entry" | "measure"): never {
  *  is the legacy rule that an exactly-full requested page has another page.
  *  Shared by the entries and measures walks (audit 2026-09-28). */
 function pageNextOffset(
-  collection: "entry" | "measure",
+  collection: "entry" | "measure" | "consent",
   header: string | null,
   offset: number,
   rows: readonly unknown[],
@@ -1001,32 +1164,54 @@ function isCollectionRevision(value: unknown): value is EntriesRevision {
   return (
     typeof value === "string" &&
     COLLECTION_REVISION_PATTERN.test(value) &&
-    (value.length < MAX_COLLECTION_REVISION.length || value <= MAX_COLLECTION_REVISION)
+    (value.length < MAX_COLLECTION_REVISION.length ||
+      value <= MAX_COLLECTION_REVISION)
   );
 }
 
-function pageRevision(collection: "entry" | "measure", header: string | null): EntriesRevision | null {
+function pageRevision(
+  collection: "entry" | "measure" | "consent",
+  header: string | null,
+): EntriesRevision | null {
   if (header === null) return null; // headerless servers retain legacy paging
   if (!isCollectionRevision(header)) invalidPageResponse(collection);
   return header;
 }
 
 export const api = {
-  setSession: async (token: string, userId: string, username?: string, options: { stillCurrent?: () => boolean } = {}) => {
+  setSession: async (
+    token: string,
+    userId: string,
+    username?: string,
+    options: { stillCurrent?: () => boolean } = {},
+  ) => {
     // L-7 (2026-09-20): a server-controlled account id becomes the vault's
     // owner binding and the AAD owner part of every stored blob — only the
     // backend's exact id shape may be adopted. A mismatched shape is a
     // hostile server relabeling the account; refusing here fails the login
     // visibly instead of corrupting all future ciphertext silently.
     if (!USER_ID_PATTERN.test(userId)) {
-      throw new ApiError(0, "the server returned an invalid account id — refusing to trust this server");
+      throw new ApiError(
+        0,
+        "the server returned an invalid account id — refusing to trust this server",
+      );
     }
-    if (options.stillCurrent?.() === false) throw new ApiError(0, "This authentication attempt was retired", "stale_operation");
+    if (options.stillCurrent?.() === false)
+      throw new ApiError(
+        0,
+        "This authentication attempt was retired",
+        "stale_operation",
+      );
     changeLocalSessionOwner(userId);
     const epoch = localWriteScopeEpoch();
     const check = () => {
       assertCredentialEpoch(epoch);
-      if (options.stillCurrent?.() === false) throw new ApiError(0, "This authentication attempt was retired", "stale_operation");
+      if (options.stillCurrent?.() === false)
+        throw new ApiError(
+          0,
+          "This authentication attempt was retired",
+          "stale_operation",
+        );
     };
     return serializedCredentials(async () => {
       try {
@@ -1045,15 +1230,18 @@ export const api = {
         check();
         await secureStore.setItem(USER_ID_KEY, userId);
         check();
-        if (username !== undefined) await secureStore.setItem(USERNAME_KEY, username);
-        else if (previousOwner !== userId) await secureStore.removeItem(USERNAME_KEY);
+        if (username !== undefined)
+          await secureStore.setItem(USERNAME_KEY, username);
+        else if (previousOwner !== userId)
+          await secureStore.removeItem(USERNAME_KEY);
         // M-3: pin the origin on first successful authentication. Later logins
         // at a different origin render the warning (see originPinStatus).
         try {
           const pinned = await secureStore.getItem(PINNED_ORIGIN_KEY);
           const origin = canonicalOrigin(await originOf(await getBaseUrl()));
           check();
-          if (pinned === null) await secureStore.setItem(PINNED_ORIGIN_KEY, origin);
+          if (pinned === null)
+            await secureStore.setItem(PINNED_ORIGIN_KEY, origin);
         } catch {
           // best effort: the warning surface degrades to "unpinned" silently
         }
@@ -1068,7 +1256,11 @@ export const api = {
           const cleanupEpoch = localWriteScopeEpoch();
           for (const key of [TOKEN_KEY, USER_ID_KEY, USERNAME_KEY]) {
             if (cleanupEpoch !== localWriteScopeEpoch()) break;
-            try { await secureStore.removeItem(key); } catch { /* Preserve the original failure; token-last keeps interrupted identity writes unauthenticated. */ }
+            try {
+              await secureStore.removeItem(key);
+            } catch {
+              /* Preserve the original failure; token-last keeps interrupted identity writes unauthenticated. */
+            }
           }
         }
         throw err;
@@ -1088,7 +1280,9 @@ export const api = {
    *  origin — the LoginScreen warning state. Canonicalized comparison so
    *  loopback alias spellings do not false-alarm. */
   originPinChanged: async (): Promise<boolean> => {
-    const pinned = await secureStore.getItem(PINNED_ORIGIN_KEY).catch(() => null);
+    const pinned = await secureStore
+      .getItem(PINNED_ORIGIN_KEY)
+      .catch(() => null);
     if (pinned === null) return false;
     const current = canonicalOrigin(await originOf(await getBaseUrl()));
     return current !== pinned;
@@ -1096,7 +1290,10 @@ export const api = {
   /** M-3: explicitly trust the currently selected origin (called from the
    *  warning's confirm action after the user has verified the URL). */
   confirmCurrentOrigin: async (): Promise<void> => {
-    await secureStore.setItem(PINNED_ORIGIN_KEY, canonicalOrigin(await originOf(await getBaseUrl())));
+    await secureStore.setItem(
+      PINNED_ORIGIN_KEY,
+      canonicalOrigin(await originOf(await getBaseUrl())),
+    );
   },
   getUserId: async () => secureStore.getItem(USER_ID_KEY),
   getUsername: async () => secureStore.getItem(USERNAME_KEY),
@@ -1106,13 +1303,62 @@ export const api = {
     return serializedCredentials(async () => {
       assertCredentialEpoch(epoch);
       await waitLocalWriteCommits();
-      assertCredentialEpoch(epoch); await secureStore.removeItem(TOKEN_KEY);
-      assertCredentialEpoch(epoch); await secureStore.removeItem(USER_ID_KEY);
-      assertCredentialEpoch(epoch); await secureStore.removeItem(USERNAME_KEY);
+      assertCredentialEpoch(epoch);
+      await secureStore.removeItem(TOKEN_KEY);
+      assertCredentialEpoch(epoch);
+      await secureStore.removeItem(USER_ID_KEY);
+      assertCredentialEpoch(epoch);
+      await secureStore.removeItem(USERNAME_KEY);
       assertCredentialEpoch(epoch);
     });
   },
-  isLoggedIn: async () => (await secureStore.getItem(TOKEN_KEY)) !== null,
+  /** Account-deletion lane: fence the retiring owner immediately and make
+   * the bearer unusable before any best-effort personal-data cleanup. The
+   * expected owner prevents an old deletion continuation from touching a
+   * replacement account. All tuple slots are attempted even if one native
+   * delete fails; token+valid-owner is the authentication invariant. */
+  retireDeletedSession: async (expectedUserId: string): Promise<void> => {
+    changeLocalSessionOwner(null);
+    const epoch = localWriteScopeEpoch();
+    return serializedCredentials(async () => {
+      assertCredentialEpoch(epoch);
+      await waitLocalWriteCommits();
+      assertCredentialEpoch(epoch);
+      const currentOwner = await secureStore.getItem(USER_ID_KEY);
+      assertCredentialEpoch(epoch);
+      if (currentOwner !== null && currentOwner !== expectedUserId) {
+        throw new ApiError(
+          0,
+          "A replacement account owns this session",
+          "stale_operation",
+        );
+      }
+      let firstFailure: unknown = null;
+      for (const slot of [TOKEN_KEY, USER_ID_KEY, USERNAME_KEY]) {
+        assertCredentialEpoch(epoch);
+        try {
+          await secureStore.removeItem(slot);
+        } catch (error) {
+          firstFailure ??= error;
+        }
+      }
+      assertCredentialEpoch(epoch);
+      if (firstFailure !== null) throw firstFailure;
+    });
+  },
+  isLoggedIn: async () => {
+    const [token, owner] = await Promise.all([
+      secureStore.getItem(TOKEN_KEY),
+      secureStore.getItem(USER_ID_KEY),
+    ]);
+    const loggedIn = token !== null && owner !== null && USER_ID_PATTERN.test(owner);
+    // A process restart loses the in-memory owner/generation contract even
+    // though its encrypted credential tuple survives. Re-establish the
+    // owner before boot can publish loggedIn or offer unlock; otherwise the
+    // first guarded cache write runs against an unowned lifecycle.
+    hydrateLocalSessionOwner(loggedIn ? owner : null);
+    return loggedIn;
+  },
 
   meta: () => request("GET", `${API_PREFIX}/meta`),
 
@@ -1126,13 +1372,17 @@ export const api = {
     username: string,
     saltB64: string,
     authKeyB64: string,
+    ageAttestation: MinimumAgeAttestation,
     kdfParams?: KdfParams,
     wrappedDataKeyB64?: string,
   ) => {
     const hasParams = kdfParams !== undefined;
     const hasWrapped = wrappedDataKeyB64 !== undefined;
     if (hasParams !== hasWrapped) {
-      throw new ApiError(0, "v2 registration requires kdf_params and wrapped_data_key together");
+      throw new ApiError(
+        0,
+        "v2 registration requires kdf_params and wrapped_data_key together",
+      );
     }
     return request(
       "POST",
@@ -1141,6 +1391,7 @@ export const api = {
         username,
         salt: saltB64,
         verifier: authKeyB64,
+        age_attestation: ageAttestation,
         ...(hasParams ? { kdf_params: kdfParams } : {}),
         ...(hasWrapped ? { wrapped_data_key: wrappedDataKeyB64 } : {}),
       },
@@ -1149,30 +1400,43 @@ export const api = {
     );
   },
   // POST body, never a URL path: usernames must not land in proxy access logs.
-  saltFor: (username: string) => request("POST", `${API_PREFIX}/auth/salt`, { username }),
+  saltFor: (username: string) =>
+    request("POST", `${API_PREFIX}/auth/salt`, { username }),
   cacheSalt: async (username: string, saltB64: string) => {
     // Bind the salt to the origin it was served from: an offline unlock
     // under server B must never derive keys with server A's salt.
     // v1 envelope: pre-v1 records were a bare { o, s } — see getCachedSalt.
-    return currentCredentialCache(async check => {
-      const origin = await getBaseUrl(); check();
-      await AsyncStorage.setItem(saltKey(username), JSON.stringify({ v: 1, o: origin, s: saltB64 }));
+    return currentCredentialCache(async (check) => {
+      const origin = await getBaseUrl();
+      check();
+      await AsyncStorage.setItem(
+        saltKey(username),
+        JSON.stringify({ v: 1, o: origin, s: saltB64 }),
+      );
     });
   },
   /** The last server-known salt for this username FROM THE CURRENT SERVER,
    *  or null. Enables offline vault unlock without cross-origin replay. */
   getCachedSalt: async (username: string) => {
     const epoch = localWriteScopeEpoch();
-    const raw = await readThroughMigrate(legacySaltKey(username), saltKey(username));
+    const raw = await readThroughMigrate(
+      legacySaltKey(username),
+      saltKey(username),
+    );
     // Stryker disable next-line ConditionalExpression: with the guard skipped, JSON.parse of a falsy raw ("" / null) throws or yields null inside the try below, and the catch returns the same null
     if (!raw) return null;
     try {
-      const parsed = JSON.parse(raw) as { v?: unknown; o?: unknown; s?: unknown };
+      const parsed = JSON.parse(raw) as {
+        v?: unknown;
+        o?: unknown;
+        s?: unknown;
+      };
       // v1 envelope, or the legacy bare { o, s } shape (no v field) — both
       // carry the same two strings; anything else refuses rather than guesses.
       const legacy = parsed.v === undefined;
       if (!(legacy || parsed.v === 1)) return null;
-      if (typeof parsed.o !== "string" || typeof parsed.s !== "string") return null;
+      if (typeof parsed.o !== "string" || typeof parsed.s !== "string")
+        return null;
       if (parsed.o !== (await getBaseUrl())) return null;
       // Stryker disable next-line ConditionalExpression: the read-through rewrite stores {v:1,o,s} — for already-v1 records that is a byte-identical (or normalizing) no-op write, and the returned salt never changes
       if (legacy) {
@@ -1181,7 +1445,10 @@ export const api = {
         // failed rewrite never fails the read.
         await serializedCredentials(async () => {
           assertCredentialEpoch(epoch);
-          await AsyncStorage.setItem(saltKey(username), JSON.stringify({ v: 1, o: parsed.o, s: parsed.s }));
+          await AsyncStorage.setItem(
+            saltKey(username),
+            JSON.stringify({ v: 1, o: parsed.o, s: parsed.s }),
+          );
           assertCredentialEpoch(epoch);
         }).catch(() => {});
       }
@@ -1193,8 +1460,9 @@ export const api = {
   clearCachedSalt: async (username: string) => {
     // Both forms: a clear must be complete whether or not a read ever got
     // to migrate the legacy key across (audit 2026-09-28).
-    return currentCredentialCache(async check => {
-      await AsyncStorage.removeItem(saltKey(username)); check();
+    return currentCredentialCache(async (check) => {
+      await AsyncStorage.removeItem(saltKey(username));
+      check();
       await AsyncStorage.removeItem(legacySaltKey(username));
     });
   },
@@ -1206,22 +1474,42 @@ export const api = {
    *  envelope, and the GCM authentication is the password proof. Origin-
    *  bound like the salt cache; the record carries the scheme so an
    *  offline unlock also knows a v1 account when it sees one. */
-  cacheKeyEnvelope: async (username: string, record: KeyEnvelopeCacheRecord) => {
-    return currentCredentialCache(async check => {
-      const origin = await getBaseUrl(); check();
-      await AsyncStorage.setItem(envelopeKey(username), JSON.stringify({ v: 1, o: origin, ...record }));
+  cacheKeyEnvelope: async (
+    username: string,
+    record: KeyEnvelopeCacheRecord,
+  ) => {
+    return currentCredentialCache(async (check) => {
+      const origin = await getBaseUrl();
+      check();
+      await AsyncStorage.setItem(
+        envelopeKey(username),
+        JSON.stringify({ v: 1, o: origin, ...record }),
+      );
     });
   },
-  getCachedKeyEnvelope: async (username: string): Promise<KeyEnvelopeCacheRecord | null> => {
-    const raw = await readThroughMigrate(legacyEnvelopeKey(username), envelopeKey(username));
+  getCachedKeyEnvelope: async (
+    username: string,
+  ): Promise<KeyEnvelopeCacheRecord | null> => {
+    const raw = await readThroughMigrate(
+      legacyEnvelopeKey(username),
+      envelopeKey(username),
+    );
     if (!raw) return null;
     try {
-      const parsed = JSON.parse(raw) as { v?: unknown; o?: unknown } & Partial<KeyEnvelopeCacheRecord>;
+      const parsed = JSON.parse(raw) as {
+        v?: unknown;
+        o?: unknown;
+      } & Partial<KeyEnvelopeCacheRecord>;
       if (parsed.v !== 1) return null;
-      if (typeof parsed.o !== "string" || parsed.o !== (await getBaseUrl())) return null;
+      if (typeof parsed.o !== "string" || parsed.o !== (await getBaseUrl()))
+        return null;
       if (parsed.scheme !== "v1" && parsed.scheme !== "v2") return null;
       if (typeof parsed.saltB64 !== "string") return null;
-      if (parsed.scheme === "v2" && (typeof parsed.wrappedB64 !== "string" || parsed.kdfParams === undefined)) {
+      if (
+        parsed.scheme === "v2" &&
+        (typeof parsed.wrappedB64 !== "string" ||
+          parsed.kdfParams === undefined)
+      ) {
         return null;
       }
       return {
@@ -1236,8 +1524,9 @@ export const api = {
   },
   clearCachedKeyEnvelope: async (username: string) => {
     // Both forms (same completeness constraint as clearCachedSalt).
-    return currentCredentialCache(async check => {
-      await AsyncStorage.removeItem(envelopeKey(username)); check();
+    return currentCredentialCache(async (check) => {
+      await AsyncStorage.removeItem(envelopeKey(username));
+      check();
       await AsyncStorage.removeItem(legacyEnvelopeKey(username));
     });
   },
@@ -1251,12 +1540,19 @@ export const api = {
     // ksv) and response fields (key_scheme, role, expires_in) pass through
     // untouched. Consumers read body.token/body.user_id only; keyScheme.ts
     // reads key_scheme separately when it needs the scheme.
-    request("POST", `${API_PREFIX}/auth/login`, { username, verifier: authKeyB64 }, {}, { sensitive: true, noBearer: true }),
+    request(
+      "POST",
+      `${API_PREFIX}/auth/login`,
+      { username, verifier: authKeyB64 },
+      {},
+      { sensitive: true, noBearer: true },
+    ),
   /** The account's key-scheme state (bearer). v2 unlock material: salt +
    *  kdf_params + the wrapped random data key; v1 answers null envelope
    *  fields. Nothing here is a client secret — the wrapped key is
    *  password-locked ciphertext — so it ships as a plain GET. */
-  keyEnvelope: (): Promise<KeyEnvelopeResponse> => request("GET", `${API_PREFIX}/auth/key-envelope`),
+  keyEnvelope: (): Promise<KeyEnvelopeResponse> =>
+    request("GET", `${API_PREFIX}/auth/key-envelope`),
   // --- key-recovery envelope (wave 3, 2026-09-30) -------------------------
   recoveryStatus: (): Promise<{
     enabled: boolean;
@@ -1267,7 +1563,7 @@ export const api = {
     passwordVerifierB64: string,
     recoveryVerifierB64: string,
     wrappedKeyB64: string,
-    scheme: "v1" | "v2" = "v2",
+    scheme: "v1" | "v2",
   ) =>
     request(
       "PUT",
@@ -1291,11 +1587,15 @@ export const api = {
       { verifier: passwordVerifierB64 },
       { sensitive: true },
     ),
-  recoverLogin: (username: string, recoveryVerifierB64: string, scheme: "v1" | "v2" = "v2") =>
+  recoverLogin: (
+    username: string,
+    recoveryVerifierB64: string,
+    scheme: "v1" | "v2",
+  ) =>
     // noBearer: like login, a 401 here means the recovery key was wrong —
     // the vault-lock hook must not fire on it. `scheme` says which
-    // derivation the verifier used; a kit stored under the other scheme
-    // answers 401 recovery_scheme_mismatch (negotiation, not a miss).
+    // derivation the verifier used. Authentication failures are uniform;
+    // clients never probe a second, weaker scheme.
     request(
       "POST",
       `${API_PREFIX}/auth/recover`,
@@ -1305,7 +1605,12 @@ export const api = {
     ),
   resetPasswordWithRecovery: (
     proofB64: string,
-    body: { new_salt: string; new_verifier: string; new_kdf_params?: object; wrapped_data_key: string },
+    body: {
+      new_salt: string;
+      new_verifier: string;
+      new_kdf_params?: object;
+      wrapped_data_key: string;
+    },
     processingToken: string,
   ) =>
     request(
@@ -1321,20 +1626,44 @@ export const api = {
    *  is the point (credential rotation, password change, deletion). */
   logout: () => request("POST", `${API_PREFIX}/auth/logout`),
 
-  createEntry: (clientEntryId: string, blobB64: string, entryDate: string, contentVersion?: number, localWritePermit?: LocalWritePermit) =>
-    request("POST", `${API_PREFIX}/entries`, {
-      client_entry_id: clientEntryId,
-      blob: blobB64,
-      entry_date: entryDate,
-      ...(contentVersion !== undefined ? { content_version: contentVersion } : {}),
-    }, {}, { localWritePermit }),
+  createEntry: (
+    clientEntryId: string,
+    blobB64: string,
+    entryDate: string,
+    contentVersion?: number,
+    localWritePermit?: LocalWritePermit,
+  ) =>
+    request(
+      "POST",
+      `${API_PREFIX}/entries`,
+      {
+        client_entry_id: clientEntryId,
+        blob: blobB64,
+        entry_date: entryDate,
+        ...(contentVersion !== undefined
+          ? { content_version: contentVersion }
+          : {}),
+      },
+      {},
+      { localWritePermit },
+    ),
   /** MBC measures (2026-09-19): opaque encrypted questionnaire records. */
-  createMeasure: (clientMeasureId: string, blobB64: string, measureDate: string, localWritePermit?: LocalWritePermit) =>
+  createMeasure: (
+    clientMeasureId: string,
+    blobB64: string,
+    measureDate: string,
+    localWritePermit?: LocalWritePermit,
+  ) =>
     request(
       "POST",
       `${API_PREFIX}/measures`,
-      { client_measure_id: clientMeasureId, blob: blobB64, measure_date: measureDate },
-      {}, { localWritePermit },
+      {
+        client_measure_id: clientMeasureId,
+        blob: blobB64,
+        measure_date: measureDate,
+      },
+      {},
+      { localWritePermit },
     ),
   /** One bounded ciphertext page of the patient's own measures, newest
    *  first (the server orders by (measure_date, received_at, id) DESC — a
@@ -1344,7 +1673,9 @@ export const api = {
    *  answering 413, and pins the X-Measures-Revision snapshot the server
    *  serves (backend measures.py) so a concurrent create answers 409
    *  collection_changed rather than silently shifting offset windows. */
-  listMeasuresPage: async (options: ListMeasuresPageOptions = {}): Promise<ListedMeasuresPage> => {
+  listMeasuresPage: async (
+    options: ListMeasuresPageOptions = {},
+  ): Promise<ListedMeasuresPage> => {
     const limit = options.limit ?? 100;
     const offset = options.offset ?? 0;
     const pageBytes = options.pageBytes ?? MEASURE_PAGE_BYTES;
@@ -1357,16 +1688,21 @@ export const api = {
       !Number.isInteger(pageBytes) ||
       pageBytes < 1 ||
       pageBytes > MEASURE_PAGE_BYTES ||
-      (options.expectedRevision !== undefined && !isCollectionRevision(options.expectedRevision))
+      (options.expectedRevision !== undefined &&
+        !isCollectionRevision(options.expectedRevision))
     ) {
-      throw new ApiError(0, "invalid measure page request — refusing the request");
+      throw new ApiError(
+        0,
+        "invalid measure page request — refusing the request",
+      );
     }
     const params = new URLSearchParams({
       limit: String(limit),
       offset: String(offset),
       page_bytes: String(pageBytes),
     });
-    if (options.expectedRevision !== undefined) params.set("expected_revision", options.expectedRevision);
+    if (options.expectedRevision !== undefined)
+      params.set("expected_revision", options.expectedRevision);
     const result = (await request(
       "GET",
       `${API_PREFIX}/measures?${params.toString()}`,
@@ -1377,17 +1713,34 @@ export const api = {
     if (!Array.isArray(result.data)) invalidPageResponse("measure");
     const measures = result.data as ListedMeasure[];
     const nextOffsetHeader =
-      typeof result.response.headers?.get === "function" ? result.response.headers.get("X-Next-Offset") : null;
+      typeof result.response.headers?.get === "function"
+        ? result.response.headers.get("X-Next-Offset")
+        : null;
     const revisionHeader =
-      typeof result.response.headers?.get === "function" ? result.response.headers.get("X-Measures-Revision") : null;
+      typeof result.response.headers?.get === "function"
+        ? result.response.headers.get("X-Measures-Revision")
+        : null;
     const revision = pageRevision("measure", revisionHeader);
     // Same snapshot-echo rule as entries: a pinned walk that sees a
     // different revision treats it as the retryable conflict, never a mixed
     // history. Headerless legacy servers never send expected_revision.
-    if (options.expectedRevision !== undefined && revision !== options.expectedRevision) {
+    if (
+      options.expectedRevision !== undefined &&
+      revision !== options.expectedRevision
+    ) {
       throw measuresRevisionConflict();
     }
-    return { measures, nextOffset: pageNextOffset("measure", nextOffsetHeader, offset, measures, limit), revision };
+    return {
+      measures,
+      nextOffset: pageNextOffset(
+        "measure",
+        nextOffsetHeader,
+        offset,
+        measures,
+        limit,
+      ),
+      revision,
+    };
   },
   /** All stored measures, newest first. M-4/L-55 (2026-09-20): the write
    *  quota is 2000 but a single unpaged GET returned only the server's
@@ -1408,12 +1761,16 @@ export const api = {
         let offset = 0;
         let revision: MeasuresRevision | null = null;
         let revisionMode: "unknown" | "snapshot" | "legacy" = "unknown";
-        const getPage = async (pageOffset: number): Promise<ListedMeasuresPage> => {
+        const getPage = async (
+          pageOffset: number,
+        ): Promise<ListedMeasuresPage> => {
           const result = await api.listMeasuresPage({
             limit: pageSize,
             offset: pageOffset,
             pageBytes: MEASURE_PAGE_BYTES,
-            ...(revisionMode === "snapshot" && revision !== null ? { expectedRevision: revision } : {}),
+            ...(revisionMode === "snapshot" && revision !== null
+              ? { expectedRevision: revision }
+              : {}),
           });
           const receivedRevision = result.revision ?? null;
           if (revisionMode === "unknown") {
@@ -1429,7 +1786,7 @@ export const api = {
           }
           return result;
         };
-        for (; offset < MAX_MEASURES; ) {
+        for (; offset < MAX_MEASURES;) {
           const result = await getPage(offset);
           for (const row of result.measures) {
             if (row && typeof row.id === "string") {
@@ -1443,31 +1800,58 @@ export const api = {
         }
         return rows;
       } catch (err) {
-        if (err instanceof ApiError && err.status === 409 && attempt < MAX_LIST_SNAPSHOT_RESTARTS) continue;
+        if (
+          err instanceof ApiError &&
+          err.status === 409 &&
+          attempt < MAX_LIST_SNAPSHOT_RESTARTS
+        )
+          continue;
         throw err;
       }
     }
-    throw new ApiError(0, "could not obtain a stable measures history snapshot");
+    throw new ApiError(
+      0,
+      "could not obtain a stable measures history snapshot",
+    );
   },
   /** Offline-queue upload. Identical to createEntry but pinned to the origin
    *  the queue is scoped to: the request refuses to ship (OriginPinnedError,
    *  nothing sent) if the selected server moved, so queued ciphertext can
    *  never ride a different origin's credentials. The queue always sends
    *  content_version 1 (an upload is the first generation of its id). */
-  createQueuedEntry: (clientEntryId: string, blobB64: string, entryDate: string, expectedOrigin: string, localWritePermit?: LocalWritePermit) =>
+  createQueuedEntry: (
+    clientEntryId: string,
+    blobB64: string,
+    entryDate: string,
+    expectedOrigin: string,
+    localWritePermit?: LocalWritePermit,
+  ) =>
     request(
       "POST",
       `${API_PREFIX}/entries`,
-      { client_entry_id: clientEntryId, blob: blobB64, entry_date: entryDate, content_version: 1 },
+      {
+        client_entry_id: clientEntryId,
+        blob: blobB64,
+        entry_date: entryDate,
+        content_version: 1,
+      },
       {},
-      { expectedOrigin, localWritePermit, expectedUserId: localWritePermit?.userId },
+      {
+        expectedOrigin,
+        localWritePermit,
+        expectedUserId: localWritePermit?.userId,
+      },
     ),
   /** One entry by its stable client id (audit fix M-5, 2026-09-20): the
    *  idempotivity-verification primitive. The offline queue proves a 409
    *  "already exists" answer is REAL before discarding its only local copy
    *  — a hostile/flaky server that 409s without persisting surfaces as a
    *  404 here. Optionally origin-pinned like the queue upload. */
-  getEntry: async (clientEntryId: string, expectedOrigin?: string, localWritePermit?: LocalWritePermit) => {
+  getEntry: async (
+    clientEntryId: string,
+    expectedOrigin?: string,
+    localWritePermit?: LocalWritePermit,
+  ) => {
     if (!ENTRY_ID_PATTERN.test(clientEntryId)) {
       throw new ApiError(0, "invalid entry id — refusing the request");
     }
@@ -1476,7 +1860,11 @@ export const api = {
       `${API_PREFIX}/entries/${encodeURIComponent(clientEntryId)}`,
       undefined,
       {},
-      { expectedOrigin, localWritePermit, expectedUserId: localWritePermit?.userId },
+      {
+        expectedOrigin,
+        localWritePermit,
+        expectedUserId: localWritePermit?.userId,
+      },
     ) as Promise<ListedEntry>;
   },
   /** Atomically replace an existing encrypted entry. The client id stays
@@ -1485,7 +1873,13 @@ export const api = {
    *  contentVersion (M-2): the version bound into the replacement blob's
    *  v2 AAD — must be stored+1; a 409 version_conflict means another device
    *  edited first (refetch, re-encrypt, retry). */
-  updateEntry: async (clientEntryId: string, blobB64: string, entryDate: string, contentVersion?: number, localWritePermit?: LocalWritePermit) => {
+  updateEntry: async (
+    clientEntryId: string,
+    blobB64: string,
+    entryDate: string,
+    contentVersion?: number,
+    localWritePermit?: LocalWritePermit,
+  ) => {
     if (!ENTRY_ID_PATTERN.test(clientEntryId)) {
       throw new ApiError(0, "invalid entry id — refusing the request");
     }
@@ -1495,14 +1889,19 @@ export const api = {
       {
         blob: blobB64,
         entry_date: entryDate,
-        ...(contentVersion !== undefined ? { content_version: contentVersion } : {}),
+        ...(contentVersion !== undefined
+          ? { content_version: contentVersion }
+          : {}),
       },
-      {}, { localWritePermit },
+      {},
+      { localWritePermit },
     );
   },
   /** One bounded ciphertext page. Screens use this rather than materializing
    * an entire multi-year journal in JS memory. */
-  listEntriesPage: async (options: ListEntriesPageOptions = {}): Promise<ListedEntriesPage> => {
+  listEntriesPage: async (
+    options: ListEntriesPageOptions = {},
+  ): Promise<ListedEntriesPage> => {
     const limit = options.limit ?? 100;
     const offset = options.offset ?? 0;
     const pageBytes = options.pageBytes ?? ENTRY_PAGE_BYTES;
@@ -1515,9 +1914,13 @@ export const api = {
       !Number.isInteger(pageBytes) ||
       pageBytes < 1 ||
       pageBytes > ENTRY_PAGE_BYTES ||
-      (options.expectedRevision !== undefined && !isCollectionRevision(options.expectedRevision))
+      (options.expectedRevision !== undefined &&
+        !isCollectionRevision(options.expectedRevision))
     ) {
-      throw new ApiError(0, "invalid entry page request — refusing the request");
+      throw new ApiError(
+        0,
+        "invalid entry page request — refusing the request",
+      );
     }
     const params = new URLSearchParams({
       limit: String(limit),
@@ -1526,7 +1929,8 @@ export const api = {
     });
     if (options.since) params.set("since", options.since);
     if (options.until) params.set("until", options.until);
-    if (options.expectedRevision !== undefined) params.set("expected_revision", options.expectedRevision);
+    if (options.expectedRevision !== undefined)
+      params.set("expected_revision", options.expectedRevision);
     const result = (await request(
       "GET",
       `${API_PREFIX}/entries?${params.toString()}`,
@@ -1537,18 +1941,35 @@ export const api = {
     if (!Array.isArray(result.data)) invalidPageResponse("entry");
     const entries = result.data as ListedEntry[];
     const nextOffsetHeader =
-      typeof result.response.headers?.get === "function" ? result.response.headers.get("X-Next-Offset") : null;
+      typeof result.response.headers?.get === "function"
+        ? result.response.headers.get("X-Next-Offset")
+        : null;
     const revisionHeader =
-      typeof result.response.headers?.get === "function" ? result.response.headers.get("X-Entries-Revision") : null;
+      typeof result.response.headers?.get === "function"
+        ? result.response.headers.get("X-Entries-Revision")
+        : null;
     const revision = pageRevision("entry", revisionHeader);
     // A modern server must echo the exact snapshot on every successful page.
     // Treat a missing/different header as a retryable conflict rather than
     // allowing a mixed history to reach the decrypting UI. Headerless legacy
     // servers never receive expected_revision in the first place.
-    if (options.expectedRevision !== undefined && revision !== options.expectedRevision) {
+    if (
+      options.expectedRevision !== undefined &&
+      revision !== options.expectedRevision
+    ) {
       throw entriesRevisionConflict();
     }
-    return { entries, nextOffset: pageNextOffset("entry", nextOffsetHeader, offset, entries, limit), revision };
+    return {
+      entries,
+      nextOffset: pageNextOffset(
+        "entry",
+        nextOffsetHeader,
+        offset,
+        entries,
+        limit,
+      ),
+      revision,
+    };
   },
   /** Paginates through every byte-bounded page (server caps each request at
    * 500 entries and 2 MiB of encrypted blobs). Modern servers issue a
@@ -1564,13 +1985,17 @@ export const api = {
         let offset = 0;
         let revision: EntriesRevision | null = null;
         let revisionMode: "unknown" | "snapshot" | "legacy" = "unknown";
-        const getPage = async (pageOffset: number): Promise<ListedEntriesPage> => {
+        const getPage = async (
+          pageOffset: number,
+        ): Promise<ListedEntriesPage> => {
           const result = await api.listEntriesPage({
             since,
             limit: pageSize,
             offset: pageOffset,
             pageBytes: ENTRY_PAGE_BYTES,
-            ...(revisionMode === "snapshot" && revision !== null ? { expectedRevision: revision } : {}),
+            ...(revisionMode === "snapshot" && revision !== null
+              ? { expectedRevision: revision }
+              : {}),
           });
           // `revision` is always null|string from the real client. The nullish
           // fallback also keeps older test doubles and external callers on the
@@ -1609,9 +2034,17 @@ export const api = {
         // A hostile or broken server has more entries than the bounded sync may
         // retain. The probe is deliberately inspected before its rows reach
         // `all`, so the cap is real rather than merely a loop-count guard.
-        throw new ApiError(0, "server keeps returning entry continuations — aborting sync, contact support or check the server");
+        throw new ApiError(
+          0,
+          "server keeps returning entry continuations — aborting sync, contact support or check the server",
+        );
       } catch (err) {
-        if (err instanceof ApiError && err.status === 409 && attempt < MAX_LIST_SNAPSHOT_RESTARTS) continue;
+        if (
+          err instanceof ApiError &&
+          err.status === 409 &&
+          attempt < MAX_LIST_SNAPSHOT_RESTARTS
+        )
+          continue;
         throw err;
       }
     }
@@ -1621,7 +2054,11 @@ export const api = {
    *  (dates ISO, until EXCLUSIVE), one bounded walk with the same snapshot
    *  discipline as listEntries. Capped rows per window so a hostile server
    *  cannot pin the phone the way the linear walk's caps prevent. */
-  listEntriesWindow: async (since: string, until: string, maxRows = 1500): Promise<ListedEntry[]> => {
+  listEntriesWindow: async (
+    since: string,
+    until: string,
+    maxRows = 1500,
+  ): Promise<ListedEntry[]> => {
     for (let attempt = 0; attempt <= MAX_LIST_SNAPSHOT_RESTARTS; attempt += 1) {
       try {
         const all: ListedEntry[] = [];
@@ -1637,11 +2074,15 @@ export const api = {
             pageBytes: ENTRY_PAGE_BYTES,
             ...(revision !== null ? { expectedRevision: revision } : {}),
           });
-          if (revision === null && result.revision !== null) revision = result.revision;
+          if (revision === null && result.revision !== null)
+            revision = result.revision;
           for (const entry of result.entries) {
             if (seen.has(entry.client_entry_id)) continue;
             if (seen.size >= maxRows) {
-              throw new ApiError(0, "entry window exceeded the on-device bound — narrowing the month view");
+              throw new ApiError(
+                0,
+                "entry window exceeded the on-device bound — narrowing the month view",
+              );
             }
             seen.add(entry.client_entry_id);
             all.push(entry);
@@ -1649,9 +2090,17 @@ export const api = {
           if (result.nextOffset === null) return all;
           offset = result.nextOffset;
         }
-        throw new ApiError(0, "server keeps returning entry continuations — aborting window fetch");
+        throw new ApiError(
+          0,
+          "server keeps returning entry continuations — aborting window fetch",
+        );
       } catch (err) {
-        if (err instanceof ApiError && err.status === 409 && attempt < MAX_LIST_SNAPSHOT_RESTARTS) continue;
+        if (
+          err instanceof ApiError &&
+          err.status === 409 &&
+          attempt < MAX_LIST_SNAPSHOT_RESTARTS
+        )
+          continue;
         throw err;
       }
     }
@@ -1664,7 +2113,10 @@ export const api = {
     if (!ENTRY_ID_PATTERN.test(clientEntryId)) {
       throw new ApiError(0, "invalid entry id — refusing the request");
     }
-    return request("DELETE", `${API_PREFIX}/entries/${encodeURIComponent(clientEntryId)}`);
+    return request(
+      "DELETE",
+      `${API_PREFIX}/entries/${encodeURIComponent(clientEntryId)}`,
+    );
   },
 
   /** The data key is the whole journal. The app transport policy already
@@ -1678,13 +2130,21 @@ export const api = {
         "the encryption key can only be sent over HTTPS (or localhost) — update the server URL",
       );
     }
-    return request("POST", `${API_PREFIX}/processing/sessions`, { data_key: dataKeyB64 }, {}, { sensitive: true });
+    return request(
+      "POST",
+      `${API_PREFIX}/processing/sessions`,
+      { data_key: dataKeyB64 },
+      {},
+      { sensitive: true },
+    );
   },
   recompute: (processingToken: string, feedbackBlob?: string) =>
     request(
       "POST",
       `${API_PREFIX}/insights/recompute`,
-      feedbackBlob ? ({ feedback_blob: feedbackBlob } as Record<string, unknown>) : undefined,
+      feedbackBlob
+        ? ({ feedback_blob: feedbackBlob } as Record<string, unknown>)
+        : undefined,
       { "X-Processing-Token": processingToken },
     ),
   insights: () => request("GET", `${API_PREFIX}/insights`),
@@ -1693,15 +2153,29 @@ export const api = {
   // 2026-09-26 audit LOW: the account export is a sensitive request like
   // deleteAccount/login/rekey — it ships the bearer and must refuse an
   // unverifiable final URL (strict redirect refusal) instead of trusting it.
-  exportAccount: () => request("GET", `${API_PREFIX}/account/export`, undefined, {}, { sensitive: true }),
+  exportAccount: () =>
+    request(
+      "GET",
+      `${API_PREFIX}/account/export`,
+      undefined,
+      {},
+      { sensitive: true },
+    ),
   /** Requires the password-derived verifier: a stolen token cannot erase
    *  data. The verifier travels in the X-Account-Verifier header (the v1
    *  preference), never the URL; the server still accepts the legacy body
    *  field during the transition. */
   deleteAccount: (verifierB64: string) =>
-    request("DELETE", `${API_PREFIX}/account`, undefined, { "X-Account-Verifier": verifierB64 }, { sensitive: true }),
-  /** Explicit, re-authenticated opt-in for third-party LLM analysis. */
-  getLlmConsent: () => request("GET", `${API_PREFIX}/account/llm-consent`),
+    request(
+      "DELETE",
+      `${API_PREFIX}/account`,
+      undefined,
+      { "X-Account-Verifier": verifierB64 },
+      { sensitive: true },
+    ),
+  /** Explicit, re-authenticated opt-in for third-party transcript translation. */
+  getLlmConsent: (): Promise<ThirdPartyConsentState> =>
+    request("GET", `${API_PREFIX}/account/llm-consent`),
   // --- voice journaling (VOICE_PLAN 2026-09-29) ---------------------------
   /** Transcript (spoken language preserved) + detected language + English
    *  translation of the text. Audio exists server-side only for the
@@ -1743,15 +2217,35 @@ export const api = {
       // recorded under — without the pin, a mid-flush server switch made
       // the remaining rows upload to the NEW origin (404) and the 404
       // handler below DELETED the only copy of the recording.
-      { expectedOrigin, localWritePermit, expectedUserId: localWritePermit?.userId },
+      {
+        expectedOrigin,
+        localWritePermit,
+        expectedUserId: localWritePermit?.userId,
+      },
     ),
   fetchAudioAttachment: (attachmentId: string) =>
-    request("GET", `${API_PREFIX}/audio/attachments/${encodeURIComponent(attachmentId)}`),
+    request(
+      "GET",
+      `${API_PREFIX}/audio/attachments/${encodeURIComponent(attachmentId)}`,
+    ),
   deleteAudioAttachment: (attachmentId: string) =>
-    request("DELETE", `${API_PREFIX}/audio/attachments/${encodeURIComponent(attachmentId)}`),
-  getVoiceConsent: () => request("GET", `${API_PREFIX}/account/voice-consent`),
-  setVoiceConsent: (enabled: boolean, verifierB64: string) =>
-    request("PUT", `${API_PREFIX}/account/voice-consent`, { enabled, verifier: verifierB64 }, {}, { sensitive: true }),
+    request(
+      "DELETE",
+      `${API_PREFIX}/audio/attachments/${encodeURIComponent(attachmentId)}`,
+    ),
+  getVoiceConsent: (): Promise<ThirdPartyConsentState> =>
+    request("GET", `${API_PREFIX}/account/voice-consent`),
+  setVoiceConsent: (
+    enabled: boolean,
+    verifierB64: string,
+  ): Promise<ThirdPartyConsentState> =>
+    request(
+      "PUT",
+      `${API_PREFIX}/account/voice-consent`,
+      { enabled, verifier: verifierB64 },
+      {},
+      { sensitive: true },
+    ),
   setShareVoice: (consentId: string, enabled: boolean, verifierB64: string) =>
     request(
       "PUT",
@@ -1760,8 +2254,17 @@ export const api = {
       { "X-Account-Verifier": verifierB64 },
       { sensitive: true },
     ),
-  setLlmConsent: (enabled: boolean, verifierB64: string) =>
-    request("PUT", `${API_PREFIX}/account/llm-consent`, { enabled, verifier: verifierB64 }, {}, { sensitive: true }),
+  setLlmConsent: (
+    enabled: boolean,
+    verifierB64: string,
+  ): Promise<ThirdPartyConsentState> =>
+    request(
+      "PUT",
+      `${API_PREFIX}/account/llm-consent`,
+      { enabled, verifier: verifierB64 },
+      {},
+      { sensitive: true },
+    ),
 
   // --- credential & key rotation (audit fix H-1/M-3, 2026-09-20) -----------
   // The recovery path for a captured key or phished verifier: rekey the
@@ -1772,7 +2275,22 @@ export const api = {
   /** Server-side re-encryption of every stored blob under a new data key.
    *  Both keys arrive as single-use processing-session tokens; the OLD
    *  password proof gates the operation. All-or-nothing. */
-  rekeyStoredData: (oldProcessingToken: string, newProcessingToken: string, verifierB64: string, credential: { operation_id: string; new_salt: string; new_verifier: string; consent_wraps: Array<{ consent_id: string; therapist_wrap_pub_key: string; ephemeral_pub: string; wrapped_key: string }> }) =>
+  rekeyStoredData: (
+    oldProcessingToken: string,
+    newProcessingToken: string,
+    verifierB64: string,
+    credential: {
+      operation_id: string;
+      new_salt: string;
+      new_verifier: string;
+      consent_wraps: Array<{
+        consent_id: string;
+        therapist_wrap_pub_key: string;
+        ephemeral_pub: string;
+        wrapped_key: string;
+      }>;
+    },
+  ) =>
     request(
       "POST",
       `${API_PREFIX}/processing/rekey`,
@@ -1788,11 +2306,19 @@ export const api = {
    *  Old-password proof required; bumps the server-side epoch, so every
    *  bearer (including this device's) dies with it. v2 accounts are
    *  refused with 409 key_scheme_conflict — changePassword is their path. */
-  rotateCredential: (oldVerifierB64: string, newSaltB64: string, newVerifierB64: string) =>
+  rotateCredential: (
+    oldVerifierB64: string,
+    newSaltB64: string,
+    newVerifierB64: string,
+  ) =>
     request(
       "PUT",
       `${API_PREFIX}/account/credential`,
-      { verifier: oldVerifierB64, new_salt: newSaltB64, new_verifier: newVerifierB64 },
+      {
+        verifier: oldVerifierB64,
+        new_salt: newSaltB64,
+        new_verifier: newVerifierB64,
+      },
       {},
       { sensitive: true },
     ),
@@ -1849,11 +2375,19 @@ export const api = {
       "POST",
       `${API_PREFIX}/account/key-envelope/upgrade`,
       { kdf_params: kdfParams, wrapped_data_key: wrappedDataKeyB64 },
-      { "X-Processing-Token": processingToken, "X-Account-Verifier": verifierB64 },
+      {
+        "X-Processing-Token": processingToken,
+        "X-Account-Verifier": verifierB64,
+      },
       { sensitive: true },
     ),
   /** Swap the wrapped data key of one ACTIVE grant after a rekey. */
-  rewrapConsent: (consentId: string, ephemeralPubB64: string, wrappedKeyB64: string, verifierB64: string) => {
+  rewrapConsent: (
+    consentId: string,
+    ephemeralPubB64: string,
+    wrappedKeyB64: string,
+    verifierB64: string,
+  ) => {
     if (!CONSENT_ID_PATTERN.test(consentId)) {
       throw new ApiError(0, "invalid consent id — refusing the request");
     }
@@ -1882,11 +2416,129 @@ export const api = {
     request(
       "POST",
       `${API_PREFIX}/consents`,
-      { code, ephemeral_pub: ephemeralPubB64, wrapped_key: wrappedKeyB64, disclosure: SHARING_DISCLOSURE_VERSION },
+      {
+        code,
+        ephemeral_pub: ephemeralPubB64,
+        wrapped_key: wrappedKeyB64,
+        disclosure: SHARING_DISCLOSURE_VERSION,
+      },
       { "X-Account-Verifier": verifierB64 },
       { sensitive: true },
     ),
-  listConsents: (): Promise<ListedConsent[]> => request("GET", `${API_PREFIX}/consents`),
+  listConsentsPage: async (
+    options: { offset?: number; expectedRevision?: string } = {},
+  ): Promise<ListedConsentsPage> => {
+    const offset = options.offset ?? 0;
+    if (
+      !Number.isSafeInteger(offset) ||
+      offset < 0 ||
+      offset > 1000 ||
+      (options.expectedRevision !== undefined &&
+        !isCollectionRevision(options.expectedRevision))
+    ) {
+      throw new ApiError(
+        0,
+        "invalid consent page request — refusing the request",
+      );
+    }
+    const params = new URLSearchParams({
+      limit: String(CONSENT_LIST_PAGE_SIZE),
+      offset: String(offset),
+    });
+    if (options.expectedRevision !== undefined)
+      params.set("expected_revision", options.expectedRevision);
+    const result = (await request(
+      "GET",
+      `${API_PREFIX}/consents?${params.toString()}`,
+      undefined,
+      {},
+      { includeResponse: true },
+    )) as { data: unknown; response: Response };
+    if (!Array.isArray(result.data)) invalidPageResponse("consent");
+    const consents = result.data as ListedConsent[];
+    const nextOffsetHeader =
+      typeof result.response.headers?.get === "function"
+        ? result.response.headers.get("X-Next-Offset")
+        : null;
+    const revisionHeader =
+      typeof result.response.headers?.get === "function"
+        ? result.response.headers.get("X-Consents-Revision")
+        : null;
+    const revision = pageRevision("consent", revisionHeader);
+    if (
+      options.expectedRevision !== undefined &&
+      revision !== options.expectedRevision
+    ) {
+      throw consentsRevisionConflict();
+    }
+    return {
+      consents,
+      // Snapshot-aware servers define an absent header as terminal. Only a
+      // headerless legacy server needs the exactly-full-page fallback.
+      nextOffset:
+        revision !== null && nextOffsetHeader === null
+          ? null
+          : pageNextOffset(
+              "consent",
+              nextOffsetHeader,
+              offset,
+              consents,
+              CONSENT_LIST_PAGE_SIZE,
+            ),
+      revision,
+    };
+  },
+  listConsents: async (): Promise<ListedConsent[]> => {
+    for (let attempt = 0; attempt <= MAX_LIST_SNAPSHOT_RESTARTS; attempt += 1) {
+      try {
+        const all: ListedConsent[] = [];
+        const seen = new Set<string>();
+        let offset = 0;
+        let revision: string | null = null;
+        let revisionMode: "unknown" | "snapshot" | "legacy" = "unknown";
+        for (let page = 0; page < MAX_CONSENT_LIST_PAGES; page += 1) {
+          const result = await api.listConsentsPage({
+            offset,
+            ...(revisionMode === "snapshot" && revision !== null
+              ? { expectedRevision: revision }
+              : {}),
+          });
+          const receivedRevision = result.revision ?? null;
+          if (revisionMode === "unknown") {
+            revisionMode = receivedRevision === null ? "legacy" : "snapshot";
+            revision = receivedRevision;
+          } else if (
+            (revisionMode === "snapshot" && receivedRevision !== revision) ||
+            (revisionMode === "legacy" && receivedRevision !== null)
+          ) {
+            throw consentsRevisionConflict();
+          }
+          for (const consent of result.consents) {
+            if (seen.has(consent.id)) continue;
+            seen.add(consent.id);
+            all.push(consent);
+          }
+          if (result.nextOffset === null) return all;
+          offset = result.nextOffset;
+        }
+        throw new ApiError(
+          0,
+          "server keeps returning consent continuations — aborting the request",
+        );
+      } catch (err) {
+        if (
+          err instanceof ApiError &&
+          err.status === 409 &&
+          err.code === "collection_changed" &&
+          attempt < MAX_LIST_SNAPSHOT_RESTARTS
+        ) {
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw new ApiError(0, "could not obtain a stable consent snapshot");
+  },
   /** Revoke: verifier-gated like every disclosure-widening/narrowing action. */
   revokeConsent: async (consentId: string, verifierB64: string) => {
     if (!CONSENT_ID_PATTERN.test(consentId)) {

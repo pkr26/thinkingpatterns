@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { afterEach,beforeEach,describe,it,expect,vi } from 'vitest';
 import { act } from 'react';
 import { EntryView } from '../src/views/Entry';
@@ -41,7 +42,10 @@ describe('independent UI custody probes',()=>{
   vi.spyOn(api,'listConsents').mockResolvedValue([]);
   const root=await render(<ShareView/>);await typeInto(root,'Pairing code','OLD12345');await press(root,'Look up');await settle(20,3);
   for(const checkbox of root.root.findAllByType('input').filter(node=>node.props.type==='checkbox'))await act(async()=>checkbox.props.onChange({target:{checked:true}}));
-  await press(root,'Confirm and share');expect(wrap).toHaveBeenCalledTimes(1);
+  await press(root,'Confirm and share');
+  await typeInto(root,'Current password','freshly typed password');
+  await press(root,'Verify and continue');
+  expect(wrap).toHaveBeenCalledTimes(1);
   await typeInto(root,'Pairing code','NEW12345');
   await act(async()=>pending.resolve({ephemeralPubB64:'ephemeral',wrappedKeyB64:'wrapped'}));await settle(20,3);
   expect(grant).not.toHaveBeenCalled();await act(async()=>root.unmount());

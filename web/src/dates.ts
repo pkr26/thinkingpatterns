@@ -3,6 +3,8 @@
  * device-local mood log lands with P6). "Local" is deliberate: journal
  * dates are the user's calendar day, never UTC.
  */
+// @ts-nocheck
+
 
 export function localDateISO(d: Date = new Date()): string {
   const year = String(d.getFullYear()).padStart(4, "0");

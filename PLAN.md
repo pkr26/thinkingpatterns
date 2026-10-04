@@ -118,9 +118,9 @@ deprecated unversioned `/api` alias for existing clients.
 
 ```
 GET  /healthz                                                            (liveness; no DB touch)
-GET  /readyz                                                             (readiness: DB SELECT 1 → 503 on failure)
+GET  /readyz                                                             (readiness: DB + configured audit journal → 503 on failure)
 GET  /api/v1/meta                                                        → {unlock_days, llm_available, api_version, version}
-POST /api/v1/auth/register        {username, salt, verifier}             → {token}   (+ per-username rate bucket)
+POST /api/v1/auth/register        {username, salt, verifier, age_attestation:"minimum_age_confirmed_v1"} → {token} (+ per-username rate bucket)
 POST /api/v1/auth/salt            {username}                             → {salt}    (decoy if unknown/deactivated)
 POST /api/v1/auth/login           {username, verifier}                   → {token}
 POST /api/v1/auth/logout          (bearer)                               → 204, revokes ALL tokens (epoch bump)

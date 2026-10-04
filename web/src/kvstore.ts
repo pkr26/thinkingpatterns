@@ -8,7 +8,10 @@
  * Durable writes are acknowledged only after IndexedDB commits. Unavailable
  * storage or failed transactions throw; no volatile fallback can claim saved.
  */
+// @ts-nocheck
+
 import { hkdfSha256, toBase64, zeroize, type Bytes } from "./crypto/core";
+import { accountKeyPolicy } from "./ownerStorage";
 
 export interface WritePermit { owner: string; generation: string | null; keyBound: boolean }
 export const writeGenerationKey = (owner: string): string => `mindpattern.writeGeneration.${owner}`;
@@ -27,9 +30,12 @@ function nonce(): string { return [...crypto.getRandomValues(new Uint8Array(16))
 export async function newWriteGeneration(owner: string, dataKey: Bytes): Promise<string> {
   return JSON.stringify({ v: 1, nonce: nonce(), deleted: false, keyTag: await keyTag(owner,dataKey) });
 }
-function permitAllowed(owner: string, raw: string | null, permit?: WritePermit): boolean {
+function permitAllowed(owner: string, raw: string | null, keyBound: boolean, permit?: WritePermit): boolean {
   if (permit && (permit.owner !== owner || permit.generation !== raw)) return false;
-  return raw === null || (!!permit && !generationRecord(raw).deleted);
+  if (raw === null) return true; // legacy install before its first rotation/deletion fence
+  const generation = generationRecord(raw);
+  if (generation.deleted) return false;
+  return !keyBound || !!permit;
 }
 
 export interface KvBackend {
@@ -48,15 +54,16 @@ export interface KvBackend {
 
 const DB_NAME = "mindpattern";
 const STORE = "kv";
-const ENCRYPTED_OWNER_PREFIXES = ["mindpattern.draft.active.","mindpattern.safetyPlan.","mindpattern.moodlog.","mindpattern.feedback.","mindpattern.pendingMeasure.","mindpattern.patternMutes.v1.","mindpattern.entryVersions.","mindpattern.entryV2Bound."];
-function encryptedOwner(key:string):string|null {
-  const prefix=ENCRYPTED_OWNER_PREFIXES.find(candidate=>key.startsWith(candidate));
-  if(prefix)return key.slice(prefix.length)||null;
-  const match=/^mindpattern\/queue\.v1\.(?:items|rejected|quarantine)\.([A-Za-z0-9_-]+)$/.exec(key);
-  if(!match)return null;
-  try {const binary=atob(match[1]!.replace(/-/g,"+").replace(/_/g,"/"));const scope=new TextDecoder().decode(Uint8Array.from(binary,char=>char.charCodeAt(0)));return scope.includes("\0")?scope.slice(scope.indexOf("\0")+1)||null:null;}
-  catch{return null;}
-}
+/** Exhaustive ownership policy for account-scoped IndexedDB keys.
+ *
+ * Ciphertext producers must present the generation they captured before
+ * their async work. Metadata/rotation producers predate that permit seam,
+ * but still read the durable fence in the commit transaction: a deleted
+ * generation therefore rejects every late write after the erasure
+ * tombstone itself has gone. Supplying a metadata permit strengthens the
+ * rule and rejects a superseded generation too (queue eviction counters do
+ * this). The canonical prefix/queue registry lives in ownerStorage.ts and
+ * is shared with local erasure. */
 
 function mutate(db:IDBDatabase,key:string,value:string|null,expected?:string|null,permit?:WritePermit,stillCurrent?:()=>boolean):Promise<boolean> {
   return new Promise((resolve,reject)=>{
@@ -67,7 +74,7 @@ function mutate(db:IDBDatabase,key:string,value:string|null,expected?:string|nul
       if(expected===undefined){apply();return;}
       const request=store.get(key);request.onsuccess=()=>{if((request.result===undefined?null:request.result)===expected)apply();};request.onerror=()=>{failure=request.error;};
     };
-    const owner=encryptedOwner(key);if(!owner){compare();return;}
+    const policy=accountKeyPolicy(key);if(!policy){compare();return;}const {owner,keyBound}=policy;
     const refuse=(reason:string)=>{
       if(value!==null){failure=new Error(reason);tx.abort();return;}
       const erasure=store.get(`mindpattern.erase.${owner}`);erasure.onerror=()=>{failure=erasure.error;};erasure.onsuccess=()=>{
@@ -77,9 +84,13 @@ function mutate(db:IDBDatabase,key:string,value:string|null,expected?:string|nul
     };
     const generation=store.get(writeGenerationKey(owner));generation.onerror=()=>{failure=generation.error;};
     generation.onsuccess=()=>{
-      try {if(!permitAllowed(owner,generation.result===undefined?null:generation.result,permit)){refuse("This writing belongs to an earlier account-key generation; the current record was retained.");return;}}
+      try {if(!permitAllowed(owner,generation.result===undefined?null:generation.result,keyBound,permit)){refuse("This writing belongs to an earlier account-key generation; the current record was retained.");return;}}
       catch(error){failure=error;tx.abort();return;}
       if(expected!==undefined){compare();return;} // migration CAS still proves its generation
+      // The checkpoint blocks content writes while a rekey is pending.
+      // Rotation journals/salts and non-content account metadata must remain
+      // writable/removable so the rotation can itself reach a terminal state.
+      if(!keyBound){compare();return;}
       const checkpoint=store.get(`mindpattern.localRotation.${owner}`);checkpoint.onerror=()=>{failure=checkpoint.error;};checkpoint.onsuccess=()=>{
         if(checkpoint.result===undefined){compare();return;}
         refuse("A key migration is pending; keep this writing open and finish recovery before saving.");

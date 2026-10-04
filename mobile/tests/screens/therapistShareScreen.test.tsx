@@ -439,7 +439,7 @@ describe("cancel paths", () => {
   });
 });
 
-describe("M-25: sharing-disclosure version gate (v2)", () => {
+describe("M-25: sharing-disclosure version gate (v3)", () => {
   /** Same drive as the grant describe's helper: code → lookup → confirm →
    *  the password card. */
   async function drive(root: Awaited<ReturnType<typeof render>>): Promise<void> {
@@ -452,16 +452,16 @@ describe("M-25: sharing-disclosure version gate (v2)", () => {
     await flush();
   }
 
-  it("a matching v2 server offers the normal grant flow", async () => {
+  it("a matching v3 server offers the normal grant flow", async () => {
     vi.mocked(api.meta).mockResolvedValue({
       sharing_available: true,
-      sharing_disclosure_version: "v2",
+      sharing_disclosure_version: "v3",
     } as never);
     const root = await render(<TherapistShareScreen navigation={nav} />);
     await flush();
     expect(textOf(root)).toContain("Add your therapist");
     expect(textOf(root)).not.toContain("Sharing terms updated");
-    // The v2 disclosure names measures explicitly.
+    // The v3 disclosure names the full measure scope explicitly.
     expect(textOf(root)).not.toContain("wellbeing measures"); // not on this screen yet (lookup card)
   });
 
@@ -474,15 +474,15 @@ describe("M-25: sharing-disclosure version gate (v2)", () => {
     await flush();
     const text = textOf(root);
     expect(text).toContain("Sharing terms updated");
-    expect(text).toContain("wellbeing measures (PHQ-9 questionnaires)");
+    expect(text).toContain("PHQ-9, GAD-7 and PHQ-2 wellbeing questionnaires");
     expect(text).not.toContain("Add your therapist");
     expect(text).not.toContain("e.g. 7X2KQM4N");
   });
 
-  it("a NEWER server disclosure (v3) shows the same calm state", async () => {
+  it("a NEWER server disclosure (v4) shows the same calm state", async () => {
     vi.mocked(api.meta).mockResolvedValue({
       sharing_available: true,
-      sharing_disclosure_version: "v3",
+      sharing_disclosure_version: "v4",
     } as never);
     const root = await render(<TherapistShareScreen navigation={nav} />);
     await flush();

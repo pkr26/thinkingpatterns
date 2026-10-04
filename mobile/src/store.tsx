@@ -10,11 +10,11 @@
  * identities every render used to refire those effects — double fetch and
  * double decrypt per mount.
  */
-import { retryPendingAccountErasures } from "./accountErasure";
+import { eraseDeletedAccountLocals, retryPendingAccountErasures } from "./accountErasure";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
 import { api, setOriginChangeHandler, setUnauthorizedHandler } from "./api/client";
-import { localWriteScopeEpoch } from "./localWriteGuard";
+import { commitActiveAccountWrite, localWriteScopeEpoch } from "./localWriteGuard";
 import { vault } from "./vault";
 import { clearUnlockProof } from "./unlockProof";
 import { clearRecomputeStamp } from "./brainSync";
@@ -27,6 +27,7 @@ import { disableBiometricUnlock } from "./biometricUnlock";
 import { cancelDailyReminder, cancelMeasureReminder } from "./nativeFeatures";
 import { loadHapticsSetting } from "./haptics";
 import type { JournalDraft } from "./journalDraft";
+import { scrubAllVoiceScratchFiles } from "./audio/voiceScratch";
 
 /** A 401-forced lock unmounts the Entry screen mid-draft; the plaintext
  *  waits here (memory-only, account-bound) so re-unlocking restores it for
@@ -109,6 +110,7 @@ interface SessionState {
   activeDaysKnown: boolean;
   activeDaysLoading: boolean;
   unlockDays: number;
+  erasureIncomplete: boolean;
   markLoggedIn: () => void;
   setUnlockDays: (days: number) => void;
   /** Restarts the foreground inactivity countdown; call from real user
@@ -132,6 +134,7 @@ const SessionContext = createContext<SessionState>({
   activeDaysKnown: false,
   activeDaysLoading: false,
   unlockDays: 30,
+  erasureIncomplete: false,
   markLoggedIn: () => {},
   setUnlockDays: () => {},
   touchActivity: () => {},
@@ -153,6 +156,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const accountGeneration = useRef(0);
   const progressRequest = useRef(0);
   const [unlockDays, setUnlockDays] = useState(30);
+  const [erasureIncomplete, setErasureIncomplete] = useState(false);
 
   /** (Re)arm the inactivity lock: drop any pending timer and start a fresh
    *  countdown, but only while the vault is actually unlocked. */
@@ -169,12 +173,28 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
-    const bootGeneration = accountGeneration.current, bootScope = localWriteScopeEpoch();
-    const ownsBootAccount = () => !cancelled && bootGeneration === accountGeneration.current && bootScope === localWriteScopeEpoch();
+    const bootGeneration = accountGeneration.current;
+    const ownsBootGeneration = () => !cancelled && bootGeneration === accountGeneration.current;
     // Any authenticated 401 (entry save, insights fetch, question fetch,
     // queue flush — not just the Entry screen) locks the vault app-wide;
     // the client invokes this hook before the ApiError reaches the caller.
-    setUnauthorizedHandler(() => vault.lock());
+    setUnauthorizedHandler((death) => {
+      vault.lock();
+      if (!death.accountDeleted) return;
+      accountGeneration.current++;
+      abortInFlightFlush(); abortInFlightAudioFlush();
+      mayStashDraft = false; stashedDraft = null;
+      setAuthStatus("loggedOut");
+      setActiveDays(0); progressOwner.current = null;
+      setActiveDaysKnown(false); setActiveDaysLoading(false);
+      if (death.userId) {
+        void eraseDeletedAccountLocals(death.userId, death.username, { origin: death.origin })
+          .then(failures => setErasureIncomplete(failures.length > 0))
+          .catch(() => setErasureIncomplete(true));
+      } else {
+        void api.clearSession().catch(() => {});
+      }
+    });
     // An API-origin change is not an ordinary sign-out: it must never call
     // logout against the old or new server. The API client has already
     // erased disk credentials before invoking this hook; lock memory and
@@ -192,42 +212,57 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       setActiveDays(0);
       progressOwner.current = null; setActiveDaysKnown(false); setActiveDaysLoading(false);
     });
-    api.isLoggedIn().then((logged) => {
-      // Stryker disable next-line ConditionalExpression: React 18 made setState on an unmounted component a silent no-op, so skipping the cancelled guard is unobservable
-      if (ownsBootAccount()) setAuthStatus(logged ? "loggedIn" : "loggedOut");
-    });
     // Audit fix 19 (2026-09-21): the haptics preference loads at session
     // start, not on the first Settings visit — the module defaults to
     // enabled, so a stored "off" (the sensory-anxiety setting) pulsed after
     // every cold start until Settings happened to be opened.
     void loadHapticsSetting();
-    void retryPendingAccountErasures().catch(() => {});
-    // Local-reminder reconciliation (2026-09-19), once per session start:
-    // align the native schedule with the stored per-account preference —
-    // disabled/absent cancels any stale schedule, enabled reschedules.
-    // Nothing is ever CREATED without the opt-in (reminders.ts default is
-    // off), and the whole path is quiet: a missing notification module or
-    // a storage fault answers false and changes nothing on screen.
-    api
-      .getUserId()
-      .then((userId) => {
-        if (!ownsBootAccount()) return;
+    // Pending authoritative erasure owns the boot barrier. Credential
+    // hydration, unlock navigation, reminders, and authenticated metadata
+    // cannot observe the retained tuple until retry has first retired it.
+    void (async () => {
+      try { await scrubAllVoiceScratchFiles(); }
+      catch {
+        if (ownsBootGeneration()) {
+          setErasureIncomplete(true);
+          setAuthStatus("loggedOut");
+        }
+        return;
+      }
+      let remaining: number;
+      try { remaining = await retryPendingAccountErasures(); }
+      catch {
+        if (ownsBootGeneration()) {
+          setErasureIncomplete(true);
+          setAuthStatus("loggedOut");
+        }
+        return;
+      }
+      if (!ownsBootGeneration()) return;
+      setErasureIncomplete(remaining > 0);
+      if (remaining > 0) {
+        setAuthStatus("loggedOut");
+        return;
+      }
+      const logged = await api.isLoggedIn().catch(() => false);
+      // isLoggedIn restores the process-local owner after a cold restart;
+      // fence all following hydration work to that newly established scope.
+      const hydrationScope = localWriteScopeEpoch();
+      if (!ownsBootGeneration() || hydrationScope !== localWriteScopeEpoch()) return;
+      setAuthStatus(logged ? "loggedIn" : "loggedOut");
+
+      // Local-reminder reconciliation (2026-09-19), once per clean boot:
+      // nothing is created without its persisted opt-in.
+      api.getUserId().then((userId) => {
+        if (!ownsBootGeneration() || hydrationScope !== localWriteScopeEpoch()) return;
         if (userId) void syncReminderSchedule(userId);
-        // The MBC check-in nudge rides the same session-start
-        // reconciliation (2026-09-27): opt-in + cadence decide, and a
-        // nudge that has become stale (a measure was completed since it
-        // was scheduled) dies here.
         if (userId) void syncMeasureReminderSchedule(userId);
-      })
-      .catch(() => {});
-    api
-      .meta()
-      .then((m) => {
-        // Stryker disable next-line OptionalChaining: with a nullish m the mutant's TypeError lands in the .catch(() => {}) below and keeps the same 30-day default
+      }).catch(() => {});
+      api.meta().then((m) => {
         const days = sanitizeUnlockDays(m?.unlock_days);
-        if (!cancelled && bootScope === localWriteScopeEpoch() && days !== null) setUnlockDays(days);
-      })
-      .catch(() => {}); // offline / old server: keep the 30-day default
+        if (ownsBootGeneration() && hydrationScope === localWriteScopeEpoch() && days !== null) setUnlockDays(days);
+      }).catch(() => {}); // offline / old server: keep the 30-day default
+    })();
     // Cold restart: the bearer token survives on disk but the key vault
     // does not — navigation shows the unlock gate until it reopens.
     const unsubscribe = vault.subscribe(() => {
@@ -272,6 +307,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     accountGeneration.current++;
     mayStashDraft = true;
     setAuthStatus("loggedIn");
+    setErasureIncomplete(false);
   },
   // Stryker disable next-line ArrayDeclaration: a string-literal element is reference-stable, so React's Object.is dep comparison never sees a change — identical to []
   []);
@@ -371,12 +407,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       return isCurrent();
     };
     if (userId) {
-      if (!(await clean(() => clearRecomputeStamp(userId)))) return;
-      if (!(await clean(() => clearUnlockProof(userId)))) return;
-      if (!(await clean(() => clearCrisisDialogStamp(userId)))) return;
-      if (!(await clean(() => clearLastMeasureDate(userId)))) return;
-      if (!(await clean(() => clearMeasureReminderPrefs(userId)))) return;
-      if (!(await clean(() => disableBiometricUnlock(userId)))) return;
+      const cleanOwned = (operation: () => Promise<unknown>) => clean(() => commitActiveAccountWrite(userId, operation));
+      if (!(await cleanOwned(() => clearRecomputeStamp(userId)))) return;
+      if (!(await cleanOwned(() => clearUnlockProof(userId)))) return;
+      if (!(await cleanOwned(() => clearCrisisDialogStamp(userId)))) return;
+      if (!(await cleanOwned(() => clearLastMeasureDate(userId)))) return;
+      if (!(await cleanOwned(() => clearMeasureReminderPrefs(userId)))) return;
+      if (!(await cleanOwned(() => disableBiometricUnlock(userId)))) return;
     }
     if (!(await clean(cancelDailyReminder))) return;
     if (!(await clean(cancelMeasureReminder))) return;
@@ -401,6 +438,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       activeDaysKnown,
       activeDaysLoading,
       unlockDays,
+      erasureIncomplete,
       markLoggedIn,
       setUnlockDays,
       touchActivity,
@@ -410,7 +448,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       finishProgressRead,
       signOut,
     }),
-    [authStatus, unlocked, activeDays, activeDaysKnown, activeDaysLoading, unlockDays, markLoggedIn, touchActivity, refreshActiveDays, applyActiveDays, beginProgressRead, finishProgressRead, signOut],
+    [authStatus, unlocked, activeDays, activeDaysKnown, activeDaysLoading, unlockDays, erasureIncomplete, markLoggedIn, touchActivity, refreshActiveDays, applyActiveDays, beginProgressRead, finishProgressRead, signOut],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

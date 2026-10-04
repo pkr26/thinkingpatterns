@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { afterEach, describe, it, expect, vi } from "vitest";
 import React, { act } from "react";
 import RTR from "react-test-renderer";

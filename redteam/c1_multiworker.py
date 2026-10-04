@@ -143,6 +143,7 @@ async def register(username: str) -> dict:
                 "username": username,
                 "salt": base64.b64encode(salt).decode(),
                 "verifier": base64.b64encode(ak).decode(),
+                "age_attestation": "minimum_age_confirmed_v1",
             },
         )
         r.raise_for_status()

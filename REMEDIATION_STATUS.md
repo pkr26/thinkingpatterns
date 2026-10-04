@@ -63,7 +63,7 @@ remain in the evidence directory so they cannot be mistaken for fresh passes.
 | Real encrypted backup restore | **PASS** current Docker helper encrypts and tags with one resolved secret; authenticated private-snapshot decrypt feeds real pg_restore. All fixture rows and latest schema match; restored ciphertext authenticates. [Log](reports/remediation-2026-10-03/validation-logs/backup-restore-final.log) |
 | Tooling adversarial contracts | **19 passed**: inclusive mutation floors, incomplete/runtime-error rejection, lost-kill rejection, exact campaign/verdict inventory, skipped-attack refusal, byte-exact AAD vectors, actual OpenSSL round trips, tampering, long-key rejection, in-place replacement and secret-rotation consistency. [Log](reports/remediation-2026-10-03/validation-logs/tooling-contracts-final.log) |
 | Current red-team campaigns | **All 11 campaigns/108 expected verdicts complete; zero harness errors**: 89 BLOCKED, 4 FINDING, 13 INFO, 2 PARTIAL in the independent rerun. The original 92/4/10/2 count overstated three unexercised multi-worker probes as BLOCKED. Three architectural findings remain documented; mobile registry advisories remain a fourth finding and fail the hard release/audit policy. Completeness is not a clean-security claim. [Summary](reports/remediation-2026-10-03/redteam-summary.json) |
-| Monitoring | Pinned real promtool validates configuration/rules and healthy/boundary/sustained-fault cases for seven alert rules across eight scenarios. This proves rule behavior, not delivered pages to an operator. [Log](reports/remediation-2026-10-03/validation-logs/promtool-alert-tests.log) |
+| Monitoring | Pinned real promtool validates the checked-in configuration and ten current alert rules, including audit-journal and audio-deletion failure cases. This proves rule behavior, not delivered pages to an operator; the linked October 3 log predates those added rules. [Historical log](reports/remediation-2026-10-03/validation-logs/promtool-alert-tests.log) |
 | Development Compose | **PASS** `config --quiet` with documented local image tags, after repairing the dev overlay. Omitted required image inputs still fail as intended; no development stack is claimed deployed. [Log](reports/remediation-2026-10-03/validation-logs/compose-dev-configured-final.log) |
 | Source/configuration | Backend Ruff formatting/lint and mypy across 46 application files; client typechecks; 234 project Python files, 21 YAML/workflow files and 58 JSON files parse, including publication evidence and the manifest; all ten shell scripts pass warning-level shellcheck. Source whitespace checks preserve verbatim terminal logs. |
 
@@ -73,14 +73,15 @@ CAS and decrypts the original seeded clinician revision after security changes.
 Earlier fresh-seed evidence also exercises active patient grant rewrapping.
 The [local migration recovery guide](reports/remediation-2026-10-03/local-migration-recovery.md)
 explains retained competing branches; an automatic reconciliation chooser has
-not been implemented. No coverage floor, dependency audit, placeholder gate or
-signing gate has been lowered to make a result green.
+not been implemented. No coverage floor, dependency audit, release security-contact
+validation or signing gate has been lowered to make a result green.
 
 ## Release work that remains
 
-1. **Real operator configuration.** The patient build compiles and stamps SRI,
-   then fails its unchanged `security.txt` placeholder check. Set the actual
-   monitored security contact/canonical URL and deployed HTTPS API origin.
+1. **Real operator configuration.** A generic patient build compiles, stamps
+   SRI and omits `security.txt`; a tagged release fails closed unless validated
+   monitored contact, canonical URL and bounded future expiry variables are
+   supplied. Set those real values and the deployed HTTPS API origin.
    Supply private signing material through the documented local/CI secret
    mechanisms. No example contact or key has been invented.
 2. **Upstream dependency resolution.** Mobile npm audit still reports 28 high

@@ -38,6 +38,7 @@ export const __resetFiles = (): void => {
   readAsStringAsync.mockClear();
   writeAsStringAsync.mockClear();
   deleteAsync.mockClear();
+  makeDirectoryAsync.mockClear();
 };
 
 export default {

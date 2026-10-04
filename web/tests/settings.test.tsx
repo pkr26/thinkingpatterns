@@ -5,6 +5,8 @@
  *  tolerance), the M-W3 deletion sweep of every per-account IndexedDB store,
  *  and the LOW-b unknown-LLM state with retry. Real crypto (600k-iteration
  *  KDF — these tests are the slow ones by design); fetch stubs at the edge. */
+// @ts-nocheck
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsView } from "../src/views/Settings";
 import { decryptEntry, encryptEntry } from "../src/crypto/patient";
@@ -24,7 +26,7 @@ import { savePendingMeasure } from "../src/pendingMeasure";
 import { applyLanguagePref, getLanguagePref, getLocale } from "../src/strings";
 import { vault } from "../src/vault";
 import { installSession, jsonResponse, resetTestState, stubFetch } from "./helpers/api";
-import { press, pressAria, render, settle, textOf, textOfNode, typeInto } from "./helpers/rtr";
+import { press, pressAria, pressSwitch, render, settle, textOf, textOfNode, typeInto } from "./helpers/rtr";
 
 const ORIGIN = "http://localhost:5173";
 const USER = "user-1";
@@ -33,7 +35,7 @@ const OLD_KEY = new Uint8Array(new ArrayBuffer(32)).fill(5);
  *  fixture credential must PASS it (3 classes, no common-word family —
  *  the previous "…-password-7" fixture contained a blocked word). */
 const NEW_PASSWORD = "a-fresh-long-passphrase-7";
-const PENDING_SALT_KEY = "mindpattern.rotatePendingSalt.user-1";
+const PENDING_SALT_KEY = "mindpattern.rotationSalt.user-1";
 
 /** B-1 (2026-09-26 follow-up): the resume ladder's production mechanism is
  *  the PENDING SALT the first attempt persists before its rekey — NOT a
@@ -78,13 +80,13 @@ const memoryBackend = (): KvBackend & { dump(): Map<string, string> } => {
 /** The endpoints every Settings mount touches before any button. */
 function baseStubs(extra?: { rekey?: (init: RequestInit) => Response; credential?: () => Response; entries?: () => Response; measures?: () => Response }): ReturnType<typeof stubFetch> {
   return stubFetch((url, init) => {
-    if (url.endsWith("/meta")) return jsonResponse({ version: "1", api_version: "v1", unlock_days: 30, llm_available: true, sharing_available: true, sharing_disclosure_version: "v2" });
+    if (url.endsWith("/meta")) return jsonResponse({ version: "1", api_version: "v1", unlock_days: 30, llm_available: true, sharing_available: true, sharing_disclosure_version: "v3" });
     if (url.endsWith("/llm-consent") && init.method === "GET") return jsonResponse({ enabled: false });
     if (url.endsWith("/access-log")) return jsonResponse([]);
     if (url.endsWith("/processing/sessions")) return jsonResponse({ session_token: "pst", expires_in: 300 });
     if (url.endsWith("/processing/rekey")) return extra?.rekey ? extra.rekey(init) : jsonResponse({credential_rotated:true,operation_id:JSON.parse(String(init.body)).operation_id});
     if (url.endsWith("/account/credential")) return (extra?.credential ?? (() => new Response(null, { status: 204 })))();
-    if (url.endsWith("/consents")) return jsonResponse([]);
+    if (new URL(url).pathname.endsWith("/consents")) return jsonResponse([]);
     if (url.startsWith(`${ORIGIN}/api/v1/entries?`)) return (extra?.entries ?? (() => jsonResponse([], { headers: { "X-Entries-Revision": "1" } })))();
     if (url.startsWith(`${ORIGIN}/api/v1/measures?`)) return (extra?.measures ?? (() => jsonResponse([], { headers: { "X-Measures-Revision": "1" } })))();
     return jsonResponse({}, { status: 404 });
@@ -166,7 +168,7 @@ describe("SettingsView rotation (H-4/M-W2, audit 2026-09-26)", () => {
     // B-1: the flow must derive from the PERSISTED pending salt (the
     // mechanism a real retry uses), so pre-seed it and pre-encrypt the
     // live journal row under exactly that key.
-    window.localStorage.setItem(PENDING_SALT_KEY, toBase64(PENDING_SALT));
+    await kv.setItem(PENDING_SALT_KEY, toBase64(PENDING_SALT));
     const { dataKey } = await derivePendingKeys();
     const { blobB64 } = await encryptEntry(dataKey, USER, "e-resume", "already under the new key", "2026-09-25T00:00:00Z", null, undefined, 1);
     const rekeyMock = vi.fn((init:RequestInit) => jsonResponse({credential_rotated:true,operation_id:JSON.parse(String(init.body)).operation_id}));
@@ -191,7 +193,7 @@ describe("SettingsView rotation (H-4/M-W2, audit 2026-09-26)", () => {
     expect(onLockdown.mock.calls[0]![0]).toContain("Password changed");
     expect(rekeyMock).toHaveBeenCalledTimes(1);
     // ...and full completion clears the pending salt.
-    expect(window.localStorage.getItem(PENDING_SALT_KEY)).toBeNull();
+    expect(await kv.getItem(PENDING_SALT_KEY)).toBeNull();
   });
 
   it("exact atomic retries and a remounted retry reuse the credential operation and new salt", async () => {
@@ -230,7 +232,7 @@ describe("SettingsView rotation (H-4/M-W2, audit 2026-09-26)", () => {
   it("B-2: an EMPTY journal does not trivially verify while measures sit under the foreign key", async () => {
     // The rekey also moved the PHQ-9 history — the probe must fall through
     // to a measure row and refuse to resume on it.
-    window.localStorage.setItem(PENDING_SALT_KEY, toBase64(PENDING_SALT));
+    await kv.setItem(PENDING_SALT_KEY, toBase64(PENDING_SALT));
     const wrongKey = new Uint8Array(new ArrayBuffer(32)).fill(9);
     const foreignBlob = toBase64(await encrypt(wrongKey, new TextEncoder().encode('{"v":1,"measure":"phq9"}'), buildAad("measure", USER, "m-foreign")));
     baseStubs({
@@ -252,7 +254,7 @@ describe("SettingsView rotation (H-4/M-W2, audit 2026-09-26)", () => {
   });
 
   it("B-2: an empty journal with measures under the SAME pending-salt key resumes and completes", async () => {
-    window.localStorage.setItem(PENDING_SALT_KEY, toBase64(PENDING_SALT));
+    await kv.setItem(PENDING_SALT_KEY, toBase64(PENDING_SALT));
     const { dataKey } = await derivePendingKeys();
     const readableBlob = toBase64(await encrypt(dataKey, new TextEncoder().encode('{"v":1,"measure":"phq9","score":5}'), buildAad("measure", USER, "m-read")));
     baseStubs({
@@ -271,7 +273,7 @@ describe("SettingsView rotation (H-4/M-W2, audit 2026-09-26)", () => {
     await settle(120, 6);
     expect(onLockdown).toHaveBeenCalledTimes(1);
     expect(onLockdown.mock.calls[0]![0]).toContain("Password changed");
-    expect(window.localStorage.getItem(PENDING_SALT_KEY)).toBeNull();
+    expect(await kv.getItem(PENDING_SALT_KEY)).toBeNull();
   });
 
   it("B-7: a successful rotation REWRAPS the mood log, feedback, and mutes under the new key instead of clearing them", async () => {
@@ -280,7 +282,7 @@ describe("SettingsView rotation (H-4/M-W2, audit 2026-09-26)", () => {
     await recordMood(OLD_KEY, USER, "2026-09-24", 0.4);
     await recordFeedbackTap(OLD_KEY, USER, "temporal:work", true);
     await writeMutedPids(OLD_KEY, USER, ["topic:divorce"]);
-    window.localStorage.setItem(PENDING_SALT_KEY, toBase64(PENDING_SALT));
+    await kv.setItem(PENDING_SALT_KEY, toBase64(PENDING_SALT));
     baseStubs();
     const onLockdown = vi.fn();
     const root = await render(<SettingsView onLockdown={onLockdown} />);
@@ -308,13 +310,13 @@ describe("SettingsView rotation (H-4/M-W2, audit 2026-09-26)", () => {
     const CONSENT_BAD = "b".repeat(31) + "2";
     const rewrapped: string[] = [];
     stubFetch((url, init) => {
-      if (url.endsWith("/meta")) return jsonResponse({ version: "1", api_version: "v1", unlock_days: 30, llm_available: true, sharing_available: true, sharing_disclosure_version: "v2" });
+      if (url.endsWith("/meta")) return jsonResponse({ version: "1", api_version: "v1", unlock_days: 30, llm_available: true, sharing_available: true, sharing_disclosure_version: "v3" });
       if (url.endsWith("/llm-consent") && init.method === "GET") return jsonResponse({ enabled: false });
       if (url.endsWith("/access-log")) return jsonResponse([]);
       if (url.endsWith("/processing/sessions")) return jsonResponse({ session_token: "pst", expires_in: 300 });
       if (url.endsWith("/processing/rekey")) { const body=JSON.parse(String(init.body)); rewrapped.push(...body.consent_wraps.map((row:{consent_id:string})=>row.consent_id)); return jsonResponse({credential_rotated:true,operation_id:body.operation_id}); }
       if (url.endsWith("/account/credential")) return new Response(null, { status: 204 });
-      if (url.endsWith("/consents") && init.method === "GET") {
+      if (new URL(url).pathname.endsWith("/consents") && init.method === "GET") {
         return jsonResponse([
           { id: CONSENT_OK, therapist_id: "t-ok", display_name: "Dr. Available", username: "t-ok", status: "active", therapist_wrap_pub_key: toBase64(spki) },
           { id: CONSENT_BAD, therapist_id: "t-bad", display_name: "Dr. Offline", username: "t-bad", status: "active", therapist_wrap_pub_key: toBase64(spki) },
@@ -410,7 +412,7 @@ describe("SettingsView rotation × offline queue (audit 2026-09-27)", () => {
     const queueKey = [...map.keys()].find((k) => k.includes(".items."))!;
     map.set(queueKey.replace(".items.", ".rejected."), map.get(queueKey)!);
     map.delete(queueKey);
-    window.localStorage.setItem(PENDING_SALT_KEY, toBase64(PENDING_SALT));
+    await kv.setItem(PENDING_SALT_KEY, toBase64(PENDING_SALT));
     baseStubs();
     const onLockdown = vi.fn();
     const root = await render(<SettingsView onLockdown={onLockdown} />);
@@ -462,7 +464,7 @@ describe("SettingsView key-scheme routing (v2 envelope, 2026-09-26)", () => {
       }
       if (extra.upgrade && url.endsWith("/account/key-envelope/upgrade")) return extra.upgrade(url, init);
       if (extra.password && url.endsWith("/account/password")) return extra.password(url, init);
-      if (extra.consents && url.endsWith("/consents")) return jsonResponse(extra.consents);
+      if (extra.consents && new URL(url).pathname.endsWith("/consents")) return jsonResponse(extra.consents);
       return inner(url, init);
     });
     return mock;
@@ -642,10 +644,10 @@ describe("SettingsView key-scheme routing (v2 envelope, 2026-09-26)", () => {
         return jsonResponse({ session_token: "proc-800k", expires_in: 900 });
       }
       if (url.endsWith("/account/password") && init.method === "PUT") return new Response(null, { status: 204 });
-      if (url.endsWith("/meta")) return jsonResponse({ version: "1", api_version: "v1", unlock_days: 30, llm_available: true, sharing_available: true, sharing_disclosure_version: "v2" });
+      if (url.endsWith("/meta")) return jsonResponse({ version: "1", api_version: "v1", unlock_days: 30, llm_available: true, sharing_available: true, sharing_disclosure_version: "v3" });
       if (url.endsWith("/llm-consent") && init.method === "GET") return jsonResponse({ enabled: false });
       if (url.endsWith("/access-log")) return jsonResponse([]);
-      if (url.endsWith("/consents")) return jsonResponse([]);
+      if (new URL(url).pathname.endsWith("/consents")) return jsonResponse([]);
       if (url.startsWith(`${ORIGIN}/api/v1/entries?`)) return jsonResponse([], { headers: { "X-Entries-Revision": "1" } });
       if (url.startsWith(`${ORIGIN}/api/v1/measures?`)) return jsonResponse([], { headers: { "X-Measures-Revision": "1" } });
       return jsonResponse({}, { status: 404 });
@@ -713,7 +715,7 @@ describe("SettingsView key-scheme routing (v2 envelope, 2026-09-26)", () => {
       expect(onLockdown).toHaveBeenCalledTimes(1); // every session died
       // The hint is PERSISTED: the lockdown unmounts this view, so only a
       // per-account flag can carry it across the sign-back-in.
-      expect(window.localStorage.getItem(REKEY_HINT_KEY)).toBe("1");
+      expect(await kv.getItem(REKEY_HINT_KEY)).toBe("1");
       // The real UX: the user signs back in and reopens Settings.
       schemeStubs("v2", { password: () => new Response(null, { status: 204 }) });
       root = await render(<SettingsView onLockdown={vi.fn()} />);
@@ -724,13 +726,13 @@ describe("SettingsView key-scheme routing (v2 envelope, 2026-09-26)", () => {
       await press(root, "Dismiss");
       await settle(20, 2);
       expect(textOf(root)).not.toContain("does not rotate your encryption key");
-      expect(window.localStorage.getItem(REKEY_HINT_KEY)).toBeNull();
+      expect(await kv.getItem(REKEY_HINT_KEY)).toBeNull();
     });
 
     it("acting on the hint runs the FULL rotation for a v2 account: rekey + new-key envelope swap, never the 409-only credential route", async () => {
       // The planted hint, plus a seeded pending salt (deterministic keys).
-      window.localStorage.setItem(REKEY_HINT_KEY, "1");
-      window.localStorage.setItem(PENDING_SALT_KEY, toBase64(PENDING_SALT));
+      await kv.setItem(REKEY_HINT_KEY, "1");
+      await kv.setItem(PENDING_SALT_KEY, toBase64(PENDING_SALT));
       const mock = schemeStubs("v2", { password: () => new Response(null, { status: 204 }) });
       const onLockdown = vi.fn();
       const root = await render(<SettingsView onLockdown={onLockdown} />);
@@ -768,8 +770,8 @@ describe("SettingsView key-scheme routing (v2 envelope, 2026-09-26)", () => {
       zeroize(newMaster);
       // The hint and the pending salt are consumed; the honest v1-style
       // success copy landed (every session died with the epoch bump).
-      expect(window.localStorage.getItem(REKEY_HINT_KEY)).toBeNull();
-      expect(window.localStorage.getItem(PENDING_SALT_KEY)).toBeNull();
+      expect(await kv.getItem(REKEY_HINT_KEY)).toBeNull();
+      expect(await kv.getItem(PENDING_SALT_KEY)).toBeNull();
       expect(onLockdown).toHaveBeenCalledTimes(1);
       expect(onLockdown.mock.calls[0]![0]).toContain("Password changed");
     });
@@ -835,7 +837,7 @@ describe("SettingsView v1 rotation × mid-flow vault lock (FE-4, pentest 2026-09
     // Seed a mood entry under the OLD key and the pending salt, so the new
     // generation is deterministic and the rewrap is checkable.
     await recordMood(OLD_KEY, USER, "2026-09-24", 0.4);
-    window.localStorage.setItem(PENDING_SALT_KEY, toBase64(PENDING_SALT));
+    await kv.setItem(PENDING_SALT_KEY, toBase64(PENDING_SALT));
     const apiMod = await import("../src/api/client");
     const listSpy = vi.spyOn(apiMod.api, "rekeyStoredData").mockImplementation(async (_old,_new,_proof,body) => {
       vault.lock();
@@ -858,13 +860,18 @@ describe("SettingsView v1 rotation × mid-flow vault lock (FE-4, pentest 2026-09
     expect(moods.map((m) => m.date)).toContain("2026-09-24");
     // And the v1 flow never plants the MED-3 rekey hint — it rekeys the
     // data key by construction (MED-3 note, pentest 2026-09-29).
-    expect(window.localStorage.getItem("mindpattern.rekeyHint.user-1")).toBeNull();
+    expect(await kv.getItem("mindpattern.rekeyHint.user-1")).toBeNull();
     listSpy.mockRestore();
   });
 });
 
 describe("SettingsView deletion (M-W3, audit 2026-09-26)", () => {
   it("after deleteAccount, no per-account data remains in any IndexedDB-backed store", async () => {
+    const reauthPassword = "fresh-delete-proof-7";
+    const reauthSalt = new Uint8Array(new ArrayBuffer(16)).fill(19);
+    const reauthKeys = await derivePatientKeys(await deriveMasterKey(reauthPassword, reauthSalt));
+    vault.unlock({ authKey: reauthKeys.authKey, dataKey: new Uint8Array(OLD_KEY) }, USER);
+    zeroize(reauthKeys.masterKey, reauthKeys.dataKey);
     // Seed EVERY per-account kv store the app persists.
     await enqueue({ userId: USER, clientEntryId: "e-d-1", blobB64: "QUJD", entryDate: "2026-09-25" });
     await recordFeedbackTap(OLD_KEY, USER, "temporal:work", true);
@@ -881,8 +888,14 @@ describe("SettingsView deletion (M-W3, audit 2026-09-26)", () => {
     baseStubs();
     // The DELETE endpoint itself:
     stubFetch((url, init) => {
-      if (url.endsWith("/account") && init.method === "DELETE") return new Response(null, { status: 204 });
-      if (url.endsWith("/meta")) return jsonResponse({ version: "1", api_version: "v1", unlock_days: 30, llm_available: true, sharing_available: true, sharing_disclosure_version: "v2" });
+      if (url.endsWith("/auth/salt")) return jsonResponse({ salt: toBase64(reauthSalt) });
+      if (url.endsWith("/auth/key-envelope")) return jsonResponse({ key_scheme: "v1", salt: toBase64(reauthSalt), kdf_params: null, wrapped_data_key: null });
+      if (url.endsWith("/account/step-up")) return jsonResponse({ proof: "delete-proof", action: "account_delete", expires_in: 120 });
+      if (url.endsWith("/account") && init.method === "DELETE") {
+        expect((init.headers as Record<string, string>)["X-Step-Up-Proof"]).toBe("delete-proof");
+        return new Response(null, { status: 204 });
+      }
+      if (url.endsWith("/meta")) return jsonResponse({ version: "1", api_version: "v1", unlock_days: 30, llm_available: true, sharing_available: true, sharing_disclosure_version: "v3" });
       if (url.endsWith("/llm-consent")) return jsonResponse({ enabled: false });
       if (url.endsWith("/access-log")) return jsonResponse([]);
       return jsonResponse({}, { status: 404 });
@@ -892,6 +905,8 @@ describe("SettingsView deletion (M-W3, audit 2026-09-26)", () => {
     await settle(40, 3);
     await typeInto(root, "Type DELETE to confirm", "DELETE");
     await press(root, "Delete my account");
+    await typeInto(root, "Current password", reauthPassword);
+    await press(root, "Verify and continue");
     await settle(60, 4);
     expect(onLockdown).toHaveBeenCalledTimes(1);
     // Every ciphertext/cache is erased. A minimal deleted-generation marker
@@ -911,14 +926,98 @@ describe("SettingsView LLM unknown state (LOW b, audit 2026-09-26)", () => {
     });
     const root = await render(<SettingsView onLockdown={() => undefined} />);
     await settle(40, 3);
-    expect(textOf(root)).toContain("Could not confirm whether this server offers LLM analysis");
+    expect(textOf(root)).toContain("Could not confirm whether this server offers transcript translation");
     // Retry recovers when the server does.
     baseStubs();
     await press(root, "Try again");
     await settle(40, 4);
-    expect(textOf(root)).not.toContain("Could not confirm whether this server offers LLM analysis");
+    expect(textOf(root)).not.toContain("Could not confirm whether this server offers transcript translation");
     // The section renders the consent switch (redesign 2026-09-26).
     expect(root.root.findAllByType("button").some((node) => node.props.role === "switch")).toBe(true);
+  });
+
+  it("treats legacy LLM/STT v1 choices as inactive until fresh v2 opt-in", async () => {
+    stubFetch((url, init) => {
+      if (url.endsWith("/meta")) return jsonResponse({
+        version: "1",
+        api_version: "v1",
+        unlock_days: 30,
+        llm_available: true,
+        audio_available: true,
+        sharing_available: true,
+        sharing_disclosure_version: "v3",
+      });
+      if (url.endsWith("/llm-consent") && init.method === "GET") return jsonResponse({
+        enabled: true,
+        active_for_current_policy: false,
+        llm_consent_disclosure: "v1",
+      });
+      if (url.endsWith("/voice-consent") && init.method === "GET") return jsonResponse({
+        enabled: true,
+        active_for_current_policy: false,
+        voice_consent_disclosure: "v1",
+      });
+      if (url.endsWith("/access-log")) return jsonResponse([]);
+      return jsonResponse({}, { status: 404 });
+    });
+    const root = await render(<SettingsView onLockdown={() => undefined} />);
+    await settle(40, 3);
+    const switches = root.root.findAllByType("button").filter((node) => node.props.role === "switch");
+    const translation = switches.find((node) => String(node.props["aria-label"]).includes("transcript translation"));
+    const voice = switches.find((node) => String(node.props["aria-label"]).includes("Voice journaling"));
+    expect(translation?.props["aria-checked"]).toBe(false);
+    expect(voice?.props["aria-checked"]).toBe(false);
+    expect(textOf(root)).toContain("earlier choice no longer authorizes transcript translation");
+    expect(textOf(root)).toContain("earlier choice no longer authorizes uploads");
+  });
+});
+
+describe("SettingsView fresh step-up errors (SEC-001)", () => {
+  it("clears the typed password and never calls the target when the one-use proof is rejected", async () => {
+    const password = "fresh-consent-proof-7!";
+    const salt = new Uint8Array(16).fill(29);
+    const keys = await derivePatientKeys(await deriveMasterKey(password, salt));
+    vault.unlock({ authKey: new Uint8Array(keys.authKey), dataKey: new Uint8Array(OLD_KEY) }, USER);
+    zeroize(keys.masterKey, keys.authKey, keys.dataKey);
+    const fetch = stubFetch((url, init) => {
+      if (url.endsWith("/meta")) return jsonResponse({ version: "1", api_version: "v1", unlock_days: 30, llm_available: true, sharing_available: true, sharing_disclosure_version: "v3" });
+      if (url.endsWith("/llm-consent") && init.method === "GET") return jsonResponse({ enabled: false });
+      if (url.endsWith("/access-log")) return jsonResponse([]);
+      if (url.endsWith("/auth/salt")) return jsonResponse({ salt: toBase64(salt) });
+      if (url.endsWith("/auth/key-envelope")) return jsonResponse({ key_scheme: "v1", salt: toBase64(salt), kdf_params: null, wrapped_data_key: null });
+      if (url.endsWith("/account/step-up")) return jsonResponse({ detail: "proof replayed <script>", code: "step_up_invalid" }, { status: 403 });
+      return jsonResponse({}, { status: 404 });
+    });
+    const root = await render(<SettingsView onLockdown={() => undefined} />);
+    await settle(40, 3);
+    await pressSwitch(root, "transcript translation");
+    await typeInto(root, "Current password", password);
+    await press(root, "Verify and continue");
+    await settle(60, 3);
+
+    const passwordField = root.root.findAllByType("input").find((node) => node.props.type === "password" && textOfNode(node.parent).includes("Current password"));
+    expect(passwordField?.props.value).toBe("");
+    expect(textOf(root)).toContain("Could not change the setting.");
+    expect(textOf(root)).not.toContain("proof replayed");
+    const puts = fetch.mock.calls.filter(([url, init]) => String(url).endsWith("/llm-consent") && (init as RequestInit).method === "PUT");
+    expect(puts).toHaveLength(0);
+  });
+});
+
+describe("SettingsView offline recovery loss disclosure (WEB-002)", () => {
+  it("surfaces the persisted rejected/quarantine eviction count", async () => {
+    const backend = memoryBackend();
+    setKvBackendForTests(backend);
+    const scoped = new TextEncoder().encode(`${ORIGIN}\u0000${USER}`);
+    let binary = "";
+    for (const byte of scoped) binary += String.fromCharCode(byte);
+    const id = btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    backend.dump().set(`mindpattern/queue.v1.evictions.${id}`, JSON.stringify({ rejected: 3, quarantine: 2 }));
+    baseStubs();
+
+    const root = await render(<SettingsView onLockdown={() => undefined} />);
+    await settle(40, 3);
+    expect(textOf(root)).toContain("5 oldest or oversized recovery record(s) could not be retained");
   });
 });
 

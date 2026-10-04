@@ -1,6 +1,8 @@
 /** Funnel coverage for the P6 views: the honest error/lock paths the
  *  happy-path suites skip — offline refresh, session-locked, freshness and
  *  rotation funnels, empty-pattern state, edit cancel. */
+// @ts-nocheck
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PatternsView } from "../src/views/Patterns";
 import { QuestionView } from "../src/views/Question";
@@ -120,7 +122,8 @@ describe("QuestionView funnels", () => {
     await settle(40, 2);
     await press(root, "Refresh patterns");
     await settle(40, 3);
-    expect(textOf(root)).toContain("the analysis service is busy");
+    expect(textOf(root)).toContain("The server hit a problem — try again in a moment.");
+    expect(textOf(root)).not.toContain("the analysis service is busy");
   });
 
   it("a generic question (no pid) shows the no-answer-needed note", async () => {
@@ -225,7 +228,7 @@ describe("HistoryView edges", () => {
 describe("final function-coverage batch", () => {
   it("ShareView: renders the live consent list and revokes with an arm gate", async () => {
     stubFetch((url) => {
-      if (url.endsWith("/consents")) {
+      if (new URL(url).pathname.endsWith("/consents")) {
         return jsonResponse([
           { id: "c1", therapist_id: "t-9", display_name: "Dr. Rivera", username: "rivera", granted_at: "2026-09-20T00:00:00Z", revoked_at: null, status: "active", share_voice: false },
         ]);

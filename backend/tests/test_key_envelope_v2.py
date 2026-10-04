@@ -239,6 +239,7 @@ async def test_v2_registration_field_pairing_and_validation(client: AsyncClient)
                 "username": emu.username,
                 "salt": emu.salt_b64,
                 "verifier": emu.auth_key_b64,
+                "age_attestation": "minimum_age_confirmed_v1",
                 **partial,
             },
         )
@@ -260,6 +261,7 @@ async def test_v2_registration_field_pairing_and_validation(client: AsyncClient)
             "username": emu.username,
             "salt": emu.salt_b64,
             "verifier": emu.auth_key_b64,
+            "age_attestation": "minimum_age_confirmed_v1",
             "kdf_params": emu.kdf_params,
             "wrapped_data_key": argon_wrap,
         },

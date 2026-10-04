@@ -116,7 +116,8 @@ async def test_access_log_cursor_pagination_is_complete_and_unduplicated(client,
         cursor = page.headers.get("X-Next-Cursor")
         if not cursor:
             break
-    assert len(seen) == 7  # every row exactly once: no holes, no repeats
+    # Registration genesis plus seven seeded grants, every row exactly once.
+    assert len(seen) == 8
 
     bad = await client.get(
         "/api/account/access-log", headers=patient.headers, params={"cursor": "garbage"}

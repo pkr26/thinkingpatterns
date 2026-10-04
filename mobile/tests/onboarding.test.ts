@@ -17,7 +17,7 @@ const {
   loadOnboardingPanel,
 } = await import("../src/onboarding");
 
-const PANEL_KEY = "@mindpattern/onboarding_panel";
+const panelKey = (userId: string) => `@mindpattern/onboarding_panel_${userId}`;
 
 beforeEach(() => {
   storage.__reset();
@@ -124,32 +124,32 @@ describe("E-10 panel persistence (audit round 2, 2026-09-21, F-11)", () => {
   const PANEL_COUNT = 3;
 
   it("round-trips the saved panel index", async () => {
-    await saveOnboardingPanel(1);
-    expect(await loadOnboardingPanel(PANEL_COUNT)).toBe(1);
-    await saveOnboardingPanel(2);
-    expect(await loadOnboardingPanel(PANEL_COUNT)).toBe(2);
+    await saveOnboardingPanel(1, "panel-user-a");
+    expect(await loadOnboardingPanel(PANEL_COUNT, "panel-user-a")).toBe(1);
+    await saveOnboardingPanel(2, "panel-user-a");
+    expect(await loadOnboardingPanel(PANEL_COUNT, "panel-user-a")).toBe(2);
   });
 
   it("never adopts an out-of-bounds or malformed stored index — the flow restarts at panel 1", async () => {
     for (const bad of ["3", "99", "0", "-1", "abc", ""]) {
-      await storage.setItem(PANEL_KEY, bad);
-      expect(await loadOnboardingPanel(PANEL_COUNT)).toBe(0);
+      await storage.setItem(panelKey("panel-user-b"), bad);
+      expect(await loadOnboardingPanel(PANEL_COUNT, "panel-user-b")).toBe(0);
     }
     // Absent key (the common case): panel 1.
-    expect(await loadOnboardingPanel(PANEL_COUNT)).toBe(0);
+    expect(await loadOnboardingPanel(PANEL_COUNT, "panel-user-b")).toBe(0);
   });
 
   it("completion clears the resume position — it is meaningless once done", async () => {
-    await saveOnboardingPanel(1);
+    await saveOnboardingPanel(1, "panel-user-c");
     await recordOnboardingSeen("panel-user-c");
-    expect(await storage.getItem(PANEL_KEY)).toBeNull();
-    expect(await loadOnboardingPanel(PANEL_COUNT)).toBe(0);
+    expect(await storage.getItem(panelKey("panel-user-c"))).toBeNull();
+    expect(await loadOnboardingPanel(PANEL_COUNT, "panel-user-c")).toBe(0);
   });
 
   it("account deletion clears the resume position with the seen flag", async () => {
-    await saveOnboardingPanel(1);
+    await saveOnboardingPanel(1, "panel-user-d");
     await clearOnboardingSeen("panel-user-d");
-    expect(await storage.getItem(PANEL_KEY)).toBeNull();
-    expect(await loadOnboardingPanel(PANEL_COUNT)).toBe(0);
+    expect(await storage.getItem(panelKey("panel-user-d"))).toBeNull();
+    expect(await loadOnboardingPanel(PANEL_COUNT, "panel-user-d")).toBe(0);
   });
 });

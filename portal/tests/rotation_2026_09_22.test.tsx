@@ -358,10 +358,10 @@ describe("NEW-3/F.4: change password", () => {
     await typeInto(root, "New password", "intended-new-2!Strong");
     await typeInto(root, "Repeat new password", "intended-new-2!Strong");
     await press(root, "Change password");
-    await vi.waitFor(async () => { await flush(); expect(textOf(root)).toContain("invalid credentials"); expect(buttonByLabel(root,"Change password")).toBe(true); });
+    await vi.waitFor(async () => { await flush(); expect(textOf(root)).toContain("could not change the password"); expect(buttonByLabel(root,"Change password")).toBe(true); });
     expect(mockedApi.changePasswordAtomic).toHaveBeenCalledTimes(1);
     expect(onSessionsEnded).not.toHaveBeenCalled();
-    expect(textOf(root)).toContain("invalid credentials");
+    expect(textOf(root)).not.toContain("invalid credentials");
     // The failure was BEFORE the re-wrap, so no interrupted-change state:
     // recovery stays disabled (nothing was re-wrapped).
     const recover = root.root.findAllByType("button").find((n) => n.children.join("") === "Recover sharing key")!;

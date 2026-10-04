@@ -8,7 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import storage from "./helpers/storageMock";
-import { api, ApiError, DEFAULT_BASE_URL } from "../src/api/client";
+import { api, ApiError, DEFAULT_BASE_URL, MINIMUM_AGE_ATTESTATION } from "../src/api/client";
 
 const jsonResponse = (
   body: unknown,
@@ -39,7 +39,7 @@ afterEach(() => {
 
 describe("v2 registration wire shape", () => {
   it("sends kdf_params + wrapped_data_key as a pair when both are supplied", async () => {
-    await api.register("alice", "c2FsdA==", "dmVyaWZpZXI=", PARAMS, WRAPPED_60_B64);
+    await api.register("alice", "c2FsdA==", "dmVyaWZpZXI=", MINIMUM_AGE_ATTESTATION, PARAMS, WRAPPED_60_B64);
     const [url, init] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [
       string,
       RequestInit,
@@ -49,13 +49,14 @@ describe("v2 registration wire shape", () => {
       username: "alice",
       salt: "c2FsdA==",
       verifier: "dmVyaWZpZXI=",
+      age_attestation: MINIMUM_AGE_ATTESTATION,
       kdf_params: PARAMS,
       wrapped_data_key: WRAPPED_60_B64,
     });
   });
 
-  it("v1 registration sends NEITHER field (the historical body, byte-for-byte)", async () => {
-    await api.register("alice", "c2FsdA==", "dmVyaWZpZXI=");
+  it("v1 registration sends neither envelope field but keeps the required age attestation", async () => {
+    await api.register("alice", "c2FsdA==", "dmVyaWZpZXI=", MINIMUM_AGE_ATTESTATION);
     const [, init] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [
       string,
       RequestInit,
@@ -64,14 +65,15 @@ describe("v2 registration wire shape", () => {
       username: "alice",
       salt: "c2FsdA==",
       verifier: "dmVyaWZpZXI=",
+      age_attestation: MINIMUM_AGE_ATTESTATION,
     });
   });
 
   it("refuses a half pair locally — the server's 422 never needs to happen", async () => {
     // The pair check throws SYNCHRONOUSLY (the rewrapConsent id-check
     // idiom): no promise exists for .rejects to await.
-    expect(() => api.register("alice", "c2FsdA==", "dmVyaWZpZXI=", PARAMS)).toThrow(/together/);
-    expect(() => api.register("alice", "c2FsdA==", "dmVyaWZpZXI=", undefined, WRAPPED_60_B64)).toThrow(
+    expect(() => api.register("alice", "c2FsdA==", "dmVyaWZpZXI=", MINIMUM_AGE_ATTESTATION, PARAMS)).toThrow(/together/);
+    expect(() => api.register("alice", "c2FsdA==", "dmVyaWZpZXI=", MINIMUM_AGE_ATTESTATION, undefined, WRAPPED_60_B64)).toThrow(
       /together/,
     );
     expect(globalThis.fetch).not.toHaveBeenCalled();

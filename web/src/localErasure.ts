@@ -2,15 +2,12 @@
 import { kv,writeGenerationKey } from './kvstore';
 import { withLock } from './platform';
 import { resetEntryVersionMirrors } from './entryVersions';
+import { keyBelongsToOwner } from './ownerStorage';
 export interface ErasureTombstone { v:1; owner:string; remoteConfirmed:boolean; keys:string[] }
 const prefix='mindpattern.erase.';
 function owned(key:string,owner:string):boolean {
  if(key===writeGenerationKey(owner))return false; // minimal durable deleted-generation fence
- if (key.startsWith('mindpattern.') && key.endsWith(`.${owner}`) && !key.startsWith(prefix)) return true;
- const match=/^mindpattern\/queue\.v1\.(?:items|rejected|quarantine)\.([A-Za-z0-9_-]+)$/.exec(key);
- if (!match) return false;
- try { const binary=atob(match[1]!.replace(/-/g,'+').replace(/_/g,'/'));const decoded=new TextDecoder().decode(Uint8Array.from(binary,char=>char.charCodeAt(0)));return decoded.slice(decoded.indexOf('\0')+1)===owner && decoded.includes('\0'); }
- catch {return false;}
+ return keyBelongsToOwner(key,owner);
 }
 function parse(raw:string,id:string):ErasureTombstone {
  const row=JSON.parse(raw) as ErasureTombstone;
@@ -23,6 +20,21 @@ export async function stageLocalErasure(owner:string):Promise<void> {
   if(raw!==null){parse(raw,id);return;}
   const keys=(await kv.keys()).filter(key=>owned(key,owner));
   await kv.setItem(id,JSON.stringify({v:1,owner,remoteConfirmed:false,keys}));
+ });
+}
+/** An authenticated 410 is already the remote confirmation. Persist that
+ * fact before fencing/removing anything so a process death can only leave a
+ * retryable confirmed job, never an ambiguous prompt that asks the user to
+ * confirm a deletion the server has already completed. */
+export async function confirmRemoteLocalErasure(owner:string):Promise<void> {
+ await withLock('account-erasure',async()=>{
+  const id=`${prefix}${owner}`;const raw=await kv.getItem(id);
+  const row=raw===null
+   ? {v:1 as const,owner,remoteConfirmed:true,keys:(await kv.keys()).filter(key=>owned(key,owner))}
+   : parse(raw,id);
+  row.remoteConfirmed=true;
+  await kv.setItem(id,JSON.stringify(row));
+  await erase(row);
  });
 }
 function clearOwnedPreferences(owner:string):void {

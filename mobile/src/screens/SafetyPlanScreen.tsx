@@ -30,6 +30,7 @@ import {
   loadSafetyPlanDraft,
   saveSafetyPlanDraft,
   clearSafetyPlanDraft,
+  SafetyPlanReadError,
   SAFETY_PLAN_FIELDS,
   type SafetyPlan,
 } from "../safetyPlan";
@@ -46,6 +47,7 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
   const [plan, setPlan] = useState<SafetyPlan>(emptySafetyPlan);
   const [loading, setLoading] = useState(true);
   const [locked, setLocked] = useState(false);
+  const [readFailed, setReadFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [statusTone, setStatusTone] = useState<InlineStatusTone>("ok");
@@ -165,8 +167,11 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
           updatePlan(draft);
           showStatus(tr("safetyplan.draftRestored"), "ok");
         }
-      } catch {
-        if (!cancelled) setLocked(true);
+      } catch (error) {
+        if (!cancelled) {
+          if (error instanceof SafetyPlanReadError) setReadFailed(true);
+          else setLocked(true);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -186,18 +191,18 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
 
   // Android hardware back (audit 2026-09-28): while the editor is up with
   // unsaved changes, back is a DISCARD — confirm it like the on-screen Back
-  // button. A clean plan (or the locked/loading views) lets the navigator
+  // button. A clean plan (or the locked/loading/read-failed views) lets the navigator
   // pop normally.
   useEffect(() => {
     const onBack = () => {
-      if (loading || locked || !planIsDirty()) return false;
+      if (loading || locked || readFailed || !planIsDirty()) return false;
       confirmDiscardPlan(() => navigation.goBack());
       return true;
     };
     const sub = BackHandler.addEventListener("hardwareBackPress", onBack);
     return () => sub.remove();
     // Stryker disable next-line ArrayDeclaration: the handlers read refs (planRef/savedPlanRef) and stable closures; loading/locked alone gate the listener — re-running for other renders only re-attaches an identical listener
-  }, [loading, locked, navigation]);
+  }, [loading, locked, readFailed, navigation]);
 
   // Native header back and iOS gestures must share the dirty-plan guard.
   useEffect(() => {
@@ -267,6 +272,24 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
           {tr("safetyplan.lockedBody")}
         </Text>
         {/* Static crisis help stays reachable from here, pre-unlock as ever. */}
+        <GhostButton label={tr("buttons.needHelp")} onPress={() => navigation.navigate("Crisis")} />
+      </ScrollView>
+    );
+  }
+
+  if (readFailed) {
+    return (
+      <ScrollView
+        style={{ flex: 1, backgroundColor: t.colors.bg }}
+        contentContainerStyle={{ padding: t.spacing.xl, gap: t.spacing.lg }}
+      >
+        <Text style={{ color: t.colors.text, fontSize: t.type.title.fontSize, fontWeight: "700" }}>
+          {tr("safetyplan.readFailedTitle")}
+        </Text>
+        <Text style={{ color: t.colors.body, fontSize: t.type.bodySmall.fontSize, lineHeight: 19 }}>
+          {tr("safetyplan.readFailedBody")}
+        </Text>
+        <GhostButton label={tr("common.back")} onPress={() => navigation.goBack()} />
         <GhostButton label={tr("buttons.needHelp")} onPress={() => navigation.navigate("Crisis")} />
       </ScrollView>
     );

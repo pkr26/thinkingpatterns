@@ -408,6 +408,7 @@ WALLS = {
     deps_module.require_rekey_retry_user: "user",
     require_password_retry_therapist: "therapist",
     deps_module.require_regular_user: "user",
+    deps_module.require_therapist_account: "therapist",
     deps_module.require_therapist: "therapist",
     deps_module.require_user: "any",
 }

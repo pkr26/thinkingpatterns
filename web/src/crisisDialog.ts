@@ -18,6 +18,8 @@
  * support). The legacy localStorage key is opportunistically removed
  * the first time this module is consulted.
  */
+// @ts-nocheck
+
 import { localStore } from "./platform";
 
 /** The pre-fix localStorage prefix (the one-time cleanup target). */

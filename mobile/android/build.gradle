@@ -20,6 +20,22 @@ buildscript {
 
 apply plugin: "com.facebook.react.rootproject"
 
+// Consume the committed lock state wherever AGP exposes a stable, lockable
+// configuration. DEFAULT is intentional rather than a claim of global STRICT:
+// React Native/Expo adds many Android library subprojects from node_modules,
+// and AGP creates dependency-free metadata configurations after lock state
+// loading; those generated subprojects have no source-owned lockfile and make
+// LockMode.STRICT fail before resolution. Artifact verification remains
+// strict through gradle/verification-metadata.xml. CI regenerates the app and
+// settings locks with --write-locks and fails if either file changes, so a
+// newly resolved version/configuration cannot drift unnoticed.
+allprojects {
+    dependencyLocking {
+        lockAllConfigurations()
+        lockMode = LockMode.DEFAULT
+    }
+}
+
 // Expo LogBox declares BuildConfig fields but SDK 57 omits the explicit
 // feature flag required by AGP 9. Configure the library before its DSL
 // finalizes; the app's release/debug privacy configuration is unchanged.

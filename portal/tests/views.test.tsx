@@ -42,6 +42,8 @@ vi.mock("../src/api", async (importOriginal) => {
       newPairingCode: vi.fn(async () => ({ code: "7X2KQM4N", expires_in: 900 })),
       pairingSas: vi.fn(async () => ({ sas: "482 913", wrap_key_fingerprint: "a1b2c3d4e5f60718", expires_in: 900 })),
       patientMeasures: vi.fn(async () => ({ measures: [], nextOffset: null })),
+      totpSetup: vi.fn(async () => ({ secret_base32: "JBSWY3DPEHPK3PXP", otpauth_uri: "otpauth://totp/Fathom:test" })),
+      totpEnable: vi.fn(async () => ({ backup_codes: ["ABCDE12345", "FGHIJ67890"] })),
     },
   };
 });
@@ -118,6 +120,12 @@ const joinedLabel = (n: { props: { children?: unknown } }): string => {
   return parts.join("");
 };
 
+async function confirmMinimumAge(root: Awaited<ReturnType<typeof render>>): Promise<void> {
+  const checkbox = root.root.findAllByType("input").find((node) => node.props.type === "checkbox");
+  if (!checkbox) throw new Error("minimum-age confirmation checkbox is missing");
+  await act(async () => { checkbox.props.onChange({ target: { checked: true } }); });
+}
+
 const patient = {
   user_id: "user-1",
   username: "patienta",
@@ -149,6 +157,38 @@ beforeEach(() => {
 });
 
 describe("LoginView", () => {
+  it("drops the setup secret and verifier after MFA enable, and revokes an abandoned handoff", async () => {
+    mockedAuth.login.mockResolvedValueOnce({ token: "unenrolled-token", user_id: "therapist-1", expires_in: 900, role: "therapist", mfa_enrollment_required: true });
+    const onReady = vi.fn(async () => { throw new Error("local portal unlock failed"); });
+    const root = await render(<LoginView onReady={onReady} />);
+    await typeInto(root, "Username", "drportal");
+    await typeInto(root, "Password", "pw");
+    await press(root, "Sign in");
+    await flush();
+    expect(textOf(root)).toContain("JBSWY3DPEHPK3PXP");
+    expect(textOf(root)).toContain("otpauth://");
+
+    await typeInto(root, "Authenticator code", "123456");
+    await press(root, "Enable two-factor authentication");
+    await flush();
+    expect(textOf(root)).toContain("ABCDE12345");
+    expect(textOf(root)).not.toContain("JBSWY3DPEHPK3PXP");
+    expect(textOf(root)).not.toContain("otpauth://");
+
+    await press(root, "I saved the codes — continue");
+    await flush();
+    expect(mockedAuth.logoutBearer).toHaveBeenCalledWith(expect.any(String), "unenrolled-token");
+    expect(textOf(root)).toContain("Two-factor authentication is enabled");
+    expect(textOf(root)).toContain("ABCDE12345");
+    expect(textOf(root)).toContain("I saved the codes — return to sign in");
+    expect(textOf(root)).not.toContain("JBSWY3DPEHPK3PXP");
+
+    await press(root, "I saved the codes — return to sign in");
+    await flush();
+    expect(textOf(root)).toContain("Sign in");
+    expect(textOf(root)).not.toContain("ABCDE12345");
+  });
+
   it("requires a genuinely strong registration password while allowing a long passphrase", async () => {
     expect(passwordPolicyError("one")).toContain("12");
     expect(passwordPolicyError("alllowercase12")).toContain("three character types");
@@ -222,6 +262,18 @@ describe("LoginView", () => {
     expect(textOf(root)).toContain("Sign-in failed — check your username and password.");
   });
 
+  it("never renders hostile or non-English API detail during sign-in", async () => {
+    const hostile = "<script>alert(1)</script> credenciales rechazadas";
+    mockedAuth.login.mockRejectedValueOnce(new ApiError(400, hostile, "unexpected"));
+    const root = await render(<LoginView onReady={vi.fn()} />);
+    await typeInto(root, "Username", "drportal");
+    await typeInto(root, "Password", "wrong");
+    await press(root, "Sign in");
+    await flush();
+    expect(textOf(root)).toContain("Sign-in failed — check your details and try again.");
+    expect(textOf(root)).not.toContain(hostile);
+  });
+
   it("a non-Error sign-in failure shows the generic fallback, and Back-to-sign-in works", async () => {
     mockedAuth.login.mockRejectedValueOnce("offline");
     let root = await render(<LoginView onReady={vi.fn()} />);
@@ -245,6 +297,7 @@ describe("LoginView", () => {
     await typeInto(root, "Username", "drnew");
     await typeInto(root, "Password", "Strong!pass123");
     await typeInto(root, "Repeat password", "Strong!pass123");
+    await confirmMinimumAge(root);
     await press(root, "Create account");
     await flush();
     expect(textOf(root)).toContain("username already taken");
@@ -258,9 +311,26 @@ describe("LoginView", () => {
     await typeInto(root, "Username", "drnew");
     await typeInto(root, "Password", "Strong!pass123");
     await typeInto(root, "Repeat password", "Strong!pass123");
+    await confirmMinimumAge(root);
     await press(root, "Create account");
     await flush();
     expect(textOf(root)).toContain("registration failed");
+  });
+
+  it("maps registration API failures to stable client copy without rendering server detail", async () => {
+    const hostile = "<img src=x onerror=alert(1)> usuario ya existe";
+    mockedAuth.registerTherapist.mockRejectedValueOnce(new ApiError(409, hostile, "conflict"));
+    const root = await render(<LoginView onReady={vi.fn()} />);
+    await press(root, "Create a therapist account instead");
+    await flush();
+    await typeInto(root, "Username", "drnew");
+    await typeInto(root, "Password", "Strong!pass123");
+    await typeInto(root, "Repeat password", "Strong!pass123");
+    await confirmMinimumAge(root);
+    await press(root, "Create account");
+    await flush();
+    expect(textOf(root)).toContain("That username is already in use.");
+    expect(textOf(root)).not.toContain(hostile);
   });
 
   it("registers: mismatched passwords blocked; happy path seals the key", async () => {
@@ -272,6 +342,7 @@ describe("LoginView", () => {
     await typeInto(root, "Username", "drnew");
     await typeInto(root, "Password", "Strong!pass123");
     await typeInto(root, "Repeat password", "two");
+    await confirmMinimumAge(root);
     await press(root, "Create account");
     await flush();
     expect(textOf(root)).toContain("passwords do not match");
@@ -299,6 +370,7 @@ describe("LoginView", () => {
     await typeInto(root, "Username", "drnew");
     await typeInto(root, "Password", "Strong!pass123");
     await typeInto(root, "Repeat password", "Strong!pass123");
+    await confirmMinimumAge(root);
     await press(root, "Create account");
     await flush();
     expect(mockedAuth.registerTherapist).toHaveBeenCalledWith(
@@ -318,6 +390,7 @@ describe("LoginView", () => {
     await typeInto(root, "Password", "Strong!pass123");
     await typeInto(root, "Repeat password", "Strong!pass123");
     await typeInto(root, "Clinician enrollment token", "managed-enrollment-token");
+    await confirmMinimumAge(root);
     await press(root, "Create account");
     await flush();
     expect(mockedAuth.registerTherapist).toHaveBeenCalledWith(
@@ -2104,7 +2177,9 @@ describe("PatientView note history decrypt failure (2026-09-26 audit round, L)",
       expect(textOf(root)).toContain("(earlier versions could not be decrypted)");
       expect(textOf(root)).not.toContain("no earlier text recorded");
       // And the failure is logged, not silently swallowed.
-      expect(warned).toHaveBeenCalledWith("note history failed to decrypt", expect.objectContaining({ noteId: "n0" }));
+      expect(warned).toHaveBeenCalledWith("note_history_decrypt_failed");
+      expect(JSON.stringify(warned.mock.calls)).not.toContain("n0");
+      expect(JSON.stringify(warned.mock.calls)).not.toContain("TamperError");
       // The print-only summary is equally honest about the failure.
       const printOnly = root.root.findAllByType("div").find((n) => n.props.className === "print-only");
       expect(rtr.textOfNode(printOnly!)).toContain("(earlier versions could not be decrypted)");

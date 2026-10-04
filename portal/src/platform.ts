@@ -41,6 +41,8 @@ export async function copyToClipboard(text: string): Promise<boolean> {
   }
 }
 
+export const DOWNLOAD_URL_REVOKE_DELAY_MS = 30_000;
+
 /** Same seam rule for the recovery-code download: plain DOM APIs only (an
  *  object URL + a synthetic anchor click), inert outside a browser and
  *  never able to break the panel when a host blocks downloads. */
@@ -52,7 +54,9 @@ export function downloadTextFile(filename: string, text: string): void {
     anchor.href = url;
     anchor.download = filename;
     anchor.click();
-    URL.revokeObjectURL(url);
+    // WebKit can begin the download after click() returns. Keep the blob
+    // alive briefly so immediate revocation cannot cancel a valid export.
+    setTimeout(() => URL.revokeObjectURL(url), DOWNLOAD_URL_REVOKE_DELAY_MS);
   } catch {
     // A blocked download must never take the security panel down with it.
   }

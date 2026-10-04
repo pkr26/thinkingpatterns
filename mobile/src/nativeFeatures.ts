@@ -369,6 +369,22 @@ export async function cancelDailyReminder(userId?: string): Promise<boolean> {
   }
 }
 
+/** Administrative origin retirement. Unlike the preference-level helpers,
+ * this deliberately cancels the complete app-owned notification set so
+ * pre-stable-id schedules cannot remain associated with the old server.
+ * A build without the native module has no reachable native scheduler and
+ * is already clean; a present module that rejects is a retryable failure. */
+export async function cancelOriginNotifications(): Promise<boolean> {
+  const api = notifeeFrom(await probeAsync("@notifee/react-native"));
+  if (api === null) return true;
+  try {
+    await api.cancelAllNotifications();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** L-9 (2026-09-28): the persisted "orphaned random-id notifications were
  *  cleared" mark. Notifications are device-local (not per-account), so the
  *  flag is device-wide in this module's prefs namespace — it says THIS

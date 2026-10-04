@@ -16,6 +16,7 @@ Covers the fixes landed the same day:
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import sys
 import types
@@ -25,11 +26,13 @@ import httpx
 import pytest
 from sqlalchemy import select
 
-from app.models import AudioAttachment, User
+from app.models import AccessLog, AudioAttachment, Consent, ConsentEvent, User
 from app.services import stt as stt_service
+from app.services import llm as llm_service
 from app.services.audio_store import (
     AudioStoreError,
     S3AudioStore,
+    drain_audio_deletions,
     get_audio_store,
     get_audio_store_cached,
 )
@@ -112,6 +115,93 @@ async def test_translation_suppressed_without_llm_consent(client, settings, monk
     assert dispatched == []
 
 
+async def test_legacy_translation_v1_consent_is_inert_until_fresh_opt_in(
+    client, app, settings, monkeypatch
+):
+    settings.audio_enabled = True
+    settings.stt_url = "https://stt.example.com/v1"
+    settings.stt_api_key = "k"
+    settings.llm_url = "https://llm.example.com/v1"
+    settings.llm_api_key = "k"
+    emu = await _voice_ready(client, settings, "legacy-translation-consent")
+    assert llm_service.LLM_DISCLOSURE_VERSION == "v2"
+    async with app.state.sessionmaker() as session:
+        user = await session.get(User, emu.user_id)
+        assert user is not None
+        user.llm_consent = True
+        user.llm_consent_disclosure = "v1"
+        # Even a copied current fingerprint cannot make the old purpose
+        # label authorize transcript translation.
+        user.llm_consent_policy = llm_service.processing_policy_fingerprint(settings)
+        await session.commit()
+
+    translated: list[str] = []
+
+    async def fake_translate(s_settings, text, source_lang):
+        translated.append(text)
+        return "must not dispatch"
+
+    monkeypatch.setattr(stt_service, "translate_to_english", fake_translate)
+    monkeypatch.setattr(
+        SpeechToText,
+        "_post_audio",
+        lambda self, files, data: _coro({"text": "Texto privado.", "language": "spanish"}),
+    )
+    response = await client.post(
+        "/api/v1/audio/transcriptions", headers=emu.headers, json=_transcription_body()
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["english_text"] is None
+    assert translated == []
+
+    current = await client.put(
+        "/api/account/llm-consent",
+        headers=emu.headers,
+        json={"enabled": True, "verifier": emu.auth_key_b64},
+    )
+    assert current.status_code == 200
+    assert current.json()["llm_consent_disclosure"] == "v2"
+
+
+async def test_legacy_voice_v1_consent_cannot_dispatch_audio(client, app, settings, monkeypatch):
+    settings.audio_enabled = True
+    settings.stt_url = "https://stt.example.com/v1"
+    settings.stt_api_key = "k"
+    emu = ClientEmulator("legacy-voice-consent", "correct horse battery staple")
+    await emu.register(client)
+    assert stt_service.STT_DISCLOSURE_VERSION == "v2"
+    async with app.state.sessionmaker() as session:
+        user = await session.get(User, emu.user_id)
+        assert user is not None
+        user.voice_consent = True
+        user.voice_consent_disclosure = "v1"
+        user.voice_consent_policy = stt_service.processing_policy_fingerprint(settings)
+        await session.commit()
+
+    dispatched = False
+
+    async def fake_post_audio(self, files, data):
+        nonlocal dispatched
+        dispatched = True
+        return {"text": "private", "language": "english"}
+
+    monkeypatch.setattr(SpeechToText, "_post_audio", fake_post_audio)
+    response = await client.post(
+        "/api/v1/audio/transcriptions", headers=emu.headers, json=_transcription_body()
+    )
+    assert response.status_code == 403
+    assert response.json()["code"] == "voice_consent_required"
+    assert dispatched is False
+
+    current = await client.put(
+        "/api/account/voice-consent",
+        headers=emu.headers,
+        json={"enabled": True, "verifier": emu.auth_key_b64},
+    )
+    assert current.status_code == 200
+    assert current.json()["voice_consent_disclosure"] == "v2"
+
+
 async def test_translation_flows_with_llm_consent(client, settings, monkeypatch):
     settings.audio_enabled = True
     settings.stt_url = "https://stt.example.com/v1"
@@ -136,6 +226,47 @@ async def test_translation_flows_with_llm_consent(client, settings, monkeypatch)
     )
     assert response.status_code == 200, response.text
     assert response.json()["english_text"] == "Private journal text."
+
+
+async def test_provider_dispatch_attempts_are_durable_before_plaintext_leaves(
+    client, app, settings, monkeypatch
+):
+    settings.audio_enabled = True
+    settings.stt_url = "https://stt.example.com/v1"
+    settings.stt_api_key = "k"
+    settings.llm_url = "https://llm.example.com/v1"
+    settings.llm_api_key = "k"
+    emu = await _voice_ready(client, settings, "dispatch-audit")
+    await _grant_llm_consent(client, emu)
+    observed = {"stt": False, "translation": False}
+
+    async def has_action(action: str) -> bool:
+        async with app.state.sessionmaker() as audit_session:
+            return (
+                await audit_session.scalar(
+                    select(AccessLog.id).where(
+                        AccessLog.user_id == emu.user_id,
+                        AccessLog.action == action,
+                    )
+                )
+                is not None
+            )
+
+    async def fake_post_audio(self, files, data):
+        observed["stt"] = await has_action("stt_dispatch_attempt")
+        return {"text": "Texto privado.", "language": "spanish"}
+
+    async def fake_translate(s_settings, text, source_lang):
+        observed["translation"] = await has_action("translation_dispatch_attempt")
+        return "Private text."
+
+    monkeypatch.setattr(SpeechToText, "_post_audio", fake_post_audio)
+    monkeypatch.setattr(stt_service, "translate_to_english", fake_translate)
+    response = await client.post(
+        "/api/v1/audio/transcriptions", headers=emu.headers, json=_transcription_body()
+    )
+    assert response.status_code == 200, response.text
+    assert observed == {"stt": True, "translation": True}
 
 
 async def test_retranslation_route_suppressed_without_llm_consent(client, settings, monkeypatch):
@@ -261,14 +392,23 @@ async def test_account_erasure_removes_audio_objects(client, app, settings):
         "DELETE", "/api/account", headers=emu.headers, json={"verifier": emu.auth_key_b64}
     )
     assert response.status_code == 204, response.text
-    # Rows gone (cascade) AND the stored object gone (the M2 fix) — and
+    # The account transaction removes rows and durably stages object
+    # deletion; the bounded worker performs provider I/O after commit.
     # the account's directory too: the key layout embeds the user id, so
     # an empty audio/<erased-id>/ leftover would keep the erased identity
     # on disk as a directory name (2026-09-29 E2E campaign finding).
     async with app.state.sessionmaker() as session:
         remaining = (await session.execute(select(AudioAttachment))).scalars().all()
         assert remaining == []
+        # The wakeable worker may win the race before this deterministic
+        # drain; either path must leave the object gone.
+        assert await drain_audio_deletions(session, settings) in (0, 1)
+        await session.commit()
     assert {p.name for p in store.root.rglob("*.enc")} == set()
+    for _ in range(100):
+        if not user_dir.exists():
+            break
+        await asyncio.sleep(0.01)
     assert not user_dir.exists()
 
 
@@ -461,3 +601,51 @@ async def test_patient_list_carries_share_voice_grant_state(client, settings):
     row = next(r for r in final.json() if r["user_id"] == patient.user_id)
     assert row["status"] != "active"
     assert row["share_voice"] is None
+
+
+async def test_revoke_and_regrant_never_reactivate_prior_voice_scope(client, app, settings):
+    patient = await _voice_ready(client, settings, "voice-regrant")
+    therapist = TherapistEmulator("drvoiceregrant", "correct horse battery staple")
+    await therapist.register(client)
+    code = await therapist.create_pairing_code(client)
+    grant = await patient.grant_consent(client, code, therapist.wrap_pub_key, therapist.user_id)
+    assert grant["status"] == 201, grant["body"]
+    consent_id = grant["body"]["id"]
+
+    enabled = await client.put(
+        f"/api/consents/{consent_id}/share-voice",
+        headers={**patient.headers, "X-Account-Verifier": patient.auth_key_b64},
+        json={"enabled": True},
+    )
+    assert enabled.status_code == 200, enabled.text
+    assert await patient.revoke_consent(client, consent_id) == 204
+
+    second_code = await therapist.create_pairing_code(client)
+    revived = await patient.grant_consent(
+        client, second_code, therapist.wrap_pub_key, therapist.user_id
+    )
+    assert revived["status"] == 201, revived["body"]
+    assert revived["body"]["id"] == consent_id
+    assert revived["body"]["share_voice"] is False
+
+    async with app.state.sessionmaker() as session:
+        live = await session.get(Consent, consent_id)
+        assert live is not None and live.status == "active"
+        assert live.share_voice is False
+        events = (
+            (
+                await session.execute(
+                    select(ConsentEvent)
+                    .where(ConsentEvent.consent_id == consent_id)
+                    .order_by(ConsentEvent.occurred_at, ConsentEvent.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    withdrawn = next(
+        event for event in events if event.action == "withdrawn" and event.kind == "sharing"
+    )
+    assert withdrawn.share_voice is True, "withdrawal preserves the scope that was revoked"
+    assert events[-1].action == "granted"
+    assert events[-1].share_voice is False

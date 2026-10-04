@@ -73,6 +73,7 @@ async def test_register_probes_do_not_lock_out_a_legitimate_registrant(app, sett
                     "username": "wanted-name",
                     "salt": "!!!not-b64!!!",
                     "verifier": base64.b64encode(b"v" * 32).decode(),
+                    "age_attestation": "minimum_age_confirmed_v1",
                 },
             )
         assert probe.status_code == 422  # rejected, and never name-counted
@@ -86,6 +87,7 @@ async def test_register_probes_do_not_lock_out_a_legitimate_registrant(app, sett
                 "username": emu.username,
                 "salt": emu.salt_b64,
                 "verifier": emu.auth_key_b64,
+                "age_attestation": "minimum_age_confirmed_v1",
             },
         )
     assert legit.status_code == 201

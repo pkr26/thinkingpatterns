@@ -196,7 +196,8 @@ async def a4_kdf_downgrade() -> None:
         r = await client.post("/api/v1/auth/register", json={
             "username": "a4_downgraded",
             "salt": base64.b64encode(salt).decode(),
-            "verifier": base64.b64encode(auth_key).decode()})
+            "verifier": base64.b64encode(auth_key).decode(),
+            "age_attestation": "minimum_age_confirmed_v1"})
         verdict(audit + ".server-cannot-verify", "PARTIAL",
                 f"a hand-rolled 1-iteration derivation still registers "
                 f"({r.status_code}) — the server never sees the password, so "

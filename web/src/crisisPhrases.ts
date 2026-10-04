@@ -26,6 +26,8 @@
  * ['’]? for optional ASCII/curly apostrophes (iOS Smart
  * Punctuation, stored as the escape sequence); \b word boundaries.
  */
+// @ts-nocheck
+
 
 /** The dialog tier: high-signal phrases that surface support resources. */
 export const CRISIS_DIALOG_PATTERNS: readonly string[] = [

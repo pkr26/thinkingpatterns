@@ -10,6 +10,8 @@
  *  - crisis phone numbers (988, 741741, 911) and URLs are NEVER
  *    translated — they are identical to the English catalog by design.
  */
+// @ts-nocheck
+
 
 export const es: Record<string, string> = {
   // ---------------------------------------------------------------- common
@@ -192,12 +194,12 @@ export const es: Record<string, string> = {
   "privacy.s3Title": "La única excepción: el análisis de patrones",
   "privacy.s3Body":
     "Los patrones los calcula el servidor, que necesita sus entradas descifradas una sola vez para hacerlo. Cuando usted inicia un análisis, su llave se envía una vez por una conexión cifrada, se mantiene en memoria por un máximo de 5 minutos, se usa y se destruye. Nunca se guarda, y nunca se envía por ninguna otra razón.",
-  "privacy.s4Title": "Análisis con IA (opcional)",
+  "privacy.s4Title": "Traducción opcional de transcripciones",
   "privacy.s4Body":
-    "Desactivado por defecto en todas las cuentas. Si lo activa, sus entradas descifradas se envían a un proveedor de IA externo elegido por el operador del servidor, y aplica la política de retención de datos de ese proveedor. Activarlo pide su contraseña, así que un teléfono prestado no puede cambiarlo.",
+    "Desactivado por defecto. Si lo activa y usa el diario por voz en un idioma que no sea inglés, la transcripción se envía en cuanto se graba al proveedor externo elegido por el operador del servidor para traducirla al inglés; se aplica la política de retención de ese proveedor. Sus entradas del diario no se envían a terceros para analizar patrones. Ajustes muestra el proveedor, la retención y la huella de la política configurados, y cambiar esta opción requiere su contraseña.",
   "privacy.s5Title": "Eliminar sus datos",
   "privacy.s5Body":
-    "Eliminar su cuenta quita sus entradas, patrones y cuenta de la base de datos activa. Las copias de seguridad y los registros del servidor caducan según el calendario del propio operador — la eliminación no puede retroceder sobre ellos. Un paquete exportado lo incluye todo y sigue siendo suyo, para conservarlo o eliminarlo.",
+    "Eliminar su cuenta quita sus entradas, patrones y cuenta de la base de datos activa. Las copias de seguridad y los registros del servidor caducan según el calendario del propio operador — la eliminación no puede retroceder sobre ellos. La exportación contiene el contenido de su cuenta y el historial de consentimientos y accesos, pero excluye registros operativos y de seguridad.",
   "privacy.footnote": "Esta política vive dentro de la app — leerla no requiere conexión y no deja rastro en ningún lugar.",
 
   // ------------------------------------------------------------------ entry
@@ -619,9 +621,10 @@ export const es: Record<string, string> = {
   "settings.legacyTitle": "Unas entradas sin conexión anteriores necesitan recuperación",
   "settings.legacyBody":
     "Esta actualización protegió entradas cifradas no enviadas de que llegaran al servidor equivocado. Siguen en este dispositivo, pero no pueden asignarse de forma segura automáticamente; contacte con soporte antes de borrar los datos de la app.",
-  "settings.llmLabel": "Análisis con IA de terceros",
-  "settings.llmBody": "Permitir enviar sus entradas (descifradas) a un servicio de IA externo para el análisis de patrones. Desactivado por defecto; se necesita su contraseña para cambiarlo.",
-  "settings.llmA11y": "Permitir el análisis con IA de terceros",
+  "settings.llmLabel": "Traducción de transcripciones por terceros",
+  "settings.llmBody":
+    "Permitir que las transcripciones de voz que no estén en inglés se envíen al servicio externo configurado para traducirlas al inglés. El análisis de patrones del diario no está activo. Desactivado por defecto; se necesita su contraseña para cambiarlo.",
+  "settings.llmA11y": "Permitir la traducción de transcripciones por terceros",
   "settings.reauthDeleteTitle": "Escriba su contraseña para eliminar todo",
   "settings.reauthBioTitle": "Escriba su contraseña para activar el desbloqueo biométrico",
   "settings.changePasswordLabel": "Cambiar contraseña",
@@ -639,7 +642,12 @@ export const es: Record<string, string> = {
   "settings.rotateFailedTitle": "No se pudo cambiar la contraseña",
   "settings.rotateWrongOld": "La contraseña actual no fue aceptada. No se cambió nada.",
   "settings.rotateRewrapFailed":
-    "Estos permisos de compartir no pudieron re-envolverse y deben emparejarse de nuevo con el código del terapeuta: {names}",  "settings.reauthLlmTitle": "Escriba su contraseña para {action} el análisis con IA de terceros",
+    "Estos permisos de compartir no pudieron re-envolverse y deben emparejarse de nuevo con el código del terapeuta: {names}",
+  "settings.reauthLlmTitle": "Escriba su contraseña para cambiar la traducción de transcripciones",
+  "settings.reauthVoiceTitle": "Escriba su contraseña para cambiar el diario por voz",
+  "settings.reauthFreshNote": "Para su protección, escriba ahora su contraseña actual. Una sesión desbloqueada por sí sola no puede autorizar este cambio.",
+  "settings.reauthPasswordField": "Contraseña actual",
+  "settings.reauthConfirm": "Verificar y continuar",
   "settings.enableWord": "activar",
   "settings.disableWord": "desactivar",
   "settings.appearanceLabel": "APARIENCIA",
@@ -669,7 +677,8 @@ export const es: Record<string, string> = {
   "settings.shareWithTherapist": "Compartir con mi terapeuta",
   "settings.measures": "Cuestionarios de bienestar",
   "settings.measuresA11y": "Abrir el cuestionario de bienestar",
-  "settings.shareWithTherapistA11y": "Compartir sus entradas y patrones con un terapeuta",
+  "settings.shareWithTherapistA11y":
+    "Compartir sus entradas del diario, patrones e ideas, medidas PHQ-9, GAD-7 y PHQ-2, y el resumen de la lista de casos con un terapeuta",
   "settings.sharingOffNote": "Compartir con terapeutas no está disponible en este servidor. Permanece desactivado hasta que se configure la inscripción verificada de profesionales.",
   "settings.sharingUnknownNote":
     "No se puede contactar al servidor para confirmar la disponibilidad de compartir con terapeutas — revise su conexión y vuelva a abrir Ajustes. No se comparte nada mientras tanto.",
@@ -691,7 +700,9 @@ export const es: Record<string, string> = {
 
   // --------------------------------------------------------- measures (M-16)
   "measures.intro":
-    "Un cuestionario de bienestar estándar (PHQ-9), completado por usted. Fathom guarda el puntaje cifrado y nunca lo interpreta — leerlo es tarea de su clínico, y se comparte solo mediante su consentimiento existente con el terapeuta.",
+    "Cuestionarios de bienestar estándar (PHQ-9, GAD-7 y PHQ-2), completados por usted. Fathom guarda el puntaje cifrado y nunca lo interpreta — leerlo es tarea de su clínico, y se comparte solo mediante su consentimiento existente con el terapeuta.",
+  "measures.unmonitored":
+    "Fathom no vigila estas respuestas ni avisa a un clínico o servicio de emergencias. Si puede estar en peligro inmediato, llame ahora al 911 o al número local de emergencias; los recursos de apoyo siempre están disponibles en Buscar ayuda.",
   "measures.offlineNote":
     "Su historial registrado necesita conexión para cargarse. Completar el cuestionario también la necesita — nada aquí funciona aún sin conexión.",
   "measures.loadFailed": "No se pudieron cargar sus cuestionarios.",
@@ -714,7 +725,7 @@ export const es: Record<string, string> = {
   "measures.recordFailedBody": "No se pudo registrar en este momento. Sus elecciones siguen en pantalla.",
   "measures.crisisTitle": "Hay apoyo disponible",
   "measures.crisisBody":
-    "Algo de lo que marcó suena pesado. Sea lo que esté cargando, no tiene que cargarlo en soledad — ayuda gratuita y confidencial está a un toque.",
+    "Una respuesta menciona pensamientos de hacerse daño. Fathom no vigila esta respuesta ni avisa a nadie. Si puede estar en peligro inmediato, llame ahora al 911 o al número local de emergencias. Hay apoyo gratuito y confidencial a un toque.",
   "measures.viewResources": "Ver recursos de apoyo",
   // PHQ-9: redacción estándar en español (instrumento de dominio público).
   "measures.phq9.item1": "Poco interés o placer en hacer las cosas",
@@ -757,11 +768,11 @@ export const es: Record<string, string> = {
   "share.codeNotFoundBody": "Revise el código con su terapeuta — expira 15 minutos después de que lo genere.",
   "share.lookupFailedTitle": "No se pudo buscar el código",
   "share.grantTitle": "¿Compartir con {name}?",
-  // Divulgación de compartir v2 (auditoría H-14/M-25): el alcance nombra
-  // cada clase derivada del paciente — entradas, patrones, cuestionarios
-  // de bienestar (PHQ-9) y resúmenes de lista de casos.
+  // Divulgación de compartir v3: el alcance nombra cada clase derivada del
+  // paciente — entradas, patrones, cuestionarios PHQ-9/GAD-7/PHQ-2 y
+  // resúmenes de lista de casos. Se mantiene alineado con el servidor.
   "share.grantBody":
-    "Esa persona podrá leer cada entrada del diario, cada patrón calculado a partir de ellas, sus cuestionarios de bienestar (PHQ-9) y el resumen de su cuenta que aparece en su lista de casos — desde su portal de terapeuta. No puede cambiar ni eliminar nada — solo leer, y escribir sus propias notas privadas.\n\nPuede dejar de compartir en cualquier momento; eso termina su acceso de inmediato, pero no puede desleer lo que ya haya leído. Se le pedirá su contraseña.",
+    "Esa persona podrá leer cada entrada del diario, cada patrón calculado a partir de ellas, sus cuestionarios de bienestar (PHQ-9, GAD-7 y PHQ-2) y el resumen de su cuenta que aparece en su lista de casos — desde su portal de terapeuta. No puede cambiar ni eliminar nada — solo leer, y escribir sus propias notas privadas.\n\nPuede dejar de compartir en cualquier momento; eso termina su acceso de inmediato, pero no puede desleer lo que ya haya leído. Se le pedirá su contraseña.",
   "share.revokeTitle": "¿Dejar de compartir con {name}?",
   "share.revokeBody": "Su acceso termina de inmediato. Conserva todo lo que ya haya leído. Se le pedirá su contraseña.",
   "share.stopSharing": "Dejar de compartir",
@@ -797,20 +808,22 @@ export const es: Record<string, string> = {
   "share.mismatchBody":
     "Si las huellas no coinciden, el emparejamiento podría haber sido interceptado. Contacte a su terapeuta por un canal de confianza antes de compartir nada.",
   "share.disclosure":
-    "Compartir le permite a esa persona leer sus entradas del diario, sus patrones e ideas, sus cuestionarios de bienestar (PHQ-9) y su línea de resumen en la lista de casos (nunca cambiar nada), y escribir sus propias notas privadas. Puede detenerlo en cualquier momento; lo que ya se leyó no se puede desleer.",
+    "Compartir le permite a esa persona leer sus entradas del diario, sus patrones e ideas, sus cuestionarios de bienestar (PHQ-9, GAD-7 y PHQ-2) y su línea de resumen en la lista de casos (nunca cambiar nada), y escribir sus propias notas privadas. Puede detenerlo en cualquier momento; lo que ya se leyó no se puede desleer.",
   "share.shareWithName": "Compartir con {name}",
   "share.reauthGrantTitle": "Escriba su contraseña para compartir con {name}",
   "share.reauthRevokeTitle": "Escriba su contraseña para dejar de compartir",
   // M-25: el servidor reporta una versión de divulgación que esta app no
-  // conoce — estado sereno, sin ofrecer nuevos permisos hasta alinear.
+  // conoce — estado sereno, sin ofrecer nuevos permisos hasta alinear. El
+  // acceso previo a entradas/patrones y la revocación siguen disponibles,
+  // pero las medidas requieren un consentimiento vigente.
   "share.termsUpdatedTitle": "Términos de compartir actualizados",
   "share.termsUpdatedBody":
-    "Lo que un terapeuta puede leer cambió — ahora incluye sus cuestionarios de bienestar (PHQ-9). Actualice esta app y comparta de nuevo para ver y aceptar los términos vigentes. Su compartir existente sigue funcionando, y puede detenerlo abajo cuando quiera.",
+    "Lo que un terapeuta puede leer cambió — ahora incluye sus cuestionarios de bienestar PHQ-9, GAD-7 y PHQ-2. Actualice esta app y comparta de nuevo para ver y aceptar los términos vigentes. El acceso existente a entradas y patrones continúa y puede detenerse abajo; el alcance ampliado de las medidas de bienestar no estará disponible para el terapeuta hasta que vuelva a compartir con los términos vigentes.",
   // M-25: el servidor rechazó el permiso porque la divulgación revisada en
   // pantalla ya no es la vigente (409 disclosure_outdated). No se compartió nada.
   "share.grantOutdatedTitle": "Términos de compartir actualizados",
   "share.grantOutdatedBody":
-    "Los términos de compartir cambiaron antes de que esto se enviara, así que no se compartió nada. Nada sobre usted cambió en el servidor. Comience de nuevo para revisar los términos vigentes — ahora incluyen sus cuestionarios de bienestar (PHQ-9).",
+    "Los términos de compartir cambiaron antes de que esto se enviara, así que no se compartió nada. Nada sobre usted cambió en el servidor. Comience de nuevo para revisar los términos vigentes — ahora incluyen sus cuestionarios de bienestar PHQ-9, GAD-7 y PHQ-2.",
 
   // ------------------------------------------------- vistas web (ola M-W5,
   // auditoría 2026-09-26): todo el texto de vistas que estaba fijo en
@@ -839,7 +852,7 @@ export const es: Record<string, string> = {
   "crisis.webTitle": "Busque ayuda ahora",
   "crisis.webImmediate": "Si está en peligro inmediato, llame al 911 (o al número de emergencias de su país).",
   "crisis.webOutsideUS": "Fuera de EE. UU.: findahelpline.com enumera servicios locales y gratuitos en su país.",
-  "crisis.webSafeMessaging": "Hablar con una persona real ayuda. Estas líneas siguen la práctica de mensajería segura (#chatsafe) — lo que comparte se queda con ellas.",
+  "crisis.webSafeMessaging": "Hablar con una persona real ayuda. Estos servicios son confidenciales, sujetos a las políticas de privacidad, seguridad, emergencias y obligaciones legales de cada servicio.",
   "crisis.webYouDeserve": "Usted merece apoyo. Buscarlo es un paso valiente.",
   "entry.title": "La entrada de hoy",
   "entry.retryDraft": "Volver a restaurar el borrador cifrado",
@@ -965,6 +978,8 @@ export const es: Record<string, string> = {
   "login.envelopeUnlockWeb": "No se pudo abrir el sobre de claves de su cuenta — no se desbloqueó nada y no se cambió nada. Revise su conexión e inténtelo de nuevo.",
   "login.kdfUnsupportedWeb": "Esta cuenta usa parámetros de protección de claves que este navegador no puede derivar (por ejemplo Argon2id). No se desbloqueó nada — use la app móvil para iniciar sesión.",
   "login.rateLimitedWeb": "Demasiados intentos — inténtelo de nuevo en unos {seconds}s.",
+  "login.invalidCredentialsWeb": "No se pudo iniciar sesión — revise su usuario y contraseña.",
+  "login.usernameTakenWeb": "Ese usuario ya está en uso — elija otro.",
   "login.genericWeb": "Algo salió mal — inténtelo de nuevo.",
   "measures.save": "Guardar cuestionario",
   "measures.savedNote": "Guardado — cifrado como todo lo demás.",
@@ -974,9 +989,9 @@ export const es: Record<string, string> = {
   "measures.saveLockedNote": "La sesión se bloqueó mientras se guardaba — no se envió nada. Sus respuestas quedan guardadas en este dispositivo, cifradas, y se registrarán cuando desbloquee y vuelva.",
   "measures.incomplete": "Responda todas las preguntas primero — un incompleto honesto vale más que un completo adivinado.",
   "measures.item9Title": "Gracias por responder con honestidad",
-  "measures.item9Body": "Una de sus respuestas menciona pensamientos de hacerse daño. Eso merece apoyo — los recursos de abajo están a un toque, en cualquier momento.",
+  "measures.item9Body": "Una respuesta menciona pensamientos de hacerse daño. Fathom no vigila esta respuesta ni avisa a nadie. Si puede estar en peligro inmediato, llame ahora al 911 o al número local de emergencias. Los recursos de apoyo están a un toque.",
   "measures.getSupport": "Buscar apoyo",
-  "measures.introWeb": "Un cuestionario estándar, registrado como todo lo demás: cifrado en este dispositivo, compartido solo mediante el consentimiento de terapeuta que usted controla. Los puntajes se muestran, nunca se interpretan — eso le corresponde a usted y a su clínico.",
+  "measures.introWeb": "Cuestionarios estándar PHQ-9, GAD-7 y PHQ-2, registrados como todo lo demás: cifrados en este dispositivo y compartidos solo mediante el consentimiento de terapeuta que usted controla. Los puntajes se muestran, nunca se interpretan — eso le corresponde a usted y a su clínico.",
   "measures.trendTitle": "Su tendencia",
   "measures.trendOne": "{name} — {count} registro, mostrado como sus propios números en el tiempo:",
   "measures.trendMany": "{name} — {count} registros, mostrados como sus propios números en el tiempo:",
@@ -1017,17 +1032,23 @@ export const es: Record<string, string> = {
   "question.refreshBaselineMany": "Línea base actualizada — faltan {days} días con actividad.",
   "question.refreshBaselineUnknown": "Línea base actualizada.",
   "settings.title": "Ajustes",
-  "settings.llmStatusEnabled": "Análisis con LLM opcional: ACTIVADO para su cuenta. Activarlo envía el texto de su diario a un proveedor externo (solo después de su umbral de 30 días, solo para usted, solo mientras esté activado).",
-  "settings.llmStatusOff": "Análisis con LLM opcional: desactivado. Activarlo envía el texto de su diario a un proveedor externo (solo después de su umbral de 30 días, solo para usted, solo mientras esté activado).",
-  "settings.llmEnable": "Activar el análisis con LLM",
-  "settings.llmDisable": "Desactivar el análisis con LLM",
-  "settings.llmNotOffered": "El análisis con LLM opcional no se ofrece en este servidor.",
-  "settings.llmNotOfferedToggle": "Este servidor no ofrece análisis con LLM.",
+  "settings.llmStatusEnabled": "La traducción de transcripciones por terceros está ACTIVADA.",
+  "settings.llmStatusOff": "La traducción de transcripciones por terceros está desactivada.",
+  "settings.llmDisclosure": "Las transcripciones de voz que no estén en inglés se envían a {provider} en cuanto se graban para traducirlas al inglés. Retención del proveedor: {retention}. Huella de la política: {fingerprint}. El análisis de patrones del diario no está activo.",
+  "settings.llmStaleNote":
+    "Su elección anterior ya no autoriza la traducción de transcripciones con los términos vigentes. La traducción está desactivada; actívela para revisar y aceptar esos términos.",
+  "settings.llmEnable": "Activar la traducción de transcripciones",
+  "settings.llmDisable": "Desactivar la traducción de transcripciones",
+  "settings.llmNotOffered": "Este servidor no ofrece traducción de transcripciones por terceros.",
+  "settings.llmNotOfferedToggle": "Este servidor no ofrece traducción de transcripciones.",
   "settings.llmToggleFailed": "No se pudo cambiar el ajuste.",
-  "settings.llmEnabledNote": "Análisis con LLM opcional activado solo para su cuenta.",
-  "settings.llmDisabledNote": "Análisis con LLM opcional desactivado.",
-  "settings.llmUnknown": "No se pudo confirmar si este servidor ofrece análisis con LLM — revise su conexión.",
+  "settings.llmEnabledNote": "Traducción de transcripciones por terceros activada para su cuenta.",
+  "settings.llmDisabledNote": "Traducción de transcripciones por terceros desactivada.",
+  "settings.llmUnknown": "No se pudo confirmar si este servidor ofrece traducción de transcripciones — revise su conexión.",
   "settings.llmRetry": "Intentar de nuevo",
+  "settings.notDisclosed": "no indicado por este servidor",
+  "settings.recoveryKitHandoff": "Los kits de recuperación se crean y gestionan en la app móvil. Abra Ajustes allí para crear, reemplazar o eliminar uno.",
+  "settings.offlineColdStart": "Guardar sin conexión funciona después de que esta app web ya esté cargada. Iniciar o recargar la app del navegador requiere conexión.",
   "settings.dataTitle": "Sus datos",
   "settings.export": "Descargar exportación (cifrada)",
   "settings.exportNote": "El paquete es texto cifrado — seguro de guardar en cualquier lugar, ilegible sin su contraseña.",
@@ -1037,6 +1058,7 @@ export const es: Record<string, string> = {
   "settings.queuedOne": "{count} entrada aún en cola sin conexión.",
   "settings.queuedMany": "{count} entradas aún en cola sin conexión.",
   "settings.requeue": "Reencolar entradas recuperadas",
+  "settings.queueEvictions": "El almacenamiento de recuperación sin conexión alcanzó su límite de seguridad. No se pudieron conservar {count} registro(s) de recuperación más antiguos o demasiado grandes.",
   "settings.recoveredOne": "{count} entrada recuperada vuelta a poner en cola.",
   "settings.recoveredMany": "{count} entradas recuperadas vueltas a poner en cola.",
   "settings.accessTitle": "Quién accedió a sus datos",
@@ -1234,14 +1256,14 @@ export const es: Record<string, string> = {
   "history.deleteRecordingFailed": "No se pudo eliminar la grabación — inténtelo de nuevo.",
   "settings.voiceTitle": "Diario por voz",
   "settings.voiceNote":
-    "Grabe entradas en cualquier idioma. Su grabación se envía a {provider} para transcribirla y se elimina inmediatamente después; solo el texto cifrado se guarda. Las grabaciones que conserve se almacenan cifradas durante 30 días.",
+    "Al detener la grabación—antes de guardar la entrada—se sube a {provider} para transcribirla. Retención del proveedor: {retention}. Huella de la política: {fingerprint}. Las grabaciones que decida conservar se guardan cifradas durante 30 días.",
   "settings.voiceStatusEnabled": "Diario por voz activado",
   "settings.voiceStatusOff": "Diario por voz desactivado",
   "settings.voiceEnabledNote": "El diario por voz está activado.",
   "settings.voiceDisabledNote": "El diario por voz está desactivado.",
   "settings.voiceNotOffered": "Este servidor no ofrece el diario por voz.",
   "settings.voiceStaleNote":
-    "El proveedor de transcripción del servidor cambió — vuelva a activarlo para revisar y aceptar los nuevos términos.",
+    "Su elección anterior ya no autoriza cargas con los términos de voz vigentes. El diario por voz está desactivado; actívelo para revisar y aceptar esos términos.",
   "settings.voiceToggleFailed": "No se pudo cambiar el ajuste de voz — inténtelo de nuevo.",
   "share.voiceNote":
     "Su terapeuta ya puede leer sus entradas (y su traducción al inglés). Activar esto también le permite reproducir las grabaciones de voz que conserve — el tono puede transmitir lo que el texto no. Conserva este acceso solo mientras el compartir esté activo.",

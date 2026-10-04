@@ -127,7 +127,7 @@ async def test_revoked_consents_do_not_consume_the_therapist_cap(client, app, mo
 # --- Round 2 F-9: the LIST cap counts ACTIVE consents only ---------------------------
 
 
-async def test_revoked_history_does_not_trip_the_list_cap(client, app):
+async def test_revoked_history_does_not_trip_the_list_cap(client, app, monkeypatch):
     """Audit round 2 (2026-09-21) F-9.
 
     GET /consents used to count ALL rows toward MAX_CONSENTS_PER_PATIENT,
@@ -138,6 +138,11 @@ async def test_revoked_history_does_not_trip_the_list_cap(client, app):
     """
     patient = ClientEmulator("listcap-p", "deep-password")
     await patient.register(client)
+    from app.api import consents as consents_api
+
+    # Isolate the active-share cap from the newer independent retained-
+    # history ceiling; pagination, not silent truncation, bounds the read.
+    monkeypatch.setattr(consents_api, "MAX_RETAINED_RELATIONSHIPS_PER_ACCOUNT", 200)
     # Consents are unique per (patient, therapist), so the history needs
     # distinct therapist rows — 100 of them, all revoked. The therapist
     # users are flushed BEFORE the consent rows reference them (SQLite
@@ -191,10 +196,8 @@ async def test_revoked_history_does_not_trip_the_list_cap(client, app):
     active = [c for c in rows if c["status"] == "active"]
     assert len(active) == 1
     assert active[0]["therapist_id"] == clinician.user_id
-    # The revoked history is RETAINED in full (the complete-list contract:
-    # disclosure record + the "stopped on" rows the mobile screen renders),
-    # never silently truncated now that it no longer counts toward the cap.
-    assert len(rows) == 101
+    assert len(rows) == 100
+    assert listed.headers["X-Next-Offset"] == "100"
 
 
 # --- B-7: dead pairing codes are swept even with an idle therapist --------------------

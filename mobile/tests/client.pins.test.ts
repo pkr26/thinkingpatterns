@@ -57,7 +57,7 @@ describe("client pins: session storage key names", () => {
 });
 
 describe("client pins: origin-bound local state on server switch", () => {
-  it("old unscoped queue bytes are preserved for safe migration; unrelated keys survive", async () => {
+  it("old unscoped queue bytes are retired with the origin; unrelated keys survive", async () => {
     await setBaseUrl("https://old.example.com");
     await storage.setItem("@mindpattern/queue_quarantine", "q");
     await storage.setItem("@mindpattern/queue_rejected", "r");
@@ -65,11 +65,11 @@ describe("client pins: origin-bound local state on server switch", () => {
 
     expect(await setBaseUrl("https://new.example.com")).toBeNull();
 
-    // Queue v2 owns scoped keys itself. Old global bytes are deliberately
-    // retained until its migration can quarantine them rather than guessing
-    // they belong to this new server.
-    expect(await storage.getItem("@mindpattern/queue_quarantine")).toBe("q");
-    expect(await storage.getItem("@mindpattern/queue_rejected")).toBe("r");
+    // Unscoped legacy bytes cannot be safely attributed to either origin.
+    // Explicit origin retirement removes them instead of leaving orphaned
+    // account ciphertext on the device.
+    expect(await storage.getItem("@mindpattern/queue_quarantine")).toBeNull();
+    expect(await storage.getItem("@mindpattern/queue_rejected")).toBeNull();
     expect(await storage.getItem("@mindpattern/unrelated")).toBe("keep-me");
   });
 

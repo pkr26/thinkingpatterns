@@ -130,10 +130,10 @@ async def test_account_delete_missing_verifier_detail(client):
     emu = ClientEmulator("delnever", "pw-del-never-x")
     await emu.register(client)
     response = await client.request("DELETE", "/api/account", headers=emu.headers)
-    assert response.status_code == 422
+    assert response.status_code == 403
     assert response.json() == {
-        "detail": "account verifier required (X-Account-Verifier header)",
-        "code": "validation_error",
+        "detail": "fresh authentication is required for this action",
+        "code": "step_up_required",
     }
 
 
@@ -189,7 +189,12 @@ async def test_register_contract_codes_and_details(client):
     # non-base64 salt
     r = await client.post(
         "/api/auth/register",
-        json={"username": bad.username, "salt": "!!not-b64!!", "verifier": bad.auth_key_b64},
+        json={
+            "username": bad.username,
+            "salt": "!!not-b64!!",
+            "verifier": bad.auth_key_b64,
+            "age_attestation": "minimum_age_confirmed_v1",
+        },
     )
     assert r.status_code == 422
     assert r.json() == {"detail": "salt and verifier must be base64", "code": "validation_error"}
@@ -200,6 +205,7 @@ async def test_register_contract_codes_and_details(client):
             "username": bad.username,
             "salt": base64.b64encode(b"x" * 17).decode(),
             "verifier": bad.auth_key_b64,
+            "age_attestation": "minimum_age_confirmed_v1",
         },
     )
     assert r.status_code == 422
@@ -211,6 +217,7 @@ async def test_register_contract_codes_and_details(client):
             "username": bad.username,
             "salt": bad.salt_b64,
             "verifier": base64.b64encode(b"y" * 33).decode(),
+            "age_attestation": "minimum_age_confirmed_v1",
         },
     )
     assert r.status_code == 422
@@ -223,7 +230,12 @@ async def test_register_conflict_code(client):
     again = ClientEmulator("regdup", "pw-other-longer")
     r = await client.post(
         "/api/auth/register",
-        json={"username": again.username, "salt": again.salt_b64, "verifier": again.auth_key_b64},
+        json={
+            "username": again.username,
+            "salt": again.salt_b64,
+            "verifier": again.auth_key_b64,
+            "age_attestation": "minimum_age_confirmed_v1",
+        },
     )
     assert r.status_code == 409
     assert r.json() == {"detail": "username already taken", "code": "conflict"}
@@ -267,6 +279,7 @@ async def test_register_integrity_race_returns_409_contract(monkeypatch, setting
         username="race-user",
         salt=base64.b64encode(b"s" * 16).decode(),
         verifier=base64.b64encode(b"v" * 32).decode(),
+        age_attestation="minimum_age_confirmed_v1",
     )
     with pytest.raises(ApiError) as exc_info:
         await auth.register(body=body, request=request, session=RacingSession())
@@ -785,6 +798,8 @@ async def test_recompute_retry_path_malformed_entry_contract(client, app):
 
 
 async def test_question_retention_window_edges(client, app):
+    from app import main as main_module
+
     emu = await _insight_user(client, app)
     today = date.today()
     async with app.state.sessionmaker() as session:
@@ -810,6 +825,7 @@ async def test_question_retention_window_edges(client, app):
         await session.commit()
 
     await emu.recompute(client)
+    await main_module._prune_expired_questions_once(app)
 
     from sqlalchemy import select
 
@@ -1373,6 +1389,13 @@ def test_settings_default_environment_is_production(monkeypatch):
     monkeypatch.delenv("MINDPATTERN_ENV", raising=False)
     monkeypatch.setenv("MINDPATTERN_DB_URL", "postgresql+asyncpg://u:p@h/db")
     monkeypatch.setenv("MINDPATTERN_TOKEN_SECRET", "s" * 40)
+    monkeypatch.setenv("MINDPATTERN_AUTH_TOKEN_SECRET", "a" * 48)
+    monkeypatch.setenv("MINDPATTERN_TOTP_WRAP_SECRET", "b" * 48)
+    monkeypatch.setenv("MINDPATTERN_PAIRING_SECRET", "c" * 48)
+    monkeypatch.setenv("MINDPATTERN_DECOY_SECRET", "d" * 48)
+    monkeypatch.setenv("MINDPATTERN_AUDIT_MAC_SECRET", "ab" * 32)
+    monkeypatch.setenv("MINDPATTERN_AUDIT_JOURNAL", "/tmp/mindpattern-default-env-audit.jsonl")
+    monkeypatch.setenv("MINDPATTERN_THERAPIST_ENROLLMENT_TOKEN", "e" * 48)
     assert Settings.from_env().environment == "production"
     assert Settings.__dataclass_fields__["environment"].default == "production"
 

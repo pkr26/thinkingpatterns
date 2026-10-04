@@ -125,7 +125,8 @@ describe("shown-once TOTP affordance seams (2026-09-26 audit round L)", () => {
     await expect(copyToClipboard("code")).resolves.toBe(false);
   });
 
-  it("downloadTextFile is inert without a document and never throws on a hostile DOM", () => {
+  it("downloadTextFile keeps its Blob URL alive long enough for WebKit to start the download", () => {
+    vi.useFakeTimers();
     // The node runtime has no document (the setup shim defines one only for
     // the App suite; this file predates it, so assert through a stub).
     const anchor = { href: "", download: "", click: vi.fn() };
@@ -142,6 +143,9 @@ describe("shown-once TOTP affordance seams (2026-09-26 audit round L)", () => {
     expect(created).toEqual(["a"]);
     expect(anchor.download).toBe("codes.txt");
     expect(anchor.click).toHaveBeenCalledTimes(1);
+    expect(revokeURL).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(30_000);
     expect(revokeURL).toHaveBeenCalledWith("blob:x");
+    vi.useRealTimers();
   });
 });

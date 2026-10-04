@@ -8,6 +8,7 @@
  * `err instanceof ApiError` and on err.status.
  */
 import { vi, type Mock } from "vitest";
+import { changeLocalSessionOwner } from "../../src/localWriteGuard";
 
 export class ApiError extends Error {
   constructor(
@@ -32,8 +33,17 @@ export function makeApiMock() {
     isLoggedIn: vi.fn(async () => false),
     getUserId: vi.fn(async () => "user-1"),
     getUsername: vi.fn(async () => "alice"),
-    setSession: vi.fn(async () => {}),
-    clearSession: vi.fn(async () => {}),
+    setSession: vi.fn(async (_token: string, userId: string) => {
+      // Production api.setSession publishes the authenticated owner before
+      // any account-scoped writer is admitted. Component mocks must retain
+      // that lifecycle side effect or successful sign-in will correctly
+      // fail closed at the first guarded local write.
+      changeLocalSessionOwner(userId);
+    }),
+    clearSession: vi.fn(async () => {
+      changeLocalSessionOwner(null);
+    }),
+    retireDeletedSession: vi.fn(async () => {}),
     register: vi.fn(async () => ({ token: "tok", user_id: "user-1" })),
     saltFor: vi.fn(async () => ({ salt: SALT_B64 })),
   cacheSalt: vi.fn(async () => {}),
@@ -86,8 +96,8 @@ export function makeApiMock() {
     recompute: vi.fn(async () => ({ question_stored: true })),
     exportAccount: vi.fn(async () => ({ entries: [], insights: [] })),
     deleteAccount: vi.fn(async () => ({})),
-    getLlmConsent: vi.fn(async () => ({ enabled: false })),
-    setLlmConsent: vi.fn(async () => ({ enabled: true })),
+    getLlmConsent: vi.fn(async () => ({ enabled: false, active_for_current_policy: false })),
+    setLlmConsent: vi.fn(async () => ({ enabled: true, active_for_current_policy: true })),
     // Voice journaling (VOICE_PLAN 2026-09-29): the endpoint surface the
     // Entry/Settings/Share/History screens drive; defaults are neutral.
     transcribeAudio: vi.fn(async () => ({
@@ -100,8 +110,8 @@ export function makeApiMock() {
     uploadAudioAttachment: vi.fn(async () => ({})),
     fetchAudioAttachment: vi.fn(async () => ({ blob: "", mime_type: "audio/m4a", duration_seconds: 60 })),
     deleteAudioAttachment: vi.fn(async () => ({})),
-    getVoiceConsent: vi.fn(async () => ({ enabled: false })),
-    setVoiceConsent: vi.fn(async () => ({ enabled: true })),
+    getVoiceConsent: vi.fn(async () => ({ enabled: false, active_for_current_policy: false })),
+    setVoiceConsent: vi.fn(async () => ({ enabled: true, active_for_current_policy: true })),
     setShareVoice: vi.fn(async () => ({ id: "a".repeat(32), share_voice: true })),
     // Therapist sharing (2026-09-16)
     pairingLookup: vi.fn(async () => ({

@@ -54,7 +54,7 @@ describe("PrivacyScreen pins: the full per-node style contract", () => {
       "What is encrypted",
       "What the server sees",
       "Temporary server decryption",
-      "Optional AI analysis",
+      "Optional transcript translation",
       "Deleting your data",
     ];
     for (const title of titles) {
@@ -66,7 +66,7 @@ describe("PrivacyScreen pins: the full per-node style contract", () => {
       "Journal entries and observations",
       "Your username, the calendar dates",
       "The server can decrypt entries",
-      "Off by default for every account",
+      "Off by default",
       "Deleting your account removes",
     ];
     for (const body of bodies) {

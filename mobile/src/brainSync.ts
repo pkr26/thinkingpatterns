@@ -13,11 +13,12 @@
  * the Settings screen's account-deletion flow wipes it per account.
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { accountStorageKey } from "./accountStorage";
 
 /** Per-account stamp: a shared key let one account's refresh satisfy (and
  *  skip) another account's — and the upload ships the DATA KEY, so the
  *  "once per day" cap held per account. */
-const stampKey = (userId: string): string => `@mindpattern/last_recompute_${userId}`;
+const stampKey = accountStorageKey.recompute;
 
 /** Account-deletion hygiene: remove this account's recompute stamp. */
 export async function clearRecomputeStamp(userId: string): Promise<void> {

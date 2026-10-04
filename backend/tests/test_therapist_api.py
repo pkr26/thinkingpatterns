@@ -138,6 +138,7 @@ async def test_therapist_register_validation(client):
             "username": th.username,
             "salt": th.salt_b64,
             "verifier": th.auth_key_b64,
+            "age_attestation": "minimum_age_confirmed_v1",
             "display_name": th.display_name,
             "wrap_pub_key": th.wrap_pub_key,
             "wrap_key_blob": th.wrap_key_blob_b64(),
@@ -156,6 +157,7 @@ async def test_therapist_username_namespace_shared_with_patients(client):
         "username": th.username,
         "salt": th.salt_b64,
         "verifier": th.auth_key_b64,
+        "age_attestation": "minimum_age_confirmed_v1",
         "display_name": th.display_name,
         "wrap_pub_key": th.wrap_pub_key,
         "wrap_key_blob": th.wrap_key_blob_b64(),
@@ -174,6 +176,7 @@ async def test_therapist_register_conflict_counts_against_name_bucket(client):
             "username": "dupname",
             "salt": th.salt_b64,
             "verifier": th.auth_key_b64,
+            "age_attestation": "minimum_age_confirmed_v1",
             "display_name": "Impostor",
             "wrap_pub_key": th.wrap_pub_key,
             "wrap_key_blob": th.wrap_key_blob_b64(),
@@ -367,7 +370,8 @@ class TestConsentGrant:
             headers=patient.headers,
             json={"code": code, **wrap, "disclosure": SHARING_DISCLOSURE_VERSION},
         )
-        assert response.status_code == 422
+        assert response.status_code == 403
+        assert response.json()["code"] == "step_up_required"
 
     async def test_grant_rejects_wrong_verifier(self, client):
         patient = ClientEmulator("wrongverify", "pw")
@@ -526,7 +530,8 @@ class TestConsentRevoke:
         response = await client.request(
             "DELETE", f"/api/consents/{consent_id}", headers=patient.headers
         )
-        assert response.status_code == 422
+        assert response.status_code == 403
+        assert response.json()["code"] == "step_up_required"
         wrong = await client.request(
             "DELETE",
             f"/api/consents/{consent_id}",
@@ -587,6 +592,8 @@ class TestTherapistReads:
 
         async def add_prior_patient(label: str) -> None:
             app = client._transport.app  # noqa: SLF001 — compact test fixture setup
+            from tests.helpers import seed_authenticated_audit_genesis
+
             async with app.state.sessionmaker() as session:
                 prior_id = new_id()
                 session.add(
@@ -599,6 +606,7 @@ class TestTherapistReads:
                     )
                 )
                 await session.flush()
+                seed_authenticated_audit_genesis(session, app.state.settings, prior_id)
                 session.add(
                     Consent(
                         user_id=prior_id,
@@ -1253,10 +1261,11 @@ class TestAuditAndCascades:
         )
         assert erased.status_code == 204
         # The account is gone. /me is itself feature-gated, so re-enable
-        # sharing first — the deleted credential must then 401 (the 404
-        # would be the feature gate, not the user lookup).
+        # sharing first — the still-valid deleted credential must then carry
+        # the explicit 410 account_deleted signal (the 404 would be the
+        # feature gate, not the user lookup).
         app.state.settings.therapist_sharing_enabled = True
-        assert (await client.get("/api/therapist/me", headers=th.headers)).status_code == 401
+        assert (await client.get("/api/therapist/me", headers=th.headers)).status_code == 410
 
     async def test_export_carries_share_records(self, client):
         patient = ClientEmulator("exportshare", "pw")
@@ -1267,15 +1276,16 @@ class TestAuditAndCascades:
         response = await client.get("/api/account/export", headers=patient.headers)
         assert response.status_code == 200
         bundle = response.json()
-        assert bundle["shares"] == [
-            {
-                "therapist_username": "drexport",
-                "therapist_display_name": th.display_name,
-                "status": "active",
-                "granted_at": bundle["shares"][0]["granted_at"],
-                "revoked_at": None,
-            }
-        ]
+        assert len(bundle["shares"]) == 1
+        share = bundle["shares"][0]
+        assert share["therapist_id"] == th.user_id
+        assert share["therapist_username"] == "drexport"
+        assert share["therapist_display_name"] == th.display_name
+        assert share["status"] == "active"
+        assert share["revoked_at"] is None
+        assert share["scope"] == "full"
+        assert share["disclosure"] == "v3"
+        assert share["share_voice"] is False
 
 
 # --- evidence drill-down data ------------------------------------------------------

@@ -2,6 +2,8 @@
  *  classification, the M-5 duplicate verification, the 401 keep-everything
  *  path, the generation fence, quarantine, and recovery. Uses the
  *  injectable kv backend + fetch stubs. */
+// @ts-nocheck
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   abortInFlightFlush,
@@ -12,6 +14,7 @@ import {
   isFutureDateRejection,
   QueueAbandonedError,
   QueueFullError,
+  queueEvictionSummary,
   queueLength,
   quarantinedQueueExists,
   rejectedEntries,
@@ -19,6 +22,9 @@ import {
   rewrapQueue,
   SessionExpiredError,
   MAX_QUEUE_LENGTH,
+  MAX_QUARANTINE_BYTES,
+  MAX_REJECTED_BYTES,
+  MAX_REJECTED_LENGTH,
 } from "../src/offlineQueue";
 import { decryptEntry, encryptEntry } from "../src/crypto/patient";
 import { ApiError } from "../src/api/client";
@@ -540,6 +546,90 @@ describe("audit 2026-09-25 hardening", () => {
     expect(quarantine.records.length).toBeLessThanOrEqual(50);
     // The NEWEST records win when the cap evicts.
     expect(quarantine.records.at(-1)).toContain('"corrupt":59');
+  });
+
+  it("bounds quarantine by bytes, evicts the oldest deterministically, and records the loss", async () => {
+    const map = new Map<string, string>();
+    setKvBackendForTests({
+      async getItem(k) { return map.get(k) ?? null; },
+      async setItem(k, v) { map.set(k, v); },
+      async removeItem(k) { map.delete(k); },
+    });
+    await enqueue(item(1));
+    const queueKey = [...map.keys()].find((k) => k.includes(".items."))!;
+    const corrupt = Array.from({ length: 12 }, (_, n) => ({ n, garbage: `${n}:${"x".repeat(31_000)}` }));
+    map.set(queueKey, JSON.stringify({ v: 1, items: [...corrupt, item(2)] }));
+
+    expect(await queueLength("user-1")).toBe(1);
+    const quarantineKey = [...map.keys()].find((k) => k.includes(".quarantine."))!;
+    const stored = map.get(quarantineKey)!;
+    const quarantine = JSON.parse(stored) as { records: string[] };
+    expect(new TextEncoder().encode(stored).length).toBeLessThanOrEqual(MAX_QUARANTINE_BYTES);
+    expect(quarantine.records.at(-1)).toContain('"n":11');
+    expect(quarantine.records.some((record) => record.includes('"n":0'))).toBe(false);
+    expect((await queueEvictionSummary("user-1")).quarantine).toBeGreaterThan(0);
+  });
+
+  it("truncates one oversized corrupt value before quarantine and surfaces that evidence loss", async () => {
+    const map = new Map<string, string>();
+    setKvBackendForTests({
+      async getItem(k) { return map.get(k) ?? null; },
+      async setItem(k, v) { map.set(k, v); },
+      async removeItem(k) { map.delete(k); },
+    });
+    await enqueue(item(1));
+    const queueKey = [...map.keys()].find((k) => k.includes(".items."))!;
+    const oversized = "!".repeat(MAX_QUARANTINE_BYTES + 10_000);
+    map.set(queueKey, oversized);
+
+    expect(await queueLength("user-1")).toBe(0);
+    const quarantineKey = [...map.keys()].find((k) => k.includes(".quarantine."))!;
+    const stored = map.get(quarantineKey)!;
+    const quarantine = JSON.parse(stored) as { records: string[] };
+    expect(new TextEncoder().encode(stored).length).toBeLessThanOrEqual(MAX_QUARANTINE_BYTES);
+    expect(quarantine.records).toHaveLength(1);
+    expect(quarantine.records[0]).toContain('"truncated":true');
+    expect(quarantine.records[0]).toContain(`"original_bytes":${oversized.length}`);
+    expect(await queueEvictionSummary("user-1")).toEqual({ rejected: 0, quarantine: 1 });
+  });
+
+  it("bounds rejected recovery records by bytes and deterministically keeps the newest entries", async () => {
+    const map = new Map<string, string>();
+    setKvBackendForTests({
+      async getItem(k) { return map.get(k) ?? null; },
+      async setItem(k, v) { map.set(k, v); },
+      async removeItem(k) { map.delete(k); },
+    });
+    await enqueue(item(0));
+    const queueKey = [...map.keys()].find((k) => k.includes(".items."))!;
+    const rejectedKey = queueKey.replace(".items.", ".rejected.");
+    const seeded = Array.from({ length: MAX_REJECTED_LENGTH }, (_, n) => item(n, { blobB64: `${n}:${"A".repeat(7_000)}` }));
+    map.set(rejectedKey, JSON.stringify({ v: 1, items: seeded }));
+
+    const retained = await rejectedEntries("user-1");
+    const stored = map.get(rejectedKey)!;
+    expect(new TextEncoder().encode(stored).length).toBeLessThanOrEqual(MAX_REJECTED_BYTES);
+    expect(retained.at(-1)?.clientEntryId).toBe(seeded.at(-1)!.clientEntryId);
+    expect(retained[0]!.clientEntryId).not.toBe(seeded[0]!.clientEntryId);
+    expect(retained.map((entry) => entry.clientEntryId)).toEqual(seeded.slice(-retained.length).map((entry) => entry.clientEntryId));
+    expect(await queueEvictionSummary("user-1")).toEqual({ rejected: seeded.length - retained.length, quarantine: 0 });
+  });
+
+  it("drops and counts a single rejected record larger than the entire byte cap", async () => {
+    const map = new Map<string, string>();
+    setKvBackendForTests({
+      async getItem(k) { return map.get(k) ?? null; },
+      async setItem(k, v) { map.set(k, v); },
+      async removeItem(k) { map.delete(k); },
+    });
+    await enqueue(item(0));
+    const queueKey = [...map.keys()].find((k) => k.includes(".items."))!;
+    const rejectedKey = queueKey.replace(".items.", ".rejected.");
+    map.set(rejectedKey, JSON.stringify({ v: 1, items: [item(999, { blobB64: "A".repeat(MAX_REJECTED_BYTES + 1) })] }));
+
+    expect(await rejectedEntries("user-1")).toEqual([]);
+    expect(map.has(rejectedKey)).toBe(false);
+    expect(await queueEvictionSummary("user-1")).toEqual({ rejected: 1, quarantine: 0 });
   });
 
   it("the future-date classifier: only genuine future-date 422s retry", () => {

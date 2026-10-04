@@ -11,6 +11,7 @@ from datetime import date
 import pytest
 
 from tests.helpers import ClientEmulator, EnvelopeClientEmulator
+from tests.test_recovery_envelope import recovery_body, recovery_verifier
 from tests.test_voice_remediation_2026_09_29 import _voice_ready
 
 TODAY = date.today()
@@ -170,17 +171,18 @@ class TestRecoveryErrorBranches:
             )
             await session.commit()
 
-        body = {
-            "password_verifier": emu.auth_key_b64,
-            "verifier": b64(recovery_key),
-            "wrapped_key": b64(os.urandom(60)),
-        }
+        body = recovery_body(recovery_key)
+        body["password_verifier"] = emu.auth_key_b64
         setup = await client.put("/api/account/recovery", headers=emu.headers, json=body)
         assert setup.status_code == 204, setup.text
 
         recovered = await client.post(
             "/api/auth/recover",
-            json={"username": "recov-insight-probe", "verifier": b64(recovery_key)},
+            json={
+                "username": "recov-insight-probe",
+                "verifier": b64(recovery_verifier(recovery_key)),
+                "scheme": "v2",
+            },
         )
         assert recovered.status_code == 200, recovered.text
         # The epoch bump killed the emulator's bearer: re-login FIRST, then
@@ -196,7 +198,7 @@ class TestRecoveryErrorBranches:
             "/api/account/recovery/password",
             headers=headers,
             json={
-                "proof": b64(recovery_key),
+                "proof": b64(recovery_verifier(recovery_key)),
                 "new_salt": b64(os.urandom(16)),
                 "new_verifier": emu.auth_key_b64,
                 "wrapped_data_key": new_wrap,

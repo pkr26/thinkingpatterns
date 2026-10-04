@@ -572,7 +572,12 @@ async def test_register_commit_race_returns_409(client, monkeypatch):
     emu = ClientEmulator("race-register", "pw-race-register")
     response = await client.post(
         "/api/auth/register",
-        json={"username": emu.username, "salt": emu.salt_b64, "verifier": emu.auth_key_b64},
+        json={
+            "username": emu.username,
+            "salt": emu.salt_b64,
+            "verifier": emu.auth_key_b64,
+            "age_attestation": "minimum_age_confirmed_v1",
+        },
     )
     assert response.status_code == 409
     assert response.json()["detail"] == "username already taken"

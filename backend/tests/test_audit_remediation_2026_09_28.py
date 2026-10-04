@@ -32,7 +32,7 @@ from sqlalchemy import select
 from app.api import insights as insights_module
 from app.config import Settings
 from app.main import create_app
-from app.models import Measure, RekeyJournal
+from app.models import AuditChainState, Measure, RekeyJournal, new_id, utcnow
 from app.security import crypto
 from tests.helpers import ClientEmulator
 
@@ -319,33 +319,38 @@ async def test_hydration_truncation_marks_the_cache_overflowed(chain_sessionmake
 def test_journal_heads_map_matches_the_per_user_read(tmp_path):
     from app.api._audit import read_journal_head, read_journal_heads
 
+    user_a = "1" * 32
+    user_b = "2" * 32
+    user_c = "3" * 32
     journal = tmp_path / "journal.log"
     journal.write_text(
-        "user-a 1 " + "a" * 64 + " - 2026-09-20T00:00:00+00:00\n"
-        "user-a 2 " + "b" * 64 + " - 2026-09-21T00:00:00+00:00\n"
-        "user-b 7 " + "c" * 64 + " - 2026-09-22T00:00:00+00:00\n"
+        f"{user_a} 1 " + "a" * 64 + " - 2026-09-20T00:00:00+00:00\n"
+        f"{user_a} 2 " + "b" * 64 + " - 2026-09-21T00:00:00+00:00\n"
+        f"{user_b} 7 " + "c" * 64 + " - 2026-09-22T00:00:00+00:00\n"
         "garbage line\n"
-        "user-a notanumber " + "d" * 64 + " - 2026-09-23T00:00:00+00:00\n",
+        f"{user_a} notanumber " + "d" * 64 + " - 2026-09-23T00:00:00+00:00\n",
         encoding="utf-8",
     )
     heads = read_journal_heads(str(journal))
     assert heads == {
-        "user-a": (2, "2026-09-21T00:00:00+00:00"),
-        "user-b": (7, "2026-09-22T00:00:00+00:00"),
+        user_a: (2, "2026-09-21T00:00:00+00:00"),
+        user_b: (7, "2026-09-22T00:00:00+00:00"),
     }
-    assert read_journal_head(str(journal), "user-a") == (2, "2026-09-21T00:00:00+00:00")
-    assert read_journal_head(str(journal), "user-b") == (7, "2026-09-22T00:00:00+00:00")
-    assert read_journal_head(str(journal), "user-c") is None
+    assert read_journal_head(str(journal), user_a) == (2, "2026-09-21T00:00:00+00:00")
+    assert read_journal_head(str(journal), user_b) == (7, "2026-09-22T00:00:00+00:00")
+    assert read_journal_head(str(journal), user_c) is None
 
 
 def test_journal_compaction_drops_only_pre_cutoff_lines(tmp_path):
     from app.api._audit import compact_audit_journal
 
+    user_a = "1" * 32
+    user_b = "2" * 32
     journal = tmp_path / "journal.log"
     journal.write_text(
-        "user-a 1 " + "a" * 64 + " - 2026-08-01T00:00:00+00:00\n"
-        "user-a 2 " + "b" * 64 + " - 2026-09-21T00:00:00+00:00\n"
-        "user-b 7 " + "c" * 64 + " - 2026-09-22T00:00:00+00:00\n",
+        f"{user_a} 1 " + "a" * 64 + " - 2026-08-01T00:00:00+00:00\n"
+        f"{user_a} 2 " + "b" * 64 + " - 2026-09-21T00:00:00+00:00\n"
+        f"{user_b} 7 " + "c" * 64 + " - 2026-09-22T00:00:00+00:00\n",
         encoding="utf-8",
     )
     kept, dropped = compact_audit_journal(str(journal), "2026-09-01T00:00:00+00:00")
@@ -358,33 +363,63 @@ def test_journal_compaction_drops_only_pre_cutoff_lines(tmp_path):
 
 
 async def test_sweep_verifies_with_the_heads_map_and_compacts(client, app, monkeypatch, tmp_path):
-    """End to end: the daily sweep feeds verify_access_log_chain the
-    precomputed heads map and compacts the journal at the retention
-    boundary, so the journal cannot grow unbounded."""
+    """The sweep reuses one index and compacts superseded journal lines."""
     from app.api import _audit as audit_module
-    from app.models import new_id
     from app import main as main_mod
 
+    journal_owner = "f" * 32
+    old_line = f"{journal_owner} 1 {'a' * 64} {'b' * 64} 2020-01-01T00:00:00+00:00\n"
+    newest_line = f"{journal_owner} 2 {'c' * 64} {'d' * 64} 2020-01-02T00:00:00+00:00\n"
     journal = tmp_path / "journal.log"
-    journal.write_text("sweepuser 1 " + "a" * 64 + " - 2020-01-01T00:00:00+00:00\n")
+    journal.write_text(old_line + newest_line)
     app.state.settings.audit_journal_path = str(journal)
 
-    # One recently-active patient so the sweep actually verifies a chain.
+    # One authenticated state owner makes the sweep exercise verification.
+    # Seed the state directly: append_access_log uses a nested savepoint for
+    # real cross-process collision recovery, which is incompatible with the
+    # in-memory SQLite fixture's one shared connection while lifespan tasks
+    # are active.
     async with app.state.sessionmaker() as session:
-        await audit_module.append_access_log(
-            session, actor_id=new_id(), actor_role="patient", user_id=new_id(), action="login"
+        state = AuditChainState(
+            user_id=new_id(),
+            head_seq=1,
+            head_hash="e" * 64,
+            head_at=utcnow(),
+            first_retained_seq=None,
+            first_retained_hash=None,
+            state_version=1,
+            mac_key_version=app.state.settings.audit_mac_key_version,
+            updated_at=utcnow(),
         )
+        state.state_mac = audit_module.compute_chain_state_mac(
+            app.state.settings.audit_mac_keyring[state.mac_key_version], state
+        )
+        session.add(state)
         await session.commit()
 
     seen: dict[str, object] = {}
-    real_verify = audit_module.verify_access_log_chain
 
-    async def spy(session, user_id, **kwargs):
+    async def spy(_session, cursor, user_id, **kwargs):
+        from app.api._audit import IncrementalChainVerification, seal_verification_checkpoint
+
         seen.update(kwargs)
-        return await real_verify(session, user_id, **kwargs)
+        cursor.last_user_id = user_id
+        cursor.verification_owner_id = None
+        cursor.verification_snapshot_head_seq = None
+        cursor.verification_snapshot_head_hash = None
+        cursor.verification_next_seq = None
+        cursor.verification_previous_hash = None
+        cursor.verification_rows_checked = 0
+        seal_verification_checkpoint(
+            cursor,
+            kwargs["mac_keys"],
+            kwargs["current_mac_key_version"],
+        )
+        return IncrementalChainVerification(ok=True, complete=True, rows_checked=0)
 
-    monkeypatch.setattr(audit_module, "verify_access_log_chain", spy)
+    monkeypatch.setattr(audit_module, "verify_access_log_chain_incremental", spy)
     await main_mod._prune_access_log_once(app)
-    assert isinstance(seen.get("journal_heads"), dict)
-    # The pre-retention line is gone after the sweep's compaction.
-    assert journal.read_text(encoding="utf-8") == ""
+    assert isinstance(seen.get("journal_evidence"), audit_module.JournalEvidenceIndex)
+    # Compaction retains the newest external anchor per owner while dropping
+    # its superseded pre-cutoff evidence.
+    assert journal.read_text(encoding="utf-8") == newest_line

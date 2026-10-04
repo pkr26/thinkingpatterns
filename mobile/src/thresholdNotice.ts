@@ -18,8 +18,10 @@
  * celebratory message, never a gate on anything.
  */
 import { secureStore } from "./secureStore";
+import { accountStorageKey } from "./accountStorage";
+import { commitActiveAccountWrite } from "./localWriteGuard";
 
-const key = (userId: string): string => `@mindpattern/threshold_notice_${userId}`;
+const key = accountStorageKey.thresholdNotice;
 
 /** Process-lifetime mirror, consulted ONLY when storage throws. */
 const memoryShown = new Set<string>();
@@ -37,11 +39,13 @@ export async function thresholdNoticeShown(userId: string): Promise<boolean> {
 /** Stamp the notice as shown. The mirror is always written, so a storage
  *  failure still suppresses repeats within this session. */
 export async function recordThresholdNotice(userId: string): Promise<void> {
-  memoryShown.add(userId);
   try {
-    await secureStore.setItem(key(userId), "1");
+    await commitActiveAccountWrite(userId, async () => {
+      await secureStore.setItem(key(userId), "1");
+      memoryShown.add(userId);
+    });
   } catch {
-    // The mirror holds it; a restart simply re-shows the card (fail-open).
+    // A failed/retired write simply re-shows the card (fail-open).
   }
 }
 

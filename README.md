@@ -33,7 +33,7 @@ Scores await independent reassessment and the required external evidence.
 | `backend/tests/` | Unit + API integration + crypto vectors + production-hardening, adversarial red-team, and remediation-regression suites |
 | `backend/scripts/seed_demo.py` | Seed a demo account with 84 days of synthetic journal + real computed insights (see "Demo") |
 | `backend/probe_brain.py` | Ground-truth probe: planted-pattern and noise corpora with explicit emitted verdicts |
-| `mobile/` | React Native (iOS/Android) client: encrypted journal with atomic entry edits, history search + mood calendar, one-tap mood check-in behind an optional details disclosure, reflective questions (auto-loaded, key-shipment still explicit), evidence-view pattern cards with per-pattern mute, one-time threshold-crossing notice, opt-in local daily reminders, optional biometric unlock (data key wrapped under Keychain biometry-current-set; password always remains), the on-device brain's graded sentiment engine (vector-pinned to the server's), optional PHQ-9 wellbeing measures shared with the therapist through the same consent, English/Spanish localization (device locale), crisis resources, therapist sharing, and scoped offline sync. Export is deliberately disabled pending a reviewed native streaming-to-file implementation. |
+| `mobile/` | React Native (iOS/Android) client: encrypted journal with atomic entry edits, history search + mood calendar, one-tap mood check-in behind an optional details disclosure, reflective questions (auto-loaded, key-shipment still explicit), evidence-view pattern cards with per-pattern mute, one-time threshold-crossing notice, opt-in local daily reminders, optional biometric unlock (data key wrapped under Keychain biometry-current-set; password always remains), the on-device brain's graded sentiment engine (vector-pinned to the server's), optional PHQ-9, GAD-7 and PHQ-2 wellbeing measures shared with the therapist through the same consent, English/Spanish localization (device locale), crisis resources, therapist sharing, and scoped offline sync. Export is deliberately disabled pending a reviewed native streaming-to-file implementation. |
 | `web/` | Patient WEB client (React + Vite + WebCrypto, 2026-09-25): the mobile app's journaling experience in the browser — same zero-knowledge crypto (four-way vector-pinned), full multi-device peer of the mobile app (the S-contract in WEB_PLAN.md), strict memory-only session custody, offline ciphertext queue, explicit-only recompute, measures/sharing/settings parity, encrypted-bundle export. Served like the portal (own subdomain, same-origin /api) |
 | `portal/` | Therapist web portal (React + WebCrypto): patient list, pattern cards with "Why this?" evidence panels, per-pattern drill-down into the decrypted evidence entries, therapist-private encrypted notes (editable, searchable, templates), the "since your last review" delta anchored to an explicit Mark-reviewed action, printable session summaries, caseload triage scan, mood sparklines, 401-expiry + idle auto-lock — read-only by construction |
 | `shared/vectors.json` | Cross-platform crypto vectors (backend ⇄ mobile ⇄ portal ⇄ web), including non-ASCII AAD cases and the therapist wrap (ECDH→HKDF→AES-GCM) constructions |
@@ -253,8 +253,8 @@ anything:
    PRESENCE surfaces on the caseload screen (a calm, non-quoting
    banner) without opening every chart. Summaries are null until the
    patient's first post-grant recompute and are cleared on revoke.
-**Wellbeing measures (MBC, 2026-09-19)**: the patient can complete a
-   standard questionnaire (PHQ-9) in the app; the score is stored as an
+**Wellbeing measures (MBC, 2026-09-19)**: the patient can complete
+   PHQ-9, GAD-7 or PHQ-2 in the app; each result is stored as an
    opaque encrypted blob (AAD context `"measure"`) under the same
    per-account quota and date discipline as entries, and the therapist
    portal reads it through the SAME active consent — decrypting with the
@@ -277,11 +277,14 @@ anything:
    disclosure says so plainly. Re-granting reactivates the same consent
    row (note continuity for the therapist). Every grant/revoke and every
    patient-data read/write is audit-logged; the log outlives account
-   deletion, and (2026-09-26) each patient's audit trail is a **forward
-   hash chain** (`prev_hash` → `entry_hash` over a canonical encoding of
-   the row's fields) with an account-deletion terminal row — silent row
-   edits or removals break the chain and are detectable by the chain
-   verifier (`verify_access_log_chain`).
+   deletion, and each patient's audit trail is a **forward hash chain**
+   (`prev_hash` → `entry_hash` over a canonical encoding of the row's
+   fields), an HMAC seal keyed outside the database, and an
+   account-deletion terminal row. Production also fsyncs committed heads
+   to an out-of-database audit journal so deletion of the newest database
+   rows is detectable. Key versions permit rotation while retained rows
+   are still verifiable; the chain verifier checks links, seals,
+   retained-prefix state and journal evidence (`verify_access_log_chain`).
 7. **Compliance flag**: sharing journal data with clinicians moves an
    operator into health-data territory (HIPAA BAA in the US or
    equivalent). The architecture (explicit consent records with
@@ -302,9 +305,9 @@ anything:
   patterns surface with `detail.sensitive=true`, and the app renders a
   non-quoting card ("A difficult thought has been returning…") with a
   support link instead of echoing the text back.
-* **Observations, not verdicts**: no advice, diagnosis, or prediction
-  anywhere — including the optional LLM path, whose output is sanitized,
-  corpus-anchored, and restricted to the verifiable pattern kinds.
+* **Observations, not verdicts**: no advice, diagnosis, or prediction.
+  Production recompute is deterministic; retained LLM provider/sanitizer
+  helpers are dormant compatibility code, not a shipped journal-text path.
 * The pre-threshold phase shows **device-local value only** (streak + mood
   trend computed on-device, never synced); the analysis threshold is
   enforced server-side.
@@ -316,9 +319,28 @@ anything:
 3. **Processing is bounded.** Nothing is decrypted before the 30-day threshold. After it: decrypt → analyze → re-encrypt, keys and plaintext buffers owned by the enclave are zeroized (`bytearray`-scrubbed). The enclave keeps **one** zeroized working copy of the data key per recompute run — minting a fresh immutable `bytes(key)` per item would leave N unzeroized copies for the GC. Honest scope: the analyzer itself creates Python/JS string copies of your text that only GC reclaims; a process memory image can still contain them. TEE-style guarantees are deployment work.
 4. **Progressive revelation is enforced server-side.** Patterns are only computed, stored, and served after 30 distinct active days. Entry dates can't predate the account (backdating can't fast-forward the gate) and may be at most server-today + 1 day (device-local timezone grace). Before the threshold the client sees only its own device-local mood trend.
 5. **Enumeration resistance — scoped truthfully.** Salt lookup (POST /api/auth/salt) never reveals account existence per request (deterministic decoys, identical for unknown and deactivated accounts). Registration must, like any name-based system, answer whether a name is taken; it is rate-limited per-IP **and** per-username to make mass probing impractical. The residual oracle is longitudinal: a name's salt changes decoy → real when it registers and real → decoy on deactivation, so a watcher who re-probes the same name over time learns the membership transition. That transition leak is inherent to name-based systems — the salt has to change hands at some point — and is stated, not claimed away.
-6. **Destructive actions re-authenticate.** `DELETE /api/account` and enabling LLM analysis require the password-derived verifier — a stolen bearer token cannot erase a journal. `POST /api/auth/logout` (2026-09-26) records the presented token's 128-bit `jti` in a revocation store until its own expiry — one device signs out without killing the account's other sessions; the account-wide epoch bump remains the global kill switch and still fires on credential rotation, password change, and account deletion (and for legacy jti-less tokens at logout).
+6. **Sensitive disclosure and destruction actions re-authenticate.** Account
+   deletion, speech/translation or legacy LLM consent changes, and therapist
+   sharing grant/revoke/rewrap/voice changes require a freshly verified
+   password. The web client exchanges it for a short-lived, one-use proof
+   bound to the exact action and current session; native clients retain the
+   immediate verifier compatibility path. A stolen bearer alone therefore
+   cannot widen sharing, enable external processing, or erase a journal.
+   `POST /api/auth/logout` (2026-09-26) records the presented token's 128-bit
+   `jti` in a revocation store until its own expiry — one device signs out
+   without killing the account's other sessions; the account-wide epoch bump
+   remains the global kill switch and still fires on credential rotation,
+   password change, and account deletion (and for legacy jti-less tokens at
+   logout).
 7. **Metadata the server does hold** (be aware of it): usernames, per-entry calendar dates and received timestamps, entry ciphertext sizes, insight dates, and — when a therapist anchors a note to a pattern — the note's `pattern_pid` (a coarse analysis-derived topic id like `temporal:work`; the note's text and timestamps stay inside the ciphertext blob). A DB leak reveals *when* and *how much* you wrote — never *what*.
-8. **Optional LLM analysis is opt-in per user.** If the operator configures `MINDPATTERN_LLM_URL`, journal text is only sent to that third-party endpoint for accounts that explicitly consented (re-authenticated toggle in Settings, with the disclosure that named-provider retention applies), only post-threshold, with model output sanitized (labels length-capped, "recurring phrases" verified against your actual text, numerics clamped). Enabling records `llm_consent_at` + `llm_consent_disclosure` ("v1") on the account — cleared on disable, and included in the export bundle, so the GDPR record of what was consented to (and when) travels with the user's own data. Off by default for every account.
+8. **Journal-text LLM dispatch is disabled.** Production recompute uses only
+   the deterministic analyzer and does not send journal text to an LLM, even
+   if legacy `MINDPATTERN_LLM_*` configuration or consent metadata exists.
+   Provider/sanitizer helpers and legacy consent fields remain for migration
+   compatibility and tests; they are not evidence of an active feature and
+   must not be marketed as one. Separately opted-in speech transcription and
+   translation are distinct provider paths with their own disclosure,
+   provider fingerprint, and retention terms.
 9. **Therapist sharing keeps the server blind.** The patient's client
    wraps the data key to the therapist's public P-256 key (the server
    stores the wrap, never a usable key); the portal unwraps it locally.
@@ -385,6 +407,16 @@ All routes mount under **`/api/v1`** (canonical); the same routers are also serv
 
 Every error response is one envelope: **`{"detail": <human string>, "code": <snake_case>}`**. The codes (complete — every value `backend/app/**` raises plus the status-default envelope map in `backend/app/deps.py`): `unauthorized`, `invalid_credentials`, `forbidden` (403 — role/ownership walls, e.g. a regular user on a therapist route), `verification_failed` (403 — wrong verifier on a re-authenticated action), `not_found`, `method_not_allowed` (405), `request_timeout` (408), `conflict`, `collection_changed` (409 — the paginated collection changed while paging; restart from the first page), `version_conflict` (409 — a version-bound entry replacement lost the race to another device; refetch and retry), `account_deleted` (410 — the account was deleted mid-request), `gone` (410 status-default), `disclosure_outdated` (409 — the sharing disclosure version moved past what the client recorded), `llm_unavailable` (409 — consent requested but the operator has not configured `MINDPATTERN_LLM_URL`), `feedback_blob_invalid` (the recompute feedback attachment failed its crypto/shape check), `rekey_key_mismatch` (400 — the rekey's old key did not authenticate every blob; nothing was changed), `payload_too_large`, `quota_exceeded`, `blob_quota_exceeded`, `validation_error` (never echoes input), `rate_limited` (+ `Retry-After`), `bad_request`, `entry_blob_invalid`, `entry_payload_malformed`, `processing_session_required`, `processing_session_invalid`, `internal_error`, `service_unavailable`, `error` (the last-resort fallback for an HTTP status outside the map in `backend/app/deps.py` — defense in depth no current route emits), `totp_required` (401 — the therapist account has TOTP enabled; re-send the login with a `totp_code`), and `totp_code_invalid` (401/403 — the presented TOTP code was wrong, outside the drift window (previous-and-current timestep only since 2026-09-26), or already consumed). 2026-09-26 key-envelope wave: `key_scheme_conflict` (409 — a v2-envelope account tried `PUT /account/credential`, whose salt swap without an envelope re-wrap would destroy the data key's locker; use `PUT /account/password`), `envelope_key_mismatch` (403 — the `POST /account/key-envelope/upgrade` processing session's key did not authenticate stored ciphertext; re-open the session with the account's current data key). Notes concurrency: `version_required` (400 — a clinical-note PATCH omitted `base_version`; fail-closed rather than last-write-wins). The completeness of this list is CI-enforced: the `contract-gates` job scans every `code="..."` kwarg **and** every `"code": "..."` dict-literal envelope under `backend/app/**` plus the status-default map, and fails if README does not list the value.
 
+The remaining scoped codes are: `step_up_required` and `step_up_invalid`
+for fresh action-bound authentication; `mfa_enrollment_required` before an
+unenrolled therapist may use patient-data routes; `recovery_not_configured`;
+`rekey_in_progress`, `rekey_operation_conflict`, `upgrade_required`; and
+`audit_integrity_error`. Voice and retained-audio routes use
+`voice_consent_required`, `consent_voice_share_required`, `unknown_entry`,
+`audio_too_large`, `audio_quota_exceeded`, `audio_expired`,
+`audio_storage_unconfigured`, `audio_storage_failed`, `audio_store_error`,
+`stt_unconfigured`, `stt_unavailable`, and `stt_upstream`.
+
 ## Running
 
 ```bash
@@ -399,10 +431,18 @@ MINDPATTERN_ENV=development uvicorn app.main:app --reload   # http://localhost:8
 # Full stack from local source (postgres + API). The production compose file
 # deliberately has no source builds; the explicit overlay below is required
 # for local work only. See deploy/README.md for digest-pinned production.
+mkdir -p deploy/secrets
+umask 077
+for name in token_secret auth_token_secret totp_wrap_secret pairing_secret decoy_secret; do
+  openssl rand -hex 32 > "deploy/secrets/$name"
+done
+openssl rand -hex 32 > deploy/secrets/audit_mac_secret
+: > deploy/secrets/audit_mac_previous_secrets
+openssl rand -hex 16 > deploy/secrets/metrics_token
+openssl rand -hex 16 > deploy/secrets/postgres_password
+openssl rand -base64 32 > deploy/secrets/backup_key
+chmod 600 deploy/secrets/{token_secret,auth_token_secret,totp_wrap_secret,pairing_secret,decoy_secret,audit_mac_secret,audit_mac_previous_secrets,metrics_token,postgres_password,backup_key}
 cat > .env <<EOF
-MINDPATTERN_TOKEN_SECRET=$(openssl rand -hex 32)
-POSTGRES_PASSWORD=$(openssl rand -hex 16)
-BACKUP_KEY=$(openssl rand -base64 32)
 MINDPATTERN_API_IMAGE=mindpattern-api:local
 MINDPATTERN_BACKUP_IMAGE=mindpattern-backup:local
 EOF
@@ -552,22 +592,24 @@ limiting/concurrency (46 killed + 14 new pins + 2 documented residuals).
 |---|---|---|
 | `MINDPATTERN_ENV` | `production` | Fails closed: only the literal `development` may use the dev secret, SQLite, or /docs; every other value (including unset) takes the production gates |
 | `MINDPATTERN_DB_URL` | local SQLite | SQLAlchemy async URL (use `postgresql+asyncpg://…` in prod) |
-| `MINDPATTERN_TOKEN_SECRET` | dev default | Legacy HMAC secret — must be set outside development (≥ 32 chars, or the app refuses to boot). Still accepted alone: each purpose below then resolves to it (the documented identity derivation), so existing deployments keep every bearer signature, wrapped TOTP secret, and pairing digest across the upgrade |
-| `MINDPATTERN_AUTH_TOKEN_SECRET` | *(empty → token secret)* | Dedicated bearer-token signing secret (2026-09-26 purpose split). Setting it bumps the token key-scheme version (`ksv`): every outstanding bearer dies — deliberately, even when the bytes equal the legacy secret, so rotation to a split secret invalidates cleanly. ≥ 32 chars when set |
-| `MINDPATTERN_TOTP_WRAP_SECRET` | *(empty → token secret)* | Dedicated secret for TOTP-at-rest wrapping and recovery-code digests (internally HKDF-domain-separated). Rotation is one-way: wrapped therapist secrets must be re-armed. ≥ 32 chars when set |
-| `MINDPATTERN_PAIRING_SECRET` | *(empty → token secret)* | Dedicated secret for pairing-code HMAC digests. Rotation is one-way: live pairing codes die with it. ≥ 32 chars when set |
+| `MINDPATTERN_TOKEN_SECRET` | dev default | Legacy/root compatibility HMAC secret — required outside development (≥ 32 chars). Production also requires every purpose-split key below; the root value is no longer an allowed fallback there. Development retains the legacy fallback for local compatibility. |
+| `MINDPATTERN_AUTH_TOKEN_SECRET` | *(development: token fallback; production: required)* | Dedicated bearer-token signing secret. Moving to or rotating it changes the token key-scheme version (`ksv`) and invalidates outstanding bearer tokens. ≥ 32 chars. |
+| `MINDPATTERN_TOTP_WRAP_SECRET` | *(development: token fallback; production: required)* | Dedicated secret for TOTP-at-rest wrapping and recovery-code digests (internally HKDF-domain-separated). Rotation requires credential migration/reset; ≥ 32 chars. |
+| `MINDPATTERN_PAIRING_SECRET` | *(development: token fallback; production: required)* | Dedicated secret for pairing-code HMAC digests. Rotation invalidates live pairing codes; ≥ 32 chars. |
 | `MINDPATTERN_SCRYPT_N` | `131072` (2¹⁷) | Server-side scrypt work factor for login verifiers (power of two, 2¹⁵–2²⁰). Raised from 2¹⁶ on 2026-09-26 (login stays well inside the auth latency budget; offline guesses pay 2× the RAM on top of the client-side PBKDF2-600k stretch). Accounts hashed under an older factor fail login after an upgrade until re-registered, or pin this to `65536` for existing fleets |
-| `MINDPATTERN_DECOY_SECRET` | *(empty → token secret)* | Dedicated secret for unknown-username decoy salts (2026-09-21 audit C-6) — set it to decouple decoy-salt stability from token-secret rotation (a longitudinal observer could otherwise distinguish "unknown user" responses across a rotation); ≥ 32 chars when set |
+| `MINDPATTERN_DECOY_SECRET` | *(development: token fallback; production: required)* | Dedicated secret for unknown-username decoy salts. It decouples decoy-salt stability from token-secret rotation; ≥ 32 chars. |
 | `MINDPATTERN_METRICS_TOKEN` | *(empty)* | Bearer token for `GET /metrics` (aggregate counters only). Without it the endpoint 404s in every non-development environment — privacy fail-closed (see the prose under "Running"); ≥ 32 chars when set |
-| `MINDPATTERN_AUDIT_MAC_SECRET` | *(empty → HKDF of the token secret)* | Keyed HMAC key sealing the access-log hash chain (`AccessLog.entry_mac`). When set it must be exactly 32 bytes of hex (64 chars) or the boot refuses; when unset it is HKDF-derived from the token secret, so rotating the token secret rotates the MAC key by construction |
-| `MINDPATTERN_AUDIT_JOURNAL` | *(empty)* | Path to the append-only journal anchoring the audit chain's tail (every committed audit append writes a line; verification flags a journal ahead of the database head as tail truncation, and the daily sweep compacts it at the retention boundary). Empty keeps the link-only boundary; the production compose wires `/var/lib/mindpattern/audit/journal.log` on the `auditjournal` volume |
-| `<NAME>_FILE` (any secret) | — | File-mounted-secrets convention: every credential-bearing variable the app reads (the token/auth/totp/pairing/decoy/metrics/audit-MAC secrets, `MINDPATTERN_LLM_API_KEY`, `MINDPATTERN_THERAPIST_ENROLLMENT_TOKEN`) resolves `<NAME>_FILE` when the env var itself is empty — the file's content, whitespace-stripped. A named file that cannot be read is a hard boot error, never a silent fallback (see `deploy/README.md`'s compose `secrets:` wiring) |
+| `MINDPATTERN_AUDIT_MAC_SECRET` | *(development: HKDF token fallback; production: required)* | Current HMAC key sealing the versioned access-log chain. It must be exactly 32 bytes of hex (64 chars). Production refuses the derived fallback. |
+| `MINDPATTERN_AUDIT_MAC_KEY_VERSION` | `1` | Positive integer written on new audit rows/state. Increment whenever the current audit key changes; never reuse a version. |
+| `MINDPATTERN_AUDIT_MAC_PREVIOUS_SECRETS` | *(empty)* | Historical verification ring as comma/newline/space-separated `version:64hex` entries. Keep old keys until all rows/state under them expire. Duplicate versions, duplicate keys, malformed entries, and a collision with the current version fail boot. Use its `_FILE` form in production. |
+| `MINDPATTERN_AUDIT_JOURNAL` | *(development: empty; production: required)* | Append-only tail anchor. Production validates and fsyncs the target before serving; append/compaction failures increment `mindpattern_audit_journal_failures_total` and make `/readyz` return 503 until a later durable operation succeeds. Compose wires `/var/lib/mindpattern/audit/journal.log` on `auditjournal`. |
+| `<NAME>_FILE` (any secret) | — | File-mounted-secret convention: every credential-bearing variable the app reads (including token/auth/TOTP/pairing/decoy/metrics/audit current+historical keys, `MINDPATTERN_LLM_API_KEY`, and `MINDPATTERN_THERAPIST_ENROLLMENT_TOKEN`) resolves `<NAME>_FILE` when the env value is empty. Unreadable files fail boot. Production Compose exposes only these file paths, never secret values, through container configuration. |
 | `MINDPATTERN_TOKEN_TTL` | `86400` | Session-token lifetime in seconds (≤ 30 days; logout revokes the presented token immediately via its `jti`, and credential rotation/password change revoke every token via the epoch bump, so this is only the idle-expiry ceiling) |
 | `MINDPATTERN_UNLOCK_DAYS` | `30` | Pattern-revelation threshold |
 | `MINDPATTERN_PROCESSING_TTL` | `300` | Processing-session key lifetime (seconds); sessions are single-use |
 | `MINDPATTERN_ANALYSIS_BLOB_BUDGET` | `8388608` | Cumulative ciphertext-byte budget bounding which entries one analysis may LOAD — the newest rows are kept whole and older rows are dropped past it, so peak recompute memory follows the analysis budget, never the account's storage quota. It never raises 413 (storage quotas are the `MINDPATTERN_MAX_*` settings) |
-| `MINDPATTERN_LLM_URL` | unset | HTTPS OpenAI-compatible endpoint for the optional LLM analyzer (exact loopback HTTP only in development); per-user consent still required; unset = deterministic mini-brain. **Mandatory companions when set outside development** (the boot refuses without all three): `MINDPATTERN_LLM_PROVIDER_NAME` (≤ 120 chars), `MINDPATTERN_LLM_DATA_RETENTION` (≤ 500 chars, the provider-declared retention that consent copy must mirror), `MINDPATTERN_LLM_POLICY_VERSION` (≤ 64 chars; the consent fingerprint covers it, so changing vendors/terms invalidates stale consents). `MINDPATTERN_LLM_API_KEY`/`MINDPATTERN_LLM_MODEL` complete the wiring |
-| `MINDPATTERN_THERAPIST_ENROLLMENT_TOKEN` | *(empty)* | Therapist sharing is **fail-closed OFF in production**: `therapist_sharing_enabled` defaults to true only in development, and enabling it in production requires this controlled enrollment token (≥ 32 chars) with which therapists register. Same posture for the LLM: unset `MINDPATTERN_LLM_URL` means the analyzer is off for every account and `llm-consent` answers 409 `llm_unavailable` |
+| `MINDPATTERN_LLM_URL` | unset | Dormant compatibility configuration for the retained provider/sanitizer helper. Production journal recompute does not call it. Keep unset; reactivation is a product/privacy change requiring code review, current consent/disclosure, vendor approval, and tests. When configured outside development, boot still validates the legacy provider/retention/policy companion fields. |
+| `MINDPATTERN_THERAPIST_ENROLLMENT_TOKEN` | *(empty)* | Therapist sharing is **fail-closed OFF in production**: `therapist_sharing_enabled` defaults to true only in development, and enabling it in production requires this controlled enrollment token (≥ 32 chars) with which therapists register. Journal recompute remains deterministic regardless of legacy LLM configuration. |
 | `MINDPATTERN_THERAPIST_SHARING_ENABLED` | *(unset → development-only default)* | Explicit boolean override of the sharing default (`1`/`true`/`yes`/`on`, `0`/`false`/`no`/`off` — anything else refuses to boot). Enabling it in production still requires the enrollment token above |
 | `MINDPATTERN_AUTH_RATE_LIMIT` / `_WINDOW` | `10` / `60` | Exact sliding-window rate limits for auth and salt lookups (2026-09-26: every limiter is an exact sliding window keyed on the monotonic clock, with sharded overflow locks bounding the key-set's memory — no fixed-window burst-of-2 edge at the boundary); registration conflicts also use a per-username bucket (login intentionally does not, so an attacker cannot spend a victim's lockout budget) |
 | `MINDPATTERN_TOTP_FAILURE_LIMIT` | `10` | Per-username second-factor failure budget (distinct from the per-IP auth bucket on purpose: this keyed bucket is reachable only with a valid verifier, so there is no lockout oracle for unauthenticated spray) |
@@ -600,17 +642,21 @@ processing-session TTL ≤ 300 s, request-body deadline ≤ 120 s, rate windows 
 > **Operator/legal pack**: `docs/OPERATOR_PACK.md` indexes the
 > signable compliance documents built on the retention facts below — a
 > privacy-policy template, the data-retention schedule (every number in
-> one table), a subprocessor/BAA register, a security policy +
-> `security.txt` example, plus the DPIA template and incident runbook.
+> one table), a subprocessor/BAA register, a security policy + fail-closed
+> `security.txt` release generator, plus the DPIA template and incident runbook.
 > Read that first when preparing a deployment.
 
 `DELETE /api/account` (password proof required) removes the user and the
 **full cascade** from the live database: entries, insights and questions,
-PHQ-9 measures, therapist notes about this patient, consent rows **in both
+PHQ-9/GAD-7/PHQ-2 measures, kept-audio attachment rows, therapist notes about
+this patient, consent rows **in both
 directions** (shares this patient granted and shares granted TO this
 account as a therapist), pairing codes, and any in-memory processing keys
-(the keystore is purged for the owner at delete time). What deliberately
-survives on the live database: **the access audit log** — every
+(the keystore is purged for the owner at delete time). Audio object deletion
+is queued transactionally before those attachment rows disappear; a durable
+object-deletion tombstone remains until the store confirms deletion and is
+covered by backlog/age alerts. What deliberately survives on the live
+database: **the access audit log** — every
 therapist/patient read/write record outlives the deletion for
 `MINDPATTERN_ACCESS_LOG_RETENTION_DAYS` (default **730 days**, 1–3650
 selectable) as plain metadata (actor, action, target id, timestamp — no
@@ -624,10 +670,14 @@ backup service makes retention concrete: every dump taken before a deletion
 still holds that user's rows until it ages out, so `BACKUP_RETENTION_DAYS`
 (default 35) is the expiry you are promising users — keep it short, encrypt
 the dumps (they carry the full metadata set the live DB holds), and
-rehearse `pg_restore` before you need it. The export bundle
-includes canonical `username`, `user_id`, `salt`, the v2 key envelope when
-applicable and recording metadata so `mobile/tools/decrypt_export.mjs` can
-turn it back into readable files offline.
+rehearse `pg_restore` before you need it. The versioned export bundle includes
+the encrypted entries, insights, all supported wellbeing measures and kept
+audio ciphertext; sharing records, consent events and access-log rows; age,
+recovery and processing-consent metadata; and canonical `username`, `user_id`,
+`salt`, KDF parameters and the v2 key envelope when applicable. Those key
+materials let the reviewed desktop/web decryptor recover the encrypted
+content after account deletion. Native export remains disabled until a
+reviewed streaming-to-file implementation exists.
 
 ## Scope decisions
 
@@ -673,17 +723,20 @@ turn it back into readable files offline.
   patients approve sharing again. Identity replacement cannot retract copies
   already decrypted by a recipient. Forgotten clinician passwords have no
   automatic reset; second-factor backup codes do not recover note keys.
-- **Optional TOTP second factor for therapist accounts** (2026-09-21
+- **Required TOTP enrollment before therapist patient-data access** (2026-09-21
   audit C-2, delivered 2026-09-22): RFC 6238 (SHA-1, 6 digits, 30 s ±1
   step drift — the authenticator-app contract). Enrollment is three
   verifier-gated steps: `POST /api/v1/account/totp/setup` (therapist
   tokens only) returns the base32 secret + `otpauth://` URI exactly once
-  and stores it AES-256-GCM-wrapped under an HKDF subkey of the server
-  `token_secret` — never plaintext at rest; `POST /account/totp/enable`
+  and stores it AES-256-GCM-wrapped under an HKDF subkey of the dedicated
+  TOTP wrapping secret — never plaintext at rest; `POST /account/totp/enable`
   confirms with a live code; disable requires the verifier AND a fresh
   code, so neither a phished password nor a stolen bearer alone strips
   the factor (re-running setup while enabled is a 409 for the same
-  reason). Login then answers `401 totp_required` without a code and
+  reason). Until enrollment completes, therapist account/enrollment routes
+  remain available but every patient-data route fails closed with
+  `mfa_enrollment_required`. Thereafter login answers `401 totp_required`
+  without a code and
   rejects wrong/stale codes with `totp_code_invalid`; each accepted code
   is single-use (the consumed timestep is persisted as a replay fence —
   bounded multiworker race documented in SECURITY_RESIDUALS.md). A lost

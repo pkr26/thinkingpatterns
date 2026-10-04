@@ -7,6 +7,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
 import { AppState, Text } from "react-native";
 
+const accountErasureMocks = vi.hoisted(() => ({
+  eraseDeletedAccountLocals: vi.fn(async () => [] as string[]),
+  retryPendingAccountErasures: vi.fn(async () => 0),
+}));
+vi.mock("../src/accountErasure", () => accountErasureMocks);
+
+const voiceScratchMocks = vi.hoisted(() => ({
+  scrubAllVoiceScratchFiles: vi.fn(async () => {}),
+}));
+vi.mock("../src/audio/voiceScratch", () => voiceScratchMocks);
+
 vi.mock("../src/api/client", async () => {
   const { makeApiMock, ApiError } = await import("./helpers/apiMock");
   return { ApiError, api: makeApiMock(), setUnauthorizedHandler: vi.fn(), setOriginChangeHandler: vi.fn() };
@@ -80,6 +91,9 @@ beforeEach(() => {
   vi.mocked(abortInFlightFlush).mockClear();
   vi.mocked(flushQueueOnReconnect).mockClear();
   syncReminderSchedule.mockClear();
+  accountErasureMocks.eraseDeletedAccountLocals.mockReset().mockResolvedValue([]);
+  accountErasureMocks.retryPendingAccountErasures.mockReset().mockResolvedValue(0);
+  voiceScratchMocks.scrubAllVoiceScratchFiles.mockReset().mockResolvedValue();
   vault.lock();
   // Sign-out/origin-switch tests deliberately suppress stale editor cleanup.
   // A fresh authenticated test session re-enables normal draft stashing.
@@ -87,6 +101,86 @@ beforeEach(() => {
 });
 
 describe("SessionProvider", () => {
+  it("scrubs crash-left plaintext voice files before reading any saved session", async () => {
+    let finishScrub!: () => void;
+    voiceScratchMocks.scrubAllVoiceScratchFiles.mockImplementationOnce(
+      () => new Promise<void>(resolve => { finishScrub = resolve; }),
+    );
+    vi.mocked(api.isLoggedIn).mockResolvedValue(true);
+    await render(<SessionProvider><Probe /></SessionProvider>);
+    await flush();
+    expect(session.authStatus).toBe("loading");
+    expect(accountErasureMocks.retryPendingAccountErasures).not.toHaveBeenCalled();
+    expect(api.isLoggedIn).not.toHaveBeenCalled();
+
+    await act(async () => { finishScrub(); });
+    await flush();
+    expect(accountErasureMocks.retryPendingAccountErasures).toHaveBeenCalledOnce();
+    expect(api.isLoggedIn).toHaveBeenCalledOnce();
+    expect(session.authStatus).toBe("loggedIn");
+  });
+
+  it("fails closed before credential hydration when crash-scratch cleanup fails", async () => {
+    voiceScratchMocks.scrubAllVoiceScratchFiles.mockRejectedValueOnce(new Error("disk failure"));
+    vi.mocked(api.isLoggedIn).mockResolvedValue(true);
+    await render(<SessionProvider><Probe /></SessionProvider>);
+    await flush();
+    expect(session.authStatus).toBe("loggedOut");
+    expect(session.erasureIncomplete).toBe(true);
+    expect(accountErasureMocks.retryPendingAccountErasures).not.toHaveBeenCalled();
+    expect(api.isLoggedIn).not.toHaveBeenCalled();
+  });
+
+  it("keeps authentication behind pending-erasure recovery across a partial-failure restart", async () => {
+    let finishRecovery!: (remaining: number) => void;
+    accountErasureMocks.retryPendingAccountErasures.mockImplementationOnce(
+      () => new Promise<number>(resolve => { finishRecovery = resolve; }),
+    );
+    vi.mocked(api.isLoggedIn).mockResolvedValue(true);
+    const unlock = vi.spyOn(vault, "unlock");
+    const first = await render(<SessionProvider><Probe /></SessionProvider>);
+    await flush();
+    expect(session.authStatus).toBe("loading");
+    expect(api.isLoggedIn).not.toHaveBeenCalled();
+    expect(unlock).not.toHaveBeenCalled();
+
+    await act(async () => { finishRecovery(1); });
+    await flush();
+    expect(textOf(first)).toBe("loggedOut|false|0|30");
+    expect(api.isLoggedIn).not.toHaveBeenCalled();
+    expect(unlock).not.toHaveBeenCalled();
+
+    // A later cold-start pass still retries the retained checkpoint.
+    accountErasureMocks.retryPendingAccountErasures.mockResolvedValueOnce(0);
+    vi.mocked(api.isLoggedIn).mockResolvedValueOnce(false);
+    const second = await render(<SessionProvider><Probe /></SessionProvider>);
+    await flush();
+    expect(textOf(second)).toBe("loggedOut|false|0|30");
+    expect(accountErasureMocks.retryPendingAccountErasures).toHaveBeenCalledTimes(2);
+  });
+
+  it("remote account death locks immediately and dispatches captured durable cleanup; ordinary 401 does not", async () => {
+    await render(<SessionProvider><Probe /></SessionProvider>); await flush();
+    await act(async () => {
+      session.markLoggedIn();
+      vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, 2) }, "a".repeat(32));
+    });
+    const handler = vi.mocked(setUnauthorizedHandler).mock.calls.at(-1)?.[0];
+    await act(async () => {
+      handler?.({ status: 401, code: "unauthorized", accountDeleted: false, userId: "a".repeat(32), username: "alice", origin: "https://old.example" });
+    });
+    expect(vault.isUnlocked()).toBe(false);
+    expect(accountErasureMocks.eraseDeletedAccountLocals).not.toHaveBeenCalled();
+
+    await act(async () => {
+      handler?.({ status: 410, code: "account_deleted", accountDeleted: true, userId: "a".repeat(32), username: "alice", origin: "https://old.example" });
+    });
+    await flush();
+    expect(session.authStatus).toBe("loggedOut");
+    expect(accountErasureMocks.eraseDeletedAccountLocals).toHaveBeenCalledWith(
+      "a".repeat(32), "alice", { origin: "https://old.example" },
+    );
+  });
   it("a late boot credential read cannot turn a newer verified login back into loggedOut", async () => {
     let resolveBoot!: (value: boolean) => void;
     vi.mocked(api.isLoggedIn).mockImplementationOnce(() => new Promise(resolve => { resolveBoot = resolve; }));
@@ -369,15 +463,14 @@ describe("SessionProvider", () => {
   // must not destroy them (account isolation is enforced at flush time).
   it("signOut keeps the offline queue intact", async () => {
     vi.mocked(api.isLoggedIn).mockResolvedValue(true);
+    const { changeLocalSessionOwner } = await import("../src/localWriteGuard");
+    changeLocalSessionOwner("user-1");
     const root = await render(
       <SessionProvider>
         <Probe />
       </SessionProvider>,
     );
     await flush();
-    await act(async () => {
-      await session.signOut();
-    });
     // The queue store was never touched: the key survives sign-out.
     const storage = (await import("./helpers/storageMock")).default;
     await storage.setItem("@mindpattern/queue", JSON.stringify([{ userId: "u1", clientEntryId: "e", blobB64: "AA==", entryDate: "2026-09-04" }]));
@@ -582,10 +675,10 @@ describe("SessionProvider", () => {
     expect(textOf(root)).toBe("loggedOut|true|0|30");
 
     // The client invokes the registered handler before throwing its 401.
-    const handler = vi.mocked(setUnauthorizedHandler).mock.calls[0]?.[0] as (() => void) | null;
+    const handler = vi.mocked(setUnauthorizedHandler).mock.calls[0]?.[0] as ((death: { accountDeleted: boolean }) => void) | null;
     expect(handler).toBeTypeOf("function");
     await act(async () => {
-      handler?.();
+      handler?.({ accountDeleted: false });
     });
     expect(vault.isUnlocked()).toBe(false);
     expect(textOf(root)).toBe("loggedOut|false|0|30");

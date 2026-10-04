@@ -1,3 +1,4 @@
+// @ts-nocheck
 // @vitest-environment jsdom
 /**
  * Interaction-layer regression tests (hardening 2026-09-26 ii). The

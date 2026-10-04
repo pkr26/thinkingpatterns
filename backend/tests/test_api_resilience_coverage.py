@@ -56,6 +56,11 @@ class _Result:
     def scalars(self):
         return _ScalarRows(self._scalar_rows)
 
+    def scalar_one_or_none(self):
+        if len(self._scalar_rows) > 1:
+            raise AssertionError("fake result unexpectedly contains multiple scalar rows")
+        return self._scalar_rows[0] if self._scalar_rows else None
+
 
 class _PageSession:
     """Tiny async-session double for deterministic streaming export races."""
@@ -65,6 +70,7 @@ class _PageSession:
     def __init__(self, results):
         self._results = list(results)
         self.expunged = []
+        self._snapshot_checked = False
 
     async def __aenter__(self):
         return self
@@ -76,10 +82,17 @@ class _PageSession:
         return self.fresh
 
     async def scalar(self, statement):
-        assert "rekey_journal" in str(statement)
+        text = str(statement).lower()
+        assert "rekey_journal" in text or ("consents" in text and "is_active is false" in text)
         return None
 
     async def execute(self, statement):
+        # Every bounded export page now locks and validates the account
+        # authority row before reading private data. Serve that guard query
+        # independently from the race-specific result queue below.
+        if not self._snapshot_checked:
+            self._snapshot_checked = True
+            return _Result(scalar_rows=[self.fresh])
         assert self._results, "unexpected export query"
         return self._results.pop(0)
 
@@ -361,12 +374,11 @@ async def test_export_refuses_disappeared_entry_metadata():
             account_api,
             fresh=fresh,
             pages=[
+                _PageSession([_Result(rows=[])]),  # active shares
+                _PageSession([_Result(scalar_rows=[])]),  # consent history
                 _PageSession([_Result(rows=metadata), _Result(scalar_rows=[])]),
                 _PageSession([_Result(rows=[])]),  # later entry page
                 # Empty insight snapshot (head served no ids): no insight page.
-                # Empty share snapshot (A-6, 2026-09-21): no share page either —
-                # the shares walk the frozen head id list, so no shares means no
-                # page session consumed.
                 _PageSession([_Result(rows=[])]),  # measures
             ],
         )
@@ -385,7 +397,8 @@ async def test_export_refuses_disappeared_insight_metadata():
             fresh=fresh,
             snapshot_ids=["gone-insight"],
             pages=[
-                # No shares (empty share snapshot): no share page consumed.
+                _PageSession([_Result(rows=[])]),  # active shares
+                _PageSession([_Result(scalar_rows=[])]),  # consent history
                 _PageSession([_Result(rows=[])]),  # entries
                 # Insight page: sizes for the snapshot id, then the blob fetch
                 # finds the row deleted since the snapshot — consumed as
@@ -430,7 +443,8 @@ async def test_export_repages_entries_when_blob_grew_after_metadata(monkeypatch)
         account_api,
         fresh=fresh,
         pages=[
-            # No shares (empty share snapshot): no share page consumed.
+            _PageSession([_Result(rows=[])]),  # active shares
+            _PageSession([_Result(scalar_rows=[])]),  # consent history
             # Wave 4: the row fetch is ONE batched IN per metadata page.
             _PageSession(
                 [
@@ -439,7 +453,6 @@ async def test_export_repages_entries_when_blob_grew_after_metadata(monkeypatch)
                 ]
             ),
             _PageSession([_Result(rows=second_metadata), _Result(scalar_rows=[second])]),
-            _PageSession([_Result(rows=[])]),
             _PageSession([_Result(rows=[])]),
             _PageSession([_Result(rows=[])]),  # measures terminator
         ],
@@ -476,8 +489,9 @@ async def test_export_repages_insights_when_blob_grew_after_metadata(monkeypatch
         fresh=fresh,
         snapshot_ids=[first.id, second.id],
         pages=[
-            # No shares (empty share snapshot): no share page consumed.
-            _PageSession([_Result(rows=[])]),
+            _PageSession([_Result(rows=[])]),  # active shares
+            _PageSession([_Result(scalar_rows=[])]),  # consent history
+            _PageSession([_Result(rows=[])]),  # entries
             # Wave 4: the row fetch is ONE batched IN per metadata page.
             _PageSession(
                 [
@@ -574,7 +588,7 @@ async def test_revoke_fails_as_deleted_account_when_lifecycle_recheck_loses_race
             assert populate_existing is True
             return None
 
-    monkeypatch.setattr(consents_api, "_require_verifier", skip_verifier)
+    monkeypatch.setattr(consents_api, "_require_step_up_or_verifier", skip_verifier)
     with pytest.raises(ApiError, match="account not found") as raised:
         await consents_api.revoke_consent(
             "consent-id",

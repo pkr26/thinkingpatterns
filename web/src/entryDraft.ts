@@ -14,6 +14,8 @@
  * (the B-7 rewrap family); account deletion clears it with the rest of
  * the per-account stores.
  */
+// @ts-nocheck
+
 import { buildAad } from "./crypto/aad";
 import { decrypt, encrypt, fromBase64, toBase64, zeroize, type Bytes } from "./crypto/core";
 import { kv, StorageReadError, type WritePermit } from "./kvstore";

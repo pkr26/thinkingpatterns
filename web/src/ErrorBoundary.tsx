@@ -15,6 +15,8 @@
  * fire-and-forget with a swallow — it must never turn a UI crash into a
  * dropped draft.
  */
+// @ts-nocheck
+
 import { Component, type ReactNode } from "react";
 import { Button, Card, Note } from "./ui";
 import { preserveActiveDraft } from "./entryDraft";

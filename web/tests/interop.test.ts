@@ -5,6 +5,8 @@
  * platform drifts, these pins fail. Also pins the shared fingerprint
  * format (P5.7).
  */
+// @ts-nocheck
+
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";

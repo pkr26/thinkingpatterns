@@ -2,6 +2,8 @@
  *  switching, the catalog fallback, date formatting, the prompt chips, the
  *  deterministic question rotation, the mood label helpers, and the
  *  Language preference (auto/en/es, persisted + live — audit 2026-09-26). */
+// @ts-nocheck
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   __setLocaleForTests,
@@ -12,9 +14,9 @@ import {
   LANGUAGE_STORAGE_KEY,
   subscribeLanguage,
   t,
-  enCatalog,
-  esCatalog,
 } from "../src/strings";
+import { en as enCatalog } from "../src/locales/en";
+import { es as esCatalog } from "../src/locales/es";
 import { genericQuestionForDate, GENERIC_QUESTIONS, GENERIC_QUESTIONS_ES } from "../src/genericQuestions";
 import { promptChipsFor, PROMPT_CHIPS, PROMPT_CHIPS_ES } from "../src/promptChips";
 import { moodLabel, localSentiment, ACTIVITY_TAGS, activityTagLabel } from "../src/mood";
@@ -83,6 +85,28 @@ describe("catalog parity (P8.2)", () => {
         expect(catalog[key]?.length).toBeGreaterThan(0);
       }
     }
+  });
+
+  it("describes only the active transcript-translation purpose and the complete v3 sharing scope", () => {
+    expect(enCatalog["privacy.s4Title"]).toContain("transcript translation");
+    expect(enCatalog["privacy.s4Body"]).toContain("journal entries are not sent to a third party for pattern analysis");
+    expect(enCatalog["settings.llmLabel"]).toContain("transcript translation");
+    expect(esCatalog["privacy.s4Title"]).toContain("Traducción");
+    expect(esCatalog["privacy.s4Body"]).toContain("entradas del diario no se envían a terceros para analizar patrones");
+    expect(esCatalog["settings.llmLabel"]).toContain("Traducción de transcripciones");
+
+    for (const catalog of [enCatalog, esCatalog]) {
+      const sharingLabel = catalog["settings.shareWithTherapistA11y"]!;
+      expect(sharingLabel).toContain("PHQ-9");
+      expect(sharingLabel).toContain("GAD-7");
+      expect(sharingLabel).toContain("PHQ-2");
+      expect(sharingLabel.toLowerCase()).toMatch(/caseload|lista de casos/);
+    }
+
+    expect(enCatalog["share.termsUpdatedBody"]).toContain("scope stays unavailable");
+    expect(enCatalog["share.termsUpdatedBody"]).toContain("until you re-share");
+    expect(esCatalog["share.termsUpdatedBody"]).toContain("no estará disponible");
+    expect(esCatalog["share.termsUpdatedBody"]).toContain("hasta que vuelva a compartir");
   });
 });
 

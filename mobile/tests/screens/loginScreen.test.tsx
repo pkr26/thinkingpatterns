@@ -39,6 +39,7 @@ const { deriveKeysAsync } = await import("../../src/crypto/MindPatternCrypto");
 const { LoginScreen } = await import("../../src/screens/LoginScreen");
 const { takePendingOnboarding } = await import("../../src/onboarding");
 const { vault } = await import("../../src/vault");
+const { __resetLocalKeyLifecycleForTests } = await import("../../src/localWriteGuard");
 const { render, flush, textOf, pressLabel, typeInto, inputByPlaceholder, pressAlertButton, lastAlert, touchableByLabel } = await import("../helpers/rtr");
 const { resetApi, SALT_B64 } = await import("../helpers/apiMock");
 
@@ -53,6 +54,7 @@ async function confirmAge18(root: Awaited<ReturnType<typeof render>>): Promise<v
 }
 
 beforeEach(() => {
+  __resetLocalKeyLifecycleForTests();
   resetApi(api as never);
   lastDerived = null;
   vi.mocked(deriveKeysAsync).mockReset();
@@ -277,10 +279,11 @@ describe("registration", () => {
       "alice",
       expect.any(String),
       expect.any(String),
+      "minimum_age_confirmed_v1",
       { algorithm: "pbkdf2-sha256", version: 1, iterations: 600000 },
       expect.any(String),
     );
-    const wrappedB64 = (vi.mocked(api.register).mock.calls[0] as unknown[])[4] as string;
+    const wrappedB64 = (vi.mocked(api.register).mock.calls[0] as unknown[])[5] as string;
     expect(Buffer.from(wrappedB64, "base64")).toHaveLength(60);
     expect(api.setSession).toHaveBeenCalledWith("tok", "user-1", "alice", { stillCurrent: expect.any(Function) });
     expect(vault.isUnlocked()).toBe(true);

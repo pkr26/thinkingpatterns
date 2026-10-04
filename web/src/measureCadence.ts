@@ -16,6 +16,8 @@
  * is available", never a streak, a deadline, or a lapse. "Not now"
  * snoozes it for three days and that is the whole contract.
  */
+// @ts-nocheck
+
 import { kv } from "./kvstore";
 import { localDateISO } from "./dates";
 

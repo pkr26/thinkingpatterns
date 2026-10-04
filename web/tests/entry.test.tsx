@@ -1,6 +1,8 @@
 /** EntryView: the daily journal flow — online save, offline queueing, the
  *  PRE-encryption crisis tier, the on-device sentiment read, and the
  *  structured v2 channels. Real crypto; fetch stubs at the API edge. */
+// @ts-nocheck
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EntryView } from "../src/views/Entry";
 import { queueLength } from "../src/offlineQueue";

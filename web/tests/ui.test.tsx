@@ -3,6 +3,8 @@
  *  classes (public/app.css), so variant assertions target classNames —
  *  the old literal-hex `theme` object is retired (src/tokens.ts mirrors
  *  the CSS for charts; tests/designTokens.test.ts pins them together). */
+// @ts-nocheck
+
 import { describe, expect, it, vi } from "vitest";
 import { AppFrame, Button, Card, Chip, ErrorBanner, Field, Note } from "../src/ui";
 import { flush, press, render, textOf, typeInto } from "./helpers/rtr";

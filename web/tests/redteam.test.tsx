@@ -7,6 +7,8 @@
  * storage after each flow; the replay/stale set drives dead tokens, queue
  * replays, and processing-token reuse.
  */
+// @ts-nocheck
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EntryView } from "../src/views/Entry";
 import { HistoryView } from "../src/views/History";

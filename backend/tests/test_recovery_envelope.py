@@ -12,6 +12,8 @@ possession probe as PUT /account/password.
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
 import os
 
 import pytest
@@ -20,17 +22,25 @@ from app.security import envelope
 from tests.helpers import ClientEmulator, EnvelopeClientEmulator
 
 WRAPPED = envelope.WRAPPED_DATA_KEY_BYTES
+RECOVERY_VERIFIER_INFO = b"mindpattern/recovery-verifier/v2"
 
 
 def b64(raw: bytes) -> str:
     return base64.b64encode(raw).decode("ascii")
 
 
+def recovery_verifier(recovery_key: bytes) -> bytes:
+    """Client-side domain-separated verifier; the raw seal key never leaves."""
+    prk = hmac.new(b"\x00" * 32, recovery_key, hashlib.sha256).digest()
+    return hmac.new(prk, RECOVERY_VERIFIER_INFO + b"\x01", hashlib.sha256).digest()
+
+
 def recovery_body(recovery_key: bytes, wrapped: bytes | None = None) -> dict:
     return {
         "password_verifier": None,  # filled per-test (needs the emulator's auth key)
-        "verifier": b64(recovery_key),
+        "verifier": b64(recovery_verifier(recovery_key)),
         "wrapped_key": b64(wrapped or os.urandom(WRAPPED)),
+        "scheme": "v2",
     }
 
 
@@ -87,7 +97,11 @@ class TestRecoveryKitLifecycle:
         # The OLD key no longer authenticates.
         old = await client.post(
             "/api/auth/recover",
-            json={"username": "rec-replace", "verifier": b64(recovery_key)},
+            json={
+                "username": "rec-replace",
+                "verifier": b64(recovery_verifier(recovery_key)),
+                "scheme": "v2",
+            },
         )
         assert old.status_code == 401, old.text
 
@@ -104,7 +118,11 @@ class TestRecoveryLogin:
 
         response = await client.post(
             "/api/auth/recover",
-            json={"username": "rec-login", "verifier": b64(recovery_key)},
+            json={
+                "username": "rec-login",
+                "verifier": b64(recovery_verifier(recovery_key)),
+                "scheme": "v2",
+            },
         )
         assert response.status_code == 200, response.text
         body = response.json()
@@ -121,19 +139,27 @@ class TestRecoveryLogin:
         await _setup_kit(client, emu, recovery_key)
         wrong = await client.post(
             "/api/auth/recover",
-            json={"username": "rec-wrong", "verifier": b64(os.urandom(32))},
+            json={"username": "rec-wrong", "verifier": b64(os.urandom(32)), "scheme": "v2"},
         )
         assert wrong.status_code == 401
         unknown = await client.post(
             "/api/auth/recover",
-            json={"username": "rec-ghost", "verifier": b64(recovery_key)},
+            json={
+                "username": "rec-ghost",
+                "verifier": b64(recovery_verifier(recovery_key)),
+                "scheme": "v2",
+            },
         )
         assert unknown.status_code == 401
         nokit = ClientEmulator("rec-nokit", "correct horse battery staple")
         await nokit.register(client)
         no_kit = await client.post(
             "/api/auth/recover",
-            json={"username": "rec-nokit", "verifier": b64(recovery_key)},
+            json={
+                "username": "rec-nokit",
+                "verifier": b64(recovery_verifier(recovery_key)),
+                "scheme": "v2",
+            },
         )
         assert no_kit.status_code == 401
 
@@ -146,7 +172,11 @@ class TestRecoveryLogin:
         # their second-factor recovery path is the TOTP backup codes.
         response = await client.post(
             "/api/auth/recover",
-            json={"username": "rec-therapist", "verifier": b64(recovery_key)},
+            json={
+                "username": "rec-therapist",
+                "verifier": b64(recovery_verifier(recovery_key)),
+                "scheme": "v2",
+            },
         )
         assert response.status_code == 401, response.text
 
@@ -164,7 +194,11 @@ class TestRecoveryPasswordReset:
 
         recovered = await client.post(
             "/api/auth/recover",
-            json={"username": "rec-reset", "verifier": b64(recovery_key)},
+            json={
+                "username": "rec-reset",
+                "verifier": b64(recovery_verifier(recovery_key)),
+                "scheme": "v2",
+            },
         )
         assert recovered.status_code == 200, recovered.text
         recovery_headers = {"Authorization": f"Bearer {recovered.json()['token']}"}
@@ -183,7 +217,7 @@ class TestRecoveryPasswordReset:
             "/api/account/recovery/password",
             headers={**recovery_headers, "X-Processing-Token": token},
             json={
-                "proof": b64(recovery_key),
+                "proof": b64(recovery_verifier(recovery_key)),
                 "new_salt": b64(emu.salt),
                 "new_verifier": emu.auth_key_b64,
                 "wrapped_data_key": new_wrap,
@@ -223,7 +257,7 @@ class TestRecoveryPasswordReset:
             "/api/account/recovery/password",
             headers=emu.headers,  # no X-Processing-Token at all
             json={
-                "proof": b64(recovery_key),
+                "proof": b64(recovery_verifier(recovery_key)),
                 "new_salt": b64(os.urandom(16)),
                 "new_verifier": emu.auth_key_b64,
                 "wrapped_data_key": b64(os.urandom(WRAPPED)),
@@ -245,7 +279,7 @@ class TestRecoveryPasswordReset:
             "/api/account/recovery/password",
             headers={**emu.headers, "X-Processing-Token": token},
             json={
-                "proof": b64(recovery_key),
+                "proof": b64(recovery_verifier(recovery_key)),
                 "new_salt": b64(os.urandom(16)),
                 "new_verifier": emu.auth_key_b64,
                 "wrapped_data_key": b64(os.urandom(WRAPPED)),

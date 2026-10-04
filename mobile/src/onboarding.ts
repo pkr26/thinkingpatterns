@@ -28,30 +28,41 @@
  * showing the three short panels once more (fail-safe direction).
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { accountStorageKey } from "./accountStorage";
+import { commitActiveAccountWrite } from "./localWriteGuard";
 
-const key = (userId: string): string => `@mindpattern/onboarding_seen_${userId}`;
+const key = accountStorageKey.onboardingSeen;
 
 // E-10 (2026-09-21): M-18's re-entry restored the SCREEN but the panel
 // index still restarted at 1 — a backgrounded user re-read everything
 // they had already dismissed. The index persists beside the seen flag
 // (single global key: only one onboarding runs at a time, and completion
 // or account deletion wipes it).
-const PANEL_INDEX_KEY = "@mindpattern/onboarding_panel";
+const LEGACY_PANEL_INDEX_KEY = "@mindpattern/onboarding_panel";
 
 let pending = false;
 
-export async function saveOnboardingPanel(index: number): Promise<void> {
+export async function saveOnboardingPanel(index: number, userId: string): Promise<void> {
   try {
-    await AsyncStorage.setItem(PANEL_INDEX_KEY, String(index));
+    await commitActiveAccountWrite(userId, () => AsyncStorage.setItem(accountStorageKey.onboardingPanel(userId), String(index)));
   } catch {
     // Storage pressure: the resume position is a nicety, never a crash —
     // the fail-safe direction is showing a dismissed panel once more.
   }
 }
 
-export async function loadOnboardingPanel(panelCount: number): Promise<number> {
+export async function loadOnboardingPanel(panelCount: number, userId: string): Promise<number> {
   try {
-    const raw = await AsyncStorage.getItem(PANEL_INDEX_KEY);
+    const slot = accountStorageKey.onboardingPanel(userId);
+    let raw = await AsyncStorage.getItem(slot);
+    if (raw === null) {
+      const legacy = await AsyncStorage.getItem(LEGACY_PANEL_INDEX_KEY);
+      if (legacy !== null) {
+        await commitActiveAccountWrite(userId, () => AsyncStorage.setItem(slot, legacy));
+        await AsyncStorage.removeItem(LEGACY_PANEL_INDEX_KEY);
+        raw = legacy;
+      }
+    }
     const parsed = Number.parseInt(raw ?? "0", 10);
     return Number.isInteger(parsed) && parsed > 0 && parsed < panelCount ? parsed : 0;
   } catch {
@@ -100,15 +111,17 @@ export function onboardingSeenCached(userId: string): boolean | null {
 /** Completion keeps the mirror live so a lock/unlock cycle in the SAME
  *  session cannot re-derive "unseen" and lecture twice. */
 export async function recordOnboardingSeen(userId: string): Promise<void> {
-  await AsyncStorage.setItem(key(userId), "1");
-  seenMemo = { userId, seen: true };
-  // E-10 (2026-09-21): the resume position is meaningless once completed.
-  await AsyncStorage.removeItem(PANEL_INDEX_KEY).catch(() => {});
+  await commitActiveAccountWrite(userId, async () => {
+    await AsyncStorage.setItem(key(userId), "1");
+    await AsyncStorage.removeItem(accountStorageKey.onboardingPanel(userId)).catch(() => {});
+    seenMemo = { userId, seen: true };
+  });
 }
 
 /** Account-deletion hygiene: the flag must not outlive its account. */
 export async function clearOnboardingSeen(userId: string): Promise<void> {
   await AsyncStorage.removeItem(key(userId));
-  await AsyncStorage.removeItem(PANEL_INDEX_KEY).catch(() => {});
+  await AsyncStorage.removeItem(accountStorageKey.onboardingPanel(userId)).catch(() => {});
+  await AsyncStorage.removeItem(LEGACY_PANEL_INDEX_KEY).catch(() => {});
   if (seenMemo?.userId === userId) seenMemo = null; // next read hits storage
 }

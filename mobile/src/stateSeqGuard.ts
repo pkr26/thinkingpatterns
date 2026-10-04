@@ -49,8 +49,8 @@
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { secureStore } from "./secureStore";
-
-const STORAGE_PREFIX = "mindpattern.stateSeq.";
+import { accountStorageKey } from "./accountStorage";
+import { commitActiveAccountWrite } from "./localWriteGuard";
 
 export const FRESHNESS_ERROR = "your pattern data failed its freshness check";
 
@@ -58,7 +58,7 @@ export const FRESHNESS_ERROR = "your pattern data failed its freshness check";
 const memoryMirror = new Map<string, number>();
 
 function storageKey(userId: string): string {
-  return `${STORAGE_PREFIX}${userId}`;
+  return accountStorageKey.stateSequence(userId);
 }
 
 /** Read the persisted mark (sealed lane first, one-time v1 plaintext
@@ -87,7 +87,7 @@ async function readPersistedMark(userId: string): Promise<{ stored: number; read
       const value = Number(raw);
       // A failed sealed write leaves the plaintext for a later retry; the
       // value is still adopted for this check either way.
-      await secureStore.setItem(storageKey(userId), raw).catch(() => {});
+      await commitActiveAccountWrite(userId, () => secureStore.setItem(storageKey(userId), raw)).catch(() => {});
       return { stored: value, readable: true };
     }
   } catch {
@@ -98,7 +98,7 @@ async function readPersistedMark(userId: string): Promise<{ stored: number; read
 
 async function persistMark(userId: string, mark: number): Promise<void> {
   try {
-    await secureStore.setItem(storageKey(userId), String(mark));
+    await commitActiveAccountWrite(userId, () => secureStore.setItem(storageKey(userId), String(mark)));
   } catch {
     // best effort; the in-memory mirror holds for this session and the
     // next load re-attempts the persist.

@@ -25,19 +25,17 @@ import { captureLocalWritePermit, assertLocalWritePermit, commitLocalWrite, type
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { buildAad } from "./crypto/aad";
 import { decrypt, encrypt } from "./crypto/envelope";
-
-const STORAGE_PREFIX = "mindpattern.entryVersions.";
+import { accountStorageKey } from "./accountStorage";
 
 // --- 2026-10-01 audit M1: the v2-bound set (see web/src/entryVersions.ts
 // for the full rationale) — ids whose blob has EVER authenticated under
 // the version-bound v2 AAD; for those, the legacy version-free fallback
 // is refused (a stale-blob replay is not a legacy row). Encrypted at rest
 // under the data key, AAD-bound to the user; absent/corrupt = no memory.
-const V2_BOUND_PREFIX = "mindpattern.entryV2Bound.";
 const v2BoundMirror = new Map<string, Set<string>>();
 
 function v2BoundKey(userId: string): string {
-  return `${V2_BOUND_PREFIX}${userId}`;
+  return accountStorageKey.entryV2Bound(userId);
 }
 
 async function loadV2Bound(userId: string, dataKey: Buffer): Promise<Set<string>> {
@@ -98,7 +96,7 @@ export async function isV2Bound(userId: string, dataKey: Buffer, clientEntryId: 
 const memoryMirror = new Map<string, Map<string, number>>();
 
 function storageKey(userId: string): string {
-  return `${STORAGE_PREFIX}${userId}`;
+  return accountStorageKey.entryVersions(userId);
 }
 
 function loadMirror(userId: string): Map<string, number> {

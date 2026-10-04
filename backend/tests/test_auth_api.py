@@ -27,6 +27,7 @@ async def test_register_duplicate_username_conflicts(client):
             "username": "bob",
             "salt": base64.b64encode(b"0" * 16).decode(),
             "verifier": base64.b64encode(b"1" * 32).decode(),
+            "age_attestation": "minimum_age_confirmed_v1",
         },
     )
     assert response.status_code == 409

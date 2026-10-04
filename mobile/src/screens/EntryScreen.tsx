@@ -1091,7 +1091,6 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
                   accessibilityLabel={tr("entry.moodOptionA11y", { label: optionLabel(option) })}
                 >
                   <Text
-                    maxFontSizeMultiplier={1.3}
                     style={{
                       color: selected ? t.colors.onPrimary : t.colors.body,
                       fontSize: t.type.bodySmall.fontSize,
@@ -1174,7 +1173,6 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
                   accessibilityLabel={tr("entry.sleepOptionA11y", { label: optionLabel(option) })}
                 >
                   <Text
-                    maxFontSizeMultiplier={1.3}
                     style={{
                       color: selected ? t.colors.onPrimary : t.colors.body,
                       fontSize: t.type.bodySmall.fontSize,
@@ -1207,7 +1205,6 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
                   accessibilityLabel={tr("entry.tagA11y", { tag: activityTagLabel(tag) })}
                 >
                   <Text
-                    maxFontSizeMultiplier={1.3}
                     style={{ color: selected ? t.colors.onPrimary : t.colors.body, fontSize: t.type.bodySmall.fontSize }}
                   >
                     {activityTagLabel(tag)}

@@ -6,8 +6,9 @@
  * auto-stop (server bound 310 s) and live metering for the level dot.
  * The take is read to base64 through expo-file-system for the
  * transcription upload; nothing is written anywhere else, and the cache
- * file is deleted once the entry is saved or the take discarded — or on
- * unmount, so a backgrounded screen never leaves a plaintext take behind.
+ * file is deleted once the entry is saved or the take discarded, and again on
+ * unmount. A process kill can bypass those callbacks; cold-start, account-
+ * erasure, and origin-retirement recovery scrub Expo Audio's cache roots.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import {

@@ -216,6 +216,7 @@ async def test_h6_note_bytes_count_once_per_chart_not_once_per_revision(client, 
 
 async def _seed_consent(app, therapist_id: str, label: str, status: str) -> None:
     from app.models import Consent, User, new_id
+    from tests.helpers import seed_authenticated_audit_genesis
 
     async with app.state.sessionmaker() as session:
         patient_id = new_id()
@@ -229,6 +230,7 @@ async def _seed_consent(app, therapist_id: str, label: str, status: str) -> None
             )
         )
         await session.flush()
+        seed_authenticated_audit_genesis(session, app.state.settings, patient_id)
         session.add(
             Consent(
                 user_id=patient_id,
@@ -255,8 +257,8 @@ async def test_h7_list_cap_counts_active_consents_only(client, app):
     listed = await client.get("/api/therapist/patients", headers=therapist.headers)
     assert listed.status_code == 200, listed.text
     body = listed.json()
-    assert len(body) == 104  # full retained history, active + revoked
-    assert sum(1 for row in body if row["status"] == "active") == 100
+    assert len(body) == 100  # retained history is now explicitly paged
+    assert listed.headers["X-Next-Offset"] == "100"
 
     # The 413 stays for a genuinely oversized ACTIVE caseload.
     await _seed_consent(app, therapist.user_id, "active-101st", "active")
@@ -488,8 +490,24 @@ async def test_mb1_stale_epoch_cannot_change_totp(client, app, monkeypatch):
     from app.schemas import TotpConfirmRequest, TotpSetupRequest
     from app.security import totp as totp_crypto
 
-    therapist = TherapistEmulator("mb1-totp-th", "deep-password")
+    therapist = TherapistEmulator("mb1-totp-legacy", "deep-password")
     await therapist.register(client)
+    # Current therapist registration requires and enables MFA atomically.
+    # Model an upgraded pre-MFA account so the setup route remains reachable
+    # and its concurrent epoch fence can still be pinned.
+    async with app.state.sessionmaker() as session:
+        from app.models import User
+
+        await session.execute(
+            update(User)
+            .where(User.id == therapist.user_id)
+            .values(
+                totp_enabled=False,
+                totp_secret=None,
+                totp_last_counter=-1,
+            )
+        )
+        await session.commit()
     # Deterministic code verification: matched counter 5.
     monkeypatch.setattr(account_api, "verify_code", lambda secret, code: 5)
 
@@ -691,9 +709,9 @@ async def test_mb2_v1_disclosure_gets_no_summary_written_or_served(client, app):
     assert row["summary_updated_at"] is None
 
 
-async def test_mb2_v2_disclosure_summary_written_and_served(client, app):
-    therapist, patient = await _mature_shared_pair(client, "v2")
-    await _grant_direct(app, patient.user_id, therapist.user_id, disclosure="v2")
+async def test_mb2_current_v3_disclosure_summary_written_and_served(client, app):
+    therapist, patient = await _mature_shared_pair(client, "v3")
+    await _grant_direct(app, patient.user_id, therapist.user_id, disclosure="v3")
     await patient.recompute(client)
 
     listed = await client.get("/api/therapist/patients", headers=therapist.headers)

@@ -400,8 +400,9 @@ describe("mutation pins 2026-09-22: password rotation stages", () => {
   });
 
   it("a readable sample cannot override an atomic corpus mismatch", async () => {
+    const hostileDetail = "<script>alert(1)</script> ya se cambió la clave";
     mockedApi.rekeyStoredData.mockRejectedValue(Object.assign(
-      new ApiError(409, "already rekeyed"), { code: "rekey_key_mismatch" }));
+      new ApiError(409, hostileDetail), { code: "rekey_key_mismatch" }));
     mockedCrypto.decryptEntry.mockImplementation(() => Buffer.from("ok"));
     mockedApi.listEntriesPage.mockResolvedValue({
       entries: [{ clientEntryId: "e1", blob: "blob", contentVersion: 1 }],
@@ -420,10 +421,8 @@ describe("mutation pins 2026-09-22: password rotation stages", () => {
       entries: [{ clientEntryId: "e1", blob: "blob", contentVersion: 1 }],
     } as never);
     const outcome = await rotatePassword(input);
-    expect(outcome).toMatchObject({
-      ok: false, stage: "rekey", reason: "server",
-      detail: "already rekeyed",
-    });
+    expect(outcome).toMatchObject({ ok: false, stage: "rekey", reason: "server" });
+    if (!outcome.ok) expect(outcome.detail).toBeUndefined();
     expect(mockedApi.rotateCredential).not.toHaveBeenCalled();
   });
 

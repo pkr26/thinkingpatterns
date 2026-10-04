@@ -11,7 +11,9 @@ require Pod::Executable.execute_command('node', ['-p',
 # the call below is the gate, keep it.
 require File.join(File.dirname(`node --print "require.resolve('expo/package.json')"`), "scripts", "autolinking")
 
-platform :ios, min_ios_version_supported
+# Expo SDK 57 pods require iOS 16.4. Keeping React Native's older default here
+# makes `pod install` silently omit Expo modules and then fail resolution.
+platform :ios, '16.4'
 prepare_react_native_project!
 
 linkage = ENV['USE_FRAMEWORKS']

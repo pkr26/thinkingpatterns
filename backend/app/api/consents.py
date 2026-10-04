@@ -48,6 +48,7 @@ from ..locks import (
 from ..models import (
     ROLE_THERAPIST,
     Consent,
+    ConsentEvent,
     PairingCode,
     User,
     utcnow,
@@ -63,7 +64,19 @@ from ..schemas import (
 from ..security import sharing
 from ..security.crypto import MIN_BLOB_SIZE
 from ._audit import append_access_log
-from .account import _require_verifier
+from ._paging import (
+    assert_expected_revision,
+    collection_changed_error,
+    emit_page_headers,
+    parse_expected_revision,
+)
+from ._sharing_state import (
+    CONSENTS_REVISION_HEADER,
+    MAX_RETAINED_RELATIONSHIPS_PER_ACCOUNT,
+    add_consent_event,
+    advance_sharing_revisions,
+)
+from .account import _require_step_up_or_verifier
 
 router = APIRouter(
     prefix="/consents",
@@ -74,13 +87,14 @@ router = APIRouter(
 # Version of the sharing disclosure copy the mobile app shows before a
 # grant (Art. 7 record parity with the LLM consent flow).
 #
-# v2 (2026-09-20 audit fix H-14): the copy now names the full data scope
-# the grant actually opens — journal entries, patterns/insights, WELLBEING
-# MEASURES (PHQ-9), and caseload summaries. v1 copy said only "every entry
+# v3: the copy explicitly names the broadened measure and voice-metadata
+# scope. Every older grant must be re-consented before measure access.
+# v2 (2026-09-20 audit fix H-14) first named PHQ-9 alongside journal
+# entries, patterns/insights, and caseload summaries. v1 copy said only "every entry
 # and pattern", which understated the record against Art. 7 once the MBC
 # module (2026-09-19) made measures readable under the same consent.
 #
-# Legacy handling: v1 grants remain ACTIVE for entries/insights/notes —
+# Legacy handling: older grants remain ACTIVE for entries/insights/notes —
 # refusing them would break live therapeutic shares the patient did agree
 # to — but they do NOT cover measures; the therapist measures read
 # (therapist.py) answers 409 disclosure_outdated for them so the patient
@@ -88,7 +102,7 @@ router = APIRouter(
 # still refuses any client that presents a version other than the current
 # one (the server, not a mutable client build, is authoritative about
 # which disclosure was current).
-SHARING_DISCLOSURE_VERSION = "v2"
+SHARING_DISCLOSURE_VERSION = "v3"
 
 # The wrap of a 32-byte data key is 12 + 32 + 16 = 60 bytes; a little
 # headroom for format evolution, still far below anything worth storing.
@@ -216,35 +230,48 @@ def _consent_out(consent: Consent, therapist: User) -> ConsentOut:
     )
 
 
-@router.get(
-    "",
-    response_model=list[ConsentOut],
-    dependencies=[
-        Depends(make_rate_limiter("consents-read", "read_rate_limit", "read_rate_window"))
-    ],
-)
-async def list_consents(
+async def _list_consents_page(
     response: Response,
-    user: User = Depends(require_regular_user),
-    session: AsyncSession = Depends(get_session),
-    limit: int = Query(default=200, ge=1, le=200),
-    offset: int = Query(default=0, ge=0, le=100_000),
+    user: User,
+    session: AsyncSession,
+    limit: int,
+    offset: int,
+    expected_revision: str | None,
 ):
-    # Round 2 audit fix F-9 (2026-09-21): the CAP must count ACTIVE consents
-    # only, mirroring the grant path's B-5 rule — revoked rows impose no
-    # ongoing load, and counting them 413'd the share screen for a patient
-    # with 100+ historical (revoked) therapists even though nothing was
-    # being shared. The retained HISTORY below is still returned in full
-    # (disclosure record + the "stopped on" rows the mobile screen renders);
-    # it is bounded by DISTINCT therapists via the unique (patient,
-    # therapist) pair, each a therapist account that had to exist, so it
-    # cannot be manufactured by row churn the way grant/revoke cycles can.
+    expected = parse_expected_revision(expected_revision)
+    revision = int(
+        await session.scalar(select(User.consents_revision).where(User.id == user.id)) or 0
+    )
+    assert_expected_revision(
+        expected,
+        revision,
+        collection="consents",
+        header_name=CONSENTS_REVISION_HEADER,
+    )
+    # Logical therapist retirement is immediate, while its consent rows may
+    # still be waiting for a bounded purge page. The purge advances this
+    # patient's revision in the same transaction that removes each page; in
+    # the interim, refuse a shifting continuation rather than exposing the
+    # scrubbed account or silently changing page cardinality.
+    inactive_relationship = await session.scalar(
+        select(Consent.id)
+        .join(User, Consent.therapist_id == User.id)
+        .where(Consent.user_id == user.id, User.is_active.is_(False))
+        .limit(1)
+    )
+    if inactive_relationship is not None:
+        raise collection_changed_error("consents", CONSENTS_REVISION_HEADER, revision)
+    # Active grants retain the original service cap.  Lifetime relationship
+    # history has a separate hard ceiling and is returned page-by-page.
     active_count = int(
         (
             await session.execute(
-                select(func.count(Consent.id)).where(
+                select(func.count(Consent.id))
+                .join(User, Consent.therapist_id == User.id)
+                .where(
                     Consent.user_id == user.id,
                     Consent.status == "active",
+                    User.is_active.is_(True),
                 )
             )
         ).scalar_one()
@@ -258,26 +285,102 @@ async def list_consents(
             detail="sharing history exceeds the supported list size",
             code="payload_too_large",
         )
-    # Wave 4 (2026-09-30): the retained history is PAGED now — a long
-    # career's revoked rows used to make this one unbounded response (and
-    # one unbounded audit of it). The limit+1 probe carries the
-    # continuation in X-Next-Offset exactly like the other opaque lists;
-    # the 200-row default covers every realistic list in one page, so
-    # existing clients are unaffected.
+    retained_count = int(
+        await session.scalar(
+            select(func.count(Consent.id))
+            .join(User, Consent.therapist_id == User.id)
+            .where(Consent.user_id == user.id, User.is_active.is_(True))
+        )
+        or 0
+    )
+    if retained_count > MAX_RETAINED_RELATIONSHIPS_PER_ACCOUNT:
+        raise ApiError(
+            status_code=413,
+            detail="retained sharing history exceeds the supported list size",
+            code="payload_too_large",
+        )
+    # Retained history is paged; the revision fence prevents concurrent
+    # revoke/re-grant mutations from silently shifting offset pages.
     rows = (
         await session.execute(
             select(Consent, User)
             .join(User, Consent.therapist_id == User.id)
-            .where(Consent.user_id == user.id)
+            .where(Consent.user_id == user.id, User.is_active.is_(True))
             .order_by(Consent.granted_at.desc(), Consent.id.desc())
             .offset(offset)
             .limit(limit + 1)
         )
     ).all()
-    if len(rows) > limit:
+    has_more = len(rows) > limit
+    if has_more:
         rows = rows[:limit]
-        response.headers["X-Next-Offset"] = str(offset + limit)
+    # One statement is the final revision+liveness fence. Keeping both
+    # observations in a single database snapshot prevents a purge from
+    # landing between two separate final probes. No awaits occur after it,
+    # so a successful response linearizes at this statement.
+    final_revision_subquery = (
+        select(User.consents_revision).where(User.id == user.id).scalar_subquery()
+    )
+    inactive_relationship_subquery = (
+        select(Consent.id)
+        .join(User, Consent.therapist_id == User.id)
+        .where(Consent.user_id == user.id, User.is_active.is_(False))
+        .limit(1)
+        .scalar_subquery()
+    )
+    final_revision_value, inactive_relationship = (
+        await session.execute(select(final_revision_subquery, inactive_relationship_subquery))
+    ).one()
+    final_revision = int(final_revision_value or 0)
+    if final_revision != revision or inactive_relationship is not None:
+        raise collection_changed_error("consents", CONSENTS_REVISION_HEADER, final_revision)
+    emit_page_headers(
+        response,
+        revision=revision,
+        header_name=CONSENTS_REVISION_HEADER,
+        has_more=has_more,
+        rows_returned=len(rows),
+        offset=offset,
+    )
     return [_consent_out(consent, therapist) for consent, therapist in rows]
+
+
+@router.get(
+    "",
+    response_model=list[ConsentOut],
+    dependencies=[
+        Depends(make_rate_limiter("consents-read", "read_rate_limit", "read_rate_window"))
+    ],
+)
+async def list_consents(
+    response: Response,
+    user: User = Depends(require_regular_user),
+    session: AsyncSession = Depends(get_session),
+    limit: int = Query(default=100, ge=1, le=200),
+    offset: int = Query(default=0, ge=0, le=MAX_RETAINED_RELATIONSHIPS_PER_ACCOUNT),
+    expected_revision: str | None = Query(default=None),
+):
+    # A request admitted before account retirement can otherwise queue and
+    # enumerate still-pending relationship rows after deletion has returned.
+    # Hold the same patient fence as deletion for the complete bounded page,
+    # and re-authorize only after acquiring it.
+    expected_epoch = user.token_epoch
+    async with sharing_locks.hold(sharing_patient_lock_key(user.id)):
+        fresh_user = await session.get(User, user.id, populate_existing=True)
+        if (
+            fresh_user is None
+            or not fresh_user.is_active
+            or fresh_user.token_epoch != expected_epoch
+        ):
+            raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+        return await _list_consents_page(
+            response,
+            fresh_user,
+            session,
+            limit,
+            offset,
+            expected_revision,
+        )
 
 
 @router.post(
@@ -294,6 +397,7 @@ async def grant_consent(
     user: User = Depends(require_regular_user),
     session: AsyncSession = Depends(get_session),
     x_account_verifier: str | None = Header(default=None),
+    x_step_up_proof: str | None = Header(default=None),
 ):
     # The grant widens who can read the journal — password proof required,
     # header transport preferred (same contract as DELETE /account).
@@ -307,18 +411,19 @@ async def grant_consent(
             code="disclosure_outdated",
         )
     verifier = x_account_verifier if isinstance(x_account_verifier, str) else None
-    if verifier is None:
-        raise ApiError(
-            status_code=422,
-            detail="account verifier required (X-Account-Verifier header)",
-            code="validation_error",
-        )
     # M-B1 (2026-09-26): the token's epoch at auth time — the grant fence
     # below re-reads the account and refuses a session retired by a
     # concurrent logout/credential rotation (the M-2 pattern), and the
     # verifier proof itself runs against the freshly re-read row.
     expected_epoch = user.token_epoch
-    await _require_verifier(user, verifier, request, session)
+    await _require_step_up_or_verifier(
+        user,
+        action="sharing_grant",
+        proof=x_step_up_proof,
+        verifier=verifier,
+        request=request,
+        session=session,
+    )
 
     try:
         sharing.validate_public_key_b64(body.ephemeral_pub)
@@ -362,9 +467,31 @@ async def grant_consent(
             # lock for that new row; the flat 404 keeps code enumeration safe.
             if therapist is None or therapist.id != therapist_id:
                 raise ApiError(status_code=404, detail="pairing code not found", code="not_found")
-            fresh_user = await session.get(User, user.id, populate_existing=True)
+            # Process-local sharing locks preserve ordering inside one worker;
+            # these database row locks are the cross-worker authority for
+            # both lifetime and active relationship caps.  Sort ids so two
+            # grants involving the same accounts cannot deadlock by choosing
+            # opposite lock order.
+            locked_users = (
+                (
+                    await session.execute(
+                        select(User)
+                        .where(User.id.in_(sorted((user.id, therapist_id))))
+                        .order_by(User.id)
+                        .with_for_update()
+                        .execution_options(populate_existing=True)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            locked_by_id = {row.id: row for row in locked_users}
+            fresh_user = locked_by_id.get(user.id)
+            therapist = locked_by_id.get(therapist_id)
             if fresh_user is None or not fresh_user.is_active:
                 raise ApiError(status_code=404, detail="account not found", code="not_found")
+            if therapist is None or not therapist.is_active or therapist.role != ROLE_THERAPIST:
+                raise ApiError(status_code=404, detail="pairing code not found", code="not_found")
             if fresh_user.token_epoch != expected_epoch:
                 # M-B1 (2026-09-26): a logout/rotation committed while this
                 # grant was queued behind the sharing fences — the bearer
@@ -387,6 +514,28 @@ async def grant_consent(
                 .scalars()
                 .first()
             )
+            if existing is None:
+                patient_history_count = int(
+                    await session.scalar(
+                        select(func.count(Consent.id)).where(Consent.user_id == fresh_user.id)
+                    )
+                    or 0
+                )
+                therapist_history_count = int(
+                    await session.scalar(
+                        select(func.count(Consent.id)).where(Consent.therapist_id == therapist.id)
+                    )
+                    or 0
+                )
+                if (
+                    patient_history_count >= MAX_RETAINED_RELATIONSHIPS_PER_ACCOUNT
+                    or therapist_history_count >= MAX_RETAINED_RELATIONSHIPS_PER_ACCOUNT
+                ):
+                    raise ApiError(
+                        status_code=413,
+                        detail="retained sharing history has reached the supported limit",
+                        code="payload_too_large",
+                    )
             # These counts are inside the therapist->patient lock order,
             # so concurrent standard grants cannot race past either cap.
             # Check before consuming the single-use code: after revoking
@@ -456,6 +605,11 @@ async def grant_consent(
                 existing.status = "active"
                 existing.granted_at = now
                 existing.revoked_at = None
+                # Voice access is an additional, explicit patient choice.
+                # Never carry that narrower grant across either a revival
+                # or a key-wrap refresh: the patient must enable it again
+                # after reviewing the current voice disclosure.
+                existing.share_voice = False
                 existing.ephemeral_pub = body.ephemeral_pub
                 existing.wrapped_key = wrapped
                 existing.disclosure = SHARING_DISCLOSURE_VERSION
@@ -471,6 +625,27 @@ async def grant_consent(
                     disclosure=SHARING_DISCLOSURE_VERSION,
                 )
                 session.add(consent)
+                # Flush only assigns the opaque id; it remains in the same
+                # transaction as the grant, pairing-code burn and audit row.
+                await session.flush()
+            await add_consent_event(
+                session,
+                ConsentEvent(
+                    user_id=fresh_user.id,
+                    kind="sharing",
+                    action="granted",
+                    disclosure=SHARING_DISCLOSURE_VERSION,
+                    consent_id=consent.id,
+                    share_voice=bool(consent.share_voice),
+                    occurred_at=now,
+                ),
+                permission_increasing=True,
+            )
+            await advance_sharing_revisions(
+                session,
+                patient_ids=[fresh_user.id],
+                therapist_ids=[therapist.id],
+            )
             await append_access_log(
                 session,
                 actor_id=fresh_user.id,
@@ -522,6 +697,7 @@ async def rewrap_consent(
     user: User = Depends(require_regular_user),
     session: AsyncSession = Depends(get_session),
     x_account_verifier: str | None = Header(default=None),
+    x_step_up_proof: str | None = Header(default=None),
 ):
     """Re-wrap the data key of an ACTIVE grant after a key rotation.
 
@@ -533,16 +709,17 @@ async def rewrap_consent(
     the same key-shape validation.
     """
     verifier = x_account_verifier if isinstance(x_account_verifier, str) else None
-    if verifier is None:
-        raise ApiError(
-            status_code=422,
-            detail="account verifier required (X-Account-Verifier header)",
-            code="validation_error",
-        )
     # M-B1 (2026-09-26): epoch captured at entry; enforced inside the
     # patient fence below (the M-2 pattern — see grant_consent).
     expected_epoch = user.token_epoch
-    await _require_verifier(user, verifier, request, session)
+    await _require_step_up_or_verifier(
+        user,
+        action="sharing_rewrap",
+        proof=x_step_up_proof,
+        verifier=verifier,
+        request=request,
+        session=session,
+    )
     try:
         sharing.validate_public_key_b64(body.ephemeral_pub)
     except sharing.SharingError:
@@ -572,7 +749,12 @@ async def rewrap_consent(
             await session.execute(
                 select(Consent, User)
                 .join(User, Consent.therapist_id == User.id)
-                .where(Consent.id == consent_id, Consent.user_id == fresh_user.id)
+                .where(
+                    Consent.id == consent_id,
+                    Consent.user_id == fresh_user.id,
+                    User.is_active.is_(True),
+                )
+                .with_for_update()
                 .execution_options(populate_existing=True)
             )
         ).first()
@@ -585,6 +767,11 @@ async def rewrap_consent(
             raise ApiError(status_code=404, detail="consent not found", code="not_found")
         consent.ephemeral_pub = body.ephemeral_pub
         consent.wrapped_key = wrapped
+        await advance_sharing_revisions(
+            session,
+            patient_ids=[fresh_user.id],
+            therapist_ids=[consent.therapist_id],
+        )
         await append_access_log(
             session,
             actor_id=fresh_user.id,
@@ -627,18 +814,20 @@ async def revoke_consent(
     user: User = Depends(require_regular_user),
     session: AsyncSession = Depends(get_session),
     x_account_verifier: str | None = Header(default=None),
+    x_step_up_proof: str | None = Header(default=None),
 ):
     verifier = x_account_verifier if isinstance(x_account_verifier, str) else None
-    if verifier is None:
-        raise ApiError(
-            status_code=422,
-            detail="account verifier required (X-Account-Verifier header)",
-            code="validation_error",
-        )
     # M-B1 (2026-09-26): epoch captured at entry; enforced inside the
     # patient fence below (the M-2 pattern — see grant_consent).
     expected_epoch = user.token_epoch
-    await _require_verifier(user, verifier, request, session)
+    await _require_step_up_or_verifier(
+        user,
+        action="sharing_revoke",
+        proof=x_step_up_proof,
+        verifier=verifier,
+        request=request,
+        session=session,
+    )
     # This is the counterpart to the therapist content-read fence. It owns
     # the patient key until the cleared key material and revoked status are
     # committed, so no new read can see active consent after this returns.
@@ -654,7 +843,13 @@ async def revoke_consent(
             (
                 await session.execute(
                     select(Consent)
-                    .where(Consent.id == consent_id, Consent.user_id == fresh_user.id)
+                    .join(User, Consent.therapist_id == User.id)
+                    .where(
+                        Consent.id == consent_id,
+                        Consent.user_id == fresh_user.id,
+                        User.is_active.is_(True),
+                    )
+                    .with_for_update()
                     .execution_options(populate_existing=True)
                 )
             )
@@ -664,8 +859,10 @@ async def revoke_consent(
         if consent is None:
             raise ApiError(status_code=404, detail="consent not found", code="not_found")
         if consent.status != "revoked":
+            revoked_at = utcnow()
+            revoked_share_voice = bool(consent.share_voice)
             consent.status = "revoked"
-            consent.revoked_at = utcnow()
+            consent.revoked_at = revoked_at
             # Nothing left to unwrap: the wrapped key and the ephemeral
             # public key are the grant's key material — cleared, not
             # archived. The caseload summary rides the same rule.
@@ -674,6 +871,27 @@ async def revoke_consent(
             consent.summary_blob = None
             consent.summary_eph_pub = None
             consent.summary_updated_at = None
+            await add_consent_event(
+                session,
+                ConsentEvent(
+                    user_id=fresh_user.id,
+                    kind="sharing",
+                    action="withdrawn",
+                    disclosure=consent.disclosure,
+                    consent_id=consent.id,
+                    # Preserve the scope that was actually withdrawn in the
+                    # immutable event before clearing live authorization.
+                    share_voice=revoked_share_voice,
+                    occurred_at=revoked_at,
+                ),
+                permission_increasing=False,
+            )
+            consent.share_voice = False
+            await advance_sharing_revisions(
+                session,
+                patient_ids=[fresh_user.id],
+                therapist_ids=[consent.therapist_id],
+            )
             await append_access_log(
                 session,
                 actor_id=fresh_user.id,
@@ -706,6 +924,7 @@ async def set_share_voice(
     user: User = Depends(require_regular_user),
     session: AsyncSession = Depends(get_session),
     x_account_verifier: str | None = Header(default=None),
+    x_step_up_proof: str | None = Header(default=None),
 ):
     """Toggle the per-therapist voice-sharing grant (VOICE_PLAN 2026-09-29).
 
@@ -722,33 +941,37 @@ async def set_share_voice(
     if not bool(getattr(request.app.state.settings, "audio_enabled", False)):
         raise ApiError(status_code=404, detail="not found", code="not_found")
     verifier = x_account_verifier if isinstance(x_account_verifier, str) else None
-    if verifier is None:
-        raise ApiError(
-            status_code=422,
-            detail="account verifier required (X-Account-Verifier header)",
-            code="validation_error",
-        )
     expected_epoch = user.token_epoch
-    await _require_verifier(user, verifier, request, session)
+    await _require_step_up_or_verifier(
+        user,
+        action="sharing_voice",
+        proof=x_step_up_proof,
+        verifier=verifier,
+        request=request,
+        session=session,
+    )
     async with sharing_locks.hold(sharing_patient_lock_key(user.id)):
         fresh_user = await session.get(User, user.id, populate_existing=True)
         if fresh_user is None or not fresh_user.is_active:
             raise ApiError(status_code=404, detail="account not found", code="not_found")
         if fresh_user.token_epoch != expected_epoch:
             raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
-        consent = (
-            (
-                await session.execute(
-                    select(Consent)
-                    .where(Consent.id == consent_id, Consent.user_id == fresh_user.id)
-                    .execution_options(populate_existing=True)
+        consent_row = (
+            await session.execute(
+                select(Consent, User)
+                .join(User, Consent.therapist_id == User.id)
+                .where(
+                    Consent.id == consent_id,
+                    Consent.user_id == fresh_user.id,
+                    User.is_active.is_(True),
                 )
+                .with_for_update()
+                .execution_options(populate_existing=True)
             )
-            .scalars()
-            .first()
-        )
-        if consent is None:
+        ).first()
+        if consent_row is None:
             raise ApiError(status_code=404, detail="consent not found", code="not_found")
+        consent, therapist = consent_row
         if consent.status != "active":
             raise ApiError(
                 status_code=409,
@@ -757,6 +980,24 @@ async def set_share_voice(
             )
         if bool(consent.share_voice) != body.enabled:
             consent.share_voice = body.enabled
+            await add_consent_event(
+                session,
+                ConsentEvent(
+                    user_id=fresh_user.id,
+                    kind="sharing_voice",
+                    action="granted" if body.enabled else "withdrawn",
+                    disclosure=consent.disclosure,
+                    consent_id=consent.id,
+                    share_voice=body.enabled,
+                    occurred_at=utcnow(),
+                ),
+                permission_increasing=body.enabled,
+            )
+            await advance_sharing_revisions(
+                session,
+                patient_ids=[fresh_user.id],
+                therapist_ids=[consent.therapist_id],
+            )
             await append_access_log(
                 session,
                 actor_id=fresh_user.id,
@@ -770,7 +1011,4 @@ async def set_share_voice(
                 raise ApiError(
                     status_code=404, detail="consent not found", code="not_found"
                 ) from None
-        therapist = await session.get(User, consent.therapist_id)
-        if therapist is None:
-            raise ApiError(status_code=404, detail="consent not found", code="not_found")
         return _consent_out(consent, therapist)

@@ -125,7 +125,7 @@ def _note_aad(therapist: TherapistEmulator, patient: ClientEmulator) -> bytes:
 async def test_totp_enable_consumes_its_timestep(client, monkeypatch):
     """U7: confirming enrollment presents a code to the server; that exact
     code must not immediately log in (the enable consumes the timestep)."""
-    th = TherapistEmulator("r4-u7-dr", "deep-password")
+    th = TherapistEmulator("r4-u7-dr", "deep-password", auto_enroll_mfa=False)
     await th.register(client)
     secret = await _totp_setup(client, th)
 
@@ -158,7 +158,7 @@ async def test_totp_enable_consumes_its_timestep(client, monkeypatch):
 async def test_totp_disable_refuses_the_code_that_just_logged_in(client, monkeypatch):
     """U8: the disable fence is strictly-greater too — the code that just
     authenticated a login must not also strip the factor."""
-    th = TherapistEmulator("r4-u8-dr", "deep-password")
+    th = TherapistEmulator("r4-u8-dr", "deep-password", auto_enroll_mfa=False)
     await th.register(client)
     secret = await _totp_setup(client, th)
 
@@ -557,7 +557,10 @@ async def test_access_log_cursor_tiebreaks_on_id_within_one_timestamp(client, ap
     hand back the tie row, not skip past it."""
     emu = ClientEmulator("r4-z3", "deep-password")
     await emu.register(client)
-    at = datetime(2026, 9, 22, 12, 0, 0, tzinfo=timezone.utc)
+    # Registration now emits the durable ``account_created`` genesis event.
+    # Keep this synthetic same-timestamp pair newer so the first cursor still
+    # lands between the two rows whose id tiebreak behavior this pin exercises.
+    at = datetime.now(timezone.utc) + timedelta(seconds=1)
     async with app.state.sessionmaker() as session:
         # 2026-09-26 audit item 16: seed through the chained append (raw
         # AccessLog inserts can no longer satisfy the per-patient unique

@@ -1104,6 +1104,7 @@ async def test_register_name_bucket_survives_ip_rotation(settings):
                                 "username": "target-name",
                                 "salt": base64.b64encode(b"s" * 16).decode(),
                                 "verifier": base64.b64encode(b"v" * 32).decode(),
+                                "age_attestation": "minimum_age_confirmed_v1",
                             },
                             headers={"X-Forwarded-For": f"10.9.{i}.{i}"},
                         )  # fresh IP each time

@@ -25,7 +25,7 @@ const { render, act, allText } = await import("./helpers/rtr");
 const controls: { detonate?: () => void; defuse?: () => void } = {};
 
 function Toggle({ armed }: { armed: boolean }): React.JSX.Element {
-  if (armed) throw new Error("render exploded");
+  if (armed) throw new Error("render exploded PRIVATE-JOURNAL-SENTINEL");
   return <Text>calm tree</Text>;
 }
 
@@ -85,11 +85,8 @@ describe("ErrorBoundary (2026-10-01 audit L-4)", () => {
     expect(text).toContain("Your journal is safe and encrypted on this device.");
     // The load-bearing escape hatch renders even though the child tree died.
     expect(text).toContain("Crisis resources");
-    // Local best-effort diagnostics only — the exception string, nothing else.
-    expect(console.warn).toHaveBeenCalledWith(
-      "render crashed; ErrorBoundary engaged:",
-      expect.stringContaining("render exploded"),
-    );
+    expect(console.warn).toHaveBeenCalledWith("render_error_boundary");
+    expect(JSON.stringify(vi.mocked(console.warn).mock.calls)).not.toContain("PRIVATE-JOURNAL-SENTINEL");
   });
 
   it("Try again re-mounts the children once the crash source is gone", async () => {

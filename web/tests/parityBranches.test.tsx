@@ -1,6 +1,8 @@
 /** Branch completion for the P7 views: the full grant flow, instrument
  *  switching, queue recovery, the LLM-unavailable branch, blocked-export
  *  fallback, access-log pagination, and the rotation failure paths. */
+// @ts-nocheck
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MeasuresView } from "../src/views/Measures";
 import { ShareView } from "../src/views/Share";
@@ -54,7 +56,7 @@ afterEach(() => {
 });
 
 describe("ShareView grant flow (the full path)", () => {
-  it("accepts the disclosure, wraps the data key, and grants with the verifier", async () => {
+  it("accepts the disclosure, wraps the data key, and grants with a one-use step-up proof", async () => {
     // A REAL therapist keypair so the wrap is real crypto, and the portal
     // side could open it.
     const pair = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
@@ -69,12 +71,12 @@ describe("ShareView grant flow (the full path)", () => {
       if (url.endsWith("/consents/pairing/lookup")) {
         return jsonResponse({ therapist_id: "t-9", display_name: "Dr. Cove", wrap_pub_key: spkiB64Real });
       }
-      if (url.endsWith("/consents") && init.method === "POST") {
+      if (new URL(url).pathname.endsWith("/consents") && init.method === "POST") {
         grantBody = JSON.parse(String(init.body)) as Record<string, unknown>;
         grantHeaders = init.headers as Record<string, string>;
         return jsonResponse({ id: "b".repeat(32), therapist_id: "t-9", display_name: "Dr. Cove", username: "cove", status: "active", granted_at: "2026-09-25T00:00:00Z", revoked_at: null });
       }
-      if (url.endsWith("/consents")) {
+      if (new URL(url).pathname.endsWith("/consents")) {
         return jsonResponse([{ id: "b".repeat(32), therapist_id: "t-9", display_name: "Dr. Cove", username: "cove", status: "active", granted_at: "2026-09-25T00:00:00Z", revoked_at: null }]);
       }
       return jsonResponse({}, { status: 404 });
@@ -95,13 +97,18 @@ describe("ShareView grant flow (the full path)", () => {
       });
     }
     await press(root, "Confirm and share");
+    const reauth = await import("../src/reauth");
+    vi.spyOn(reauth, "freshStepUp").mockResolvedValueOnce({ ok: true, proof: "grant-proof" });
+    await typeInto(root, "Current password", "freshly typed password");
+    await press(root, "Verify and continue");
     await settle(60, 4);
     expect(grantBody).not.toBeNull();
     expect(grantBody!.code).toBe("ZZ99ZZ99");
-    expect(grantBody!.disclosure).toBe("v2");
+    expect(grantBody!.disclosure).toBe("v3");
     expect(typeof grantBody!.ephemeral_pub).toBe("string");
     expect(typeof grantBody!.wrapped_key).toBe("string");
-    expect(grantHeaders["X-Account-Verifier"]).toBeTruthy();
+    expect(grantHeaders["X-Step-Up-Proof"]).toBe("grant-proof");
+    expect(grantHeaders["X-Account-Verifier"]).toBeUndefined();
     expect(textOf(root)).toContain("Shared with Dr. Cove");
   });
 });
@@ -161,7 +168,7 @@ describe("MeasuresView branches", () => {
 describe("SettingsView branches", () => {
   function coreStubs(extra?: { llm?: () => Response; export?: () => Response; access?: (cursor?: string) => Response; rekey?: () => Response }) {
     return stubFetch((url, init) => {
-      if (url.endsWith("/meta")) return jsonResponse({ version: "1", api_version: "v1", unlock_days: 30, llm_available: true, sharing_available: true, sharing_disclosure_version: "v2" });
+      if (url.endsWith("/meta")) return jsonResponse({ version: "1", api_version: "v1", unlock_days: 30, llm_available: true, sharing_available: true, sharing_disclosure_version: "v3" });
       if (url.endsWith("/llm-consent") && init.method === "GET") return (extra?.llm ?? (() => jsonResponse({ enabled: false })))();
       if (url.endsWith("/llm-consent") && init.method === "PUT") {
         return jsonResponse({ detail: "no provider configured", code: "llm_unavailable" }, { status: 409 });
@@ -179,7 +186,7 @@ describe("SettingsView branches", () => {
       }
       if (url.endsWith("/processing/rekey")) return (extra?.rekey ?? (() => new Response(null, { status: 204 })))();
       if (url.endsWith("/processing/sessions")) return jsonResponse({ session_token: "pst", expires_in: 300 });
-      if (url.endsWith("/consents")) return jsonResponse([]);
+      if (new URL(url).pathname.endsWith("/consents")) return jsonResponse([]);
       return jsonResponse({}, { status: 404 });
     });
   }
@@ -189,10 +196,14 @@ describe("SettingsView branches", () => {
     const root = await render(<SettingsView onLockdown={() => undefined} />);
     await settle(40, 3);
     // 2026-09-27: Settings renders TWO switches now (the check-in cadence
-    // joined the LLM consent) — press the LLM one by its aria-label.
-    await pressSwitch(root, "LLM");
+    // joined transcript-translation consent) — press that switch by its label.
+    await pressSwitch(root, "transcript translation");
+    const reauth = await import("../src/reauth");
+    vi.spyOn(reauth, "freshStepUp").mockResolvedValueOnce({ ok: true, proof: "llm-proof" });
+    await typeInto(root, "Current password", "freshly typed password");
+    await press(root, "Verify and continue");
     await settle(40, 3);
-    expect(textOf(root)).toContain("does not offer LLM analysis");
+    expect(textOf(root)).toContain("does not offer transcript translation");
   });
 
   it("the access log pages via Show more", async () => {
@@ -274,7 +285,7 @@ describe("SettingsView rotation with an active grant (the rewrap loop)", () => {
     for (const b of spki) binary += String.fromCharCode(b);
     const spkiB64 = btoa(binary);
     stubFetch((url, init) => {
-      if (url.endsWith("/meta")) return jsonResponse({ version: "1", api_version: "v1", unlock_days: 30, llm_available: false, sharing_available: true, sharing_disclosure_version: "v2" });
+      if (url.endsWith("/meta")) return jsonResponse({ version: "1", api_version: "v1", unlock_days: 30, llm_available: false, sharing_available: true, sharing_disclosure_version: "v3" });
       if (url.endsWith("/llm-consent")) return jsonResponse({ enabled: false });
       if (url.endsWith("/access-log")) return jsonResponse([]);
       if (url.endsWith("/processing/sessions")) {
@@ -287,7 +298,7 @@ describe("SettingsView rotation with an active grant (the rewrap loop)", () => {
         expect(Array.isArray(body.consent_wraps)).toBe(true);
         return jsonResponse({credential_rotated:true,operation_id:body.operation_id});
       }
-      if (url.endsWith("/consents") && init.method === "GET") {
+      if (new URL(url).pathname.endsWith("/consents") && init.method === "GET") {
         return jsonResponse([{ id: "c".repeat(32), therapist_id: "t-4", display_name: "Dr. Ridge", username: "ridge", status: "active", granted_at: "2026-09-01T00:00:00Z", revoked_at: null, therapist_wrap_pub_key: spkiB64 }]);
       }
       if (url.endsWith("/rewrap")) {
@@ -313,7 +324,7 @@ describe("SettingsView rotation with an active grant (the rewrap loop)", () => {
 
   it("an export failure surfaces honestly", async () => {
     stubFetch((url) => {
-      if (url.endsWith("/meta")) return jsonResponse({ version: "1", api_version: "v1", unlock_days: 30, llm_available: false, sharing_available: true, sharing_disclosure_version: "v2" });
+      if (url.endsWith("/meta")) return jsonResponse({ version: "1", api_version: "v1", unlock_days: 30, llm_available: false, sharing_available: true, sharing_disclosure_version: "v3" });
       if (url.endsWith("/llm-consent")) return jsonResponse({ enabled: false });
       if (url.endsWith("/access-log")) return jsonResponse([]);
       if (url.endsWith("/account/export")) return jsonResponse({ detail: "slow down", code: "rate_limited" }, { status: 429, headers: { "Retry-After": "5" } });

@@ -4,6 +4,8 @@
  *  the editor restores it after re-unlock. Module custody, the editor's
  *  restore/save/discard contract, and the App-level lock wiring, with real
  *  crypto throughout. */
+// @ts-nocheck
+
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {

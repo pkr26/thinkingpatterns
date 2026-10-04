@@ -292,10 +292,11 @@ describe("round 2: crypto identity and hygiene", () => {
     // "7" as a string score is corrupt data, never a score.
     const strScore = await sealMeasure({ v: 1, measure: "phq9", score: "7", completed_at: null }, "s1");
     expect(await realCrypto.decryptMeasure(dataKey, "user-1", { client_measure_id: "s1", blob: strScore, measure_date: "2026-09-01" })).toBeNull();
-    // A non-string measure name degrades to the neutral label.
+    // A non-string or unknown instrument is rejected rather than rendered
+    // against a fabricated neutral scale.
     const noName = await sealMeasure({ v: 1, measure: 7, score: 4, completed_at: null }, "s2");
     expect(await realCrypto.decryptMeasure(dataKey, "user-1", { client_measure_id: "s2", blob: noName, measure_date: "2026-09-01" }))
-      .toMatchObject({ measure: "measure" });
+      .toBeNull();
     // A non-string completed_at degrades to null.
     const noDate = await sealMeasure({ v: 1, measure: "phq9", score: 4, completed_at: 17 }, "s3");
     expect(await realCrypto.decryptMeasure(dataKey, "user-1", { client_measure_id: "s3", blob: noDate, measure_date: "2026-09-01" }))
@@ -486,7 +487,8 @@ describe("round 2: LoginView arms", () => {
     await typeInto(root, "Password", "password-value-123");
     await press(root, "Sign in");
     await flush();
-    expect(textOf(root)).toContain("server unreachable");
+    expect(textOf(root)).toContain("Could not reach the server — check your connection.");
+    expect(textOf(root)).not.toContain("server unreachable");
     expect(onReady).not.toHaveBeenCalled();
   });
 

@@ -116,10 +116,26 @@ class TestPairingExpiryBoundary:
             )
             await session.commit()
 
-        # Any later pairing-code creation sweeps the dead row in the same
-        # transaction (the opportunistic housekeeping in create_pairing_code).
+        # Request paths no longer perform attacker-amplifiable global
+        # housekeeping. A later code creation leaves the expired row for the
+        # bounded maintenance worker.
         second = await th.create_pairing_code(client)
         assert second != first
+        async with app.state.sessionmaker() as session:
+            before_maintenance = (
+                (
+                    await session.execute(
+                        select(PairingCode).where(PairingCode.therapist_id == th.user_id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        assert len(before_maintenance) == 2
+
+        from app import main as main_module
+
+        await main_module._prune_access_log_once(app)
         async with app.state.sessionmaker() as session:
             remaining = (
                 (
@@ -226,10 +242,14 @@ class TestDeletionCascadeEveryTable:
                     rendered = repr(row)
                     if emu.user_id in rendered:
                         leftovers[table.name] = leftovers.get(table.name, 0) + 1
-            # The audit trail is the ONLY deliberate survivor.
-            assert set(leftovers) == {"access_log"}, (
-                f"rows referencing the deleted account survived in: {leftovers}"
-            )
+            # Content and account identity rows are gone. The append-only
+            # audit trail, its authenticated continuity anchor, and the
+            # short-lived authenticated deletion signal deliberately survive.
+            assert set(leftovers) == {
+                "access_log",
+                "audit_chain_state",
+                "account_deletion_tombstones",
+            }, f"rows referencing the deleted account survived in: {leftovers}"
             # And the therapist's note about this patient is gone too.
             notes_table = Base.metadata.tables["therapist_notes"]
             note_rows = (await session.execute(select(notes_table))).all()

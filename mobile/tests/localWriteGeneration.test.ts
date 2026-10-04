@@ -306,7 +306,7 @@ describe("credential cache ownership", () => {
 });
 
 describe("erasure cleanup ownership", () => {
-  it("preserves the original-origin cleanup job when an owner lookup spans a server change", async () => {
+  it("retires the original-origin cleanup job when an owner lookup spans an exhaustive server change", async () => {
     await api.setSession("deleted-token", USER, "deleted");
     const origin = await getBaseUrl(), started = deferred(), owner = deferred<string | null>();
     vi.spyOn(api, "getUserId").mockImplementation(async () => { started.resolve(); return owner.promise; });
@@ -316,14 +316,14 @@ describe("erasure cleanup ownership", () => {
     await storage.setItem(replacementSlot, "replacement-origin-record"); owner.resolve(USER);
     expect(await erase).toEqual(["account scope changed"]);
     expect(await storage.getItem(replacementSlot)).toBe("replacement-origin-record");
-    expect((await storage.getAllKeys()).some(k => k.startsWith("@mindpattern/erasure.v1."))).toBe(true);
+    expect((await storage.getAllKeys()).some(k => k.startsWith("@mindpattern/erasure.v1."))).toBe(false);
   });
-  it("lets an explicitly preserved deleted session stay in scope until its caller signs out", async () => {
+  it("retires deleted credentials immediately even when a legacy caller requests session preservation", async () => {
     vi.spyOn(nativeFeatures, "cancelDailyReminder").mockResolvedValue(true);
     vi.spyOn(nativeFeatures, "cancelMeasureReminder").mockResolvedValue(true);
     await api.setSession("deleted-token", USER, "deleted"); const origin = await getBaseUrl();
     expect(await eraseDeletedAccountLocals(USER, null, { origin, preserveSession: true })).toEqual([]);
-    expect(await api.getUserId()).toBe(USER); expect(await secureStore.getItem("@mindpattern/token")).toBe("deleted-token");
+    expect(await api.getUserId()).toBeNull(); expect(await secureStore.getItem("@mindpattern/token")).toBeNull();
     expect((await storage.getAllKeys()).some(k => k.startsWith("@mindpattern/erasure.v1."))).toBe(false);
   });
   it("defaults to clearing only its own deleted session after completing the cleanup", async () => {

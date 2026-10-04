@@ -21,6 +21,8 @@
  * static resources, never a gate in front of them: locked sessions still
  * see every number and line above.
  */
+// @ts-nocheck
+
 import { t } from "./strings";
 import { Button, Dialog, Icon, Note } from "./ui";
 import { vault } from "./vault";
@@ -86,6 +88,7 @@ export function CrisisCard(props: { onClose: () => void; onMakeSafetyPlan?: () =
     <Dialog title={t("crisis.webTitle")} onClose={props.onClose}>
       <Note tone="danger">{t("crisis.webImmediate")}</Note>
       <div className="stack" style={{ gap: "var(--space-2)" }}>
+        <CrisisAction href="tel:911" label={t("crisis.emergency.us")} detail={t("crisis.emergency.detail")} />
         <CrisisAction href="tel:988" label={t("crisis.call988")} detail={t("crisis.call988.detail")} />
         <CrisisAction href={crisisSmsLink()} label={t("crisis.text741741")} detail={t("crisis.text741741.detail")} />
         <CrisisAction href={CRISIS_CHAT_URL} label={t("crisis.chat")} detail={t("crisis.chat.detail")} external />

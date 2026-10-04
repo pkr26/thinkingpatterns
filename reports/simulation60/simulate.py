@@ -399,7 +399,8 @@ async def run():
             cl = Client(p.name, p.password)
             r = await req(c, "POST", "/api/auth/register", json={
                 "username": p.name, "salt": base64.b64encode(cl.salt).decode(),
-                "verifier": base64.b64encode(cl.auth_key).decode()})
+                "verifier": base64.b64encode(cl.auth_key).decode(),
+                "age_attestation": "minimum_age_confirmed_v1"})
             assert r.status_code == 201, r.text
             cl.user_id, cl.token = r.json()["user_id"], r.json()["token"]
             await age_account(cl.user_id, DAYS + 2)

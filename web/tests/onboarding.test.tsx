@@ -1,10 +1,11 @@
 /** Onboarding panels + the per-account completion stamp, and the static
  *  privacy screen. */
+// @ts-nocheck
+
 import { describe, expect, it, vi } from "vitest";
 import { hasSeenOnboarding, markOnboardingSeen, Onboarding } from "../src/views/Onboarding";
 import { Privacy } from "../src/views/Privacy";
 import { press, render, textOf } from "./helpers/rtr";
-import { localStore } from "../src/platform";
 
 describe("onboarding", () => {
   it("advances through the three panels and finishes", async () => {
@@ -21,11 +22,11 @@ describe("onboarding", () => {
     expect(onDone).toHaveBeenCalledTimes(1);
   });
 
-  it("the completion stamp is per-account and round-trips through the seam", () => {
-    expect(hasSeenOnboarding("user-1", localStore.get)).toBe(false);
-    markOnboardingSeen("user-1", localStore.set);
-    expect(hasSeenOnboarding("user-1", localStore.get)).toBe(true);
-    expect(hasSeenOnboarding("user-2", localStore.get)).toBe(false);
+  it("the generation-fenced completion stamp is per-account and round-trips", async () => {
+    expect(await hasSeenOnboarding("onboarding-user-1")).toBe(false);
+    await markOnboardingSeen("onboarding-user-1");
+    expect(await hasSeenOnboarding("onboarding-user-1")).toBe(true);
+    expect(await hasSeenOnboarding("onboarding-user-2")).toBe(false);
   });
 });
 

@@ -361,7 +361,7 @@ describe("SettingsScreen chrome", () => {
   it("loads the stored URL, insecure consent and LLM state on mount", async () => {
     vi.mocked(getBaseUrl).mockImplementation(async () => "https://sync.example.com");
     vi.mocked(api.meta).mockResolvedValue({ llm_available: true } as never);
-    vi.mocked(api.getLlmConsent).mockResolvedValue({ enabled: true } as never);
+    vi.mocked(api.getLlmConsent).mockResolvedValue({ enabled: true, active_for_current_policy: true } as never);
 
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
@@ -371,7 +371,7 @@ describe("SettingsScreen chrome", () => {
     );
     const sw = root.root
       .findAllByType(Switch)
-      .find((n) => n.props.accessibilityLabel === "Allow third-party AI analysis");
+      .find((n) => n.props.accessibilityLabel === "Allow third-party transcript translation");
     expect(sw).toBeDefined();
     expect(sw.props.value).toBe(true);
     expect(sw.props.trackColor).toEqual({ true: "#b7d5b2", false: "#232019" });
@@ -437,13 +437,28 @@ describe("SettingsScreen chrome", () => {
     );
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
-    expect(root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow third-party AI analysis")!.props.value).toBe(false);
+    expect(root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow third-party transcript translation")!.props.value).toBe(false);
     const { act } = await import("../helpers/rtr");
     await act(async () => {
-      resolveConsent({ enabled: true });
+      resolveConsent({ enabled: true, active_for_current_policy: true });
     });
     await flush();
-    expect(root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow third-party AI analysis")!.props.value).toBe(true);
+    expect(root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow third-party transcript translation")!.props.value).toBe(true);
+  });
+
+  it("treats legacy LLM v1 consent as inactive until a fresh v2 opt-in", async () => {
+    vi.mocked(api.meta).mockResolvedValue({ llm_available: true } as never);
+    vi.mocked(api.getLlmConsent).mockResolvedValue({
+      enabled: true,
+      active_for_current_policy: false,
+      llm_consent_disclosure: "v1",
+    } as never);
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    const sw = root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow third-party transcript translation")!;
+    expect(sw.props.value).toBe(false);
+    expect(textOf(root)).toContain("earlier choice no longer authorizes transcript translation");
+    expect(textOf(root)).toContain("Translation is off");
   });
 
   it("disables the switch and buttons while the verified consent save is busy, and resets after", async () => {
@@ -455,7 +470,7 @@ describe("SettingsScreen chrome", () => {
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
     const { act, firePress } = await import("../helpers/rtr");
-    const sw0 = root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow third-party AI analysis")!;
+    const sw0 = root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow third-party transcript translation")!;
     await act(async () => {
       (sw0.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
     });
@@ -465,13 +480,13 @@ describe("SettingsScreen chrome", () => {
     await flush();
     expect(root.root.findAllByType(Switch)[0].props.disabled).toBe(true);
     await act(async () => {
-      resolveSave?.({ enabled: true });
+      resolveSave?.({ enabled: true, active_for_current_policy: true });
     });
     await flush();
     expect(root.root.findAllByType(Switch)[0].props.disabled).toBe(false);
 
     // busy reset in finally: a second toggle round-trip works.
-    vi.mocked(api.setLlmConsent).mockResolvedValue({ enabled: false } as never);
+    vi.mocked(api.setLlmConsent).mockResolvedValue({ enabled: false, active_for_current_policy: false } as never);
     const sw1 = root.root.findAllByType(Switch)[0];
     await act(async () => {
       (sw1.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(false);
@@ -485,9 +500,9 @@ describe("SettingsScreen chrome", () => {
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
     expect(
-      root.root.findAllByType(Switch).filter((n) => n.props.accessibilityLabel === "Allow third-party AI analysis"),
+      root.root.findAllByType(Switch).filter((n) => n.props.accessibilityLabel === "Allow third-party transcript translation"),
     ).toHaveLength(0);
-    expect(textOf(root)).not.toContain("Third-party AI analysis");
+    expect(textOf(root)).not.toContain("Third-party transcript translation");
   });
 
   it("keeps defaults when the server is unreachable on mount", async () => {
@@ -496,7 +511,7 @@ describe("SettingsScreen chrome", () => {
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
     expect(
-      root.root.findAllByType(Switch).filter((n) => n.props.accessibilityLabel === "Allow third-party AI analysis"),
+      root.root.findAllByType(Switch).filter((n) => n.props.accessibilityLabel === "Allow third-party transcript translation"),
     ).toHaveLength(0);
     expect(textOf(root)).toContain("Save server URL");
   });
@@ -570,7 +585,7 @@ describe("server URL policy", () => {
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
     expect(
-      root.root.findAllByType(Switch).filter((n) => n.props.accessibilityLabel === "Allow third-party AI analysis"),
+      root.root.findAllByType(Switch).filter((n) => n.props.accessibilityLabel === "Allow third-party transcript translation"),
     ).toHaveLength(0);
   });
 });
@@ -603,7 +618,7 @@ describe("LLM consent toggle", () => {
 
     expect(verifyPasswordForVault).toHaveBeenCalledWith("correct horse");
     expect(api.setLlmConsent).toHaveBeenCalledWith(true, authKey.toString("base64"));
-    expect(root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow third-party AI analysis")!.props.value).toBe(true);
+    expect(root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow third-party transcript translation")!.props.value).toBe(true);
   });
 
   it("a wrong password never reaches the server", async () => {
@@ -618,7 +633,7 @@ describe("LLM consent toggle", () => {
     await reauth(root, "wrong guess");
     expect(api.setLlmConsent).not.toHaveBeenCalled();
     expect(Alert.alert).toHaveBeenCalledWith("Could not verify", "Wrong password.");
-    expect(root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow third-party AI analysis")!.props.value).toBe(false);
+    expect(root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow third-party transcript translation")!.props.value).toBe(false);
   });
 
   it("reports failures and keeps the old state", async () => {
@@ -633,7 +648,7 @@ describe("LLM consent toggle", () => {
     await reauth(root);
     // Calm fallback copy — no raw error text in the dialog (audit fix).
     expect(Alert.alert).toHaveBeenCalledWith("Could not complete", "Something went wrong — try again.");
-    expect(root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow third-party AI analysis")!.props.value).toBe(false);
+    expect(root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow third-party transcript translation")!.props.value).toBe(false);
   });
 
   it("falls back to calm copy for non-Error consent failures", async () => {
@@ -657,7 +672,7 @@ describe("export safety gate", () => {
     await pressLabel(root, "Why export is unavailable");
     expect(Alert.alert).toHaveBeenCalledWith(
       "Export unavailable in this build",
-      expect.stringContaining("verified secure file-export component"),
+      expect.stringContaining("sign in to the Fathom web app on a trusted computer"),
     );
     expect(api.exportAccount).not.toHaveBeenCalled();
     expect(flushQueue).not.toHaveBeenCalled();
@@ -1454,7 +1469,7 @@ describe("accessibility", () => {
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
     const sw = root.root.findAllByType(Switch)[0];
-    expect(sw.props.accessibilityLabel).toBe("Allow third-party AI analysis");
+    expect(sw.props.accessibilityLabel).toBe("Allow third-party transcript translation");
     expect(sw.props.accessibilityState).toEqual({ checked: false, disabled: false });
   });
 
@@ -1873,7 +1888,7 @@ describe("navigation rows and sign-out hygiene (independent audit 2026-09-27)", 
     await pressLabel(root, "Why export is unavailable");
     await flush();
     expect(Alert.alert).toHaveBeenCalledTimes(1);
-    expect(Alert.alert.mock.calls[0]![1]).toContain("verified secure file-export component");
+    expect(Alert.alert.mock.calls[0]![1]).toContain("sign in to the Fathom web app on a trusted computer");
   });
 
   it("the re-auth card's Cancel retires the pending action and clears the field", async () => {
@@ -1884,7 +1899,7 @@ describe("navigation rows and sign-out hygiene (independent audit 2026-09-27)", 
     const { Switch } = await import("../helpers/rnMock");
     const { act } = await import("../helpers/rtr");
     await act(async () => {
-      const node = root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow third-party AI analysis");
+      const node = root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow third-party transcript translation");
       node!.props.onValueChange(true);
     });
     await flush();
@@ -1907,15 +1922,18 @@ describe("voice journaling consent (VOICE_PLAN 2026-09-29, audit C5)", () => {
     expect(sw!.props.value).toBe(true);
     expect(textOf(root)).toContain("Whisper Medical");
     // Current policy: no stale note.
-    expect(textOf(root)).not.toContain("transcription provider changed");
+    expect(textOf(root)).not.toContain("earlier choice no longer authorizes uploads");
   });
 
-  it("flags an enabled-but-stale consent (the provider changed under it)", async () => {
+  it("treats legacy voice v1 consent as inactive until a fresh v2 opt-in", async () => {
     vi.mocked(api.meta).mockResolvedValue({ audio_available: true } as never);
     vi.mocked(api.getVoiceConsent).mockResolvedValue({ enabled: true, active_for_current_policy: false } as never);
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
-    expect(textOf(root)).toContain("re-enable to review and accept the new terms");
+    const sw = root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow voice journaling")!;
+    expect(sw.props.value).toBe(false);
+    expect(textOf(root)).toContain("earlier choice no longer authorizes uploads");
+    expect(textOf(root)).toContain("Voice journaling is off");
   });
 
   it("the toggle demands the typed password; the verifier, not the bearer, changes the consent", async () => {

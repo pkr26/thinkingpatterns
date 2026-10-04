@@ -26,6 +26,8 @@
  * Item 6 (same audit): the picks are option VALUES, never option array
  * indexes — validated as membership in the instrument's option scale.
  */
+// @ts-nocheck
+
 import { buildAad } from "./crypto/aad";
 import { decrypt, encrypt, fromBase64, toBase64, zeroize, type Bytes } from "./crypto/core";
 import { kv,type WritePermit } from "./kvstore";

@@ -11,6 +11,7 @@ import base64
 import hashlib
 import json
 import os
+import time
 import uuid
 from datetime import date
 
@@ -24,6 +25,79 @@ from app.security import crypto, kdf
 # callers, and this emulator is harness code, not the product. The key
 # schedule below (HKDF auth/data keys) is still the real library.
 FAST_ITERATIONS = 1_000
+
+
+def production_secret_settings(**overrides: object) -> dict[str, object]:
+    """Return a complete, purpose-separated non-development secret set.
+
+    Tests that exercise one production boot gate should not accidentally fail
+    an earlier, unrelated gate as the production contract grows.  The journal
+    name is unique so parallel app lifespans never share durable audit state.
+    """
+    values: dict[str, object] = {
+        "auth_token_secret_explicit": "a" * 48,
+        "totp_wrap_secret_explicit": "b" * 48,
+        "pairing_secret_explicit": "c" * 48,
+        "decoy_secret": "d" * 48,
+        "audit_mac_secret_explicit": "ab" * 32,
+        "audit_journal_path": f"/tmp/mindpattern-test-audit-{os.getpid()}-{uuid.uuid4().hex}.jsonl",
+        "therapist_enrollment_token": "e" * 48,
+    }
+    values.update(overrides)
+    return values
+
+
+def seed_authenticated_audit_genesis(
+    session, settings, user_id: str, *, actor_role: str = "patient"
+) -> None:
+    """Seed registration-equivalent audit authority for direct ORM fixtures.
+
+    Production creates this row and durable state atomically in the register
+    route. Tests that deliberately bypass registration must reproduce that
+    authenticated invariant before exercising later audited operations.
+    """
+    from app.api._audit import compute_chain_state_mac, compute_entry_hash, compute_entry_mac
+    from app.models import AccessLog, AuditChainState, new_id, utcnow
+
+    at = utcnow()
+    key_version = settings.audit_mac_key_version
+    mac_key = settings.audit_mac_keyring[key_version]
+    entry_hash = compute_entry_hash(
+        None,
+        user_id,
+        user_id,
+        "account_created",
+        at,
+        actor_role=actor_role,
+        record_version=2,
+    )
+    row = AccessLog(
+        id=new_id(),
+        actor_id=user_id,
+        actor_role=actor_role,
+        user_id=user_id,
+        action="account_created",
+        at=at,
+        chain_seq=1,
+        prev_hash=None,
+        entry_hash=entry_hash,
+        entry_mac=compute_entry_mac(mac_key, user_id, 1, entry_hash),
+        mac_key_version=key_version,
+        record_version=2,
+    )
+    state = AuditChainState(
+        user_id=user_id,
+        head_seq=1,
+        head_hash=entry_hash,
+        head_at=at,
+        first_retained_seq=1,
+        first_retained_hash=entry_hash,
+        state_version=1,
+        mac_key_version=key_version,
+        updated_at=at,
+    )
+    state.state_mac = compute_chain_state_mac(mac_key, state)
+    session.add_all([row, state])
 
 
 class ClientEmulator:
@@ -121,6 +195,7 @@ class ClientEmulator:
                 "username": self.username,
                 "salt": self.salt_b64,
                 "verifier": self.auth_key_b64,
+                "age_attestation": "minimum_age_confirmed_v1",
             },
         )
         assert response.status_code == 201, response.text
@@ -135,6 +210,11 @@ class ClientEmulator:
             json={
                 "username": self.username,
                 "verifier": self.auth_key_b64,
+                **(
+                    {"totp_code": self.totp_backup_codes.pop(0)}
+                    if getattr(self, "totp_backup_codes", None)
+                    else {}
+                ),
             },
         )
         assert response.status_code == 200, response.text
@@ -492,7 +572,14 @@ from app.security.kdf import hkdf_sha256  # noqa: E402
 
 
 class TherapistEmulator:
-    def __init__(self, username: str, password: str, display_name: str | None = None):
+    def __init__(
+        self,
+        username: str,
+        password: str,
+        display_name: str | None = None,
+        *,
+        auto_enroll_mfa: bool = True,
+    ):
         self.username = username
         self.password = password
         self.display_name = display_name or f"Dr. {username.title()}"
@@ -513,6 +600,7 @@ class TherapistEmulator:
         ).decode("ascii")
         self.user_id: str | None = None
         self.token: str | None = None
+        self.auto_enroll_mfa = auto_enroll_mfa
 
     # ---- key material encodings ---------------------------------------------
 
@@ -592,6 +680,7 @@ class TherapistEmulator:
                 "username": self.username,
                 "salt": self.salt_b64,
                 "verifier": self.auth_key_b64,
+                "age_attestation": "minimum_age_confirmed_v1",
                 "display_name": self.display_name,
                 "wrap_pub_key": self.wrap_pub_key,
                 "wrap_key_blob": self.wrap_key_blob_b64(),
@@ -601,6 +690,25 @@ class TherapistEmulator:
         body = response.json()
         self.user_id = body["user_id"]
         self.token = body["token"]
+        if self.auto_enroll_mfa:
+            setup = await client.post(
+                "/api/account/totp/setup",
+                headers=self.headers,
+                json={"verifier": self.auth_key_b64},
+            )
+            assert setup.status_code == 200, setup.text
+            secret = base64.b32decode(setup.json()["secret_base32"])
+            from app.security import totp
+
+            code = totp._code_for_counter(secret, int(time.time() // totp.STEP_SECONDS))
+            enabled = await client.post(
+                "/api/account/totp/enable",
+                headers=self.headers,
+                json={"verifier": self.auth_key_b64, "code": code},
+            )
+            assert enabled.status_code == 200, enabled.text
+            self.totp_secret = secret
+            self.totp_backup_codes = enabled.json()["backup_codes"]
         return body
 
     async def login(self, client: AsyncClient) -> dict:
@@ -609,6 +717,11 @@ class TherapistEmulator:
             json={
                 "username": self.username,
                 "verifier": self.auth_key_b64,
+                **(
+                    {"totp_code": self.totp_backup_codes.pop(0)}
+                    if getattr(self, "totp_backup_codes", None)
+                    else {}
+                ),
             },
         )
         assert response.status_code == 200, response.text
@@ -692,6 +805,7 @@ class EnvelopeClientEmulator(ClientEmulator):
                 "username": self.username,
                 "salt": self.salt_b64,
                 "verifier": self.auth_key_b64,
+                "age_attestation": "minimum_age_confirmed_v1",
                 "kdf_params": self.kdf_params,
                 "wrapped_data_key": self.wrap_for(self.password, self.salt),
             },

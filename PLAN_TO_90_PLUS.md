@@ -182,7 +182,7 @@ For deployed web performance, target the published good thresholds at the 75th p
 
 ## 9. P6 — Make delivery and recovery trustworthy
 
-- [ ] Correct Compose indentation and prove the documented development startup. Run format/type/build gates; fix stale password-policy assertions and build-artifact/SRI assumptions with current build outputs. Retain the production security-contact placeholder gate.
+- [ ] Correct Compose indentation and prove the documented development startup. Run format/type/build gates; fix stale password-policy assertions and build-artifact/SRI assumptions with current build outputs. Retain the fail-closed release-time `security.txt` configuration gate; generic builds must omit the file rather than shipping a placeholder.
 - [ ] Correct mutation workflow exit logic at below/equal/above thresholds. Preserve documented floors and ratchet risk-focused coverage using meaningful surviving mutants; an app score above 90 is not a requirement that every mutation number equals 90.
 - [ ] Make missing/failed red-team campaigns fail completeness checks, including `g_voice`. Require exact campaign/result inventory, terminal status and nonzero exit on infrastructure/process errors.
 - [ ] Match mutation identity, source/scope and actual result before crediting a kill. RuntimeError, missing or changed-scope mutants cannot count as killed. Document any accepted timeout classifications.

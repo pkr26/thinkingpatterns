@@ -6,16 +6,32 @@
 import { act } from "react";
 import RTR from "react-test-renderer";
 import type { ReactTestInstance } from "react-test-renderer";
+import { afterEach } from "vitest";
+import { drainPortalDraftWritesForTests } from "../../src/noteDrafts";
 
 type ReactTestRenderer = ReturnType<typeof RTR.create>;
 
 type NodeWithChildren = { children: unknown[] };
+
+const mountedRoots = new Set<ReactTestRenderer>();
+
+afterEach(async () => {
+  const roots = [...mountedRoots];
+  mountedRoots.clear();
+  if (roots.length > 0) {
+    await act(async () => {
+      for (const root of roots) root.unmount();
+    });
+  }
+  await drainPortalDraftWritesForTests();
+});
 
 export async function render(ui: React.ReactElement): Promise<ReactTestRenderer> {
   let root!: ReactTestRenderer;
   await act(async () => {
     root = RTR.create(ui);
   });
+  mountedRoots.add(root);
   return root;
 }
 

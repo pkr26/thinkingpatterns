@@ -166,13 +166,13 @@ describe("upgradeKeyProtection (v1 → v2)", () => {
   });
 
   it("a 403 verifier rejection maps to wrong-password (retryable)", async () => {
-    upgradeState.failUpgrade = { status: 403, code: "verification_failed", message: "verifier rejected" };
+    upgradeState.failUpgrade = { status: 403, code: "verification_failed", message: "<script>alert(1)</script> credencial rechazada" };
     const outcome = await upgradeKeyProtection({ username: "alice", userId: USER, password: PASSWORD, verifierB64: "stale-verifier" });
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) {
       expect(outcome.stage).toBe("upgrade");
       expect(outcome.reason).toBe("wrong-password");
-      expect(outcome.detail).toBe("verifier rejected");
+      expect(outcome.detail).toBeUndefined();
     }
   });
 

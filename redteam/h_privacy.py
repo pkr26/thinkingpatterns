@@ -129,6 +129,7 @@ async def h2_export() -> None:
                         "username": username,
                         "salt": base64.b64encode(salt).decode(),
                         "verifier": base64.b64encode(auth_key).decode(),
+                        "age_attestation": "minimum_age_confirmed_v1",
                         "wrapped_data_key": wrapped,
                         "kdf_params": params,
                     },

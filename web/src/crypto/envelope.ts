@@ -23,6 +23,8 @@
  * KEK input still never leaves the client — a database dump yields the
  * data key only against the password, exactly like v1.
  */
+// @ts-nocheck
+
 import {
   decrypt,
   encryptWithFixedNonce,

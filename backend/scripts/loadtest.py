@@ -132,6 +132,7 @@ class LoadUser:
                 "username": self.name,
                 "salt": base64.b64encode(self.salt).decode(),
                 "verifier": base64.b64encode(auth_key).decode(),
+                "age_attestation": "minimum_age_confirmed_v1",
             },
         )
         if r.status_code == 201:

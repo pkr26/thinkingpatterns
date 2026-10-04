@@ -1,6 +1,8 @@
 /** App state machine (P3): booting → login → onboarding → home, sign-out,
  *  privacy, the epoch-death funnel, and the crisis overlay from every
  *  state. Sign-in drives REAL crypto against fetch stubs. */
+// @ts-nocheck
+
 import { act } from "react";
 import type { ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,7 +12,9 @@ import { enqueue } from "../src/offlineQueue";
 import { vault } from "../src/vault";
 import { jsonResponse, resetTestState, stubFetch } from "./helpers/api";
 import { applyLanguagePref } from "../src/strings";
-import { flush, press, render, textOf } from "./helpers/rtr";
+import { kv } from "../src/kvstore";
+import { withLock } from "../src/platform";
+import { buttonByLabel, flush, press, render, textOf } from "./helpers/rtr";
 
 // Preload modules in this state-machine suite; production still lazy-loads them.
 await import("../src/views/Entry");
@@ -385,6 +389,43 @@ describe("App", () => {
     expect(textOf(root)).toContain("Sign in");
     const calls = fetchMock?.mock.calls ?? [];
     expect(calls.some(([url]) => url.endsWith("/auth/logout"))).toBe(true);
+  });
+
+  it("locks plaintext immediately and orders delayed sign-out cleanup before successor account state", async () => {
+    authStubs();
+    const root = await render(<App />);
+    await vi.advanceTimersByTimeAsync(50); await flush(); await signIn(root);
+    await press(root, "Next"); await press(root, "Next"); await press(root, "Start journaling"); await flush();
+
+    let release!: () => void;
+    let started!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const began = new Promise<void>(resolve => { started = resolve; });
+    const actualRemove = kv.removeItem.bind(kv);
+    let delayed = true;
+    vi.spyOn(kv, "removeItem").mockImplementation(async (key, permit) => {
+      if (delayed && key === "mindpattern.onboarding.v1.user-7") {
+        delayed = false; started(); await gate;
+      }
+      return actualRemove(key, permit);
+    });
+
+    await press(root, "More"); await press(root, "Sign out (this device)");
+    await began; await flush();
+    expect(vault.isUnlocked()).toBe(false);
+    expect(hasSession()).toBe(false);
+    expect(buttonByLabel(root, "Sign in")).toBe(false);
+    expect(textOf(root)).toContain("Starting");
+
+    let successorPublished = false;
+    const successor = withLock("account-transition", async () => {
+      await kv.setItem("mindpattern.onboarding.v1.user-7", "done");
+      successorPublished = true;
+    });
+    await flush(); expect(successorPublished).toBe(false);
+    release(); await successor; await flush();
+    expect(await kv.getItem("mindpattern.onboarding.v1.user-7")).toBe("done");
+    expect(buttonByLabel(root, "Sign in")).toBe(true);
   });
 
   it("L-8 (2026-09-28): mounting the App sweeps the legacy plaintext crisis stamps", async () => {

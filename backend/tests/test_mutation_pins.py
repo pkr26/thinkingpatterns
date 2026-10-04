@@ -50,7 +50,12 @@ from fastapi.routing import APIRoute
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import event, insert, select
 from sqlalchemy.exc import IntegrityError
-from tests.helpers import ClientEmulator, TherapistEmulator, daterange
+from tests.helpers import (
+    ClientEmulator,
+    TherapistEmulator,
+    daterange,
+    production_secret_settings,
+)
 from types import SimpleNamespace
 import asyncio
 import base64
@@ -202,6 +207,8 @@ def test_settings_defaults_are_pinned(clean_env):
         # (default derives from the token secret) and the optional
         # out-of-DB journal path (default off).
         "audit_mac_secret_explicit": "",
+        "audit_mac_key_version": 1,
+        "audit_mac_previous_secrets_explicit": "",
         "audit_journal_path": "",
         # Voice journaling (2026-09-29, VOICE_PLAN.md): dev-defaults-on
         # like therapist sharing; every other default documented in the
@@ -223,6 +230,7 @@ def test_settings_defaults_are_pinned(clean_env):
         "audio_upload_rate_limit": 30,
         "audio_upload_rate_window": 3_600,
         "audio_retention_days": 30,
+        "audio_lifecycle_ceiling_days": 0,
         "audio_max_user_bytes": 64 * 1024 * 1024,
         "audio_bucket": "",
         "audio_bucket_region": "",
@@ -363,6 +371,13 @@ def test_production_refuses_weak_token_secret_at_the_exact_boundary(clean_env, m
 
     # Exactly 32 characters is the accepted minimum.
     monkeypatch.setenv("MINDPATTERN_TOKEN_SECRET", "x" * 32)
+    monkeypatch.setenv("MINDPATTERN_AUTH_TOKEN_SECRET", "a" * 48)
+    monkeypatch.setenv("MINDPATTERN_TOTP_WRAP_SECRET", "b" * 48)
+    monkeypatch.setenv("MINDPATTERN_PAIRING_SECRET", "c" * 48)
+    monkeypatch.setenv("MINDPATTERN_DECOY_SECRET", "d" * 48)
+    monkeypatch.setenv("MINDPATTERN_AUDIT_MAC_SECRET", "ab" * 32)
+    monkeypatch.setenv("MINDPATTERN_AUDIT_JOURNAL", "/tmp/mindpattern-mutation-audit.jsonl")
+    monkeypatch.setenv("MINDPATTERN_THERAPIST_ENROLLMENT_TOKEN", "e" * 48)
     assert Settings.from_env().token_secret == "x" * 32
 
 
@@ -708,6 +723,7 @@ async def test_cors_middleware_contract(settings):
         "X-Processing-Token",
         "X-New-Processing-Token",
         "X-Account-Verifier",
+        "X-Step-Up-Proof",
         "X-Therapist-Enrollment-Token",
         "X-Pairing-Code",  # 2026-09-28: SAS preflight for browser clients
     ]
@@ -766,7 +782,12 @@ async def test_register_rejects_whitespace_in_base64_salt(client):
     emu = ClientEmulator("b64strict", "pw-b64-strict")
     response = await client.post(
         "/api/auth/register",
-        json={"username": emu.username, "salt": SPACEY_SALT, "verifier": emu.auth_key_b64},
+        json={
+            "username": emu.username,
+            "salt": SPACEY_SALT,
+            "verifier": emu.auth_key_b64,
+            "age_attestation": "minimum_age_confirmed_v1",
+        },
     )
     assert response.status_code == 422
     assert response.json()["detail"] == "salt and verifier must be base64"
@@ -780,6 +801,7 @@ async def test_register_rejects_whitespace_in_base64_verifier(client):
             "username": emu.username,
             "salt": emu.salt_b64,
             "verifier": emu.auth_key_b64 + " ",
+            "age_attestation": "minimum_age_confirmed_v1",
         },
     )
     assert response.status_code == 422
@@ -793,6 +815,7 @@ async def test_register_rejects_wrongly_sized_salt_and_verifier(client):
             "username": "sizing",
             "salt": base64.b64encode(b"short").decode(),
             "verifier": base64.b64encode(b"y" * 32).decode(),
+            "age_attestation": "minimum_age_confirmed_v1",
         },
     )
     assert response.status_code == 422
@@ -804,6 +827,7 @@ async def test_register_rejects_wrongly_sized_salt_and_verifier(client):
             "username": "sizing",
             "salt": base64.b64encode(b"x" * 16).decode(),
             "verifier": base64.b64encode(b"y" * 31).decode(),
+            "age_attestation": "minimum_age_confirmed_v1",
         },
     )
     assert response.status_code == 422
@@ -1202,7 +1226,12 @@ async def test_register_conflict_detail_is_exact(client):
     await emu.register(client)
     response = await client.post(
         "/api/auth/register",
-        json={"username": emu.username, "salt": emu.salt_b64, "verifier": emu.auth_key_b64},
+        json={
+            "username": emu.username,
+            "salt": emu.salt_b64,
+            "verifier": emu.auth_key_b64,
+            "age_attestation": "minimum_age_confirmed_v1",
+        },
     )
     assert response.status_code == 409
     assert response.json()["detail"] == "username already taken"
@@ -1290,7 +1319,7 @@ async def test_export_bundle_header_is_exact(client):
 
     lines = [line for line in response.text.splitlines() if line.strip()]
     head = json.loads(lines[0])
-    assert head["version"] == 2
+    assert head["version"] == 3
     assert head["llm_consent"] is False
     # 2026-09-16 (finding H2): no cleartext username in the export bundle.
     assert head["username"] == emu.username
@@ -1463,16 +1492,20 @@ async def test_middleware_generated_errors_carry_exact_content_type():
 
 
 async def test_unhandled_exceptions_are_logged_on_the_mindpattern_logger(caplog):
+    sensitive = "private-user-id/object-key"
+
     async def exploding(scope, receive, send):
-        raise RuntimeError("boom")
+        raise RuntimeError(sensitive)
 
     wrapped = HardeningMiddleware(exploding, max_body_bytes=100)
     with caplog.at_level(logging.ERROR, logger="mindpattern"):
         await _call_asgi(wrapped, _http_scope([], method="GET"), [])
-    matching = [r for r in caplog.records if "unhandled error serving method=GET" in r.message]
+    matching = [r for r in caplog.records if r.message == "unhandled request failure"]
     assert matching, "expected an unhandled-error record"
     assert matching[0].name == "mindpattern"
-    assert matching[0].message == "unhandled error serving method=GET"
+    assert matching[0].message == "unhandled request failure"
+    assert sensitive not in matching[0].message
+    assert matching[0].exc_info is None
 
 
 # ---------------------------------------------------------------------------
@@ -1688,6 +1721,7 @@ async def test_register_schema_boundaries(client):
             "username": "bounds",
             "salt": base64.b64encode(b"s").decode(),
             "verifier": good_verifier,
+            "age_attestation": "minimum_age_confirmed_v1",
         },
     )
     assert one_char.status_code == 422
@@ -1695,7 +1729,12 @@ async def test_register_schema_boundaries(client):
 
     one_char_v = await client.post(
         "/api/auth/register",
-        json={"username": "bounds", "salt": good_salt, "verifier": base64.b64encode(b"v").decode()},
+        json={
+            "username": "bounds",
+            "salt": good_salt,
+            "verifier": base64.b64encode(b"v").decode(),
+            "age_attestation": "minimum_age_confirmed_v1",
+        },
     )
     assert one_char_v.status_code == 422
     assert one_char_v.json()["detail"] == "verifier must be 32 bytes"
@@ -1706,13 +1745,23 @@ async def test_register_schema_boundaries(client):
     assert len(long_salt) == 128
     at_cap = await client.post(
         "/api/auth/register",
-        json={"username": "bounds129a", "salt": long_salt, "verifier": good_verifier},
+        json={
+            "username": "bounds129a",
+            "salt": long_salt,
+            "verifier": good_verifier,
+            "age_attestation": "minimum_age_confirmed_v1",
+        },
     )
     assert at_cap.status_code == 422
     assert at_cap.json()["detail"] == "salt must be exactly 16 bytes"
     too_long = await client.post(
         "/api/auth/register",
-        json={"username": "bounds129b", "salt": long_salt + "A", "verifier": good_verifier},
+        json={
+            "username": "bounds129b",
+            "salt": long_salt + "A",
+            "verifier": good_verifier,
+            "age_attestation": "minimum_age_confirmed_v1",
+        },
     )
     assert too_long.status_code == 422
     assert _is_validation_shaped(too_long.json()["detail"])
@@ -1723,7 +1772,12 @@ async def test_register_schema_boundaries(client):
     v65 = v64 + "A"
     over_v = await client.post(
         "/api/auth/register",
-        json={"username": "boundsv", "salt": good_salt, "verifier": v65},
+        json={
+            "username": "boundsv",
+            "salt": good_salt,
+            "verifier": v65,
+            "age_attestation": "minimum_age_confirmed_v1",
+        },
     )
     assert over_v.status_code == 422
     assert _is_validation_shaped(over_v.json()["detail"])
@@ -1731,7 +1785,12 @@ async def test_register_schema_boundaries(client):
     # Username: pattern-anchored, 1..128 chars.
     bad_name = await client.post(
         "/api/auth/register",
-        json={"username": "!!not-a-user!!", "salt": good_salt, "verifier": good_verifier},
+        json={
+            "username": "!!not-a-user!!",
+            "salt": good_salt,
+            "verifier": good_verifier,
+            "age_attestation": "minimum_age_confirmed_v1",
+        },
     )
     assert bad_name.status_code == 422
     assert _is_validation_shaped(bad_name.json()["detail"])
@@ -1739,12 +1798,22 @@ async def test_register_schema_boundaries(client):
     # Register usernames follow the 3..64 pattern.
     min_ok = await client.post(
         "/api/auth/register",
-        json={"username": "abc", "salt": good_salt, "verifier": good_verifier},
+        json={
+            "username": "abc",
+            "salt": good_salt,
+            "verifier": good_verifier,
+            "age_attestation": "minimum_age_confirmed_v1",
+        },
     )
     assert min_ok.status_code == 201
     too_short = await client.post(
         "/api/auth/register",
-        json={"username": "ab", "salt": good_salt, "verifier": good_verifier},
+        json={
+            "username": "ab",
+            "salt": good_salt,
+            "verifier": good_verifier,
+            "age_attestation": "minimum_age_confirmed_v1",
+        },
     )
     assert too_short.status_code == 422
     assert _is_validation_shaped(too_short.json()["detail"])
@@ -1840,6 +1909,7 @@ async def test_single_character_fields_reach_the_handlers(client):
             "username": "singlechar",
             "salt": "A",
             "verifier": base64.b64encode(b"v" * 32).decode(),
+            "age_attestation": "minimum_age_confirmed_v1",
         },
     )
     assert r1.status_code == 422
@@ -1853,6 +1923,7 @@ async def test_single_character_fields_reach_the_handlers(client):
             "username": "singlechar2b",
             "salt": emu.salt_b64,
             "verifier": "A",
+            "age_attestation": "minimum_age_confirmed_v1",
         },
     )
     assert r2.status_code == 422
@@ -1898,6 +1969,7 @@ async def test_single_character_fields_reach_the_handlers(client):
             "username": "a",
             "salt": emu.salt_b64,
             "verifier": base64.b64encode(b"v" * 32).decode(),
+            "age_attestation": "minimum_age_confirmed_v1",
         },
     )
     assert r6.status_code == 422
@@ -1994,7 +2066,12 @@ async def test_keyed_limit_buckets_use_the_username_namespaced_keys(client, app)
     emu = ClientEmulator("keyednames", "pw-keyed-names")
     response = await client.post(
         "/api/auth/register",
-        json={"username": emu.username, "salt": emu.salt_b64, "verifier": emu.auth_key_b64},
+        json={
+            "username": emu.username,
+            "salt": emu.salt_b64,
+            "verifier": emu.auth_key_b64,
+            "age_attestation": "minimum_age_confirmed_v1",
+        },
     )
     assert response.status_code == 201
     counter: SlidingWindowCounter = app.state.rate_counter
@@ -2021,7 +2098,12 @@ async def test_keyed_limit_buckets_use_the_username_namespaced_keys(client, app)
     # And a 409 register conflict does consume the register-name bucket.
     response = await client.post(
         "/api/auth/register",
-        json={"username": emu.username, "salt": emu.salt_b64, "verifier": emu.auth_key_b64},
+        json={
+            "username": emu.username,
+            "salt": emu.salt_b64,
+            "verifier": emu.auth_key_b64,
+            "age_attestation": "minimum_age_confirmed_v1",
+        },
     )
     assert response.status_code == 409
     keys = set(counter._hits)
@@ -2174,11 +2256,12 @@ async def test_meta_payload_is_exact(client):
         "llm_available": False,
         "llm_provider_name": None,
         "llm_data_retention": None,
+        "llm_disclosure_version": None,
         "llm_policy_fingerprint": None,
         "sharing_available": True,
-        # v2 (2026-09-20, audit H-14): the disclosure copy now names
-        # measures + caseload summaries.
-        "sharing_disclosure_version": "v2",
+        # v3 (2026-10-04, PRIV-003): the copy names the broadened measure
+        # set, voice metadata, and caseload summaries.
+        "sharing_disclosure_version": "v3",
         "sharing_access_log_retention_days": 730,
         # Voice journaling (2026-09-29): dev default has the flag on but no
         # STT endpoint, so availability is honest-false and every stt_*
@@ -2186,6 +2269,7 @@ async def test_meta_payload_is_exact(client):
         "audio_available": False,
         "stt_provider_name": None,
         "stt_data_retention": None,
+        "stt_disclosure_version": None,
         "stt_policy_fingerprint": None,
     }
 
@@ -2640,6 +2724,7 @@ class TestBootGates:
             environment="production",
             token_secret="x" * 48,
             database_url="postgresql+asyncpg://u:p@localhost:5432/mindpattern_test",
+            **production_secret_settings(),
         )
         app = create_app(settings)  # no lifespan: construction must not touch the DB
         assert app.docs_url is None
@@ -2724,6 +2809,7 @@ async def test_therapist_registration_requires_the_enrollment_token(client, sett
             "display_name": emu.display_name,
             "wrap_pub_key": emu.wrap_pub_key,
             "wrap_key_blob": emu.wrap_key_blob_b64(),
+            "age_attestation": "minimum_age_confirmed_v1",
         }
 
     wrong = TherapistEmulator("pins-o10-wrong", "pw")

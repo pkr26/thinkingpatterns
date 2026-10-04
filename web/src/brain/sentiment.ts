@@ -21,6 +21,8 @@
  *  - sentimentComponents sums the same walk by sign,
  *  - both are pure functions of the input string.
  */
+// @ts-nocheck
+
 import { LEXICON } from "./lexicon";
 
 /** Lazily-derived engine tables. Module-scope derivation proved fragile

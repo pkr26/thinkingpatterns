@@ -48,6 +48,7 @@ from ..services import audio_store as audio_store_service
 from ..services import stt
 from ..services.audio_store import AudioStoreError, get_audio_store_cached
 from ..services.stt import ALLOWED_AUDIO_MIMES, normalize_mime
+from ._audit import append_access_log
 
 logger = logging.getLogger("mindpattern.audio")
 
@@ -186,10 +187,20 @@ async def transcribe_recording(
         if fresh.token_epoch != expected_epoch:
             raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
         _require_voice_consent(fresh, settings)
+        await append_access_log(
+            session,
+            actor_id=fresh.id,
+            actor_role=fresh.role,
+            user_id=fresh.id,
+            action="stt_dispatch_attempt",
+        )
+        # The attempt record is durable before plaintext leaves the trust
+        # boundary.  It contains no transcript, provider payload, or PHI.
+        await session.commit()
         try:
             result = await engine.transcribe(audio, mime)
-        except Exception as exc:  # noqa: BLE001 — every upstream failure is one outcome
-            logger.warning("stt upstream failed for user %s (%s)", user.id, type(exc).__name__)
+        except Exception:  # noqa: BLE001 — every upstream failure is one safe aggregate outcome
+            logger.warning("stt upstream failed")
             raise ApiError(
                 status_code=502,
                 detail="speech-to-text provider failed; try again",
@@ -197,6 +208,14 @@ async def transcribe_recording(
             ) from None
         english_text = None
         if result.text and stt.translation_dispatch_allowed(fresh, settings):
+            await append_access_log(
+                session,
+                actor_id=fresh.id,
+                actor_role=fresh.role,
+                user_id=fresh.id,
+                action="translation_dispatch_attempt",
+            )
+            await session.commit()
             english_text = await stt.translate_to_english(
                 settings, result.text, result.language_iso
             )
@@ -263,6 +282,14 @@ async def translate_text(
         _require_voice_consent(fresh, settings)
         if not stt.translation_dispatch_allowed(fresh, settings):
             return AudioTranslationResponse(english_text=None)
+        await append_access_log(
+            session,
+            actor_id=fresh.id,
+            actor_role=fresh.role,
+            user_id=fresh.id,
+            action="translation_dispatch_attempt",
+        )
+        await session.commit()
         english_text = await stt.translate_to_english(settings, body.text, body.source_lang)
     return AudioTranslationResponse(english_text=english_text)
 
@@ -423,6 +450,7 @@ async def upload_attachment(
             locator = audio_store_service.storage_locator(store)
             pending = AudioDeletion(
                 id=new_id(),
+                owner_id=fresh.id,
                 backend=store.backend,
                 storage_key=key,
                 storage_locator=locator,
@@ -435,7 +463,7 @@ async def upload_attachment(
             try:
                 await store.put(key, blob)
             except AudioStoreError:
-                logger.warning("audio put failed for user %s", fresh.id)
+                logger.warning("audio object put failed")
                 raise ApiError(
                     status_code=502,
                     detail="audio storage failed; try again",
@@ -515,7 +543,7 @@ async def fetch_attachment(
             store = audio_store_service.store_for_object(settings, row)
             blob = await store.get(row.storage_key, max_bytes=settings.audio_max_body_bytes)
         except AudioStoreError:
-            logger.warning("audio get failed for attachment %s", row.id)
+            logger.warning("audio object get failed")
             raise ApiError(
                 status_code=502, detail="audio storage failed", code="audio_storage_failed"
             ) from None

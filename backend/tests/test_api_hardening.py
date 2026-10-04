@@ -170,6 +170,7 @@ async def test_same_day_question_upserts_in_place(client, app):
 
 
 async def test_question_rows_older_than_90_days_are_purged(client, app):
+    from app import main as main_module
     from app.models import Insight
 
     emu = ClientEmulator("qpurge", "pw-q-purge")
@@ -186,6 +187,12 @@ async def test_question_rows_older_than_90_days_are_purged(client, app):
         await session.commit()
 
     await emu.recompute(client)
+
+    # Request paths no longer perform attacker-amplifiable global cleanup.
+    # The bounded background maintenance pass owns retention instead.
+    before_maintenance = await _insight_rows(app, emu.user_id)
+    assert ancient in {r.for_date for r in before_maintenance if r.kind == "question"}
+    await main_module._prune_expired_questions_once(app)
 
     rows = await _insight_rows(app, emu.user_id)
     question_dates = {r.for_date for r in rows if r.kind == "question"}
@@ -305,6 +312,7 @@ async def test_v1_mount_serves_the_full_flow(client):
             "username": emu.username,
             "salt": emu.salt_b64,
             "verifier": emu.auth_key_b64,
+            "age_attestation": "minimum_age_confirmed_v1",
         },
     )
     assert registered.status_code == 201, registered.text
@@ -369,6 +377,7 @@ async def test_error_envelope_codes_across_endpoints(client, settings):
             "username": emu.username,
             "salt": emu.salt_b64,
             "verifier": emu.auth_key_b64,
+            "age_attestation": "minimum_age_confirmed_v1",
         },
     )
     _assert_envelope(dup, 409, "conflict")
@@ -481,7 +490,7 @@ async def test_export_timestamps_are_iso8601_with_offsets(client):
     from app.schemas import ExportBundle
 
     parsed = ExportBundle.model_validate(bundle)
-    assert parsed.version == 2 and len(parsed.entries) == 32
+    assert parsed.version == 3 and len(parsed.entries) == 32
 
     # ...and every timestamp is ISO-8601 with an explicit offset — never the
     # str(datetime) form ("2026-09-07 12:00:00+00:00", note the space).
@@ -507,7 +516,8 @@ async def test_delete_account_accepts_the_verifier_header(client, app):
     await emu.create_entry(client, "to be deleted", TODAY, client_entry_id="e-del")
     assert await delete_account_via_header(client, emu) == 204
     stale = await client.get("/api/entries", headers=emu.headers)
-    assert stale.status_code == 401
+    assert stale.status_code == 410
+    assert stale.json()["code"] == "account_deleted"
 
 
 async def test_delete_account_header_and_body_semantics(client):
@@ -534,11 +544,12 @@ async def test_delete_account_header_and_body_semantics(client):
     _assert_envelope(refused, 403, "verification_failed")
     assert await emu2.delete_account(client) == 204  # deprecated body fallback still works
 
-    # Neither header nor body: 422, and nothing is deleted.
+    # Neither a one-use proof nor the native verifier fallback: explicit
+    # fresh-authentication refusal, and nothing is deleted.
     emu3 = ClientEmulator("neverified", "pw-ne-verified")
     await emu3.register(client)
     bare = await client.request("DELETE", "/api/account", headers=emu3.headers)
-    _assert_envelope(bare, 422, "validation_error")
+    _assert_envelope(bare, 403, "step_up_required")
     still = await client.get("/api/entries", headers=emu3.headers)
     assert still.status_code == 200
 
@@ -898,7 +909,9 @@ async def test_entry_mutations_serialize_with_account_deletion(
     mutation_response, deletion_response = await asyncio.gather(mutation, deletion)
     assert mutation_response.status_code == expected_status, mutation_response.text
     assert deletion_response.status_code == 204, deletion_response.text
-    assert (await client.get("/api/entries", headers=emu.headers)).status_code == 401
+    stale = await client.get("/api/entries", headers=emu.headers)
+    assert stale.status_code == 410
+    assert stale.json()["code"] == "account_deleted"
 
 
 async def test_entry_mutation_rechecks_account_after_deletion_wins(client, monkeypatch):

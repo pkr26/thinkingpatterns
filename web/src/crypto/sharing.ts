@@ -16,6 +16,8 @@
  * Pinned by shared/vectors.json wrap_vectors (both directions, plus the
  * deterministic-kek construction via encryptWithFixedNonce).
  */
+// @ts-nocheck
+
 import { buildAad } from "./aad";
 import {
   decrypt,

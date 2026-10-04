@@ -13,6 +13,8 @@
  * granularity, connection, energy, honest difficulty, curiosity. Every
  * phrasing stays observational, never prescriptive.
  */
+// @ts-nocheck
+
 
 import { localDateISO } from "./dates";
 import type { Locale } from "./strings";

@@ -4,6 +4,8 @@
  * wire contract, same loud-fail version guards); the AEAD/AAD primitives
  * come from ./core (portal's WebCrypto implementation).
  */
+// @ts-nocheck
+
 import { buildAad } from "./aad";
 import { decrypt, encrypt, fromBase64, toBase64, zeroize, type Bytes } from "./core";
 

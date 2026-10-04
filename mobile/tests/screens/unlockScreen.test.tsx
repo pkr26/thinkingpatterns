@@ -30,8 +30,8 @@ vi.mock("../../src/unlockBackoff", async (importOriginal) => {
   return {
     ...actual,
     unlockFailureDelayMs: () => 0,
-    recordUnlockFailure: (username: string) => recordUnlockFailure(username),
-    clearUnlockFailures: (username: string) => clearUnlockFailures(username),
+    recordUnlockFailure: (username: string, userId: string) => recordUnlockFailure(username, userId),
+    clearUnlockFailures: (username: string, userId: string) => clearUnlockFailures(username, userId),
   };
 });
 
@@ -198,7 +198,7 @@ describe("UnlockScreen", () => {
     await pressLabel(root, "Unlock");
     await flush();
     expect(vault.isUnlocked()).toBe(false);
-    expect(recordUnlockFailure).toHaveBeenCalledWith("alice");
+    expect(recordUnlockFailure).toHaveBeenCalledWith("alice", "user-1");
 
     // Offline wrong proof: the SAME single record site catches it.
     recordUnlockFailure.mockClear();
@@ -220,7 +220,7 @@ describe("UnlockScreen", () => {
     await pressLabel(root, "Unlock");
     await flush();
     expect(vault.isUnlocked()).toBe(true);
-    expect(clearUnlockFailures).toHaveBeenCalledWith("alice");
+    expect(clearUnlockFailures).toHaveBeenCalledWith("alice", "user-1");
   });
 
   it("REFUSES a wrong password offline (sealed proof fails)", async () => {
@@ -692,7 +692,7 @@ describe("UnlockScreen v2 key envelope", () => {
     await flush();
 
     expect(vault.isUnlocked()).toBe(false);
-    expect(recordUnlockFailure).toHaveBeenCalledWith("alice");
+    expect(recordUnlockFailure).toHaveBeenCalledWith("alice", "user-1");
     expect(Alert.alert).toHaveBeenCalledWith("Unlock failed", "Wrong password.");
   });
 

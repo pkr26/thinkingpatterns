@@ -90,6 +90,12 @@ async def snapshot_rows(session, settings: Settings) -> tuple[bytes, list[Access
         proof = await verify_access_log_chain(
             session,
             owner,
+            # This is the sole intentionally unkeyed verifier call: the
+            # operator is snapshotting genuine pre-MAC rows for independent
+            # review. Passing an explicit empty ring prevents the ambient
+            # runtime key configured by app.main from turning every NULL MAC
+            # into a failure before the offline sealing workflow can run.
+            mac_keys={},
             journal_path=settings.audit_journal_path or None,
             retention_cutoff=cutoff,
             journal_heads=heads,
@@ -124,8 +130,8 @@ async def run(args) -> None:
     from app.config import Settings
     from app.db import build_engine, build_sessionmaker
     from app.main import _acquire_cross_host_guard, _release_cross_host_guard
-    from app.models import utcnow
-    from app.api._audit import compute_entry_mac
+    from app.models import AuditChainState, utcnow
+    from app.api._audit import compute_chain_state_mac, compute_entry_mac
     from app.singleprocess import single_process_guard
 
     settings = Settings.from_env()
@@ -165,12 +171,71 @@ async def run(args) -> None:
                         )
                     key = bytes.fromhex(settings.audit_mac_secret_hex)
                     changed = 0
+                    rows_by_owner: dict[str, list[AccessLog]] = {}
                     for row in rows:
+                        rows_by_owner.setdefault(row.user_id, []).append(row)
                         if row.entry_mac is None:
+                            if row.entry_hash is None:
+                                raise ValueError(
+                                    "reviewed audit row has no hash; investigate instead of sealing"
+                                )
                             row.entry_mac = compute_entry_mac(
                                 key, row.user_id, row.chain_seq, row.entry_hash
                             )
+                            row.mac_key_version = settings.audit_mac_key_version
                             changed += 1
+                    # A keyed trail without its independently authenticated
+                    # high-water state is still unusable: runtime verification
+                    # must reject it as possible tail deletion. Establish (or
+                    # authenticate a migration-created) state in this SAME
+                    # transaction as the reviewed row seals.
+                    keyring = settings.audit_mac_keyring
+                    now = utcnow()
+                    for owner, owner_rows in rows_by_owner.items():
+                        first, last = owner_rows[0], owner_rows[-1]
+                        if first.entry_hash is None or last.entry_hash is None:
+                            raise ValueError(
+                                "reviewed audit chain has no endpoint hash; investigate instead "
+                                "of sealing"
+                            )
+                        state = await session.get(AuditChainState, owner)
+                        if state is None:
+                            state = AuditChainState(
+                                user_id=owner,
+                                head_seq=last.chain_seq,
+                                head_hash=last.entry_hash,
+                                head_at=last.at,
+                                first_retained_seq=first.chain_seq,
+                                first_retained_hash=first.entry_hash,
+                                state_version=1,
+                                mac_key_version=settings.audit_mac_key_version,
+                                updated_at=now,
+                            )
+                            session.add(state)
+                        else:
+                            if (
+                                state.first_retained_seq != first.chain_seq
+                                or state.first_retained_hash != first.entry_hash
+                                or state.head_seq != last.chain_seq
+                                or state.head_hash != last.entry_hash
+                            ):
+                                raise ValueError(
+                                    "audit chain state changed after review; create and "
+                                    "independently review a new snapshot"
+                                )
+                            if state.state_mac is not None:
+                                old_key = keyring.get(state.mac_key_version or 1)
+                                if old_key is None or not hmac.compare_digest(
+                                    state.state_mac, compute_chain_state_mac(old_key, state)
+                                ):
+                                    raise ValueError(
+                                        "existing audit chain state MAC is invalid; investigate "
+                                        "instead of resealing"
+                                    )
+                            state.head_at = last.at
+                            state.mac_key_version = settings.audit_mac_key_version
+                            state.updated_at = now
+                        state.state_mac = compute_chain_state_mac(key, state)
                     # Prepare receipt before commit so an unwritable destination
                     # cannot silently omit the operator's provenance record.
                     receipt = canonical_snapshot(

@@ -27,6 +27,8 @@
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { secureStore } from "./secureStore";
+import { accountStorageKey } from "./accountStorage";
+import { commitActiveAccountWrite } from "./localWriteGuard";
 
 export interface MeasureReminderPrefs {
   enabled: boolean;
@@ -46,8 +48,8 @@ export const DEFAULT_MEASURE_REMINDER_PREFS: Readonly<MeasureReminderPrefs> = {
   intervalWeeks: DEFAULT_MEASURE_INTERVAL_WEEKS,
 };
 
-const prefKey = (userId: string): string => `@mindpattern/measure_reminders_${userId}`;
-const lastKey = (userId: string): string => `@mindpattern/last_measure_${userId}`;
+const prefKey = accountStorageKey.measureReminders;
+const lastKey = accountStorageKey.lastMeasure;
 
 /** Full validation of anything read back from storage, the reminders.ts
  *  discipline: null = not a usable record (absent, unparsable, hostile). */
@@ -77,7 +79,7 @@ export async function getMeasureReminderPrefs(userId: string): Promise<MeasureRe
 }
 
 async function writePrefs(userId: string, prefs: MeasureReminderPrefs): Promise<void> {
-  await AsyncStorage.setItem(prefKey(userId), JSON.stringify(prefs));
+  await commitActiveAccountWrite(userId, () => AsyncStorage.setItem(prefKey(userId), JSON.stringify(prefs)));
 }
 
 /** Flip the opt-in, preserving the stored interval. Throws on a storage
@@ -124,7 +126,7 @@ export async function recordMeasureCompleted(userId: string, dateISO: string): P
     if (!isValidLocalDate(dateISO)) return;
     const current = await lastMeasureCompletedOn(userId);
     if (current !== null && current >= dateISO) return;
-    await secureStore.setItem(lastKey(userId), dateISO);
+    await commitActiveAccountWrite(userId, () => secureStore.setItem(lastKey(userId), dateISO));
   } catch {
     // Disposable cadence metadata, never an error surface.
   }

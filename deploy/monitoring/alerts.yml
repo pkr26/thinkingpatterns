@@ -12,6 +12,19 @@
 #   mindpattern_llm_calls_total{outcome="success"|"failure"}        counter
 #   mindpattern_keystore_sessions                                   gauge
 #   mindpattern_audit_chain_failures                                counter
+#   mindpattern_audit_journal_failures_total                        counter
+#   mindpattern_audit_maintenance_failures_total                    counter
+#   mindpattern_audit_prune_backlog                                 gauge
+#   mindpattern_audit_prune_pending_rows_probe                      gauge
+#   mindpattern_audit_prune_oldest_overdue_seconds                  gauge
+#   mindpattern_audit_verification_backlog                          gauge
+#   mindpattern_audit_verification_pending_owners_probe             gauge
+#   mindpattern_audit_verification_cycle_age_seconds                gauge
+#   mindpattern_audio_deletion_backlog                              gauge
+#   mindpattern_audio_deletion_oldest_seconds                       gauge
+#   mindpattern_account_deletion_pending_probe                      gauge
+#   mindpattern_account_deletion_oldest_seconds                     gauge
+#   mindpattern_account_deletion_failures_total{category}           counter
 #
 # plus Prometheus' own `up` (and `probe_success` if the blackbox job is
 # enabled), and — ONLY inside the commented optional sections at the
@@ -145,6 +158,156 @@ groups:
         annotations:
           summary: "Audit-chain verification failed for at least one patient trail in the last hour"
           runbook: "docs/INCIDENT_RUNBOOK.md — S2; the breach-assessment section names the chain verification as evidence — preserve the verification output and treat the tampered window as potentially-accessed until reconciled"
+
+      # S2 — every increment is a failed durable append or compaction of the
+      # out-of-database audit anchor. The application also drops readiness
+      # until a later fsynced operation succeeds, while this counter preserves
+      # a release-visible signal even after recovery. A five-minute lookback
+      # avoids paging forever on a recovered monotonic counter.
+      - alert: MindPatternAuditJournalFailure
+        expr: |
+          increase(mindpattern_audit_journal_failures_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: S2
+        annotations:
+          summary: "Audit journal append or compaction failed in the last 5m"
+          runbook: "docs/INCIDENT_RUNBOOK.md — Audit-journal failure (preserve the journal and chain evidence, restore the original durable volume, and require /readyz recovery)"
+
+      # S2 — a bounded retention/verification pass failed and readiness is
+      # held closed until an authenticated pass succeeds. Unlike the backlog
+      # gauges, this catches invalid key rings, database faults, and journal-
+      # index failures immediately even when there is no retained backlog.
+      - alert: MindPatternAuditMaintenanceFailure
+        expr: |
+          increase(mindpattern_audit_maintenance_failures_total[15m]) > 0
+        for: 0m
+        labels:
+          severity: S2
+        annotations:
+          summary: "Authenticated audit maintenance failed in the last 15m"
+          runbook: "docs/INCIDENT_RUNBOOK.md — Audit-maintenance backlog/failure (preserve evidence, restore the original key/journal/database inputs, and require a complete successful pass before reopening)"
+
+      # S3 — cooperative catch-up should normally consume many fixed-size
+      # pages inside this window. A persistent boolean means expiration work
+      # is arriving faster than it drains or a very large legacy backlog is
+      # consuming its request-headroom budget.
+      - alert: MindPatternAuditPruneBacklogPersistent
+        expr: |
+          mindpattern_audit_prune_backlog > 0
+        for: 30m
+        labels:
+          severity: S3
+        annotations:
+          summary: "Audit-retention pruning has remained backlogged for 30m"
+          runbook: "docs/INCIDENT_RUNBOOK.md — Audit-maintenance backlog/failure (confirm the bounded cursor is advancing; never bypass authenticated verification to drain faster)"
+
+      # S2 — this is age beyond the configured retention cutoff, not row age.
+      # Two hours is well beyond the one-second catch-up cadence and turns a
+      # maintenance-capacity problem into a missed deletion commitment.
+      - alert: MindPatternAuditPruneOldestOverdue
+        expr: |
+          mindpattern_audit_prune_oldest_overdue_seconds > 2 * 60 * 60
+        for: 15m
+        labels:
+          severity: S2
+        annotations:
+          summary: "Oldest access-audit row is over 2h beyond its retention cutoff"
+          runbook: "docs/INCIDENT_RUNBOOK.md — Audit-maintenance backlog/failure (treat as a retention incident; preserve cursor and chain evidence while restoring bounded catch-up)"
+
+      # S3 — verification uses its own durable cursor and fixed row budget.
+      # A persistent cycle is visible independently from deletion progress.
+      - alert: MindPatternAuditVerificationBacklogPersistent
+        expr: |
+          mindpattern_audit_verification_backlog > 0
+        for: 30m
+        labels:
+          severity: S3
+        annotations:
+          summary: "Incremental audit verification has remained backlogged for 30m"
+          runbook: "docs/INCIDENT_RUNBOOK.md — Audit-maintenance backlog/failure (confirm the verification cursor is advancing and the snapshot is not restarting continuously)"
+
+      # S2 — a two-hour incomplete authenticated verification cycle leaves
+      # retained access evidence without timely end-to-end validation even if
+      # individual pages still succeed.
+      - alert: MindPatternAuditVerificationCycleStalled
+        expr: |
+          mindpattern_audit_verification_cycle_age_seconds > 2 * 60 * 60
+        for: 15m
+        labels:
+          severity: S2
+        annotations:
+          summary: "Incremental audit verification cycle has remained incomplete over 2h"
+          runbook: "docs/INCIDENT_RUNBOOK.md — Audit-maintenance backlog/failure (preserve the cursor/checkpoint and investigate repeated snapshot resets or insufficient catch-up capacity)"
+
+      # S3 — every retained recording deletion is first committed as a
+      # durable tombstone, then retried with exponential backoff capped at
+      # one hour. The retention worker samples this gauge every configured
+      # sweep (15m by default). A non-empty queue for 30m therefore spans at
+      # least two default observations and is operational degradation, not a
+      # transient provider error.
+      - alert: MindPatternAudioDeletionBacklogPersistent
+        expr: |
+          mindpattern_audio_deletion_backlog > 0
+        for: 30m
+        labels:
+          severity: S3
+        annotations:
+          summary: "Encrypted audio deletions have remained queued for 30m"
+          runbook: "docs/INCIDENT_RUNBOOK.md — Audio-deletion backlog (confirm object-store availability, preserve tombstones, and verify the queue drains)"
+
+      # S2 — the retry delay is capped at 1h and the default sweep interval
+      # is 15m. An oldest tombstone above 2h has survived a full maximum
+      # backoff plus multiple sweep opportunities, so a user's deletion or
+      # retention expiry is materially overdue. The independent lifecycle
+      # ceiling still reconciles untracked objects; this alert covers the
+      # tracked, retryable deletion queue before that last-resort ceiling.
+      - alert: MindPatternAudioDeletionOldestTooOld
+        expr: |
+          mindpattern_audio_deletion_oldest_seconds > 2 * 60 * 60
+        for: 15m
+        labels:
+          severity: S2
+        annotations:
+          summary: "Oldest encrypted-audio deletion has been pending over 2h"
+          runbook: "docs/INCIDENT_RUNBOOK.md — Audio-deletion backlog (treat as a retention/deletion incident; restore the original object-store target and drain the durable queue)"
+
+      # S3 — logical erasure is immediate, but a persistent physical-purge
+      # queue means the bounded worker is not converging promptly. The gauge
+      # is a deliberately capped aggregate probe, never an account label.
+      - alert: MindPatternAccountDeletionBacklogPersistent
+        expr: |
+          mindpattern_account_deletion_pending_probe > 0
+        for: 30m
+        labels:
+          severity: S3
+        annotations:
+          summary: "Account-erasure physical purge has remained queued for 30m"
+          runbook: "docs/INCIDENT_RUNBOOK.md — Account-deletion backlog (confirm bounded phase progress and object-store availability without removing durable jobs)"
+
+      # S2 — two hours is an operational escalation boundary for a rights
+      # request whose inaccessible ciphertext has not finished physical
+      # purge. This measures request age, not per-account content volume.
+      - alert: MindPatternAccountDeletionOldestTooOld
+        expr: |
+          mindpattern_account_deletion_oldest_seconds > 2 * 60 * 60
+        for: 15m
+        labels:
+          severity: S2
+        annotations:
+          summary: "Oldest account-erasure physical purge has been pending over 2h"
+          runbook: "docs/INCIDENT_RUNBOOK.md — Account-deletion backlog (treat as a rights-request incident and restore bounded worker progress)"
+
+      # S2 — categories are a fixed allowlist emitted by the worker. They
+      # contain no exception text, identifiers, object keys, or paths.
+      - alert: MindPatternAccountDeletionFailure
+        expr: |
+          sum(increase(mindpattern_account_deletion_failures_total[15m])) > 0
+        labels:
+          severity: S2
+        annotations:
+          summary: "Account-erasure worker failed during the last 15m"
+          runbook: "docs/INCIDENT_RUNBOOK.md — Account-deletion backlog (use the safe failure category and preserve the durable job before repair)"
 
   # DEFAULT-ON (2026-09-26 infra audit): the /readyz probe alert ships
   # enabled — the blackbox exporter is part of the default stack now

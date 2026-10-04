@@ -1,16 +1,20 @@
 # Production deployment contract.
 #
-# SECRETS (2026-09-26 infra audit): the token/backup secrets mount as compose
+# SECRETS: every credential mounts as a Compose secret file
 # `secrets:` FILES (0600, never in the container environment, invisible to
 # `docker inspect`), consumed via the app's `<VAR>_FILE` resolution — the same
 # posture the monitoring stack's bearer token already had. Copy each example
 # from deploy/secrets/, fill it, chmod 600:
 #
 #   mkdir -p deploy/secrets
-#   for f in token_secret backup_key postgres_password; do
+#   for f in token_secret auth_token_secret totp_wrap_secret pairing_secret \
+#            decoy_secret audit_mac_secret metrics_token backup_key postgres_password; do
 #     cp deploy/secrets/$f.example deploy/secrets/$f; chmod 600 deploy/secrets/$f
 #   done
-#   openssl rand -hex 32 > deploy/secrets/token_secret
+#   : > deploy/secrets/audit_mac_previous_secrets
+#   chmod 600 deploy/secrets/audit_mac_previous_secrets
+#   for f in token_secret auth_token_secret totp_wrap_secret pairing_secret \
+#            decoy_secret audit_mac_secret; do openssl rand -hex 32 > "deploy/secrets/$f"; done
 #   openssl rand -base64 32 > deploy/secrets/backup_key
 #   openssl rand -hex 16 > deploy/secrets/postgres_password
 #
@@ -75,11 +79,14 @@ services:
       - auditjournal:/var/lib/mindpattern/audit
     secrets:
       - token_secret
-      # 2026-09-28 audit H-2: the environment block points
-      # MINDPATTERN_AUTH_TOKEN_SECRET_FILE at /run/secrets/auth_token_secret,
-      # but this list never mounted it — _secret_env hard-fails on the
-      # unreadable path and `docker compose up` crash-looped the api.
       - auth_token_secret
+      - totp_wrap_secret
+      - pairing_secret
+      - decoy_secret
+      - audit_mac_secret
+      # Empty on a first deployment. During an audit-key rotation this file
+      # carries historical `version:64hex` entries until their rows expire.
+      - audit_mac_previous_secrets
       - metrics_token
       # Pentest 2026-09-29 MED-1: the same file the db service reads
       # (native POSTGRES_PASSWORD_FILE there). docker-entrypoint.sh builds
@@ -101,17 +108,23 @@ services:
       # unset/empty.
       POSTGRES_USER: ${POSTGRES_USER:-mindpattern}
       POSTGRES_DB: ${POSTGRES_DB:-mindpattern}
-      # The signing secret reads from the mounted file (empty env var falls
-      # through to <VAR>_FILE in app.config); the dev overlay may keep the
-      # plain env form.
-      MINDPATTERN_TOKEN_SECRET: ${MINDPATTERN_TOKEN_SECRET:-}
+      # Every credential is file-only. Do not add a plain-value companion:
+      # app.config deliberately gives VAR precedence over VAR_FILE, and a
+      # Compose environment value would be visible via `docker inspect`.
       MINDPATTERN_TOKEN_SECRET_FILE: /run/secrets/token_secret
       MINDPATTERN_AUTH_TOKEN_SECRET_FILE: /run/secrets/auth_token_secret
+      MINDPATTERN_TOTP_WRAP_SECRET_FILE: /run/secrets/totp_wrap_secret
+      MINDPATTERN_PAIRING_SECRET_FILE: /run/secrets/pairing_secret
+      MINDPATTERN_DECOY_SECRET_FILE: /run/secrets/decoy_secret
+      MINDPATTERN_AUDIT_MAC_SECRET_FILE: /run/secrets/audit_mac_secret
+      MINDPATTERN_AUDIT_MAC_PREVIOUS_SECRETS_FILE: /run/secrets/audit_mac_previous_secrets
+      # Non-secret identifier persisted on every audit row. Increment it
+      # whenever audit_mac_secret changes; never reuse a version.
+      MINDPATTERN_AUDIT_MAC_KEY_VERSION: ${MINDPATTERN_AUDIT_MAC_KEY_VERSION:-1}
       # Independent audit 2026-09-27: the metrics bearer token was the
       # last secret still delivered as a plain env var (docker-inspect
       # readable). It now rides the same file-mount chain as everything
       # else; MINDPATTERN_METRICS_TOKEN env stays supported for dev.
-      MINDPATTERN_METRICS_TOKEN: ${MINDPATTERN_METRICS_TOKEN:-}
       MINDPATTERN_METRICS_TOKEN_FILE: /run/secrets/metrics_token
       # The audit journal path on the named volume below (2026-09-28 audit
       # H-2 — the anchor existed but was never wired, so production ran
@@ -288,9 +301,9 @@ services:
       # Days to keep dumps. Must match your stated backup-expiry policy —
       # see the retention note above.
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-35}
-      # The dump-encryption key: BACKUP_KEY overrides the file when nonempty.
-      # One helper owns the same resolution for encryption, MAC and restore.
-      BACKUP_KEY: ${BACKUP_KEY:-}
+      # File-only delivery keeps the dump key out of `docker inspect`.
+      # The helper still accepts BACKUP_KEY for explicitly managed custom
+      # environments, but this production contract never sets it.
       BACKUP_KEY_FILE: /run/secrets/backup_key
     volumes:
       - pgbackups:/backups
@@ -416,15 +429,26 @@ volumes:
   # EVIDENCE, not authoritative state.
   auditjournal:
 
-# File-mounted secrets (2026-09-26 infra audit): copy the examples from
-# deploy/secrets/, fill, chmod 600. The api's auth_token_secret file is
-# OPTIONAL (an empty file means "derive from token_secret" — the app's
-# documented legacy-derivation path), so the example may stay empty.
+# File-mounted secrets: copy every example from deploy/secrets/, generate an
+# independent non-empty value, and chmod 600. Production Compose intentionally
+# requires every split secret so a new deployment cannot silently couple
+# authentication, TOTP wrapping, pairing, decoys, and audit integrity to the
+# root token.
 secrets:
   token_secret:
     file: ${MINDPATTERN_SECRETS_DIR:-./deploy/secrets}/token_secret
   auth_token_secret:
     file: ${MINDPATTERN_SECRETS_DIR:-./deploy/secrets}/auth_token_secret
+  totp_wrap_secret:
+    file: ${MINDPATTERN_SECRETS_DIR:-./deploy/secrets}/totp_wrap_secret
+  pairing_secret:
+    file: ${MINDPATTERN_SECRETS_DIR:-./deploy/secrets}/pairing_secret
+  decoy_secret:
+    file: ${MINDPATTERN_SECRETS_DIR:-./deploy/secrets}/decoy_secret
+  audit_mac_secret:
+    file: ${MINDPATTERN_SECRETS_DIR:-./deploy/secrets}/audit_mac_secret
+  audit_mac_previous_secrets:
+    file: ${MINDPATTERN_SECRETS_DIR:-./deploy/secrets}/audit_mac_previous_secrets
   postgres_password:
     file: ${MINDPATTERN_SECRETS_DIR:-./deploy/secrets}/postgres_password
   backup_key:

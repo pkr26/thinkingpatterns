@@ -7,7 +7,7 @@ import { defaultKdfParams, envelopeKek, wrapDataKey } from "./crypto/keyEnvelope
 import { recoveryKeyFromB64, recoveryVerifierKeyV2, unsealDataKeyWithRecoveryScheme, type RecoveryScheme } from "./crypto/recovery";
 import { engine } from "./crypto/engine";
 export interface RecoveryOutcome { userId: string; username: string; dataKey: Buffer; ownershipEpoch: number; localCacheReady?: boolean }
-export async function recoverAccountWithKey(username: string, recoveryKeyText: string, newPassword: string, scheme: RecoveryScheme = "v2", options: { stillCurrent?: () => boolean } = {}): Promise<RecoveryOutcome> {
+export async function recoverAccountWithKey(username: string, recoveryKeyText: string, newPassword: string, scheme: RecoveryScheme, options: { stillCurrent?: () => boolean } = {}): Promise<RecoveryOutcome> {
   let epoch = localWriteScopeEpoch();
   const ownsAttempt = () => options.stillCurrent?.() !== false;
   const current = () => ownsAttempt() && epoch === localWriteScopeEpoch();

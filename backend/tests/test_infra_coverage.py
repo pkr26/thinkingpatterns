@@ -520,7 +520,8 @@ async def test_main_readyz_fails_closed_when_production_schema_is_not_at_head():
             app=SimpleNamespace(
                 state=SimpleNamespace(
                     sessionmaker=Session,
-                    settings=SimpleNamespace(environment="production"),
+                    settings=SimpleNamespace(environment="production", audit_journal_path=""),
+                    audit_maintenance_healthy=True,
                 )
             )
         )

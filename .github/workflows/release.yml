@@ -40,6 +40,7 @@ jobs:
     timeout-minutes: 35
     permissions:
       contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Validate release tag and changelog contract before any artifact can publish
@@ -107,7 +108,7 @@ jobs:
           npm run typecheck
           npm test
           npm run verify:vectors
-          npm audit --audit-level=moderate
+          npm run audit:dependencies
       - name: Portal test, build, and dependency gates
         working-directory: portal
         run: |
@@ -118,11 +119,20 @@ jobs:
           npm audit --audit-level=moderate
       - name: Web (patient client) test, build, and dependency gates
         working-directory: web
+        env:
+          IS_TAG_RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          SECURITY_TXT_CONTACT: ${{ vars.SECURITY_TXT_CONTACT }}
+          SECURITY_TXT_CANONICAL: ${{ vars.SECURITY_TXT_CANONICAL }}
+          SECURITY_TXT_EXPIRES: ${{ vars.SECURITY_TXT_EXPIRES }}
         run: |
           npm ci
           npm run typecheck
           npm test
-          npm run build
+          if [ "$IS_TAG_RELEASE" = "true" ]; then
+            npm run build:release
+          else
+            npm run build
+          fi
           npm audit --audit-level=moderate
       - name: Package the verified portal deployment artifact
         if: startsWith(github.ref, 'refs/tags/v')
@@ -135,7 +145,46 @@ jobs:
           web_archive="mindpattern-web-${GITHUB_REF_NAME:?missing Git ref name}.tar.gz"
           tar -C web -czf "$web_archive" dist
           sha256sum "$web_archive" > "$web_archive.sha256"
-      - name: Preserve the verified portal deployment artifact for this release
+          subjects=$(for subject in "$archive" "$web_archive"; do
+            sha=$(sha256sum "$subject" | awk '{print $1}')
+            jq -n --arg name "$subject" --arg sha "$sha" '{name:$name,digest:{sha256:$sha}}'
+          done | jq -s '.')
+          jq -n \
+            --arg repository "https://github.com/${GITHUB_REPOSITORY}" \
+            --arg commit "$GITHUB_SHA" \
+            --arg ref "$GITHUB_REF" \
+            --arg workflow "https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}" \
+            --argjson subjects "$subjects" \
+            '{
+              _type:"https://in-toto.io/Statement/v1",
+              subject:$subjects,
+              predicateType:"https://slsa.dev/provenance/v1",
+              predicate:{
+                buildDefinition:{
+                  buildType:"https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1",
+                  externalParameters:{gitRef:$ref},
+                  resolvedDependencies:[{uri:$repository,digest:{gitCommit:$commit}}]
+                },
+                runDetails:{builder:{id:$workflow}}
+              }
+            }' > "mindpattern-browser-${GITHUB_REF_NAME}.provenance.json"
+      - name: Install cosign for keyless browser-artifact signing
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: sigstore/cosign-installer@c56c2d3e59e4281cc41dea2217323ba5694b171e # v3.8.0
+      - name: Sign browser archives, checksums, and provenance
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          for asset in \
+            "mindpattern-portal-${GITHUB_REF_NAME}.tar.gz" \
+            "mindpattern-portal-${GITHUB_REF_NAME}.tar.gz.sha256" \
+            "mindpattern-web-${GITHUB_REF_NAME}.tar.gz" \
+            "mindpattern-web-${GITHUB_REF_NAME}.tar.gz.sha256" \
+            "mindpattern-browser-${GITHUB_REF_NAME}.provenance.json"; do
+            cosign sign-blob --yes --bundle "${asset}.sigstore.json" "$asset"
+          done
+      - name: Preserve the verified browser deployment artifacts for this release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -145,6 +194,12 @@ jobs:
             mindpattern-portal-${{ github.ref_name }}.tar.gz.sha256
             mindpattern-web-${{ github.ref_name }}.tar.gz
             mindpattern-web-${{ github.ref_name }}.tar.gz.sha256
+            mindpattern-portal-${{ github.ref_name }}.tar.gz.sigstore.json
+            mindpattern-portal-${{ github.ref_name }}.tar.gz.sha256.sigstore.json
+            mindpattern-web-${{ github.ref_name }}.tar.gz.sigstore.json
+            mindpattern-web-${{ github.ref_name }}.tar.gz.sha256.sigstore.json
+            mindpattern-browser-${{ github.ref_name }}.provenance.json
+            mindpattern-browser-${{ github.ref_name }}.provenance.json.sigstore.json
           if-no-files-found: error
           # The GitHub Release below is the durable delivery artifact. This
           # workflow artifact only bridges verified build -> release job.
@@ -205,41 +260,43 @@ jobs:
       - name: Write a throwaway compose environment and secret files
         # The production compose is FAIL-CLOSED on compose `secrets:` mounts
         # (2026-09-26 infra audit): .env alone is not enough — `compose up`
-        # refuses to start until all four files under deploy/secrets/
+        # refuses to start until every purpose-specific file under deploy/secrets/
         # (MINDPATTERN_SECRETS_DIR default, ./deploy/secrets relative to this
-        # checkout) exist. Materialize them from the SAME single-generation
-        # values the .env carries (one `openssl rand` per secret, two sinks);
-        # auth_token_secret is deliberately empty per the documented
-        # derive-from-token_secret path. Re-audit 2026-09-27: the first
-        # tagged release previously died at `compose up` with no secret
-        # files on disk at all.
+        # checkout) exists. Materialize independent random values; .env carries
+        # only public image references, while every credential remains file-only.
+        # The audit history-ring file is required but intentionally empty on a
+        # first deployment. Re-audit 2026-09-27: the first tagged release
+        # previously died at `compose up` with no secret files on disk at all.
         run: |
           set -euo pipefail
-          token_secret=$(openssl rand -hex 32)
           pg_password=$(openssl rand -hex 16)
-          backup_key=$(openssl rand -base64 32)
-          test -n "$token_secret" && test -n "$pg_password" && test -n "$backup_key" \
-            || { echo "::error::openssl produced an empty secret" >&2; exit 1; }
+          test -n "$pg_password" || { echo "::error::openssl produced an empty secret" >&2; exit 1; }
           # Pentest 2026-09-29 (MED-1): POSTGRES_PASSWORD lives ONLY in
           # deploy/secrets/postgres_password — the api never receives it
           # (docker-entrypoint.sh assembles MINDPATTERN_DB_URL from the
           # mounted secret), so .env carries no copy to keep in sync.
           {
-            echo "MINDPATTERN_TOKEN_SECRET=$token_secret"
-            echo "BACKUP_KEY=$backup_key"
             echo "MINDPATTERN_API_IMAGE=${{ needs.image.outputs.api_image }}"
             echo "MINDPATTERN_BACKUP_IMAGE=${{ needs.image.outputs.backup_image }}"
           } > .env
           mkdir -p deploy/secrets
-          printf '%s\n' "$token_secret" > deploy/secrets/token_secret
-          : > deploy/secrets/auth_token_secret
+          for name in token_secret auth_token_secret totp_wrap_secret pairing_secret decoy_secret audit_mac_secret; do
+            openssl rand -hex 32 > "deploy/secrets/$name"
+          done
+          # The historical audit key ring is intentionally empty on a new
+          # deployment but remains a required file-only mount so rotations
+          # never need a credential-bearing environment variable.
+          : > deploy/secrets/audit_mac_previous_secrets
           printf '%s\n' "$pg_password" > deploy/secrets/postgres_password
-          printf '%s\n' "$backup_key" > deploy/secrets/backup_key
+          openssl rand -base64 32 > deploy/secrets/backup_key
           # Independent audit 2026-09-27: metrics token file (api
           # MINDPATTERN_METRICS_TOKEN_FILE), same no-plaintext-env chain.
           openssl rand -hex 16 > deploy/secrets/metrics_token
           chmod 600 .env deploy/secrets/token_secret \
-            deploy/secrets/auth_token_secret deploy/secrets/postgres_password \
+            deploy/secrets/auth_token_secret deploy/secrets/totp_wrap_secret \
+            deploy/secrets/pairing_secret deploy/secrets/decoy_secret \
+            deploy/secrets/audit_mac_secret deploy/secrets/audit_mac_previous_secrets \
+            deploy/secrets/postgres_password \
             deploy/secrets/backup_key deploy/secrets/metrics_token
           # 2026-09-28 audit L-4: ONE value into BOTH metrics-token sinks
           # (api secret file + the monitoring stack's bearer_token_file),
@@ -249,7 +306,7 @@ jobs:
           chmod 600 deploy/monitoring/token
           cmp -s deploy/secrets/metrics_token deploy/monitoring/token \
             || { echo '::error::metrics token sinks diverged' >&2; exit 1; }
-      - name: Assert the db password never reaches a container environment
+      - name: Assert secret values never reach a container environment
         # Pentest 2026-09-29 (MED-1): same negative contract as ci.yml's
         # docker job — the api used to receive MINDPATTERN_DB_URL with the
         # password interpolated raw (docker-inspect readable). The rendered
@@ -258,30 +315,40 @@ jobs:
         # assembles the URL from.
         run: |
           set -euo pipefail
-          for f in deploy/secrets/token_secret deploy/secrets/auth_token_secret \
-                   deploy/secrets/postgres_password deploy/secrets/backup_key \
-                   deploy/secrets/metrics_token; do
-            test -f "$f" || { echo "::error::required file $f was not written by the previous step" >&2; exit 1; }
+          secret_files=(token_secret auth_token_secret totp_wrap_secret pairing_secret decoy_secret audit_mac_secret metrics_token postgres_password backup_key)
+          for name in "${secret_files[@]}"; do
+            test -s "deploy/secrets/$name" || { echo "::error::required secret $name is missing or empty" >&2; exit 1; }
           done
-          file_password=$(cat deploy/secrets/postgres_password)
-          if [ -z "$file_password" ]; then
-            echo "::error::deploy/secrets/postgres_password is empty" >&2
-            exit 1
-          fi
-          rendered=$(docker compose config)
-          if printf '%s' "$rendered" | grep -q 'MINDPATTERN_DB_URL'; then
+          test -f deploy/secrets/audit_mac_previous_secrets \
+            || { echo "::error::required audit history file is missing" >&2; exit 1; }
+          rendered_json=$(mktemp)
+          docker compose config --format json > "$rendered_json"
+          if jq -e '.services.api.environment | has("MINDPATTERN_DB_URL")' "$rendered_json" >/dev/null; then
             echo "::error::rendered compose still carries MINDPATTERN_DB_URL — the api environment must never contain it (MED-1 regression)" >&2
             exit 1
           fi
-          if printf '%s' "$rendered" | grep -qF "$file_password"; then
-            echo "::error::rendered compose contains the postgres password in plaintext (MED-1 regression)" >&2
+          for key in MINDPATTERN_TOKEN_SECRET MINDPATTERN_AUTH_TOKEN_SECRET \
+                     MINDPATTERN_TOTP_WRAP_SECRET MINDPATTERN_PAIRING_SECRET \
+                     MINDPATTERN_DECOY_SECRET MINDPATTERN_AUDIT_MAC_SECRET \
+                     MINDPATTERN_AUDIT_MAC_PREVIOUS_SECRETS \
+                     MINDPATTERN_METRICS_TOKEN; do
+            if jq -e --arg key "$key" '.services.api.environment | has($key)' "$rendered_json" >/dev/null; then
+              echo "::error::rendered api environment exposes $key instead of file-only delivery" >&2
+              exit 1
+            fi
+          done
+          if jq -e '.services.backup.environment | has("BACKUP_KEY")' "$rendered_json" >/dev/null; then
+            echo "::error::rendered backup environment exposes BACKUP_KEY instead of file-only delivery" >&2
             exit 1
           fi
-          if ! printf '%s' "$rendered" | grep -q postgres_password; then
-            echo "::error::rendered compose does not reference the postgres_password secret" >&2
-            exit 1
-          fi
-          echo "compose render: no MINDPATTERN_DB_URL, no plaintext password, postgres_password secret mounted"
+          for name in "${secret_files[@]}"; do
+            value=$(cat "deploy/secrets/$name")
+            if grep -qF "$value" "$rendered_json"; then
+              echo "::error::rendered compose contains plaintext from deploy/secrets/$name" >&2
+              exit 1
+            fi
+          done
+          echo "compose render: all credentials are non-empty file mounts and no plaintext secret is present"
       - name: Validate the digest-pinned production Compose contract
         run: |
           docker compose config --quiet
@@ -298,7 +365,7 @@ jobs:
         run: |
           curl --fail --silent --show-error --output /dev/null \
             -H 'Content-Type: application/json' \
-            --data '{"username":"backup-restore-probe","salt":"AAAAAAAAAAAAAAAAAAAAAA==","verifier":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}' \
+            --data '{"username":"backup-restore-probe","salt":"AAAAAAAAAAAAAAAAAAAAAA==","verifier":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","age_attestation":"minimum_age_confirmed_v1"}' \
             http://127.0.0.1:8000/api/v1/auth/register
       - name: Create, authenticate, and actually restore a backup
         run: |
@@ -530,6 +597,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Download the portal artifact built and tested by verify
@@ -554,7 +622,23 @@ jobs:
             printf 'MINDPATTERN_BACKUP_IMAGE=%s\n' "$MINDPATTERN_BACKUP_IMAGE"
           } > "$release_env"
           ./deploy/verify-release-env.sh "$release_env"
-          sha256sum "$release_env" > "$release_env.sha256"
+          # Keep the checksum subject path-independent. Release assets are
+          # downloaded into an operator-selected directory, so recording the
+          # workflow-local `release-assets/` prefix would make `sha256sum -c`
+          # fail after download even when the bytes are authentic.
+          (
+            cd release-assets
+            sha256sum "$(basename "$release_env")" > "$(basename "$release_env").sha256"
+          )
+      - name: Install cosign for keyless release-env signing
+        uses: sigstore/cosign-installer@c56c2d3e59e4281cc41dea2217323ba5694b171e # v3.8.0
+      - name: Sign the release env and its checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_env="release-assets/mindpattern-release-${GITHUB_REF_NAME:?missing Git ref name}.env"
+          cosign sign-blob --yes --bundle "$release_env.sigstore.json" "$release_env"
+          cosign sign-blob --yes --bundle "$release_env.sha256.sigstore.json" "$release_env.sha256"
       - name: Extract the CHANGELOG section for this tag
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
@@ -576,7 +660,15 @@ jobs:
             release-assets/mindpattern-portal-${{ github.ref_name }}.tar.gz.sha256
             release-assets/mindpattern-web-${{ github.ref_name }}.tar.gz
             release-assets/mindpattern-web-${{ github.ref_name }}.tar.gz.sha256
+            release-assets/mindpattern-portal-${{ github.ref_name }}.tar.gz.sigstore.json
+            release-assets/mindpattern-portal-${{ github.ref_name }}.tar.gz.sha256.sigstore.json
+            release-assets/mindpattern-web-${{ github.ref_name }}.tar.gz.sigstore.json
+            release-assets/mindpattern-web-${{ github.ref_name }}.tar.gz.sha256.sigstore.json
+            release-assets/mindpattern-browser-${{ github.ref_name }}.provenance.json
+            release-assets/mindpattern-browser-${{ github.ref_name }}.provenance.json.sigstore.json
             release-assets/mindpattern-release-${{ github.ref_name }}.env
             release-assets/mindpattern-release-${{ github.ref_name }}.env.sha256
+            release-assets/mindpattern-release-${{ github.ref_name }}.env.sigstore.json
+            release-assets/mindpattern-release-${{ github.ref_name }}.env.sha256.sigstore.json
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}

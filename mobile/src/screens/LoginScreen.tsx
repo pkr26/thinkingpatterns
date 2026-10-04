@@ -32,7 +32,7 @@ import {
   View,
 } from "react-native";
 import qcrypto from "react-native-quick-crypto"; // registers the Buffer global used below
-import { api, ApiError, getBaseUrl, parseServerUrl, setBaseUrl } from "../api/client";
+import { api, ApiError, getBaseUrl, MINIMUM_AGE_ATTESTATION, parseServerUrl, setBaseUrl } from "../api/client";
 import { deriveKeysAsync } from "../crypto/MindPatternCrypto";
 import type { Keys } from "../crypto/MindPatternCrypto";
 import { engine } from "../crypto/engine";
@@ -105,7 +105,7 @@ export function passwordPolicyError(password: string): string {
 
 export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Element {
   const t = useTheme();
-  const { refreshActiveDays, markLoggedIn } = useSession();
+  const { refreshActiveDays, markLoggedIn, erasureIncomplete } = useSession();
   const [mode, setMode] = useState<"login" | "register">("login");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -212,6 +212,7 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
           name,
           salt.toString("base64"),
           derived!.authKey.toString("base64"),
+          MINIMUM_AGE_ATTESTATION,
           envelope.kdfParams,
           envelope.wrappedB64,
         ));
@@ -373,6 +374,11 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
       <Text style={[styles.subtitle, { color: t.colors.muted, fontSize: 14 }]}>
         {tr("login.subtitle")}
       </Text>
+      {erasureIncomplete ? (
+        <Text accessibilityRole="alert" style={{ color: t.colors.danger }}>
+          {tr("login.erasureIncomplete")}
+        </Text>
+      ) : null}
       {serverUrl !== "" && (
         <Text style={{ color: t.colors.muted, fontSize: 12 }} accessibilityLabel={tr("login.serverA11y")}>
           {tr("login.serverLabel", { server: serverUrl })}

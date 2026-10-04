@@ -10,7 +10,7 @@ from __future__ import annotations
 from app.config import Settings
 from app.main import _acquire_cross_host_guard, create_app
 from app.metrics import MetricsRegistry, RECOMPUTE_BUCKETS
-from app.models import AccessLog, Entry, new_id, utcnow
+from app.models import AccessLog, AuditChainState, Entry, new_id, utcnow
 from app.security import crypto
 from datetime import date, datetime, timedelta, timezone
 from sqlalchemy import select
@@ -376,27 +376,58 @@ async def test_sweep_task_is_created_and_cancelled_with_the_lifespan(settings):
 
 async def test_prune_once_deletes_only_rows_past_retention(client, app):
     now = utcnow()
-    from app.api._audit import append_access_log
+    from app.api._audit import compute_chain_state_mac, compute_entry_hash, compute_entry_mac
+
+    mac_version = app.state.settings.audit_mac_key_version
+    mac_key = app.state.settings.audit_mac_keyring[mac_version]
+
+    def signed_genesis(*, action: str, at: datetime) -> tuple[AccessLog, AuditChainState]:
+        user_id = new_id()
+        actor_id = new_id()
+        entry_hash = compute_entry_hash(
+            None,
+            actor_id,
+            user_id,
+            action,
+            at,
+            actor_role="therapist",
+            record_version=2,
+        )
+        row = AccessLog(
+            id=new_id(),
+            actor_id=actor_id,
+            actor_role="therapist",
+            user_id=user_id,
+            action=action,
+            at=at,
+            chain_seq=1,
+            prev_hash=None,
+            entry_hash=entry_hash,
+            entry_mac=compute_entry_mac(mac_key, user_id, 1, entry_hash),
+            mac_key_version=mac_version,
+            record_version=2,
+        )
+        state = AuditChainState(
+            user_id=user_id,
+            head_seq=1,
+            head_hash=entry_hash,
+            head_at=at,
+            first_retained_seq=1,
+            first_retained_hash=entry_hash,
+            state_version=1,
+            mac_key_version=mac_version,
+            updated_at=now,
+        )
+        state.state_mac = compute_chain_state_mac(mac_key, state)
+        return row, state
 
     async with app.state.sessionmaker() as session:
-        # 2026-09-26 audit item 16: seeded through the chained append (each
-        # row is its own one-patient chain here).
-        await append_access_log(
-            session,
-            actor_id=new_id(),
-            actor_role="therapist",
-            user_id=new_id(),
-            action="read_insights",
-            at=now - timedelta(days=731),
-        )
-        await append_access_log(
-            session,
-            actor_id=new_id(),
-            actor_role="therapist",
-            user_id=new_id(),
-            action="read_notes",
-            at=now,
-        )
+        # Seed fully authenticated one-row chains without invoking the
+        # append helper's retry savepoint on the fixture's shared SQLite
+        # connection. Production append behavior has dedicated coverage.
+        old = signed_genesis(action="read_insights", at=now - timedelta(days=731))
+        recent = signed_genesis(action="read_notes", at=now)
+        session.add_all([*old, *recent])
         await session.commit()
 
     await main_mod._prune_access_log_once(app)
@@ -406,23 +437,20 @@ async def test_prune_once_deletes_only_rows_past_retention(client, app):
     assert remaining == ["read_notes"]
 
 
-async def test_pairing_codes_and_sweep_share_one_prune_statement(client, monkeypatch):
-    import app.api.therapist as therapist_mod
-
+async def test_pairing_prune_runs_only_in_the_bounded_sweep(client, monkeypatch):
     seen = []
-    real = therapist_mod.access_log_prune_statement
+    real = main_mod._prune_auxiliary_retention_once
 
-    def spy(now, retention_days=730):
-        statement = real(now, retention_days)
-        seen.append(statement)
-        return statement
+    async def spy(*args, **kwargs):
+        seen.append(True)
+        return await real(*args, **kwargs)
 
-    monkeypatch.setattr(therapist_mod, "access_log_prune_statement", spy)
+    monkeypatch.setattr(main_mod, "_prune_auxiliary_retention_once", spy)
 
     doc = TherapistEmulator("sweepshare", "pw")
     await doc.register(client)
-    await doc.create_pairing_code(client)  # the opportunistic prune path
-    assert len(seen) == 1
+    await doc.create_pairing_code(client)
+    assert seen == []
 
     await main_mod._prune_access_log_once(client._transport.app)  # the sweep path
-    assert len(seen) == 2
+    assert len(seen) == 1

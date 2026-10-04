@@ -32,7 +32,7 @@ def test_processing_policy_fingerprint_is_frozen():
     what persisted user consents compare against; drift here silently
     invalidates (or worse, re-validates) consents."""
     assert llm.processing_policy_fingerprint(_llm_settings()) == (
-        "3942edfec04e7bfeb49b69e593004d5645cd66b356f61d6d4e6e64837b9f92c2"
+        "e38f3ce72b769f4901edb48a0cc89ecb86c2307663d194656c9405a7ea4ff9e5"
     )
 
 

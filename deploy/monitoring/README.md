@@ -21,7 +21,7 @@ below).
 - `alerts.yml` — alert rules, each with a `runbook` annotation pointing at
   `docs/INCIDENT_RUNBOOK.md`.
 - `alert-tests.yml` — synthetic fault and healthy/boundary scenarios for
-  all seven default alerts. Run `promtool test rules alert-tests.yml` from
+  all ten default alerts. Run `promtool test rules alert-tests.yml` from
   this directory; `verify.sh` runs these when promtool is installed.
 - `blackbox-modules.yml` — the blackbox exporter's module set as code:
   `http_2xx` (equivalent to the stock module incl. its 5s timeout and ip4 preference, used by the `/readyz`
@@ -93,29 +93,13 @@ its UI.
 `/metrics` requires `Authorization: Bearer <MINDPATTERN_METRICS_TOKEN>`
 (`backend/app/config.py`). Two consequences:
 
-1. **The API side.** Production `/metrics` **404s** until the `api` service
-   itself receives `MINDPATTERN_METRICS_TOKEN` — the production compose
-   file does not (and must not, here) be edited for that. Add it with an
-   operator-owned overlay that never enters the checkout:
-
-   ```yaml
-   # /etc/mindpattern/api-metrics.env-overlay.yml  (owner-only, 0600, never committed)
-   services:
-     api:
-       environment:
-         MINDPATTERN_METRICS_TOKEN: ${MINDPATTERN_METRICS_TOKEN:?}
-   ```
-
-   ```bash
-   # extend the deploy/README.md compose() function with one more -f:
-   docker compose --env-file "$SECRETS_ENV" --env-file "$RELEASE_ENV" \
-     -f "$APP_DIR/docker-compose.yml" \
-     -f /etc/mindpattern/api-metrics.env-overlay.yml up -d api
-   ```
-
-   The token grants aggregate operational counters only (no usernames, no
-   paths, no per-user data — by design in `backend/app/metrics.py`), but
-   treat it as a secret anyway.
+1. **The API side.** Production Compose mounts
+   `${MINDPATTERN_SECRETS_DIR}/metrics_token` read-only and sets only
+   `MINDPATTERN_METRICS_TOKEN_FILE=/run/secrets/metrics_token`; the plaintext
+   token is absent from the rendered container environment. A missing host
+   file makes Compose fail before startup. The token grants aggregate
+   operational counters only (no usernames, paths, or per-user data), but it
+   remains a credential.
 
 2. **The Prometheus side.** `prometheus.yml` reads the credential with
    `bearer_token_file: /etc/prometheus/metrics-token`, mounted from
@@ -133,7 +117,16 @@ its UI.
 
 Alerts are grounded ONLY in what `backend/app/metrics.py` renders —
 `mindpattern_requests_total{status}`, `mindpattern_recompute_seconds_*`,
-`mindpattern_llm_calls_total{outcome}`, `mindpattern_keystore_sessions` —
+`mindpattern_llm_calls_total{outcome}`, `mindpattern_keystore_sessions`,
+`mindpattern_audit_chain_failures`,
+`mindpattern_audit_journal_failures_total`,
+`mindpattern_audit_maintenance_failures_total`, audit prune/verification
+backlog, bounded pending-work probes, prune-overdue age, verification-cycle age,
+`mindpattern_audio_deletion_backlog`, and
+`mindpattern_audio_deletion_oldest_seconds`,
+`mindpattern_account_deletion_pending_probe`,
+`mindpattern_account_deletion_oldest_seconds`, and
+`mindpattern_account_deletion_failures_total{category}` —
 plus Prometheus' own `up` and `probe_success` (the default-on blackbox
 `/readyz` probe).
 `verify.sh` machine-checks this, so an alert cannot silently reference a
@@ -148,6 +141,18 @@ S1 exposure indicator).
 | `MindPatternRecomputeP95Slow` | `histogram_quantile(0.95, ... mindpattern_recompute_seconds_bucket[10m]) > 5` for 10m | **S3** — elevated latency; runbook's saturation guidance (shed load, do not scale out) |
 | `MindPatternKeystoreSessionsStuck` | `mindpattern_keystore_sessions > 16` for 15m | **S2, escalate to S1** — the runbook's plaintext-exposure checklist names this gauge; >16 is 4x the analyze slots (4) held for three TTL windows (<=5 min each) |
 | `MindPatternLLMFailureRatioHigh` | `mindpattern_llm_calls_total{outcome="failure"}` ratio > 25%, floor > 2 calls/15m, for 15m | **S3** — consent-gated enrichment degraded; core journaling unaffected |
+| `MindPatternAuditChainFailures` | `increase(mindpattern_audit_chain_failures[1h]) > 0` | **S2** — retained access evidence failed verification |
+| `MindPatternAuditJournalFailure` | `increase(mindpattern_audit_journal_failures_total[5m]) > 0` | **S2** — an append/compaction could not durably update the independent audit anchor; readiness also fails until a later durable operation succeeds |
+| `MindPatternAuditMaintenanceFailure` | `increase(mindpattern_audit_maintenance_failures_total[15m]) > 0` | **S2** — authenticated bounded maintenance failed and readiness remains closed until a complete pass succeeds |
+| `MindPatternAuditPruneBacklogPersistent` | `mindpattern_audit_prune_backlog > 0` for 30m | **S3** — bounded access-log retention catch-up is not draining promptly |
+| `MindPatternAuditPruneOldestOverdue` | `mindpattern_audit_prune_oldest_overdue_seconds > 7200` for 15m | **S2** — the oldest retained audit row is more than two hours beyond the configured deletion cutoff |
+| `MindPatternAuditVerificationBacklogPersistent` | `mindpattern_audit_verification_backlog > 0` for 30m | **S3** — the durable incremental verifier has not completed its current owner cycle promptly |
+| `MindPatternAuditVerificationCycleStalled` | `mindpattern_audit_verification_cycle_age_seconds > 7200` for 15m | **S2** — retained audit evidence has gone over two hours without a completed authenticated verification cycle |
+| `MindPatternAudioDeletionBacklogPersistent` | `mindpattern_audio_deletion_backlog > 0` for 30m | **S3** — a durable deletion queue survived at least two default 15m sweeps |
+| `MindPatternAudioDeletionOldestTooOld` | `mindpattern_audio_deletion_oldest_seconds > 7200` for 15m | **S2** — oldest deletion survived the 1h maximum retry delay and multiple sweep opportunities |
+| `MindPatternAccountDeletionBacklogPersistent` | `mindpattern_account_deletion_pending_probe > 0` for 30m | **S3** — the restart-safe bounded physical-purge queue is not converging promptly |
+| `MindPatternAccountDeletionOldestTooOld` | `mindpattern_account_deletion_oldest_seconds > 7200` for 15m | **S2** — a logically erased account has awaited physical purge for over two hours |
+| `MindPatternAccountDeletionFailure` | `increase(mindpattern_account_deletion_failures_total[15m]) > 0` | **S2** — a database, object-store, state, or unexpected worker failure interrupted a rights-request purge |
 | `MindPatternReadyzProbeFailing` *(default-on; blackbox)* | `probe_success == 0` for 5m | **S2** — DB path broken while the process lives |
 | `MindPatternBackupHeartbeatStale` / `...Absent` *(commented; textfile)* | `time() - mindpattern_backup_last_success_timestamp_seconds > 26h` / `absent(...)` | **S2** — recovery capability degraded; an amplifier for any live incident |
 | `MindPatternHostDiskSpaceLow` *(commented; node)* | `node_filesystem_avail_bytes / node_filesystem_size_bytes < 0.20` (real filesystems) for 30m | **S3** — time-bounded decay; Postgres degrades long before ENOSPC |
@@ -164,6 +169,14 @@ absent. Where S1/S2 pages land is still an operator decision:
 (severity routing that mirrors the runbook, an inhibit rule, and the exact
 compose + prometheus.yml snippets in its header comment): copy it to
 `alertmanager.yml` and fill in the receiver URLs.
+
+The audio alerts supervise the application's durable tombstone/retry path;
+they do not replace an independent object-store lifecycle rule. Production
+operators must set `MINDPATTERN_AUDIO_LIFECYCLE_CEILING_DAYS` greater than the
+application retention and configure the S3/object-store `audio/` prefix (or
+an independent host policy for a local store) to expire objects no later than
+that ceiling. Retain the provider rule export and a deletion drill as release
+evidence; see `docs/DATA_RETENTION_SCHEDULE.md`.
 
 ## Host-level failure modes (opt-in)
 

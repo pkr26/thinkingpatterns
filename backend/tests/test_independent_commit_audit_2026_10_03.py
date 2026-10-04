@@ -16,9 +16,10 @@ from sqlalchemy import delete, select, update
 
 from app.api import account, insights
 from app.api._audit import read_journal_head, verify_access_log_chain
+from app.db import build_engine, build_sessionmaker
 from app.deps import ApiError, require_user
 from app.locks import lifecycle_locks
-from app.models import AccessLog, AudioDeletion, Entry, Insight, RekeyJournal, User, utcnow
+from app.models import Base, AccessLog, AudioDeletion, Entry, Insight, RekeyJournal, User, utcnow
 from app.services import audio_store
 from tests.helpers import ClientEmulator
 
@@ -134,6 +135,46 @@ async def test_export_refuses_insight_replaced_before_size_metadata_fetch(client
         await response.body_iterator.aclose()
 
 
+async def test_export_rejects_access_log_retention_between_pages(client, app, monkeypatch):
+    """A retention/delete race must truncate with an explicit snapshot
+    conflict, never complete a valid-looking JSON bundle missing an unseen
+    audit row."""
+    patient = ClientEmulator("audit-export-access-snapshot", "password")
+    await patient.register(client)
+    async with app.state.sessionmaker() as session:
+        for index in range(3):
+            await account.append_access_log(
+                session,
+                actor_id=patient.user_id,
+                actor_role="patient",
+                user_id=patient.user_id,
+                action=f"snapshot_event_{index}",
+            )
+        await session.commit()
+    monkeypatch.setattr(account, "EXPORT_METADATA_PAGE_SIZE", 1)
+    response = await _export_response(app, patient)
+    await _advance_to(response, '],"access_log":[')
+    first_row = await anext(response.body_iterator)
+    assert "snapshot_event_" in first_row or '"action"' in first_row
+
+    async with app.state.sessionmaker() as session:
+        unseen = await session.scalar(
+            select(AccessLog)
+            .where(AccessLog.user_id == patient.user_id)
+            .order_by(AccessLog.at.desc(), AccessLog.id.desc())
+        )
+        assert unseen is not None
+        await session.delete(unseen)
+        await session.commit()
+    try:
+        with pytest.raises(ApiError) as raised:
+            await _finish(response)
+        assert raised.value.status_code == 409
+        assert raised.value.code == "collection_changed"
+    finally:
+        await response.body_iterator.aclose()
+
+
 async def test_export_head_cancellation_releases_admission_capacity(client, app, monkeypatch):
     patient = ClientEmulator("audit-export-cancel", "password")
     await patient.register(client)
@@ -197,7 +238,10 @@ async def test_atomic_rotation_journals_commit_and_detects_tail_deletion(
             retention_cutoff=row.at - timedelta(seconds=1),
         )
         assert proof.ok is False
-        assert "tail truncation" in proof.reason
+    assert proof.reason in {
+        "tail truncation detected: durable journal is ahead of database",
+        "database tail differs from durable chain head",
+    }
 
 
 async def test_audio_cleanup_claims_each_tombstone_before_provider_io(
@@ -309,64 +353,76 @@ async def test_cancelled_audio_cleanup_retains_durable_expiring_lease(
 
 
 async def test_audio_cleanup_uses_authoritative_attempts_after_another_drains_retry(
-    app, settings, monkeypatch
+    app, settings, tmp_path, monkeypatch
 ):
     clock = [utcnow()]
     monkeypatch.setattr(audio_store, "utcnow", lambda: clock[0])
     first_id, second_id = "1" * 32, "2" * 32
-    async with app.state.sessionmaker() as session:
-        session.add_all(
-            [
-                AudioDeletion(
-                    id=first_id,
-                    backend="local",
-                    storage_key="first",
-                    not_before=clock[0] - timedelta(seconds=2),
-                ),
-                AudioDeletion(
-                    id=second_id,
-                    backend="local",
-                    storage_key="second",
-                    not_before=clock[0] - timedelta(seconds=1),
-                ),
-            ]
-        )
-        await session.commit()
+    engine = None
+    sessionmaker = app.state.sessionmaker
+    if settings.database_url == "sqlite+aiosqlite://":
+        engine = build_engine(f"sqlite+aiosqlite:///{tmp_path / 'audio-claims.sqlite'}")
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        sessionmaker = build_sessionmaker(engine)
 
-    started, resume = asyncio.Event(), asyncio.Event()
-
-    class Store:
-        backend = "local"
-
-        async def delete(self, key):
-            if key == "first":
-                started.set()
-                await resume.wait()
-                return
-            raise audio_store.AudioStoreError("second object temporarily unavailable")
-
-    monkeypatch.setattr(audio_store, "get_audio_store_cached", lambda _settings: Store())
-
-    async def drain(identifiers=None):
-        async with app.state.sessionmaker() as session:
-            return await audio_store.drain_audio_deletions(
-                session, settings, identifiers=identifiers
-            )
-
-    first = asyncio.create_task(drain())
-    await asyncio.wait_for(started.wait(), timeout=2)
     try:
-        assert await drain([second_id]) == 0
-        async with app.state.sessionmaker() as session:
+        async with sessionmaker() as session:
+            session.add_all(
+                [
+                    AudioDeletion(
+                        id=first_id,
+                        backend="local",
+                        storage_key="first",
+                        not_before=clock[0] - timedelta(seconds=2),
+                    ),
+                    AudioDeletion(
+                        id=second_id,
+                        backend="local",
+                        storage_key="second",
+                        not_before=clock[0] - timedelta(seconds=1),
+                    ),
+                ]
+            )
+            await session.commit()
+
+        started, resume = asyncio.Event(), asyncio.Event()
+
+        class Store:
+            backend = "local"
+
+            async def delete(self, key):
+                if key == "first":
+                    started.set()
+                    await resume.wait()
+                    return
+                raise audio_store.AudioStoreError("second object temporarily unavailable")
+
+        monkeypatch.setattr(audio_store, "get_audio_store_cached", lambda _settings: Store())
+
+        async def drain(identifiers=None):
+            async with sessionmaker() as session:
+                return await audio_store.drain_audio_deletions(
+                    session, settings, identifiers=identifiers
+                )
+
+        first = asyncio.create_task(drain())
+        await asyncio.wait_for(started.wait(), timeout=2)
+        try:
+            assert await drain([second_id]) == 0
+            async with sessionmaker() as session:
+                pending = await session.get(AudioDeletion, second_id)
+                assert pending.attempts == 1
+                assert pending.not_before == clock[0] + timedelta(seconds=60)
+            clock[0] += timedelta(seconds=61)
+        finally:
+            resume.set()
+            outcome = await asyncio.gather(first, return_exceptions=True)
+        assert outcome == [1]
+        async with sessionmaker() as session:
             pending = await session.get(AudioDeletion, second_id)
-            assert pending.attempts == 1
-            assert pending.not_before == clock[0] + timedelta(seconds=60)
-        clock[0] += timedelta(seconds=61)
+            assert pending.attempts == 2
+            assert pending.not_before == clock[0] + timedelta(seconds=120)
     finally:
-        resume.set()
-        outcome = await asyncio.gather(first, return_exceptions=True)
-    assert outcome == [1]
-    async with app.state.sessionmaker() as session:
-        pending = await session.get(AudioDeletion, second_id)
-        assert pending.attempts == 2
-        assert pending.not_before == clock[0] + timedelta(seconds=120)
+        if engine is not None:
+            await engine.dispose()

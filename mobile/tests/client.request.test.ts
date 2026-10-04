@@ -19,6 +19,7 @@ import {
   setBaseUrl,
   setUnauthorizedHandler,
 } from "../src/api/client";
+import { captureLocalWritePermit, changeLocalSessionOwner } from "../src/localWriteGuard";
 
 // The real client validates the FINAL url of every response (redirect
 // hardening); node Response objects carry url === "" so the mock pins a
@@ -169,7 +170,7 @@ describe("stored base URL policy", () => {
     expect(await api.isLoggedIn()).toBe(true);
   });
 
-  it("still switches origin when key enumeration is unavailable", async () => {
+  it("fails closed before publishing a new origin when exhaustive key enumeration is unavailable", async () => {
     await setBaseUrl("https://old.example.com");
     await api.setSession("tok-secret", "abababababababababababababababab", "alice");
     const originalGetAllKeys = storage.getAllKeys.bind(storage);
@@ -177,12 +178,13 @@ describe("stored base URL policy", () => {
       throw new Error("getAllKeys unsupported on this platform");
     };
     try {
-      expect(await setBaseUrl("https://new.example.com")).toBeNull();
+      await expect(setBaseUrl("https://new.example.com")).rejects.toThrow("getAllKeys unsupported");
     } finally {
       (storage as { getAllKeys: typeof storage.getAllKeys }).getAllKeys = originalGetAllKeys;
     }
-    // The critical part — the session wipe — happened despite the failure.
-    expect(await getBaseUrl()).toBe("https://new.example.com");
+    // Credentials are still retired immediately, but the destination is not
+    // exposed until every old-origin account slot can be proven gone.
+    expect(await getBaseUrl()).toBe("https://old.example.com");
     expect(await api.isLoggedIn()).toBe(false);
   });
 });
@@ -367,9 +369,44 @@ describe("401 session-death hook", () => {
     vi.mocked(fetch).mockResolvedValue(jsonResponse({ detail: "invalid token" }, 401));
     await expect(api.insights()).rejects.toMatchObject({ status: 401 });
   });
+
+  it("erases only on explicit account-death proof, with gone limited to account lifecycle routes", async () => {
+    const owner = "abababababababababababababababab";
+    await api.setSession("tok-1", owner, "alice");
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ detail: "resource gone", code: "gone" }, 410));
+    await expect(api.insights()).rejects.toMatchObject({ status: 410, code: "gone" });
+    expect(handler).not.toHaveBeenCalled();
+
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ detail: "attachment expired", code: "audio_expired" }, 410));
+    await expect(api.insights()).rejects.toMatchObject({ status: 410, code: "audio_expired" });
+    expect(handler).not.toHaveBeenCalled();
+
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ detail: "deleted", code: "account_deleted" }, 410));
+    await expect(api.insights()).rejects.toMatchObject({ status: 410, code: "account_deleted" });
+    expect(handler).toHaveBeenLastCalledWith(expect.objectContaining({ accountDeleted: true, userId: owner }));
+
+    handler.mockClear();
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ detail: "gone", code: "gone" }, 410));
+    await expect(api.deleteAccount("verifier")).rejects.toMatchObject({ status: 410, code: "gone" });
+    expect(handler).toHaveBeenCalledWith(expect.objectContaining({ accountDeleted: true, userId: owner }));
+  });
 });
 
 describe("session storage helpers", () => {
+  it("rehydrates the active write owner before a cold-start session is published", async () => {
+    const owner = "abababababababababababababababab";
+    await api.setSession("tok", owner, "alice");
+    // Simulate process-local lifecycle loss while the encrypted credential
+    // tuple remains durable.
+    changeLocalSessionOwner(null);
+    expect(() => captureLocalWritePermit(owner)).toThrow(/account\/session changed/);
+    await expect(api.isLoggedIn()).resolves.toBe(true);
+    expect(() => captureLocalWritePermit(owner)).not.toThrow();
+  });
+
   it("stores and clears token, user id and username", async () => {
     expect(await api.isLoggedIn()).toBe(false);
     await api.setSession("tok", "abababababababababababababababab");
@@ -556,11 +593,11 @@ describe("endpoint wiring", () => {
     expect(init.method).toBe("POST");
     expect(init.body).toBe(JSON.stringify({ username: "alice" }));
 
-    await api.register("alice", "c2FsdA==", "dmVyaWZpZXI=");
+    await api.register("alice", "c2FsdA==", "dmVyaWZpZXI=", "minimum_age_confirmed_v1");
     [url, init] = vi.mocked(fetch).mock.calls[1] as [string, RequestInit];
     expect(url).toBe(`${DEFAULT_BASE_URL}/api/v1/auth/register`);
     expect(init.method).toBe("POST");
-    expect(init.body).toBe(JSON.stringify({ username: "alice", salt: "c2FsdA==", verifier: "dmVyaWZpZXI=" }));
+    expect(init.body).toBe(JSON.stringify({ username: "alice", salt: "c2FsdA==", verifier: "dmVyaWZpZXI=", age_attestation: "minimum_age_confirmed_v1" }));
 
     await api.login("alice", "dmVyaWZpZXI=");
     [url, init] = vi.mocked(fetch).mock.calls[2] as [string, RequestInit];
@@ -780,7 +817,7 @@ describe("sensitive-request redirect hardening", () => {
       message: expect.stringContaining("could not verify"),
     });
     await expect(api.openProcessingSession("a2V5")).rejects.toMatchObject({ status: 0 });
-    await expect(api.register("a", "c2FsdA==", "dg==")).rejects.toMatchObject({ status: 0 });
+    await expect(api.register("a", "c2FsdA==", "dg==", "minimum_age_confirmed_v1")).rejects.toMatchObject({ status: 0 });
     await expect(api.deleteAccount("dg==")).rejects.toMatchObject({ status: 0 });
     await expect(api.setLlmConsent(true, "dg==")).rejects.toMatchObject({ status: 0 });
     // 2026-09-26 audit LOW: the account export ships the bearer too — it

@@ -44,6 +44,7 @@ import {
 import { Button, Card, Disclosure, ErrorBanner, Note as NoteText, theme } from "../ui";
 import { usePortalDrafts } from "../noteDrafts";
 import { printPage, randomBytes, visitAnchorStore } from "../platform";
+import { displayError } from "../errors";
 
 export interface PortalSession {
   username: string;
@@ -787,7 +788,7 @@ export function PatientView(props: {
         // longer silent (2026-09-26 audit L): an honest inline line says
         // the questionnaire trail could not be loaded and why.
         if (operation === loadGeneration.current) {
-          setMeasuresError(err instanceof Error ? err.message : "could not load this patient's recorded measures");
+          setMeasuresError(displayError(err, "could not load this patient's recorded measures"));
         }
       }
     })();
@@ -847,7 +848,7 @@ export function PatientView(props: {
       if (operation === loadGeneration.current) setNotes(opened);
     })().catch((err: unknown) => {
       if (operation === loadGeneration.current) {
-        setError(err instanceof Error ? err.message : "could not load therapist notes");
+        setError(displayError(err, "could not load therapist notes"));
         setLoadFailed(true);
       }
     });
@@ -913,7 +914,7 @@ export function PatientView(props: {
       }
     } catch (err) {
       if (operation === loadGeneration.current) {
-        setError(err instanceof Error ? err.message : "could not load this patient");
+        setError(displayError(err, "could not load this patient"));
         setLoadFailed(true);
       }
     } finally {
@@ -949,9 +950,9 @@ export function PatientView(props: {
           // blob failed to decrypt. Storing [] alone rendered "no earlier
           // text recorded" — making a corrupt/cross-key history read as a
           // never-edited note in a clinical record. Record the failure
-          // distinctly (rendered as its own honest line below) and log it
-          // instead of swallowing it silently.
-          console.warn("note history failed to decrypt", { noteId: note.id });
+          // distinctly (rendered as its own honest line below). Never put
+          // the server note id or exception text into diagnostics.
+          console.warn("note_history_decrypt_failed");
           setHistoryFailed((prev) => ({ ...prev, [note.id]: true }));
           setHistory((prev) => ({ ...prev, [note.id]: [] }));
           return;
@@ -1135,7 +1136,7 @@ export function PatientView(props: {
       if (operation === drilldownGeneration.current) setEntries(decrypted);
     } catch (err) {
       if (operation === drilldownGeneration.current) {
-        setError(err instanceof Error ? err.message : "could not load the evidence entries");
+        setError(displayError(err, "could not load the evidence entries"));
       }
     }
   };
@@ -1174,7 +1175,7 @@ export function PatientView(props: {
         const pending = { ...latestDraft.current.pending }; delete pending[savedScope];
         const snapshot = { ...latestDraft.current,pending }; setDraftState(snapshot); await persistDraft(snapshot).catch(error => setError(error instanceof Error ? error.message : "Draft was not saved locally."));
       }
-      setError(err instanceof Error ? err.message : "could not save the note");
+      setError(displayError(err, "could not save the note"));
     }
     finally { if (mounted.current) setBusy(false); }
   };
@@ -1187,7 +1188,7 @@ export function PatientView(props: {
       setNotes((prev) => prev.filter((n) => n.id !== note.id));
       setConfirmDeleteId(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "could not delete the note");
+      setError(displayError(err, "could not delete the note"));
     } finally {
       setBusy(false);
     }
@@ -1234,7 +1235,7 @@ export function PatientView(props: {
         } catch { setError("This note changed on another device. Your draft is preserved, but the current saved version could not be loaded. Retry when connected."); }
         return;
       }
-      setError(err instanceof Error ? err.message : "could not save the note edit");
+      setError(displayError(err, "could not save the note edit"));
     } finally {
       setBusy(false);
     }

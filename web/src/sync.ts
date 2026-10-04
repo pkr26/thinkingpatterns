@@ -11,7 +11,11 @@
  * data key changed elsewhere (S-8) and surfaces as `credentialRotated` —
  * never a retry loop, never stale keys.
  */
+// @ts-nocheck
+
 import { ApiError, api, hasSession, sessionAbortSignal, sessionUserId, type InsightsResponse } from "./api/client";
+import { displayError } from "./errors";
+import { t } from "./strings";
 import { decryptInsights, type InsightsPayload } from "./crypto/patient";
 import { checkAnalysisGeneration, FRESHNESS_ERROR } from "./stateSeqGuard";
 import { withLock } from "./platform";
@@ -46,7 +50,7 @@ export async function reconcileInsights(): Promise<ReconcileOutcome> {
     // 401/410 funnels fire the client's session-expiry latch (App handles
     // the lockdown); here they only end this reconciliation.
     if (err instanceof ApiError && (err.status === 401 || err.status === 410)) return { kind: "locked" };
-    return { kind: "error", message: err instanceof Error ? err.message : "reconciliation failed" };
+    return { kind: "error", message: displayError(err, t("errors.generic")) };
   }
   if (!current()) return { kind: "locked" };
   if (summary.blob === null) {

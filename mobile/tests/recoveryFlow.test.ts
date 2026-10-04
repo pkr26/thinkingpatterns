@@ -119,6 +119,7 @@ describe("recoverAccountWithKey (the full flow)", () => {
       "someuser",
       recoveryKeyToB64(recoveryKey),
       "a brand new passphrase",
+      "v2",
     );
 
     expect(outcome.userId).toBe("user-77");
@@ -161,11 +162,11 @@ describe("recoverAccountWithKey (the full flow)", () => {
     expect(mockedApi.resetPasswordWithRecovery!.mock.calls[0]![2]).toBe("pst-1");
   });
 
-  it("a server mismatch cannot downgrade a v2 kit or receive its raw key", async () => {
+  it("a uniform authentication failure cannot trigger a weaker-scheme retry", async () => {
     const { recoverAccountWithKey } = await import("../src/recoveryFlow");
     const key = generateRecoveryKey();
-    mockedApi.recoverLogin!.mockRejectedValue(new ApiErrorCtor(401, "retry with v1", "recovery_scheme_mismatch"));
-    await expect(recoverAccountWithKey("someuser", recoveryKitText(key), "new passphrase")).rejects.toThrow("retry with v1");
+    mockedApi.recoverLogin!.mockRejectedValue(new ApiErrorCtor(401, "invalid credentials", "invalid_credentials"));
+    await expect(recoverAccountWithKey("someuser", recoveryKitText(key), "new passphrase", "v2")).rejects.toThrow("invalid credentials");
     expect(mockedApi.recoverLogin).toHaveBeenCalledTimes(1);
     expect(mockedApi.recoverLogin!.mock.calls[0]![1]).toBe(recoveryVerifierKeyV2(key).toString("base64"));
     expect(mockedApi.recoverLogin!.mock.calls[0]![1]).not.toBe(recoveryKeyToB64(key));
@@ -192,7 +193,7 @@ describe("recoverAccountWithKey (the full flow)", () => {
       recovery_scheme: "v2",
     } as never);
     await expect(
-      recoverAccountWithKey("someuser", recoveryKeyToB64(generateRecoveryKey()), "new passphrase"),
+      recoverAccountWithKey("someuser", recoveryKeyToB64(generateRecoveryKey()), "new passphrase", "v2"),
     ).rejects.toThrow(/did not open/i);
     expect(mockedApi.setSession).not.toHaveBeenCalled();
     expect(mockedApi.clearSession).not.toHaveBeenCalled();
@@ -205,7 +206,7 @@ describe("recoverAccountWithKey (the full flow)", () => {
     const key = generateRecoveryKey();
     mockedApi.recoverLogin!.mockResolvedValue({ token: "tok", user_id: "user-1", recovery_scheme: "v2", recovery_wrapped_data_key: sealDataKeyForRecoveryV2(key, Buffer.alloc(32, 7), "user-1").toString("base64") } as never);
     mockedApi.setSession!.mockRejectedValueOnce(new Error("secure storage unavailable"));
-    await expect(recoverAccountWithKey("someuser", recoveryKitText(key), "new passphrase")).rejects.toThrow("secure storage unavailable");
+    await expect(recoverAccountWithKey("someuser", recoveryKitText(key), "new passphrase", "v2")).rejects.toThrow("secure storage unavailable");
     expect(mockedApi.clearSession).toHaveBeenCalledOnce();
     expect(mockedApi.resetPasswordWithRecovery).not.toHaveBeenCalled();
   });
@@ -216,7 +217,7 @@ describe("recoverAccountWithKey (the full flow)", () => {
     const dataKey = Buffer.alloc(32, 8);
     mockedApi.recoverLogin!.mockResolvedValue({ token: "tok", user_id: "user-1", username: "canonical", recovery_scheme: "v2", recovery_wrapped_data_key: sealDataKeyForRecoveryV2(key, dataKey, "user-1").toString("base64") } as never);
     mockedApi.cacheKeyEnvelope!.mockRejectedValueOnce(new Error("cache full"));
-    const outcome = await recoverAccountWithKey("someuser", recoveryKitText(key), "new passphrase");
+    const outcome = await recoverAccountWithKey("someuser", recoveryKitText(key), "new passphrase", "v2");
     expect(outcome).toMatchObject({ userId: "user-1", username: "canonical", localCacheReady: false });
     expect(outcome.dataKey).toEqual(dataKey);
     expect(mockedApi.resetPasswordWithRecovery).toHaveBeenCalledOnce();

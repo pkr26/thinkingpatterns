@@ -272,12 +272,13 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
       await recordMeasureCompleted(userId, record.date).catch(() => {});
       void syncMeasureReminderSchedule(userId).catch(() => {});
       await load();
-      // SAFETY: only after the response is safely stored. Same throttle
-      // stamp and calm copy as the entry crisis dialog.
+      // SAFETY: only after the response is safely stored. Item-9 uses its
+      // own trigger-specific throttle so a journal prompt shown earlier
+      // today cannot suppress this clinically distinct safety check-in.
       if (safetyFlagged) {
-        const flagged = await crisisDialogShownOn(userId, record.date).catch(() => false);
+        const flagged = await crisisDialogShownOn(userId, record.date, "phq9-item9").catch(() => false);
         if (!flagged) {
-          await recordCrisisDialogShown(userId, record.date).catch(() => {});
+          await recordCrisisDialogShown(userId, record.date, "phq9-item9").catch(() => {});
           Alert.alert(
             tr("measures.crisisTitle"),
             tr("measures.crisisBody"),
@@ -321,9 +322,11 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
         if (offlinePending !== null && safetyItemEndorsed(offlinePending.kind, offlinePending.picks)) {
           const owner = sentUserId;
           const flagged =
-            owner !== null ? await crisisDialogShownOn(owner, offlinePending.date).catch(() => false) : false;
+            owner !== null
+              ? await crisisDialogShownOn(owner, offlinePending.date, "phq9-item9").catch(() => false)
+              : false;
           if (!flagged && owner !== null) {
-            await recordCrisisDialogShown(owner, offlinePending.date).catch(() => {});
+            await recordCrisisDialogShown(owner, offlinePending.date, "phq9-item9").catch(() => {});
             Alert.alert(
               tr("measures.crisisTitle"),
               tr("measures.crisisBody"),
@@ -379,6 +382,9 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
       >
         <Text style={{ color: t.colors.muted, fontSize: t.type.bodySmall.fontSize }}>
           {tr("measures.intro")}
+        </Text>
+        <Text style={{ color: t.colors.muted, fontSize: t.type.bodySmall.fontSize }}>
+          {tr("measures.unmonitored")}
         </Text>
 
         {loading && <ActivityIndicator color={t.colors.primaryBright} />}

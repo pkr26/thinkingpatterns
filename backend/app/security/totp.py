@@ -1,6 +1,6 @@
-"""RFC 6238 TOTP for optional therapist second-factor login (delivered
-2026-09-22; the 2026-09-21 audit's C-2/F-4 "optional TOTP" item, previously
-a documented deferral in SECURITY_RESIDUALS.md).
+"""RFC 6238 TOTP for required therapist second-factor login.
+
+Enrollment became mandatory before patient-data access in 2026-10-04.
 
 Deliberately dependency-free: HMAC-SHA1 over a 30-second timestep with six
 digits is the authenticator-app contract (Google Authenticator, Aegis,

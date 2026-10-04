@@ -1,5 +1,9 @@
+// @ts-nocheck
 import "fake-indexeddb/auto";
-await import("../../src/strings").then(module => module.loadFullCatalogs());
+await import("../../src/strings").then(module => Promise.all([
+  module.loadFullCatalogs("en"),
+  module.loadFullCatalogs("es"),
+]));
 
 /** React 19 requires an explicit act() environment outside jsdom;
  *  without it every act() warns and update flushing is unreliable. */

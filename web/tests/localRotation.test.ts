@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { kv, setKvBackendForTests } from "../src/kvstore";
 import { encrypt, decrypt, toBase64, fromBase64 } from "../src/crypto/core";

@@ -74,6 +74,21 @@ def _tracked_files() -> list[Path]:
     return [REPO_ROOT / name for name in out.decode("utf-8", "ignore").split("\0") if name]
 
 
+def _working_tree_source_files() -> list[Path]:
+    """Tracked and untracked, non-ignored source files in the checkout."""
+    try:
+        out = subprocess.run(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            check=True,
+            timeout=60,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return [REPO_ROOT / name for name in out.decode("utf-8", "ignore").split("\0") if name]
+
+
 def test_no_session_tokens_in_tracked_files():
     offenders: list[str] = []
     for path in _tracked_files():
@@ -104,3 +119,42 @@ def test_scan_detects_the_original_leak_shape():
     assert _scan_bytes(b"sha512-QmFzZTY0YmFzZTY0YmFzZTY0.XhK2.P9zQ") == []
     assert _scan_bytes(b"see ghp_ notes without a real suffix") == []
     assert _scan_bytes(b"github_pat_11" + b"A" * 30) == ["GitHub PAT shape"]
+
+
+def test_gitleaks_false_positive_exceptions_stay_at_reviewed_locations():
+    """Exact-match exceptions must not quietly become general exemptions.
+
+    The strings necessarily also occur in the policy and its planted-secret
+    CI probe. Any new occurrence is a review event rather than an implicit
+    extension of the allowlist.
+    """
+    approved = {
+        b"therapist linkage, speech/translation": {
+            Path(".gitleaks.toml"),
+            Path(".github/workflows/ci.yml"),
+            Path("backend/tests/test_repo_secret_scan.py"),
+            Path("docs/OPERATOR_PACK.md"),
+        },
+        b"React-cxxstableapi: 1e0ad8a5ecb7f2f5440c012798cf20bec6341c1f": {
+            Path(".gitleaks.toml"),
+            Path(".github/workflows/ci.yml"),
+            Path("backend/tests/test_repo_secret_scan.py"),
+            Path("mobile/ios/Podfile.lock"),
+        },
+    }
+    found = {needle: set() for needle in approved}
+    source_files = _working_tree_source_files()
+    if not source_files:
+        return
+    for path in source_files:
+        if not path.is_file():
+            continue
+        try:
+            blob = path.read_bytes()
+        except OSError:
+            continue
+        relative = path.relative_to(REPO_ROOT)
+        for needle in approved:
+            if needle in blob:
+                found[needle].add(relative)
+    assert found == approved

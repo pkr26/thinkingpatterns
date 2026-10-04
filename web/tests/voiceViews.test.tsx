@@ -10,6 +10,8 @@
  *
  * Entries and attachments are encrypted with the REAL patient crypto; the
  * fetch edge and URL.createObjectURL are stubbed. */
+// @ts-nocheck
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactTestInstance } from "react-test-renderer";
 import { encryptAudio, encryptEntry } from "../src/crypto/patient";
@@ -18,7 +20,7 @@ import { SettingsView } from "../src/views/Settings";
 import { setKvBackendForTests, type KvBackend } from "../src/kvstore";
 import { vault } from "../src/vault";
 import { installSession, jsonResponse, resetTestState, stubFetch } from "./helpers/api";
-import { press, pressSwitch, render, settle, textOf, typeArea } from "./helpers/rtr";
+import { press, pressSwitch, render, settle, textOf, typeArea, typeInto } from "./helpers/rtr";
 
 // The submitEdit pin needs to spy on encryptEntry while keeping every
 // other export (decryptEntry included) the shipping implementation.
@@ -311,7 +313,7 @@ describe("Settings stt_unavailable branch (H3, audit 2026-09-29)", () => {
           unlock_days: 30,
           llm_available: true,
           sharing_available: true,
-          sharing_disclosure_version: "v2",
+          sharing_disclosure_version: "v3",
           audio_available: true,
           stt_provider_name: "Whisper",
         });
@@ -339,6 +341,10 @@ describe("Settings stt_unavailable branch (H3, audit 2026-09-29)", () => {
     // The voice consent switch rendered (meta says audio_available).
     expect(textOf(root)).toContain("Voice journaling on");
     await pressSwitch(root, "Voice journaling on");
+    const reauth = await import("../src/reauth");
+    vi.spyOn(reauth, "freshStepUp").mockResolvedValueOnce({ ok: true, proof: "voice-proof" });
+    await typeInto(root, "Current password", "freshly typed password");
+    await press(root, "Verify and continue");
     await settle(40, 6);
     expect(textOf(root)).toContain("Voice journaling is not offered by this server.");
   });

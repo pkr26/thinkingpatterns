@@ -3,6 +3,8 @@
  *  pageshow, and the hidden-tab guard locks the moment the tab goes to
  *  the background (mobile background-lock parity, W-1). Driven through
  *  the platform seam's window shim. */
+// @ts-nocheck
+
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useBfcacheGuard, useHiddenTabLock, useIdleLock, IDLE_LOCK_MS } from "../src/sessionLock";

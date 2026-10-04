@@ -33,7 +33,7 @@ organization's names, and sign. Verified against the tree 2026-09-28.
   without its token.
 - Digest-pinned deployment contract (every compose image is an
   `@sha256` reference; CI's monitoring-verify fails mutable refs);
-  14-job CI incl. gitleaks full-history secret scans, pip-audit,
+  multi-job CI incl. gitleaks full-history secret scans, pip-audit,
   supply-chain pinning, mutation gates, and the red-team weekly job.
 - Security headers on every response (nosniff/DENY/no-referrer/
   no-store + HSTS); 2 MiB body cap with a complete-read deadline;
@@ -41,23 +41,23 @@ organization's names, and sign. Verified against the tree 2026-09-28.
 
 ## Owned by the operator (this policy's actual content)
 
-1. **Secrets custody.** `MINDPATTERN_TOKEN_SECRET` (and the three
-   purpose-split secrets + `MINDPATTERN_DECOY_SECRET` +
-   `MINDPATTERN_AUDIT_MAC_SECRET` + `POSTGRES_PASSWORD` + `BACKUP_KEY`)
-   live only in the owner-only secrets file
-   (`/etc/mindpattern/secrets.env`, mode 0600) and your
-   secret manager. `MINDPATTERN_AUDIT_MAC_SECRET` seals the audit
-   chain's keyed MAC: 32 bytes of hex (64 chars) when set — also
-   readable from a mounted file via `MINDPATTERN_AUDIT_MAC_SECRET_FILE`
-   — and when unset it is HKDF-derived from the token secret, so
-   rotating the token secret rotates the MAC key by construction.
+1. **Secrets custody.** The root compatibility, bearer-signing, TOTP-wrap,
+   pairing, decoy, audit-MAC, metrics, database, and backup credentials live
+   as separate mode-0600 files under `/etc/mindpattern/secrets/` (or an
+   equivalent secret manager), never in a Compose environment file.
+   Production requires every purpose-split key. The current audit key is
+   exactly 32 bytes as 64 hex characters; audit rows record
+   `MINDPATTERN_AUDIT_MAC_KEY_VERSION`, and old `version:64hex` keys remain in
+   the file named by `MINDPATTERN_AUDIT_MAC_PREVIOUS_SECRETS_FILE` until their
+   rows/state expire. The HKDF root-token fallback is development-only.
    BACKUP_KEY needs a documented second-location
    custody procedure (the runbook's sealed-envelope / break-glass /
    split-knowledge options) — rehearse it quarterly.
-2. **Rotation.** Token-secret rotation is a documented multi-step
-   procedure (TOTP lockout + decoy-salt boundary) — follow
-   `docs/INCIDENT_RUNBOOK.md` "Rotating MINDPATTERN_TOKEN_SECRET"
-   verbatim; never rotate it "quickly" under pressure.
+2. **Rotation.** Rotate only the affected purpose. Audit-key rotation must
+   preserve the old version in the historical file and increment the current
+   version before serving new writes. Follow `docs/INCIDENT_RUNBOOK.md`
+   "Rotating purpose-split and audit keys"; never overwrite all keys under
+   pressure.
 3. **Patching & host hardening.** The container images are
    digest-pinned; adopting a new image is a deliberate re-pin through
    the release workflow. Host OS patching, firewalling, and access

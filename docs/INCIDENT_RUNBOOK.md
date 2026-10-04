@@ -13,17 +13,17 @@ issue, not just an SLO miss.** This runbook is the operator's checklist.
 
 ## Detection & escalation (S1)
 
-Nothing pages yet — v1 detection is the alert rules and scheduled jobs
-below plus a human watching them; wiring them to an on-call channel
-(Alertmanager or equivalent) is tracked follow-up work. Until that lands,
-**whoever deployed the system is on-call by default.**
+Alertmanager ships in the operator monitoring stack, but a repository cannot
+prove that a real receiver is configured or staffed. Until the operator has
+retained a received-page drill, **whoever deployed the system is on-call by
+default.**
 
 **Where signals surface today**
 
 | Signal | Source | Notes |
 |---|---|---|
-| `FathomAPIDown`, `FathomHigh5xxRatio`, `FathomRecomputeP95Slow`, `FathomKeystoreSessionsStuck`, `FathomLLMFailureRatioHigh` | `deploy/monitoring/alerts.yml` | Check the Prometheus `/alerts` view (the keystore alert is the S1 plaintext-exposure tripwire — an unconsumed processing session). The rule set is drift-gated in CI: the `monitoring-verify` job runs `deploy/monitoring/verify.sh` on every PR. |
-| Liveness / readiness | `/healthz`, `/readyz` | Blackbox probe rules are shipped commented-out in `alerts.yml` — enable at deploy time. |
+| `MindPatternAPIDown`, `MindPatternHigh5xxRatio`, `MindPatternRecomputeP95Slow`, `MindPatternKeystoreSessionsStuck`, audit-chain/journal alerts, audio-deletion backlog/age alerts | `deploy/monitoring/alerts.yml` | Check Prometheus `/alerts`; the rule set is metric-grounded and tested in CI. The keystore alert is the plaintext-retention tripwire. |
+| Liveness / readiness | `/healthz`, `/readyz` | The `/readyz` blackbox probe is default-on; readiness requires both the database and configured audit journal to be usable. Production-origin TLS probes remain operator-configured. |
 | Backup freshness | `deploy/monitoring/check-backup-freshness.sh` + heartbeat rules | Run during any incident touching the host or DB (step 4 below). |
 | Attack-surface regression | weekly `redteam` CI job (Saturdays) | Fails on any new FINDING; the accepted standing set is registered in `docs/SECURITY_RESIDUALS.md`. |
 
@@ -47,13 +47,16 @@ lives in exactly one place.
 (`UPDATE users SET is_active = false WHERE ...` via direct database
 access) is reserved for incident response — every auth path checks
 `is_active`, but no API or job exposes it (see README "Scope decisions").
-Token invalidation is `MINDPATTERN_TOKEN_SECRET` rotation.
+Token invalidation is rotation of the dedicated `auth_token_secret` file
+(`MINDPATTERN_AUTH_TOKEN_SECRET_FILE`), not the root compatibility secret.
 
 ## The first five minutes (any severity)
 
 1. **Look at the four signals that exist**: `/healthz` (liveness), `/readyz`
-   (DB reachability), `/metrics` (status-code families, recompute
-   histogram, LLM failures, keystore length), container logs.
+   (database and audit-journal readiness), `/metrics` (status-code families,
+   recompute histogram, keystore length, audit-chain/journal failures,
+   audit-maintenance backlog/overdue/cycle-age probes, and audio-deletion backlog/age),
+   container logs.
 2. **Do not restart the database on a hunch** — the evidence must support
    the specific action (restarts destroy the in-memory keystore and rate
    counters; sessions opened in the last TTL window die with them).
@@ -66,24 +69,21 @@ Token invalidation is `MINDPATTERN_TOKEN_SECRET` rotation.
 
 ## S1: suspected plaintext exposure
 
-The design exposes plaintext in exactly two places: the single-use
-processing session (server memory, ≤5 min TTL) and the consent-gated LLM
-egress. For anything else claiming "leak":
+The design exposes plaintext in the single-use processing session (server
+memory, ≤5 min TTL) and, after purpose-specific consent, to configured speech
+transcription/translation providers. Production journal recompute does not
+dispatch journal text to an LLM. For anything else claiming "leak":
 
 1. Capture evidence: which endpoint, which auth state, what was observed.
 2. Check `/metrics` `mindpattern_keystore_sessions` — an unexpectedly
    LARGE value means processing sessions are not being consumed.
-3. If a third-party LLM endpoint is implicated: disable
-   `MINDPATTERN_LLM_URL` at the next deploy (consent per user remains,
-   but the egress point dies with the unset URL), and note which accounts
-   had `llm_consent_at` set (their data may be in the provider's hands —
-   provider retention is disclosed in the consent copy).
-4. Rotate `MINDPATTERN_TOKEN_SECRET` if tokens are implicated (invalidates
-   every session; users re-login). Rotation has TWO further consequences
-   the backend documents (`backend/app/security/totp.py`,
-   `backend/app/config.py`) — see "Rotating `MINDPATTERN_TOKEN_SECRET`"
-   below BEFORE turning the key: every wrapped TOTP enrollment dies with
-   it, and decoy salts change unless a dedicated decoy secret is set.
+3. If a speech/translation provider is implicated, disable the corresponding
+   endpoint/API-key configuration, preserve consent/dispatch evidence, and
+   invoke the provider's contractual deletion/incident path.
+4. Rotate `auth_token_secret` if bearer tokens are implicated (invalidates
+   every session; users re-login). Leave the TOTP-wrap, pairing, decoy, and
+   audit-MAC keys unchanged unless the incident specifically compromises one
+   of those purposes. See "Rotating purpose-split and audit keys" below.
    `BACKUP_KEY` rotation requires the dual-key procedure (below).
 5. Disclosure: journal content is special-category data. Prepare the
    notification per your jurisdiction (GDPR Art. 33: 72h to the SA;
@@ -111,7 +111,8 @@ whose therapists are HIPAA-covered entities follows HIPAA's own
   (IHI) — acquisition without authorization. Encrypted data where the
   key was NOT compromised is generally NOT unsecured IHI; the moment a
   compromised server could have captured keys or plaintext (the
-  processing-session window, the LLM egress path), assume the trigger.
+  processing-session window or a consented speech/translation dispatch),
+  assume the trigger.
   **Discovery** = the first day the breach is known, or reasonably
   would have been known with diligence — the clock starts there, not
   at confirmation.
@@ -158,37 +159,44 @@ feature that makes individual HBNR notices harder to deliver: plan the
 substitute notice mechanism — in-app banner on next login plus a
 website notice — and say so in the filing.)
 
-## Rotating `MINDPATTERN_TOKEN_SECRET`
+## Rotating purpose-split and audit keys
 
-Token invalidation IS `MINDPATTERN_TOKEN_SECRET` rotation — but the key
-derives more than tokens, so a rotation is never a one-line change. The
-backend's own contract (`backend/app/security/totp.py`,
-`backend/app/config.py`):
+Production mounts independent files for bearer signing, TOTP wrapping,
+pairing-code HMAC, decoy salts, audit MAC, metrics access, backups, and the
+legacy/root compatibility secret. Rotate only the compromised purpose:
 
-1. **Sessions:** every issued token dies; every user re-logins. Expected.
-2. **Therapist TOTP (the lockout):** the wrapped second-factor secrets
-   (`users.totp_secret`) are AES-256-GCM under an HKDF subkey of the
-   token secret. Rotation makes EVERY enrollment undecryptable — all
-   TOTP-enrolled therapists are locked out at login until either they
-   re-enroll or an operator clears the columns by direct database
-   action (no API exposes them):
-   `UPDATE users SET totp_secret = NULL, totp_enabled = NULL, totp_last_counter = NULL WHERE totp_secret IS NOT NULL;`
-   then those therapists log in password-only and re-enroll. Clearing
-   is usually the right call during an incident: a rotation under
-   pressure with a locked-out clinician population is its own S3.
-3. **Decoy salts (the enumeration signal):** the anti-enumeration decoy
-   salts derive from the token secret by default, so rotating it
-   changes every decoy — a longitudinal observer comparing
-   "unknown user" responses across the rotation boundary can
-   distinguish the rotation (and with it, infer when accounts were
-   created). Set a dedicated `MINDPATTERN_DECOY_SECRET` (it survives
-   the rotation) BEFORE rotating if that boundary matters for your
-   threat model; without it, accept the one-time fingerprint.
+1. **Bearer compromise:** replace `auth_token_secret`; every outstanding
+   bearer becomes invalid and users re-authenticate. Do not change the TOTP,
+   pairing, decoy, or audit files.
+2. **Pairing compromise:** replace `pairing_secret`; every live 15-minute
+   pairing code becomes unusable. Issue new codes.
+3. **TOTP-wrap compromise:** the backend has no dual-key rewrap path. Stop
+   traffic, preserve the incident evidence, clear `users.totp_secret`,
+   `users.totp_enabled`, and `users.totp_last_counter` and delete the matching
+   `totp_backup_codes` rows (whose digests use the same key) in one reviewed
+   database transaction, then replace
+   `totp_wrap_secret`. Every therapist must sign in and enroll a new factor
+   before patient-data routes reopen; retain a test of that fail-closed gate.
+4. **Audit-MAC compromise/rotation:** never overwrite the current key and
+   restart blindly. Stop the API, verify every chain and preserve that output
+   plus the journal anchor, then copy the old current key into the file named by
+   `MINDPATTERN_AUDIT_MAC_PREVIOUS_SECRETS_FILE` as
+   `old-version:64-hex-key`. Generate a distinct 32-byte key for
+   `audit_mac_secret`, increment `MINDPATTERN_AUDIT_MAC_KEY_VERSION` in the
+   non-secret operator env (never reuse a version), and restart. Require
+   `/readyz`, chain verification, and one successful audited action before
+   reopening traffic. Duplicate versions/keys or malformed ring entries fail
+   boot. Remove a historical entry only after every row and state anchor under
+   that version has aged out or an explicit reviewed re-seal migration has
+   completed. A missing historical key is loss of audit evidence and is S2.
+5. **Root compatibility key:** with all dedicated production secrets present,
+   changing it must not be used as a shortcut for any rotation above. Legacy
+   deployments must first split every purpose and prove historical audit/TOTP
+   compatibility.
 
-Sequence: set `MINDPATTERN_DECOY_SECRET` first (if you want it) → clear
-`users.totp_*` (or accept the lockout) → rotate the secret at the next
-deploy. All three consequences are the documented caveats registered in
-`docs/SECURITY_RESIDUALS.md`.
+Record old/new key versions, custody approvals, change time, pre/post chain
+verification, affected sessions/codes, and rollback decision in the incident
+timeline. Never put any key bytes in that record.
 
 ## S1: crisis-screen defect
 
@@ -200,8 +208,10 @@ this).
 
 ## S2: API down
 
-1. `/readyz` 503 → database: check the `db` container, then Postgres logs.
-   The app is fail-closed by design; it will not serve on a dead DB.
+1. `/readyz` 503 → first inspect the readiness response and
+   `mindpattern_audit_journal_failures_total`. Check the `db` container and
+   Postgres logs for a database failure; use "Audit-journal failure" below if
+   the journal is unhealthy. The app is fail-closed on either dependency.
 2. `/healthz` failing → the process itself: container logs, OOM (the
    memory limits exist to make this visible), CPU saturation from
    recomputes (`mindpattern_recompute_seconds` histogram — p95 climbing
@@ -210,6 +220,103 @@ this).
    host per database (in-process keystore/locks/counters; the boot guard
    enforces it). Saturation means: shed load (tighten
    `MINDPATTERN_PROCESSING_RATE_LIMIT`), then plan the Redis migration.
+
+## Audit-journal failure
+
+`MindPatternAuditJournalFailure` (S2) means an append or compaction could not
+fsync the out-of-database audit anchor. `/readyz` also returns 503 while that
+runtime fault remains active; an invalid or unwritable configured path fails
+production startup.
+
+1. Stop new traffic. Preserve the database chain-verification output, current
+   journal bytes, volume metadata, and failure time; do not delete, truncate,
+   hand-edit, or rotate the journal to clear the alert.
+2. Inspect capacity, mount presence, ownership, permissions, and storage I/O
+   for the existing `auditjournal` volume. Restore that same durable volume;
+   starting with an empty replacement destroys the independent tail evidence.
+3. After the storage cause is fixed, require a successful audited action (or
+   scheduled compaction), `/readyz` 200, and no new counter increment. Run full
+   chain+journal verification and retain its output before reopening traffic.
+4. If the original journal cannot be recovered or verification fails, keep the
+   service closed, classify the affected interval as an audit-integrity loss,
+   and follow the breach/evidence assessment rather than silently re-anchoring.
+
+## Audit-maintenance backlog or failure
+
+`MindPatternAuditMaintenanceFailure` (S2) means a bounded retention or
+verification pass failed and readiness stays closed until a complete
+authenticated pass succeeds. The two persistent-backlog alerts are S3 early
+warnings; the two-hour prune-overdue or verification-cycle alerts are S2
+because a deletion commitment or timely evidence check has been missed.
+
+1. Preserve the database, journal, durable verifier cursor/checkpoint, and
+   reusable journal-index artifact. Do not clear a gauge by deleting evidence,
+   resetting a cursor, or bypassing MAC/chain verification.
+2. Check `/readyz`, the failure counter, database health, audit-key-ring files,
+   journal volume identity/permissions/capacity, and the fixed-text service
+   logs. Restore the original inputs; never substitute an empty journal.
+3. Compare the bounded pending-row/owner probes across successive scrapes.
+   They may stay capped during a large backlog, so also confirm the durable
+   cursor advances and prune-overdue/cycle-age eventually decrease. Repeated
+   snapshot restarts indicate ongoing writes or checkpoint-integrity failure.
+4. Keep one API worker and preserve ordinary request headroom. Do not raise the
+   transaction/page bounds merely to silence the alert; repair capacity or the
+   failed dependency and let cooperative catch-up drain.
+5. Before reopening after an S2 failure, require `/readyz` 200, a complete
+   authenticated maintenance pass, stable journal/index evidence, and no new
+   failure increment. If the retention deadline was exceeded, involve the
+   privacy lead; if verification cannot complete, treat the interval as an
+   audit-integrity incident.
+
+## Account-deletion backlog
+
+`MindPatternAccountDeletionBacklogPersistent` (S3) means at least one durable
+bounded physical-purge job remained for 30 minutes.
+`MindPatternAccountDeletionOldestTooOld` (S2) means the oldest logically erased
+account has awaited physical purge for over two hours.
+`MindPatternAccountDeletionFailure` (S2) means a worker pass failed; its only
+label is the fixed safe category `database`, `object_store`, `state`, or
+`unexpected`.
+
+1. Preserve `account_deletion_jobs`, deletion tombstones, and pending audio
+   tombstones. Never delete them merely to clear an alert.
+2. Confirm `mindpattern_account_deletion_pending_probe` decreases and
+   `mindpattern_account_deletion_oldest_seconds` resets. A probe value of 1001
+   is saturated: there may be more jobs, but metric work remains bounded.
+3. Use the failure category to choose the dependency to inspect. Do not add
+   exception text, account identifiers, object keys, or storage paths to
+   metrics or routine logs.
+4. For `object_store`, restore the original recorded backend/locator and let
+   the durable audio tombstone retry. The worker sleeps up to 60 seconds while
+   all jobs await a future retry, but a new deletion wakes it immediately.
+5. For `state`, preserve the failed transaction and inspect revision exhaustion
+   or invalid phase/checkpoint state before repair; do not bypass the atomic
+   counterpart-revision fence. For `database`, restore availability and verify
+   bounded page commits resume.
+6. If the two-hour threshold or the deployment's promised erasure window was
+   exceeded, involve the privacy lead and retain job/metric/provider evidence.
+
+## Audio-deletion backlog
+
+`MindPatternAudioDeletionBacklogPersistent` (S3) means at least one durable
+tombstone remained for 30 minutes. `MindPatternAudioDeletionOldestTooOld`
+(S2) means a deletion has been pending over two hours—longer than the one-hour
+maximum retry delay plus multiple default sweeps.
+
+1. Preserve the database tombstones; never delete them to clear the gauge.
+2. Confirm the originally recorded backend/locator is reachable with the
+   configured least-privilege credentials. Do not redirect an old tombstone to
+   a different bucket/path.
+3. Restore provider access and wait for the 15-minute default sweep; confirm
+   both backlog and oldest-age gauges return to zero and the exact ciphertext
+   objects are absent.
+4. Check the provider/host-native `audio/` lifecycle rule and the configured
+   `MINDPATTERN_AUDIO_LIFECYCLE_CEILING_DAYS`. The application inventory sweep
+   removes untracked objects at that ceiling, but a process/provider outage is
+   why the independent rule is mandatory.
+5. If the ceiling or a promised user deletion window was exceeded, involve the
+   privacy lead, preserve object/tombstone/provider evidence, and assess breach
+   or rights-request notification obligations.
 
 ## Backups
 
@@ -250,23 +357,25 @@ have off-site backups.
 (copy, never sync — replication can never delete from the remote; remote
 retention is the operator's lifecycle policy). It ships ciphertext only and
 never sees `BACKUP_KEY`. Enable it with the layered command in
-`deploy/backup-offsite/README.md` (its `BACKUP_OFFSITE_*` values live in
-the owner-only secrets file, never the release env asset).
+`deploy/backup-offsite/README.md` (its non-secret `BACKUP_OFFSITE_*` deployment
+choices live in the owner-only operator env, while provider credentials live
+only in the mounted `rclone_config` secret; neither belongs in the release env
+asset).
 
 **Recovery when the HOST is gone** (database, local backups, and the
 compose stack are all lost):
 
 1. New host: follow deploy/README.md "Deploy a tagged release" through
    `compose pull`, but do not serve user traffic yet. Recover
-   `/etc/mindpattern/secrets.env` — including `BACKUP_KEY` from its second
-   location (above).
+   `/etc/mindpattern/operator.env` plus `/etc/mindpattern/secrets/`; restore
+   the `backup_key` file from its second location (above).
 2. Start only the database: `compose up -d db`.
 3. Fetch the newest ciphertext from object storage with the overlay's
-   one-shot mode (a host with only the secrets file and the release assets
-   can run it):
+   one-shot mode (a host with the recovered operator env, mounted secret, and
+   release assets can run it):
    ```bash
    mkdir -p /srv/restore
-   docker compose --env-file "$SECRETS_ENV" \
+   docker compose --env-file "$OPERATOR_ENV" --env-file "$RELEASE_ENV" \
      -f "$APP_DIR/docker-compose.yml" \
      -f "$APP_DIR/deploy/backup-offsite/docker-compose.yml" \
      --profile backups-offsite run --rm -v /srv/restore:/restore \
@@ -285,15 +394,18 @@ compose stack are all lost):
    backup). This is the exact selection
    `backend/scripts/rehearse_restore.sh` performs in `--remote` mode:
    ```bash
+   SECRET_DIR=/etc/mindpattern/secrets
    NEWEST=""
    for f in $(ls -1t /srv/restore/mindpattern-*.dump.enc); do
      [ -f "$f.hmac" ] && { NEWEST=$(basename "$f"); break; }
    done
    [ -n "$NEWEST" ] || { echo "no authenticated mindpattern-*.dump.enc (+ .hmac) in /srv/restore" >&2; exit 1; }
    set -o pipefail
-   docker run --rm -i -v /srv/restore:/restore -e BACKUP_KEY \
+   docker run --rm -i -v /srv/restore:/restore \
+     -v "$SECRET_DIR/backup_key:/run/secrets/backup_key:ro" \
+     -e BACKUP_KEY_FILE=/run/secrets/backup_key \
      --entrypoint mindpattern-backup-mac "$BACKUP_IMAGE" decrypt "/restore/$NEWEST" \
-     | docker compose --env-file "$SECRETS_ENV" \
+     | docker compose --env-file "$OPERATOR_ENV" --env-file "$RELEASE_ENV" \
      -f "$APP_DIR/docker-compose.yml" \
      exec -T db pg_restore -U "${POSTGRES_USER:-mindpattern}" -d "${POSTGRES_DB:-mindpattern}" --clean --if-exists
    ```
@@ -305,7 +417,7 @@ compose stack are all lost):
    traffic.
 
 **Rehearse this quarterly**: `bash backend/scripts/rehearse_restore.sh
---remote --env-file <secrets.env> [--env-file <release.env>]` IS steps 3–4
+--remote --env-file <operator.env> --env-file <release.env>` IS steps 3–4
 — it fetches from the off-site store through the overlay's one-shot mode
 (the `BACKUP_OFFSITE_*` values must live in one of the passed `--env-file`
 arguments), then authenticates, decrypts via the `/restore/$NEWEST`

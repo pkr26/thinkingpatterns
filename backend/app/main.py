@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import logging
+import random
 from contextlib import asynccontextmanager
 
 import anyio
@@ -24,6 +25,7 @@ from .deps import DEFAULT_ERROR_CODES
 from .metrics import MetricsMiddleware, MetricsRegistry
 from .middleware import HardeningMiddleware, RateLimitRule
 from .security.enclave import InMemoryKeyStore
+from .security.step_up import StepUpProofStore
 
 # Distinct from alembic/env.py's migration lock (727272): this one is held
 # for the app's LIFETIME, serializing deployments of the same database.
@@ -82,7 +84,7 @@ async def _release_cross_host_guard(conn: AsyncConnection | None) -> None:
     try:
         await conn.exec_driver_sql(f"SELECT pg_advisory_unlock({CROSS_HOST_ADVISORY_LOCK_ID})")
     except Exception:
-        logger.warning("pg_advisory_unlock failed; disconnect releases the lock", exc_info=True)
+        logger.warning("pg_advisory_unlock failed; disconnect releases the lock")
     finally:
         await conn.close()
 
@@ -139,114 +141,418 @@ APP_VERSION = __version__
 # grew unbounded. The sweep runs the same shared statement (see
 # api/therapist.py) once at startup and then daily.
 ACCESS_LOG_SWEEP_INTERVAL_SECONDS = 24 * 60 * 60
+# A bounded page that reports remaining work is followed cooperatively after
+# a short pause.  The pause gives ordinary requests headroom while ensuring
+# cardinality above one page does not turn into a multi-year daily backlog.
+AUDIT_MAINTENANCE_CATCHUP_SECONDS = 1
+AUDIT_MAINTENANCE_RETRY_MAX_SECONDS = 60
+# Expired generated questions can have a large legacy backlog. Bound the
+# awaited startup pass, then catch up in short deterministic batches while a
+# one-bit aggregate backlog gauge says more rows remain.
+QUESTION_RETENTION_BATCH = 500
+QUESTION_RETENTION_CATCHUP_SECONDS = 1
+AUXILIARY_RETENTION_BATCH = 500
 # Processing sessions contain client data keys.  The store also validates
 # expiry on every access, but a periodic purge is required so an abandoned
 # process does not retain expired key material merely because no later
 # request happens to touch the store.  A one-second cadence keeps the
 # over-TTL residency bounded without coupling one timer task to every key.
 PROCESSING_KEY_PURGE_INTERVAL_SECONDS = 1
+# Account erasure returns after one constant-size logical-retirement
+# transaction.  Physical rows and provider objects then drain through this
+# dedicated, restart-safe worker.  A request wakes it immediately; while a
+# backlog exists it yields between pages so ordinary traffic retains room.
+ACCOUNT_DELETION_IDLE_SECONDS = 60
+ACCOUNT_DELETION_CATCHUP_SECONDS = 1
 
 
-async def _prune_access_log_once(app: FastAPI) -> None:
-    """One daily housekeeping pass: access_log retention (the SAME
-    statement the pairing-code path issues — api.therapist
-    .access_log_prune_statement, imported at call time so both call sites
-    provably share one definition) plus dead pairing codes (2026-09-21
-    audit B-7: codes were pruned only opportunistically inside
-    create_pairing_code — an idle therapist meant dead rows accumulated
-    forever; the steady-state sweep now owns it too), expired token
-    revocations (independent audit 2026-09-27), and the audit-chain
-    verification sweep for recently-active patients — the runtime caller
-    that makes the chain's tamper evidence load-bearing instead of a
-    test-only helper."""
+async def _prune_expired_questions_once(app: FastAPI) -> bool:
+    """Delete one deterministic question-retention batch.
+
+    Returns whether at least one more expired row was visible. Both the
+    selection and delete are bounded, so a legacy backlog cannot monopolize
+    startup or a SQLite WAL writer; the recurring sweep uses the result for
+    prompt catch-up rather than waiting another day.
+    """
     from datetime import timedelta
 
-    from sqlalchemy import delete as sa_delete, select as sa_select
+    from sqlalchemy import delete, select
+
+    from .api.insights import QUESTION_RETENTION_DAYS
+    from .models import Insight, KIND_QUESTION, utcnow
+
+    cutoff = utcnow().date() - timedelta(days=QUESTION_RETENTION_DAYS)
+    async with app.state.sessionmaker() as session:
+        candidate_ids = list(
+            (
+                await session.scalars(
+                    select(Insight.id)
+                    .where(Insight.kind == KIND_QUESTION, Insight.for_date < cutoff)
+                    .order_by(Insight.for_date, Insight.id)
+                    .limit(QUESTION_RETENTION_BATCH + 1)
+                )
+            ).all()
+        )
+        batch_ids = candidate_ids[:QUESTION_RETENTION_BATCH]
+        if batch_ids:
+            result = await session.execute(delete(Insight).where(Insight.id.in_(batch_ids)))
+            pruned = max(0, int(getattr(result, "rowcount", len(batch_ids))))
+        else:
+            pruned = 0
+        await session.commit()
+    backlog = len(candidate_ids) > QUESTION_RETENTION_BATCH
+    app.state.question_retention_backlog = backlog
+    if hasattr(app.state.metrics, "observe_retention"):
+        app.state.metrics.observe_retention(
+            question_insights=pruned,
+            question_backlog=backlog,
+        )
+    return backlog
+
+
+async def _prune_auxiliary_retention_once(app: FastAPI, session, *, now) -> dict[str, tuple]:
+    """Delete one deterministic page for each auxiliary retention class.
+
+    At most four fixed-size ID batches share this transaction.  The first
+    unprocessed row in each ordered ``limit + 1`` probe supplies a privacy-
+    safe backlog/oldest-age signal without another global materialization.
+    """
+    from sqlalchemy import delete, select
+
+    from .api.therapist import PAIRING_RETENTION
+    from .models import (
+        AccountDeletionTombstone,
+        PairingCode,
+        RekeyJournal,
+        TokenRevocation,
+        User,
+    )
+
+    async def delete_page(
+        model, identity_column, timestamp_column, criterion
+    ) -> tuple[bool, float, int]:
+        candidates = list(
+            (
+                await session.execute(
+                    select(identity_column, timestamp_column)
+                    .where(criterion)
+                    .order_by(timestamp_column, identity_column)
+                    .limit(AUXILIARY_RETENTION_BATCH + 1)
+                )
+            ).all()
+        )
+        selected = candidates[:AUXILIARY_RETENTION_BATCH]
+        if selected:
+            await session.execute(
+                delete(model).where(identity_column.in_([row[0] for row in selected]))
+            )
+        backlog = len(candidates) > AUXILIARY_RETENTION_BATCH
+        oldest_age = (
+            max(0.0, (now - candidates[AUXILIARY_RETENTION_BATCH][1]).total_seconds())
+            if backlog
+            else 0.0
+        )
+        return backlog, oldest_age, len(selected)
+
+    pairing = await delete_page(
+        PairingCode,
+        PairingCode.id,
+        PairingCode.expires_at,
+        PairingCode.expires_at < now - PAIRING_RETENTION,
+    )
+    revocations = await delete_page(
+        TokenRevocation,
+        TokenRevocation.jti,
+        TokenRevocation.expires_at,
+        TokenRevocation.expires_at < now,
+    )
+    rekeys = await delete_page(
+        RekeyJournal,
+        RekeyJournal.id,
+        RekeyJournal.updated_at,
+        RekeyJournal.user_id.not_in(select(User.id)),
+    )
+    deletions = await delete_page(
+        AccountDeletionTombstone,
+        AccountDeletionTombstone.user_id,
+        AccountDeletionTombstone.expires_at,
+        AccountDeletionTombstone.expires_at <= now,
+    )
+    return {
+        "pairing": pairing,
+        "revocations": revocations,
+        "rekeys": rekeys,
+        "deletions": deletions,
+    }
+
+
+async def _prune_access_log_once(app: FastAPI) -> bool:
+    """Run one authenticated maintenance pass with one shared journal index."""
+    from .api._audit import reusable_journal_evidence_index
+
+    settings = app.state.settings
+    try:
+        mac_keys = settings.audit_mac_keyring
+        current_mac_key_version = settings.audit_mac_key_version
+        if not mac_keys or current_mac_key_version not in mac_keys:
+            raise RuntimeError("current audit MAC key is unavailable")
+    except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+        app.state.audit_maintenance_healthy = False
+        app.state.audit_maintenance_retry_needed = True
+        app.state.metrics.observe_audit_maintenance_failure()
+        logger.error("audit maintenance refused: MAC key ring is invalid")
+        raise RuntimeError("audit maintenance requires a valid MAC key ring") from exc
+
+    journal_evidence = None
+    try:
+        if settings.audit_journal_path:
+            journal_evidence = await anyio.to_thread.run_sync(
+                reusable_journal_evidence_index, settings.audit_journal_path
+            )
+            if journal_evidence.corrupt:
+                app.state.metrics.observe_audit_journal_failure()
+                raise RuntimeError("audit journal evidence is unavailable or malformed")
+        result = await _prune_access_log_once_with_evidence(
+            app,
+            mac_keys=mac_keys,
+            current_mac_key_version=current_mac_key_version,
+            journal_evidence=journal_evidence,
+        )
+    except Exception:
+        app.state.audit_maintenance_healthy = False
+        app.state.audit_maintenance_retry_needed = True
+        app.state.metrics.observe_audit_maintenance_failure()
+        raise
+    app.state.audit_maintenance_healthy = True
+    app.state.audit_maintenance_retry_needed = False
+    app.state.audit_maintenance_retry_delay_seconds = AUDIT_MAINTENANCE_CATCHUP_SECONDS
+    return result
+
+
+async def _prune_access_log_once_with_evidence(
+    app: FastAPI,
+    *,
+    mac_keys,
+    current_mac_key_version: int,
+    journal_evidence,
+) -> bool:
+    """One daily housekeeping pass: authenticated, bounded access-log
+    retention plus dead pairing codes (2026-09-21 audit B-7: codes were
+    pruned only opportunistically inside create_pairing_code — an idle
+    therapist meant dead rows accumulated forever), expired token
+    revocations (independent audit 2026-09-27), and the audit-chain
+    verification sweep for every durable chain owner by round-robin — the runtime caller
+    that makes the chain's tamper evidence load-bearing instead of a
+    test-only helper."""
+    from datetime import datetime, timedelta
+
     from sqlalchemy import select
 
-    from .api._audit import verify_access_log_chain
-    from .api.therapist import PAIRING_RETENTION, access_log_prune_statement
-    from .models import AccessLog, PairingCode, RekeyJournal, TokenRevocation, User, utcnow
+    from .api._audit import (
+        AUDIT_MAINTENANCE_OWNER_BATCH,
+        AUDIT_VERIFY_ROW_BATCH,
+        AUDIT_VERIFY_TOTAL_ROW_BATCH,
+        authenticate_verification_checkpoint,
+        compact_audit_journal,
+        prune_access_logs,
+        seal_verification_checkpoint,
+        seal_legacy_audit_states,
+        verify_access_log_chain_incremental,
+    )
+    from .models import (
+        AuditChainState,
+        AuditSweepCursor,
+        utcnow,
+    )
 
     now = utcnow()
     settings = app.state.settings
     async with app.state.sessionmaker() as session:
-        await session.execute(access_log_prune_statement(now, settings.access_log_retention_days))
-        await session.execute(
-            sa_delete(PairingCode).where(PairingCode.expires_at < now - PAIRING_RETENTION)
+        maintenance_cursor = await session.get(AuditSweepCursor, 1)
+        if maintenance_cursor is None:
+            maintenance_cursor = AuditSweepCursor(
+                id=1,
+                last_user_id=None,
+                prune_last_user_id=None,
+                updated_at=now,
+            )
+            session.add(maintenance_cursor)
+        prune_progress = {
+            "backlog": False,
+            "next_owner": None,
+            "owners_processed": 0,
+            "rows_deleted": 0,
+            "pending_rows_probe": 0,
+            "oldest_pending_at": None,
+        }
+
+        def observe_prune_progress(**values) -> None:
+            prune_progress.update(values)
+
+        await seal_legacy_audit_states(
+            session,
+            mac_keys=mac_keys,
+            current_mac_key_version=current_mac_key_version,
         )
-        await session.execute(sa_delete(TokenRevocation).where(TokenRevocation.expires_at < now))
-        # 2026-09-28 deep audit (models LOW): RekeyJournal rows orphaned by
-        # an interrupted rekey (process death before completion) or by
-        # account deletion (the lifecycle cascade cannot reach a non-FK
-        # column) accumulated forever — the same unbounded-growth class the
-        # pairing-code sweep closed. Users dropped from the users table are
-        # gone; journals older than the sweep horizon are abandoned.
-        await session.execute(
-            sa_delete(RekeyJournal).where(RekeyJournal.user_id.not_in(sa_select(User.id)))
+        await prune_access_logs(
+            session,
+            cutoff=now - timedelta(days=settings.access_log_retention_days),
+            mac_keys=mac_keys,
+            current_mac_key_version=current_mac_key_version,
+            journal_evidence=journal_evidence,
+            owner_after=maintenance_cursor.prune_last_user_id,
+            progress_observer=observe_prune_progress,
         )
+        maintenance_cursor.prune_last_user_id = prune_progress["next_owner"]
+        audit_prune_backlog = bool(prune_progress["backlog"])
+        if audit_prune_backlog:
+            if maintenance_cursor.prune_cycle_started_at is None:
+                maintenance_cursor.prune_cycle_started_at = now
+        else:
+            maintenance_cursor.prune_cycle_started_at = None
+        maintenance_cursor.updated_at = now
+        auxiliary_progress = await _prune_auxiliary_retention_once(app, session, now=now)
         await session.commit()
+    question_backlog = await _prune_expired_questions_once(app)
 
-    # Chain verification (independent audit 2026-09-27): every patient with
-    # an audit row in the last 24h, bounded, each verified with the MAC key
-    # and (when configured) against the out-of-DB journal. A broken chain
-    # logs at ERROR and bumps the metrics counter — the operator-visible
-    # tamper signal — but never fails the sweep cycle itself.
-    try:
-        mac_key = bytes.fromhex(settings.audit_mac_secret_hex)
-    except ValueError:
-        logger.error("audit MAC secret is not valid hex; chain verification runs link-only")
-        mac_key = None
+    # Chain verification is bounded by owners *and rows*. A large single
+    # owner resumes from a durable HMAC-authenticated checkpoint rather than
+    # monopolizing one pass or being rescanned from genesis on every page.
     retention_cutoff = now - timedelta(days=settings.access_log_retention_days)
-    # 2026-09-28 audit M-5: ONE pass over the journal file builds every
-    # patient's head (the per-patient scan made the sweep O(patients ×
-    # file) on a file that grows forever); verification below consumes the
-    # map, and compaction afterwards drops lines older than the retention
-    # boundary (minus a 7-day margin so the tail-truncation anchor can
-    # never lose a line the empty-trail check still compares against).
-    from .api._audit import compact_audit_journal, read_journal_heads
-
     journal_path = settings.audit_journal_path or None
-    # 2026-10-01 audit M14: the full-file walk (and the rewrite+fsync below)
-    # are blocking I/O — off the event loop like every other long pole in
-    # the sweep (the journal is bounded only by retention, 730d default).
-    journal_heads = (
-        await anyio.to_thread.run_sync(read_journal_heads, journal_path) if journal_path else None
-    )
     async with app.state.sessionmaker() as session:
-        user_ids = (
-            (
-                await session.execute(
-                    select(AccessLog.user_id)
-                    .where(AccessLog.at >= now - timedelta(hours=24))
-                    .group_by(AccessLog.user_id)
-                    .limit(500)
-                )
+        # Merge two independently bounded sorted pages (durable DB state and
+        # disk-spooled journal-only owners). Reaching the end completes this
+        # verification cycle and resets the cursor for the next daily cycle;
+        # a full page schedules a cooperative follow-up instead of waiting a
+        # day. No all-owner set is ever materialized in process memory.
+        cursor = await session.get(AuditSweepCursor, 1)
+        if cursor is None:
+            cursor = AuditSweepCursor(
+                id=1,
+                last_user_id=None,
+                prune_last_user_id=prune_progress["next_owner"],
+                updated_at=now,
             )
-            .scalars()
-            .all()
-        )
+            session.add(cursor)
+        authenticate_verification_checkpoint(cursor, mac_keys, current_mac_key_version)
+        active_owner = cursor.verification_owner_id
+        last = cursor.last_user_id
+        if active_owner is not None:
+            candidates = [active_owner]
+            candidate_page_has_more = True
+        else:
+            state_after = list(
+                (
+                    await session.execute(
+                        select(AuditChainState.user_id)
+                        .where(
+                            AuditChainState.user_id > last
+                            if last is not None
+                            else AuditChainState.user_id.is_not(None)
+                        )
+                        .order_by(AuditChainState.user_id)
+                        .limit(AUDIT_MAINTENANCE_OWNER_BATCH + 1)
+                    )
+                ).scalars()
+            )
+            journal_after = (
+                journal_evidence.owner_ids_after(last, AUDIT_MAINTENANCE_OWNER_BATCH + 1)
+                if journal_evidence is not None
+                else []
+            )
+            candidates = sorted(set(state_after) | set(journal_after))
+            candidate_page_has_more = len(candidates) > AUDIT_MAINTENANCE_OWNER_BATCH
+            candidates = candidates[:AUDIT_MAINTENANCE_OWNER_BATCH]
         failures = 0
-        for uid in user_ids:
-            verdict = await verify_access_log_chain(
+        owners_verified = 0
+        rows_remaining = AUDIT_VERIFY_TOTAL_ROW_BATCH
+        verification_backlog = candidate_page_has_more
+        for index, uid in enumerate(candidates):
+            if rows_remaining <= 0:
+                verification_backlog = True
+                break
+            verdict = await verify_access_log_chain_incremental(
                 session,
+                cursor,
                 uid,
-                mac_key=mac_key,
-                journal_path=journal_path,
+                mac_keys=mac_keys,
+                current_mac_key_version=current_mac_key_version,
                 retention_cutoff=retention_cutoff,
-                journal_heads=journal_heads,
+                journal_evidence=journal_evidence,
+                row_budget=min(AUDIT_VERIFY_ROW_BATCH, rows_remaining),
             )
+            rows_remaining -= verdict.rows_checked
             if not verdict.ok:
                 failures += 1
-                logger.error(
-                    "audit chain verification FAILED for user %s at seq %s: %s",
-                    uid,
-                    verdict.broken_at_seq,
-                    verdict.reason,
-                )
+                break
+            if verdict.complete:
+                owners_verified += 1
+            else:
+                verification_backlog = True
+                break
+            if index + 1 < len(candidates):
+                verification_backlog = True
+            elif not candidate_page_has_more:
+                verification_backlog = False
         if failures:
             app.state.metrics.observe_audit_chain(failures=failures)
-    if journal_path:
+            logger.error("audit chain verification failed for %d owner(s)", failures)
+            # A failed page may have populated tentative in-memory checkpoint
+            # fields before discovering the bad row. Never commit those
+            # fields with the previous checkpoint MAC: retain the last known
+            # authenticated resume point for diagnosis and retry.
+            await session.rollback()
+            raise RuntimeError("audit chain verification failed")
+        if not candidates:
+            verification_backlog = False
+        if not verification_backlog and not failures:
+            cursor.last_user_id = None
+            seal_verification_checkpoint(cursor, mac_keys, current_mac_key_version)
+        if verification_backlog:
+            if cursor.verification_cycle_started_at is None:
+                cursor.verification_cycle_started_at = now
+        else:
+            cursor.verification_cycle_started_at = None
+        verification_cycle_age = (
+            max(0.0, (now - cursor.verification_cycle_started_at).total_seconds())
+            if cursor.verification_cycle_started_at is not None
+            else 0.0
+        )
+        cursor.updated_at = now
+        await session.commit()
+    rows_pruned = prune_progress["rows_deleted"]
+    if not isinstance(rows_pruned, int):  # observer is internal; fail closed on drift
+        raise RuntimeError("audit prune progress is invalid")
+    pending_rows_probe = prune_progress["pending_rows_probe"]
+    oldest_pending_at = prune_progress["oldest_pending_at"]
+    if isinstance(pending_rows_probe, bool) or not isinstance(pending_rows_probe, int):
+        raise RuntimeError("audit prune progress is invalid")
+    if oldest_pending_at is not None and not isinstance(oldest_pending_at, datetime):
+        raise RuntimeError("audit prune progress is invalid")
+    app.state.audit_prune_backlog = audit_prune_backlog
+    app.state.audit_verification_backlog = verification_backlog
+    auxiliary_backlog = any(bool(values[0]) for values in auxiliary_progress.values())
+    app.state.auxiliary_retention_backlog = auxiliary_backlog
+    app.state.metrics.observe_audit_progress(
+        prune_backlog=audit_prune_backlog,
+        verification_backlog=verification_backlog,
+        rows_pruned=rows_pruned,
+        owners_verified=owners_verified,
+        prune_pending_rows_probe=pending_rows_probe,
+        prune_oldest_overdue_seconds=(
+            max(
+                0.0,
+                (retention_cutoff - oldest_pending_at).total_seconds(),
+            )
+            if oldest_pending_at is not None
+            else 0.0
+        ),
+        verification_pending_owners_probe=max(0, len(candidates) - owners_verified),
+        verification_cycle_age_seconds=verification_cycle_age,
+    )
+    app.state.metrics.observe_auxiliary_retention(auxiliary_progress)
+    if journal_path and not audit_prune_backlog and not verification_backlog:
         compaction_cutoff = (retention_cutoff - timedelta(days=7)).isoformat()
         try:
             kept, dropped = await anyio.to_thread.run_sync(
@@ -260,7 +566,11 @@ async def _prune_access_log_once(app: FastAPI) -> None:
                     compaction_cutoff,
                 )
         except Exception:  # noqa: BLE001 — compaction is best-effort by contract
-            logger.exception("audit journal compaction failed; retrying next cycle")
+            app.state.metrics.observe_audit_journal_failure()
+            logger.error("audit journal compaction failed; retrying next cycle")
+    return bool(
+        question_backlog or audit_prune_backlog or verification_backlog or auxiliary_backlog
+    )
 
 
 async def _access_log_retention_sweep(app: FastAPI) -> None:
@@ -269,13 +579,62 @@ async def _access_log_retention_sweep(app: FastAPI) -> None:
     failed pass logs and waits for the next cycle: retention lag must
     never take the app down."""
     while True:
-        await asyncio.sleep(ACCESS_LOG_SWEEP_INTERVAL_SECONDS)
+        retry_needed = bool(getattr(app.state, "audit_maintenance_retry_needed", False))
+        question_catchup = bool(getattr(app.state, "question_retention_backlog", False))
+        audit_catchup = bool(
+            getattr(app.state, "audit_prune_backlog", False)
+            or getattr(app.state, "audit_verification_backlog", False)
+            or getattr(app.state, "auxiliary_retention_backlog", False)
+        )
+        catching_up = question_catchup or audit_catchup
+        if retry_needed:
+            retry_base = max(
+                AUDIT_MAINTENANCE_CATCHUP_SECONDS,
+                min(
+                    float(
+                        getattr(
+                            app.state,
+                            "audit_maintenance_retry_delay_seconds",
+                            AUDIT_MAINTENANCE_CATCHUP_SECONDS,
+                        )
+                    ),
+                    AUDIT_MAINTENANCE_RETRY_MAX_SECONDS,
+                ),
+            )
+            # Bounded jitter prevents a fleet restarted after the same outage
+            # from hammering its database in lock-step. Never exceed the cap.
+            delay = min(
+                AUDIT_MAINTENANCE_RETRY_MAX_SECONDS,
+                retry_base * (0.8 + 0.4 * random.random()),
+            )
+        elif catching_up:
+            delay = min(QUESTION_RETENTION_CATCHUP_SECONDS, AUDIT_MAINTENANCE_CATCHUP_SECONDS)
+        else:
+            delay = ACCESS_LOG_SWEEP_INTERVAL_SECONDS
+        await asyncio.sleep(delay)
         try:
-            await _prune_access_log_once(app)
+            if retry_needed or audit_catchup:
+                await _prune_access_log_once(app)
+            elif question_catchup:
+                await _prune_expired_questions_once(app)
+            else:
+                await _prune_access_log_once(app)
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("access_log retention sweep failed; retrying next cycle")
+            app.state.audit_maintenance_retry_needed = True
+            current_delay = float(
+                getattr(
+                    app.state,
+                    "audit_maintenance_retry_delay_seconds",
+                    AUDIT_MAINTENANCE_CATCHUP_SECONDS,
+                )
+            )
+            app.state.audit_maintenance_retry_delay_seconds = min(
+                AUDIT_MAINTENANCE_RETRY_MAX_SECONDS,
+                max(AUDIT_MAINTENANCE_CATCHUP_SECONDS, current_delay * 2),
+            )
+            logger.error("retention sweep failed; retrying shortly")
 
 
 async def _processing_key_sweep(app: FastAPI) -> None:
@@ -288,8 +647,125 @@ async def _processing_key_sweep(app: FastAPI) -> None:
         except Exception:
             # A failure here must not take the API down; expiration is still
             # enforced at get/pop/create, and the next short interval retries.
-            logger.exception("processing-key expiry sweep failed; retrying shortly")
+            logger.error("processing-key expiry sweep failed; retrying shortly")
         await asyncio.sleep(PROCESSING_KEY_PURGE_INTERVAL_SECONDS)
+
+
+async def _purge_deleted_account_once(app: FastAPI) -> bool:
+    """Drain one fixed account-erasure page and return backlog state."""
+    from .models import utcnow
+    from .services.account_deletion import (
+        ACCOUNT_PURGE_AUDIO_BATCH,
+        account_deletion_status,
+        purge_one_account_page,
+    )
+    from .services.audio_store import drain_audio_deletions
+
+    async with app.state.sessionmaker() as session:
+        # Object deletion is itself leased, retryable and fixed-size.  Run a
+        # page before advancing an ``audio_wait`` job so a completed account
+        # cannot remain solely because the ordinary audio-retention cadence
+        # is long.
+        await drain_audio_deletions(
+            session,
+            app.state.settings,
+            limit=ACCOUNT_PURGE_AUDIO_BATCH,
+            failure_observer=lambda: app.state.metrics.observe_account_deletion_failure(
+                "object_store"
+            ),
+        )
+        await purge_one_account_page(session, app.state.settings)
+        await session.commit()
+        status = await account_deletion_status(session)
+    backlog = status.pending_probe > 0
+    oldest_seconds = (
+        max(0.0, (utcnow() - status.oldest_requested_at).total_seconds())
+        if status.oldest_requested_at is not None
+        else 0.0
+    )
+    app.state.metrics.observe_account_deletion(
+        pending_probe=status.pending_probe,
+        oldest_seconds=oldest_seconds,
+    )
+    app.state.account_deletion_backlog = backlog
+    app.state.account_deletion_failure_streak = 0
+    if not backlog:
+        retry_delay = float(ACCOUNT_DELETION_IDLE_SECONDS)
+    elif status.runnable:
+        retry_delay = ACCOUNT_DELETION_CATCHUP_SECONDS
+    elif status.next_due_at is not None:
+        retry_delay = max(
+            ACCOUNT_DELETION_CATCHUP_SECONDS,
+            min(
+                ACCOUNT_DELETION_IDLE_SECONDS,
+                (status.next_due_at - utcnow()).total_seconds(),
+            ),
+        )
+    else:
+        retry_delay = ACCOUNT_DELETION_IDLE_SECONDS
+    app.state.account_deletion_retry_delay_seconds = retry_delay
+    return backlog
+
+
+def _account_deletion_failure_category(exc: Exception) -> str:
+    """Normalize worker failures without exposing exception text or identifiers."""
+
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from .deps import ApiError
+    from .services.audio_store import AudioStoreError
+
+    if isinstance(exc, AudioStoreError):
+        return "object_store"
+    if isinstance(exc, SQLAlchemyError):
+        return "database"
+    if isinstance(exc, (ApiError, RuntimeError)):
+        return "state"
+    return "unexpected"
+
+
+async def _account_deletion_sweep(app: FastAPI) -> None:
+    """Wakeable bounded erasure worker; durable jobs survive every restart."""
+    while True:
+        delay = (
+            max(
+                ACCOUNT_DELETION_CATCHUP_SECONDS,
+                float(
+                    getattr(
+                        app.state,
+                        "account_deletion_retry_delay_seconds",
+                        ACCOUNT_DELETION_CATCHUP_SECONDS,
+                    )
+                ),
+            )
+            if bool(getattr(app.state, "account_deletion_backlog", False))
+            else ACCOUNT_DELETION_IDLE_SECONDS
+        )
+        try:
+            await asyncio.wait_for(app.state.account_deletion_wakeup.wait(), timeout=delay)
+        except TimeoutError:
+            pass
+        except asyncio.CancelledError:
+            raise
+        app.state.account_deletion_wakeup.clear()
+        try:
+            await _purge_deleted_account_once(app)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            category = _account_deletion_failure_category(exc)
+            app.state.metrics.observe_account_deletion_failure(category)
+            app.state.account_deletion_backlog = True
+            failure_streak = int(getattr(app.state, "account_deletion_failure_streak", 0)) + 1
+            app.state.account_deletion_failure_streak = failure_streak
+            app.state.account_deletion_retry_delay_seconds = min(
+                ACCOUNT_DELETION_IDLE_SECONDS,
+                ACCOUNT_DELETION_CATCHUP_SECONDS * (2 ** min(failure_streak, 6)),
+            )
+            logger.error(
+                "account deletion sweep failed; category=%s; retrying with bounded backoff",
+                category,
+            )
 
 
 async def _audio_retention_sweep(app: FastAPI) -> None:
@@ -302,9 +778,12 @@ async def _audio_retention_sweep(app: FastAPI) -> None:
     feature or store is unconfigured.
     """
     from .services.audio_store import (
+        AudioStoreError,
         get_audio_store_cached,
         sweep_expired_audio,
         drain_audio_deletions,
+        reconcile_audio_inventory,
+        audio_deletion_backlog,
     )
 
     while True:
@@ -315,12 +794,40 @@ async def _audio_retention_sweep(app: FastAPI) -> None:
             async with app.state.sessionmaker() as session:
                 swept = await sweep_expired_audio(session, store, settings)
                 await drain_audio_deletions(session, settings)
+                inventory_progress = {
+                    "scanned": 0,
+                    "backlog": False,
+                    "cycle_completed": False,
+                }
+
+                def observe_inventory_progress(**values) -> None:
+                    inventory_progress.update(values)
+
+                reconciled = await reconcile_audio_inventory(
+                    session,
+                    store,
+                    settings,
+                    progress_observer=observe_inventory_progress,
+                )
+                backlog, oldest_age = await audio_deletion_backlog(session)
+                app.state.metrics.observe_audio_retention(
+                    backlog=backlog,
+                    oldest_age_seconds=oldest_age,
+                    reconciled=reconciled,
+                    inventory_scanned=int(inventory_progress["scanned"]),
+                    inventory_backlog=bool(inventory_progress["backlog"]),
+                    inventory_cycle_completed=bool(inventory_progress["cycle_completed"]),
+                )
             if swept:
                 logger.info("audio retention sweep removed %d expired attachment(s)", swept)
         except asyncio.CancelledError:
             raise
+        except AudioStoreError:
+            app.state.metrics.observe_audio_storage_failure()
+            logger.warning("audio retention sweep deferred after storage failure")
         except Exception:
-            logger.exception("audio retention sweep failed; retrying next cycle")
+            app.state.metrics.observe_audio_storage_failure()
+            logger.error("audio retention sweep failed unexpectedly; retrying next cycle")
 
 
 def _error_envelope(status_code: int, detail, code: str | None = None) -> dict:
@@ -399,6 +906,10 @@ def _rate_limit_rules(app: FastAPI) -> tuple[RateLimitRule, ...]:
 def create_app(settings: config.Settings | None = None) -> FastAPI:
     settings = settings or config.settings
     is_development = settings.environment == "development"
+    if not is_development:
+        from .api._audit import validate_audit_journal_path
+
+        validate_audit_journal_path(settings.audit_journal_path)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -429,6 +940,7 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
             sweep_task: asyncio.Task | None = None
             key_sweep_task: asyncio.Task | None = None
             audio_sweep_task: asyncio.Task | None = None
+            account_deletion_task: asyncio.Task | None = None
             try:
                 # create_all is a dev/test convenience only. Outside development
                 # the schema comes from `alembic upgrade head` (run by the image
@@ -448,9 +960,9 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
                 try:
                     async with app.state.sessionmaker() as session:
                         await app.state.token_revocations.hydrate(session)
-                except Exception as exc:  # noqa: BLE001 — boot must survive a missing table
+                except Exception:  # noqa: BLE001 — boot must survive a missing table
                     config.logger.warning(
-                        "token-revocation hydration skipped (schema not present yet?): %s", exc
+                        "token-revocation hydration skipped because storage is unavailable"
                     )
                 # The FIRST housekeeping pass runs AWAITED, before the app
                 # serves anything: a sweep interleaving with the first
@@ -462,7 +974,7 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
                 try:
                     await _prune_access_log_once(app)
                 except Exception:  # noqa: BLE001 — boot must survive a failed sweep
-                    config.logger.exception("initial housekeeping pass failed; retrying in 24h")
+                    config.logger.error("initial housekeeping pass failed; retrying shortly")
                 # The app.state handle pins the task's lifecycle to the
                 # lifespan for tests.
                 sweep_task = asyncio.create_task(_access_log_retention_sweep(app))
@@ -474,6 +986,11 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
                 # flip needs no restart.
                 audio_sweep_task = asyncio.create_task(_audio_retention_sweep(app))
                 app.state.audio_sweep_task = audio_sweep_task
+                # Wake once at every boot: a crash can leave durable purge
+                # jobs even though no live request remains to signal them.
+                app.state.account_deletion_wakeup.set()
+                account_deletion_task = asyncio.create_task(_account_deletion_sweep(app))
+                app.state.account_deletion_sweep_task = account_deletion_task
                 yield
             finally:
                 if guard_task is not None:
@@ -488,10 +1005,16 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
                 if audio_sweep_task is not None:
                     audio_sweep_task.cancel()
                     await asyncio.gather(audio_sweep_task, return_exceptions=True)
+                if account_deletion_task is not None:
+                    account_deletion_task.cancel()
+                    await asyncio.gather(account_deletion_task, return_exceptions=True)
                 # Process shutdown is a terminal lifecycle boundary: drop
                 # every key before disposing DB/network resources or returning
                 # control to a process manager that may retain memory briefly.
                 app.state.key_store.destroy_all()
+                from .api._audit import close_reusable_journal_evidence_index
+
+                close_reusable_journal_evidence_index()
                 await _release_cross_host_guard(boot_guard_conn)
                 await app.state.engine.dispose()
 
@@ -528,13 +1051,34 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
     # deps.require_user. In-process on the same standing as the rate
     # counter and the keystore (one host per database, enforced at boot).
     app.state.token_revocations = TokenRevocationStore()
+    app.state.step_up_store = StepUpProofStore()
     app.state.metrics = MetricsRegistry()
+    app.state.audit_maintenance_healthy = True
+    app.state.audit_maintenance_retry_needed = False
+    app.state.audit_maintenance_retry_delay_seconds = AUDIT_MAINTENANCE_CATCHUP_SECONDS
+    app.state.audit_prune_backlog = False
+    app.state.audit_verification_backlog = False
+    app.state.auxiliary_retention_backlog = False
+    app.state.question_retention_backlog = False
+    app.state.account_deletion_backlog = False
+    app.state.account_deletion_retry_delay_seconds = ACCOUNT_DELETION_IDLE_SECONDS
+    app.state.account_deletion_failure_streak = 0
+    app.state.account_deletion_wakeup = asyncio.Event()
     # Independent audit 2026-09-27: seal every runtime audit append with
     # the keyed MAC (secret resolved from the env/file or derived from the
     # token secret — never stored in the database).
     from .api._audit import configure_audit_mac_key
 
-    configure_audit_mac_key(bytes.fromhex(settings.audit_mac_secret_hex))
+    audit_keys = settings.audit_mac_keyring
+    audit_key_version = settings.audit_mac_key_version
+    configure_audit_mac_key(
+        audit_keys[audit_key_version],
+        settings.audit_journal_path,
+        key_version=audit_key_version,
+        previous_keys={
+            version: key for version, key in audit_keys.items() if version != audit_key_version
+        },
+    )
     # Analysis (brain recomputes) is attacker-sized CPU work; a dedicated
     # limiter keeps it from occupying every worker thread that auth scrypt
     # and ordinary requests also need.
@@ -592,6 +1136,7 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
             "X-Processing-Token",
             "X-New-Processing-Token",
             "X-Account-Verifier",
+            "X-Step-Up-Proof",
             "X-Therapist-Enrollment-Token",
             # X-Pairing-Code rides GET /therapist/pairing/sas (deep audit
             # 2026-09-28): the portal is a browser client, and a header not
@@ -716,6 +1261,19 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
             return JSONResponse(
                 status_code=503, content=_error_envelope(503, "instance ownership unavailable")
             )
+        if not request.app.state.audit_maintenance_healthy:
+            return JSONResponse(
+                status_code=503,
+                content=_error_envelope(503, "audit maintenance unavailable"),
+            )
+        if request.app.state.settings.audit_journal_path:
+            from .api._audit import audit_journal_health
+
+            if not audit_journal_health()[0]:
+                return JSONResponse(
+                    status_code=503,
+                    content=_error_envelope(503, "audit journal unavailable"),
+                )
         try:
             async with request.app.state.sessionmaker() as session:
                 await session.execute(text("SELECT 1"))
@@ -732,7 +1290,7 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
                             f"database schema revision {version!r} is not required head {SCHEMA_HEAD!r}"
                         )
         except Exception:
-            logger.exception("readiness check failed: database or schema unavailable")
+            logger.error("readiness check failed: database or schema unavailable")
             return JSONResponse(
                 status_code=503,
                 content=_error_envelope(503, "database unavailable"),

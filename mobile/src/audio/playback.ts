@@ -1,12 +1,14 @@
 /**
  * Decrypt-and-play for kept recordings (VOICE_PLAN P4, 2026-09-29).
  *
- * Fetch the encrypted attachment → decrypt in memory → write a cache file
- * expo-audio can play → release the plaintext buffer. Nothing decrypted
- * persists beyond the OS cache dir, and `release` deletes the scratch file.
+ * Fetch the encrypted attachment → decrypt in memory → write an app-private
+ * cache file expo-audio can play → release the plaintext buffer. `release`
+ * deletes the scratch file. A process kill can bypass release, so cold start,
+ * account erasure, and origin retirement also scrub the owned cache roots.
  */
 import * as FileSystem from "expo-file-system/legacy";
 import { decryptAudio } from "../crypto/MindPatternCrypto";
+import { createPlaybackScratchUri } from "./voiceScratch";
 
 export interface PlayingVoice {
   uri: string;
@@ -28,7 +30,7 @@ export async function playVoiceAttachment(options: {
     const fetched = await options.fetchBlob();
     if (options.cancelled?.()) throw new Error("Playback cancelled");
     plaintext = decryptAudio({ dataKey: key }, options.userId, options.clientEntryId, fetched.blob);
-    uri = `${FileSystem.cacheDirectory}voice-${Date.now()}-${Math.random().toString(36).slice(2)}.m4a`;
+    uri = await createPlaybackScratchUri(options.userId, fetched.mime_type);
     await FileSystem.writeAsStringAsync(uri, plaintext.toString("base64"), { encoding: FileSystem.EncodingType.Base64 });
     if (options.cancelled?.()) throw new Error("Playback cancelled");
     const scratch = uri;

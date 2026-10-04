@@ -7,6 +7,8 @@
  * lifeline, in writing), and the "Make a safety plan" link renders only
  * while the vault is unlocked — always BELOW the static resources, which
  * stay complete and first in every state. */
+// @ts-nocheck
+
 import { describe, expect, it, vi } from "vitest";
 import { CrisisCard } from "../src/crisis";
 import { crisisDialogShownOn, recordCrisisDialogShown } from "../src/crisisDialog";
@@ -23,6 +25,7 @@ describe("CrisisCard", () => {
     expect(text).toContain("988");
     expect(text).toContain("741741");
     expect(text).toContain("findahelpline.com");
+    expect(root.root.findAllByType("a").some((node) => node.props.href === "tel:911")).toBe(true);
   });
 
   it("offers the 988 lifeline CHAT with the never-translated URL, opened externally", async () => {

@@ -59,7 +59,10 @@ async def test_therapist_rotates_password_credential(client):
     # The epoch bump retires every bearer issued under the old credential.
     stale = await client.get("/api/therapist/me", headers=old.headers)
     assert stale.status_code == 401
-    # The new password is the login credential now.
+    # The new password is the login credential now; password rotation
+    # deliberately preserves the enrolled second factor and recovery codes.
+    successor.totp_secret = old.totp_secret
+    successor.totp_backup_codes = old.totp_backup_codes
     await successor.login(client)
 
 

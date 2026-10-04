@@ -308,7 +308,7 @@ describe("mutation pins 2026-09-22: api request body shapes", () => {
       headers.push(init.headers);
       return { ok: true, status: 200, json: async () => ({ token: "t", user_id: "u", expires_in: 1, role: "therapist" }), headers: new Headers(), url: "" };
     }));
-    const payload = { username: "u", salt: "s", verifier: "v", display_name: "d", wrap_pub_key: "p", wrap_key_blob: "b" };
+    const payload = { username: "u", salt: "s", verifier: "v", display_name: "d", wrap_pub_key: "p", wrap_key_blob: "b", age_attestation: "minimum_age_confirmed_v1" as const };
     await realApi.auth.registerTherapist(BASE, payload, "  tok  ");
     await realApi.auth.registerTherapist(BASE, payload, "   ");
     await realApi.auth.registerTherapist(BASE, payload);
@@ -478,25 +478,34 @@ describe("mutation pins 2026-09-22: crypto sanitization", () => {
     return toBase64(blob);
   };
 
-  it("decryptMeasure accepts the exact score boundaries 0 and 100 and rejects outside them", async () => {
-    for (const score of [0, 100]) {
-      const blob = await sealedMeasure({ v: 1, measure: "phq9", score, completed_at: "2026-09-01T12:00:00Z" }, "m1");
-      const reading = await realCrypto.decryptMeasure(dataKey(), "user-1", { client_measure_id: "m1", blob, measure_date: "2026-09-01" });
-      expect(reading, `score ${score}`).toMatchObject({ score });
+  it("decryptMeasure enforces each instrument's exact integer score range", async () => {
+    const bounds = [{ measure: "phq9", max: 27 }, { measure: "gad7", max: 21 }, { measure: "phq2", max: 6 }] as const;
+    for (const { measure, max } of bounds) {
+      for (const score of [0, max]) {
+        const id = `${measure}-${score}`;
+        const blob = await sealedMeasure({ v: 1, measure, score, completed_at: "2026-09-01T12:00:00Z" }, id);
+        const reading = await realCrypto.decryptMeasure(dataKey(), "user-1", { client_measure_id: id, blob, measure_date: "2026-09-01" });
+        expect(reading, `${measure} score ${score}`).toMatchObject({ measure, score });
+      }
+      const id = `${measure}-over`;
+      const blob = await sealedMeasure({ v: 1, measure, score: max + 1, completed_at: null }, id);
+      await expect(realCrypto.decryptMeasure(dataKey(), "user-1", { client_measure_id: id, blob, measure_date: "2026-09-01" })).resolves.toBeNull();
     }
-    for (const score of [-1, 101, Number.NaN, Number.POSITIVE_INFINITY, "7", null]) {
-      const blob = await sealedMeasure({ v: 1, measure: "phq9", score, completed_at: null }, "m2");
-      const reading = await realCrypto.decryptMeasure(dataKey(), "user-1", { client_measure_id: "m2", blob, measure_date: "2026-09-01" });
+    for (const score of [-1, 4.5, 100, Number.NaN, Number.POSITIVE_INFINITY, "7", null]) {
+      const blob = await sealedMeasure({ v: 1, measure: "phq9", score, completed_at: null }, "m-invalid");
+      const reading = await realCrypto.decryptMeasure(dataKey(), "user-1", { client_measure_id: "m-invalid", blob, measure_date: "2026-09-01" });
       expect(reading, `score ${String(score)}`).toBeNull();
     }
   });
 
-  it("decryptMeasure clamps the display fields to their fixed slices", async () => {
+  it("decryptMeasure accepts only known instruments while clamping date display fields", async () => {
     const blob = await sealedMeasure({
-      v: 1, measure: "m".repeat(30), score: 4, completed_at: "2026-09-01T12:00:00.999Z",
+      v: 1, measure: "phq9", score: 4, completed_at: "2026-09-01T12:00:00.999Z",
     }, "m3");
     const reading = await realCrypto.decryptMeasure(dataKey(), "user-1", { client_measure_id: "m3", blob, measure_date: "2026-09-01T23:59:59Z" });
-    expect(reading).toMatchObject({ measure: "m".repeat(24), completedAt: "2026-09-01", measureDate: "2026-09-01" });
+    expect(reading).toMatchObject({ measure: "phq9", completedAt: "2026-09-01", measureDate: "2026-09-01" });
+    const unknown = await sealedMeasure({ v: 1, measure: "custom", score: 4, completed_at: null }, "m4");
+    await expect(realCrypto.decryptMeasure(dataKey(), "user-1", { client_measure_id: "m4", blob: unknown, measure_date: "2026-09-01" })).resolves.toBeNull();
   });
 
   it("decryptCaseloadSummary sanitizes every field of a hostile summary", async () => {
@@ -717,6 +726,9 @@ describe("mutation pins 2026-09-22: LoginView", () => {
     await typeInto(root, "Username", "drpin");
     await typeInto(root, "Password", "orchard-copper-value-123");
     await typeInto(root, "Repeat password", "orchard-copper-value-123");
+    const age = root.root.findAllByType("input").find((node) => node.props.type === "checkbox")!;
+    const { act } = await import("react");
+    await act(async () => { age.props.onChange({ target: { checked: true } }); });
     await press(root, "Create account");
     await flush();
     expect(onReady).toHaveBeenCalledTimes(1);

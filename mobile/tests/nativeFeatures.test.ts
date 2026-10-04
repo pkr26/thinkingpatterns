@@ -6,6 +6,7 @@
  * the next local fire time.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { __resetLocalKeyLifecycleForTests, changeLocalSessionOwner } from "../src/localWriteGuard";
 
 // The seam resolves the module through a dynamic import (require fails in
 // a node build), which vi.mock intercepts — see probeAsync in nativeFeatures.
@@ -21,10 +22,12 @@ vi.mock("@notifee/react-native", () => ({
   RepeatFrequency: { HOURLY: 0, DAILY: 1, WEEKLY: 2 },
 }));
 
-const { scheduleDailyReminder, cancelDailyReminder } = await import("../src/nativeFeatures");
+const { scheduleDailyReminder, cancelDailyReminder, cancelOriginNotifications } = await import("../src/nativeFeatures");
 const { nextReminderFireTime } = await import("../src/reminders");
 
 beforeEach(() => {
+  __resetLocalKeyLifecycleForTests();
+  changeLocalSessionOwner("user-1");
   requestPermission.mockReset();
   requestPermission.mockResolvedValue({ authorizationStatus: 1 });
   createTriggerNotification.mockReset();
@@ -183,6 +186,19 @@ describe("cancelDailyReminder", () => {
   });
 });
 
+describe("cancelOriginNotifications", () => {
+  it("retires the complete app-owned notification set", async () => {
+    expect(await cancelOriginNotifications()).toBe(true);
+    expect(cancelAllNotifications).toHaveBeenCalledTimes(1);
+    expect(cancelNotification).not.toHaveBeenCalled();
+  });
+
+  it("reports a present native scheduler failure", async () => {
+    cancelAllNotifications.mockRejectedValueOnce(new Error("native exploded"));
+    expect(await cancelOriginNotifications()).toBe(false);
+  });
+});
+
 describe("module ABSENT (this build)", () => {
   it("both actions are quiet no-ops returning false", async () => {
     // Simulate the unlinked build: the dynamic import resolves to nothing
@@ -195,6 +211,7 @@ describe("module ABSENT (this build)", () => {
     try {
       expect(await scheduleDailyReminder(20, 0)).toBe(false);
       expect(await cancelDailyReminder()).toBe(false);
+      expect(await cancelOriginNotifications()).toBe(true);
     } finally {
       notifee.default.requestPermission = original;
     }

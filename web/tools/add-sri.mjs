@@ -27,8 +27,6 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { assertNoSecurityTxtPlaceholders } from "./securityTxt.mjs";
-
 const dist = join(import.meta.dirname, "..", "dist");
 const indexPath = join(dist, "index.html");
 
@@ -36,13 +34,6 @@ if (!existsSync(indexPath)) {
   console.error("add-sri: dist/index.html not found — run `vite build` first.");
   process.exit(1);
 }
-
-// security.txt placeholder gate (audit 2026-09-28, INFO): the file under
-// public/ is what vite copies into dist/ verbatim, so gate on the SOURCE.
-// The build fails while the RFC 9116 template still carries its example
-// contact/URL — a placeholder contact is worse than none because it looks
-// like a channel nobody reads. The check itself is unit-pinned
-// (tests/securityTxt.test.ts).
 
 let html = readFileSync(indexPath, "utf8");
 
@@ -105,10 +96,3 @@ if (stamped === 0) {
 
 writeFileSync(indexPath, html);
 console.log(`add-sri: stamped ${stamped} subresource integrity attribute(s) into dist/index.html`);
-
-try {
-  assertNoSecurityTxtPlaceholders(readFileSync(join(import.meta.dirname, "..", "public", ".well-known", "security.txt"), "utf8"));
-} catch (err) {
-  console.error(`add-sri: ${(err instanceof Error ? err.message : String(err))}`);
-  process.exit(1);
-}

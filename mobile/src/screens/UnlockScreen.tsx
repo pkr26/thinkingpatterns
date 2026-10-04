@@ -188,14 +188,16 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
     setBusy(true);
     let derived: Keys | null = null;
     let username: string | null = null;
+    let expectedOwner: string | null = null;
     // v2 sessions: the envelope's random data key, held until the vault
     // takes ownership (the catch zeroizes it on a mid-flow failure).
     let sessionDataKey: Buffer | null = null;
     try {
       username = await wait(() => api.getUsername());
-      const expectedOwner = await wait(() => api.getUserId());
+      expectedOwner = await wait(() => api.getUserId());
       if (!expectedOwner) throw new Error(tr("unlock.noAccount"));
       if (!username) throw new Error(tr("unlock.noAccount"));
+      const owner: string = expectedOwner;
       let saltB64: string;
       let offline = false;
       try {
@@ -267,7 +269,7 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
       if (!offline) {
         try {
           const body = await wait(() => api.login(username!, keys.authKey.toString("base64")));
-          if (body.user_id !== expectedOwner) throw new ApiError(0,"The account changed before unlock.","stale_operation");
+          if (body.user_id !== owner) throw new ApiError(0,"The account changed before unlock.","stale_operation");
           await adoptSession(body.token, body.user_id, username);
           // KEY SCHEME: the fresh bearer fetches the envelope. Only a
           // definitive answer routes the session; a FAILED fetch falls back
@@ -351,24 +353,24 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
         }
       }
       const localOwner = await wait(() => api.getUserId());
-      if (localOwner !== expectedOwner) throw new Error("The saved account changed before key adoption.");
-      await wait(() => resumeLocalRekey(expectedOwner, sessionDataKey ?? keys.dataKey, { credentialConfirmed: !offline }));
+      if (localOwner !== owner) throw new Error("The saved account changed before key adoption.");
+      await wait(() => resumeLocalRekey(owner, sessionDataKey ?? keys.dataKey, { credentialConfirmed: !offline }));
       assertCurrent();
       if (sessionDataKey !== null) {
         vault.unlock(
           { masterKey: keys.masterKey, authKey: keys.authKey, dataKey: sessionDataKey },
-          expectedOwner,
+          owner,
         );
         zeroize(keys.dataKey); // the v1 data label never protects v2 storage
       } else {
-        vault.unlock(derived, expectedOwner); // vault takes ownership and zeroizes the master key
+        vault.unlock(derived, owner); // vault takes ownership and zeroizes the master key
       }
       sessionDataKey = null; // the vault owns it now
       derived = null;
       setPassword(""); // minimize the password's lifetime in memory
       setBiometricError(false); // the promised password path worked — retract the biometric nudge
       // S-5: an honest success forgives the whole failure count.
-      if (username) await wait(() => clearUnlockFailures(username!).catch(() => {}));
+      if (username) await wait(() => clearUnlockFailures(username!, owner).catch(() => {}));
       await wait(() => refreshActiveDays());
     } catch (err) {
       if (sessionDataKey) zeroize(sessionDataKey);
@@ -381,7 +383,7 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
         // S-5: the ONLINE wrong-password path escalates through the same
         // durable counter (the server throttles per-IP; this throttles
         // per-DEVICE, covering the offline oracle's online twin).
-        const failures = username ? await recordUnlockFailure(username).catch(() => 1) : 1;
+        const failures = username && expectedOwner ? await recordUnlockFailure(username, expectedOwner).catch(() => 1) : 1;
         if (!current()) return;
         await new Promise((resolve) => setTimeout(resolve, unlockFailureDelayMs(failures)));
         if (!current()) return;

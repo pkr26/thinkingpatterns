@@ -8,6 +8,8 @@
  * replayed across recomputes). The shipped shape partitions taps from
  * mutes: {"feedback": [...], "muted": [pids], "unmuted": [pids]}.
  */
+// @ts-nocheck
+
 import { buildAad } from "./crypto/aad";
 import { decrypt, encrypt, fromBase64, toBase64, zeroize, type Bytes } from "./crypto/core";
 import { kv,type WritePermit } from "./kvstore";

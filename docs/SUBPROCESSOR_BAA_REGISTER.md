@@ -1,14 +1,14 @@
 # Subprocessor / BAA register — Fathom deployment (TEMPLATE)
 
-Complete for YOUR deployment before enabling each processor. The
-product's defaults engage NONE of these rows (no LLM URL set, backups
-local-only, no analytics) — the register exists because each row, once
-enabled, is a disclosure obligation (GDPR Art. 28/30; state privacy
-laws; HIPAA where covered).
+Complete for YOUR deployment before enabling each processor. Every placeholder
+row has status **BLOCKED / DISABLED**. A URL, API key, bucket, export target,
+agent, or SDK must not be configured until that row's activation checklist is
+approved. The journal-pattern LLM integration is dormant in production
+recompute; configuring legacy variables does not make it an approved feature.
 
 | # | Processor | Role | Data categories disclosed | Region/transfer basis | DPA signed | BAA required | Notes |
 |---|---|---|---|---|---|---|---|
-| 1 | `OPERATOR-FILL: LLM provider (MINDPATTERN_LLM_URL)` | Optional AI narrative analyzer | Verbatim recent journal text (bounded corpus) + deterministic findings; plaintext AT the provider by design; only for accounts that re-authenticated consent | `OPERATOR-FILL` — if outside EEA: SCCs/adequacy BEFORE enabling | `OPERATOR-FILL` | `OPERATOR-FILL` — YES if any sharing therapist is a HIPAA covered entity, or the operator holds the data out as a PHR; else document the determination | Consent copy must mirror the provider's declared retention (`MINDPATTERN_LLM_DATA_RETENTION`); provider name + policy version are fingerprinted into each consent (`MINDPATTERN_LLM_POLICY_VERSION`) |
+| 1 | `OPERATOR-FILL: future journal-LLM provider` | **Dormant; no production journal dispatch** | Would receive journal plaintext if a future reviewed feature reactivates it | `OPERATOR-FILL` — if outside EEA: SCCs/adequacy BEFORE enabling | `OPERATOR-FILL` | `OPERATOR-FILL` — qualified determination required | **BLOCKED / DISABLED.** Reactivation requires code/privacy/clinical review and new consent; legacy `MINDPATTERN_LLM_*` settings are not approval |
 | 2 | `OPERATOR-FILL: hosting provider (VM/container host)` | Infrastructure | Encrypted at rest by the application (ciphertext, metadata, audit rows); memory-plaintext only within consented processing windows | `OPERATOR-FILL` | `OPERATOR-FILL` | `OPERATOR-FILL` — same HIPAA test: infrastructure hosting PHI under a BAA where covered | The application encrypts content client-side; hosting staff with DB access still see metadata |
 | 3 | `OPERATOR-FILL: backup/off-site object storage (deploy/backup-offsite/)` | Encrypted backup replication | BACKUP_KEY-encrypted database dumps only (ciphertext + metadata inside) | `OPERATOR-FILL` — bucket region must be documented | `OPERATOR-FILL` | `OPERATOR-FILL` | The overlay never sees BACKUP_KEY; off-site retention is the operator's lifecycle policy (see DATA_RETENTION_SCHEDULE) |
 | 4 | `OPERATOR-FILL: any additional (email, monitoring SaaS, error tracking…)` | — | — | — | — | — | NOTE: the product ships with NO analytics/crash reporting by design — each added processor is a new disclosure and likely contradicts the privacy-policy template's "no tracking SDKs" line; update both together |
@@ -33,6 +33,29 @@ verify deletion per its contract and close the row with a date.
 
 | Subprocessor | Purpose | Data disclosed | Retention | BAA status |
 |---|---|---|---|---|
-| {STT_PROVIDER_NAME — OPERATOR-FILL} | Speech-to-text transcription of consented recordings | Raw audio, one call per recording; never stored by us | Per provider terms ({STT_DATA_RETENTION}) | OPERATOR-FILL |
-| {OBJECT STORAGE PROVIDER — OPERATOR-FILL, e.g. AWS S3} | Storage of KEPT recordings | Client-encrypted ciphertext only (unreadable to us); SSE at rest | 30-day rolling expiry + lifecycle backstop | OPERATOR-FILL |
-| {LLM PROVIDER — existing row applies} | English translation of transcript TEXT | Transcript text only | Per existing row | see above |
+| `OPERATOR-FILL: STT provider` | Speech-to-text transcription of consented recordings | Raw audio, one call per recording; never stored by us | `OPERATOR-FILL: provider retention/deletion terms` | `OPERATOR-FILL` — **BLOCKED / DISABLED until approved** |
+| `OPERATOR-FILL: object-storage provider` | Storage of recordings the user chooses to keep | Client-encrypted ciphertext plus object metadata; provider-side encryption at rest | App retention default 30 days; provider-native lifecycle at or below `OPERATOR-FILL: deployed ceiling` | `OPERATOR-FILL` — **BLOCKED / DISABLED until approved and lifecycle evidence attached** |
+| `OPERATOR-FILL: translation provider, if distinct` | Translation of consented transcript text | Transcript plaintext for one request | `OPERATOR-FILL: provider retention/deletion terms` | `OPERATOR-FILL` — **BLOCKED / DISABLED until separately disclosed and approved** |
+
+## Fail-closed activation checklist (one copy per enabled row)
+
+- [ ] Processor legal name, product, purpose, data categories, and production
+  endpoint/account are recorded.
+- [ ] Processing/storage regions, transfers, subprocessors, government-access
+  posture, and data-residency choices are recorded.
+- [ ] Retention, deletion-on-request, backup deletion, no-training/secondary-use,
+  and incident-notification terms match the user disclosure.
+- [ ] DPA is executed; SCC/adequacy and transfer assessment are attached where
+  applicable.
+- [ ] A qualified owner recorded whether HIPAA, HBNR, state consumer-health,
+  medical-device, or other sector rules apply; any required BAA is executed.
+- [ ] Least-privilege credentials are file-mounted, rotation/revocation is
+  rehearsed, and production logs/telemetry do not add undisclosed data.
+- [ ] Consent/disclosure version and provider-policy fingerprint are verified
+  against the candidate build; withdrawal and provider deletion are tested.
+- [ ] Security/privacy owner approval, legal approval, enable date, next review
+  date, and evidence links are recorded below.
+
+| Processor row | Status (`BLOCKED`/`APPROVED`) | Security/privacy owner + date | Legal/BAA owner + date | Evidence links | Next review |
+|---|---|---|---|---|---|
+| `OPERATOR-FILL` | `BLOCKED` | `OPERATOR-FILL` | `OPERATOR-FILL` | `OPERATOR-FILL` | `OPERATOR-FILL` |

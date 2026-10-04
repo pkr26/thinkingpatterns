@@ -24,10 +24,13 @@ DigestAlgorithm structures that the unpatched verifier accepts.
 The npm registry currently reports no patched releases for
 [braces GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm)
 and [forge GHSA-86w9-cpqp-85rv](https://github.com/advisories/GHSA-86w9-cpqp-85rv).
-**Package versions stay unchanged; `npm audit` remains red.** This is a
-tested local mitigation, not suppression or a claim that registry
-advisories are gone. Remove these backports only after reviewing and
-installing fixed upstream releases and re-running all checks.
+**Package versions stay unchanged; raw `npm audit` remains red.** This is a
+tested local mitigation, not suppression or a claim that registry advisories
+are gone. CI/release runs `npm run audit:dependencies`: it first verifies the
+exact patched bytes and attack regressions, then parses the registry report
+and permits only these two advisory URLs. Any unrelated advisory or audit
+service failure remains a hard failure. Remove the allowlist and backports
+only after reviewing fixed upstream releases and re-running all checks.
 
 Reachability: braces handles trusted project/tooling glob inputs through
 Metro/React Native CLI; forge is Expo CLI certificate/code-signing tooling.

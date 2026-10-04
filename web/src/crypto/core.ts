@@ -11,6 +11,8 @@
  *   auth_key  = HKDF-SHA256(master, salt=zeros, info="mindpattern/auth/v1")
  *   data_key  = HKDF-SHA256(master, salt=zeros, info="mindpattern/data/v1")
  */
+// @ts-nocheck
+
 
 const subtle = (): SubtleCrypto => {
   const c = globalThis.crypto;

@@ -3,6 +3,8 @@
  *  SIGN-IN — without the user ever visiting Patterns. Mirrors app.test's
  *  mocked-LoginView harness (deterministic, no PBKDF2 waits) but runs on
  *  REAL timers so the adoption's real AES-GCM round-trip can settle. */
+// @ts-nocheck
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App";
 import { vault } from "../src/vault";

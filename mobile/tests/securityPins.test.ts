@@ -47,6 +47,7 @@ const apiState = {
 
 vi.mock("../src/api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/api/client")>();
+  const { changeLocalSessionOwner } = await import("../src/localWriteGuard");
   class ApiError extends Error {
     constructor(
       public status: number,
@@ -93,7 +94,9 @@ vi.mock("../src/api/client", async (importOriginal) => {
         if (apiState.failAt === "relogin") throw new ApiError(0, "network unreachable");
         return { token: "fresh", user_id: USER };
       }),
-      setSession: async () => {},
+      setSession: async (_token: string, userId: string) => {
+        changeLocalSessionOwner(userId);
+      },
       listEntriesPage: vi.fn(async () => ({ entries: [], nextOffset: null, revision: null })),
       listMeasuresPage: vi.fn(async () => []),
       // independent audit 2026-09-27 (P2): the rotation's offline-queue drain
@@ -543,7 +546,9 @@ describe("rotatePassword failure-path cleanup (audit round 2, 2026-09-21, F-4)",
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) {
       expect(outcome.stage).toBe("rekey");
-      expect(outcome.detail).toContain("newer key protection");
+      // Server-controlled error detail is never reflected through the
+      // client-authored rotation outcome.
+      expect(outcome.detail).toBeUndefined();
     }
     expect(vault.isUnlocked()).toBe(false);
     expect(await hasBiometricUnlock(USER)).toBe(false);

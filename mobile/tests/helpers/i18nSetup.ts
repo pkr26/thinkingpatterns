@@ -12,10 +12,21 @@
  *    and reads the version from the same manifest babel.config.cjs inlines
  *    it from, so the two can never disagree.
  */
+import { beforeEach } from "vitest";
 import { __setLocaleForTests } from "../../src/strings";
+import { __resetLocalKeyLifecycleForTests } from "../../src/localWriteGuard";
 import pkg from "../../package.json";
 
 (globalThis as { __DEV__?: boolean }).__DEV__ = true;
 (globalThis as { __APP_VERSION__?: string }).__APP_VERSION__ = pkg.version;
 
 __setLocaleForTests("en");
+
+// Production starts with no active owner and therefore rejects account
+// writes until credential hydration. Most legacy unit fixtures exercise a
+// feature in isolation rather than booting the store, so give each test the
+// explicit permissive test seam; lifecycle/boot regressions publish the
+// concrete owner (or null) they need after this reset.
+beforeEach(() => {
+  __resetLocalKeyLifecycleForTests();
+});

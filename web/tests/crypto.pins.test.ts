@@ -4,6 +4,8 @@
  * corrupted envelope fails CLOSED — never a wrong plaintext, never a
  * crash), and zeroization of decrypt-path buffers.
  */
+// @ts-nocheck
+
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";

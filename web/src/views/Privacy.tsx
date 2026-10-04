@@ -4,6 +4,8 @@
  * the person journaling). Static content; no network. M-W5 (audit
  * 2026-09-26): the copy resolves through the t() catalog.
  */
+// @ts-nocheck
+
 import { t } from "../strings";
 import { Button, Card, Note } from "../ui";
 

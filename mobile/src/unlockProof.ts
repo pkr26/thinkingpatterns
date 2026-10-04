@@ -17,15 +17,18 @@
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { buildAad, decrypt, encrypt } from "./crypto/envelope";
+import { accountStorageKey } from "./accountStorage";
+import { captureLocalWritePermit, commitLocalWrite } from "./localWriteGuard";
 
-const proofKey = (userId: string): string => `@mindpattern/unlockproof_${userId}`;
+const proofKey = accountStorageKey.unlockProof;
 const PROOF_PLAINTEXT = Buffer.from("mindpattern-unlock-proof/v1", "utf8");
 
 /** Call exactly once after a VERIFIED online login (or registration):
  *  seals the marker under the account's data key. */
 export async function storeUnlockProof(dataKey: Buffer, userId: string): Promise<void> {
+  const permit = captureLocalWritePermit(userId, dataKey);
   const blob = encrypt(dataKey, PROOF_PLAINTEXT, buildAad("unlockproof", userId));
-  await AsyncStorage.setItem(proofKey(userId), blob.toString("base64"));
+  await commitLocalWrite(permit, () => AsyncStorage.setItem(proofKey(userId), blob.toString("base64")));
 }
 
 export type ProofResult = "ok" | "wrong" | "absent";

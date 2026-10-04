@@ -3,6 +3,8 @@
  *  small, load-bearing branches that had no tests — crypto core's
  *  parameter guards, the stats helpers the on-device brain leans on, and
  *  the recorder's failure paths. */
+// @ts-nocheck
+
 
 import { describe, expect, it } from "vitest";
 

@@ -13,9 +13,13 @@ const deleted = new Set<string>();
 const generations = new Map<string, number>();
 const installedKeys = new Map<string, { originEpoch: number; keyId: string }>();
 const commits = new Map<string, Set<Promise<unknown>>>();
+const ORIGIN_ERASURE_LANE = "\0origin-erasure";
 let scopeEpoch = 0;
 let originEpoch = 0;
-let sessionOwner: string | null | undefined;
+// No account owns writes until a verified login or cold-start credential
+// hydration explicitly publishes one. `undefined` is reserved for the
+// legacy-permissive test reset seam below; production starts fail-closed.
+let sessionOwner: string | null | undefined = null;
 const generationOf = (userId: string) => generations.get(userId) ?? 0;
 export function localKeyGeneration(userId: string): number { return generationOf(userId); }
 function advance(userId: string): void { generations.set(userId, generationOf(userId) + 1); }
@@ -28,6 +32,14 @@ export function advanceLocalWriteScope(): number { return ++scopeEpoch; }
 /** Called before the first asynchronous credential/origin mutation. */
 export function changeLocalSessionOwner(userId: string | null): void {
   scopeEpoch++; sessionOwner = userId;
+}
+/** Cold-start credential hydration establishes the owner that was already
+ * durably authenticated. Unlike a fresh login transition, rereading the
+ * same owner is a no-op so routine auth checks do not retire valid permits. */
+export function hydrateLocalSessionOwner(userId: string | null): void {
+  if (sessionOwner === userId) return;
+  scopeEpoch++;
+  sessionOwner = userId;
 }
 export function changeLocalOrigin(): void {
   originEpoch++; scopeEpoch++; sessionOwner = null;
@@ -70,6 +82,16 @@ export function commitLocalWrite<T>(permit: LocalWritePermit, write: () => Promi
   assertLocalWritePermit(permit);
   return trackCommit(permit.userId, write);
 }
+/** Account metadata that is not encrypted under the data key still belongs
+ * to the same owner/generation lifecycle. Capture before admission and track
+ * the physical commit so deletion/origin replacement cannot race past it. */
+export function commitActiveAccountWrite<T>(userId: string, write: () => Promise<T>): Promise<T> {
+  const permit = captureLocalWritePermit(userId);
+  return commitLocalWrite(permit, async () => {
+    assertLocalWritePermit(permit);
+    return write();
+  });
+}
 export function assertLocalTransitionScope(userId: string, epoch: number, generation?: number): void {
   assertAccountActive(userId);
   if (epoch !== scopeEpoch || sessionOwner === null || (sessionOwner !== undefined && sessionOwner !== userId)) throw new Error("The local account/server changed during key transition");
@@ -84,6 +106,14 @@ export function commitLocalTransitionWrite<T>(userId: string, epoch: number, wri
 export function commitLocalErasureWrite<T>(userId: string, epoch: number, write: () => Promise<T>): Promise<T> {
   if (epoch !== scopeEpoch) throw new Error("The account/server changed during local erasure");
   return trackCommit(userId, write);
+}
+/** Origin retirement can include unattributable upgrade-era state (for
+ * example the former singleton biometric slot). Keep that physical deletion
+ * in the same tracked administrative lane even when no account id survives
+ * from which to derive an owner-scoped permit. */
+export function commitOriginErasureWrite<T>(epoch: number, write: () => Promise<T>): Promise<T> {
+  if (epoch !== scopeEpoch) throw new Error("The account/server changed during origin erasure");
+  return trackCommit(ORIGIN_ERASURE_LANE, write);
 }
 function trackCommit<T>(userId: string, write: () => Promise<T>): Promise<T> {
   const pending = Promise.resolve(write());

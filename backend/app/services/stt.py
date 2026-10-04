@@ -41,7 +41,9 @@ logger = logging.getLogger("mindpattern.stt")
 # flow. Same GDPR Art. 7 standing as llm.LLM_DISCLOSURE_VERSION: bump it
 # whenever the copy changes; it is folded into the policy fingerprint so
 # a consent recorded against older copy goes inert until re-opt-in.
-STT_DISCLOSURE_VERSION = "v1"
+# v2 reflects the corrected upload timing and configured-provider retention
+# disclosure. A v1 choice is historical evidence, not current authorization.
+STT_DISCLOSURE_VERSION = "v2"
 
 # A five-minute take transcribes in well under a minute on the providers
 # this is pointed at, but the budget must cover a cold provider queue.
@@ -209,7 +211,12 @@ def processing_policy_fingerprint(settings: Settings) -> str | None:
 def consent_is_current(user, settings: Settings) -> bool:
     """Whether this user has accepted the current STT policy exactly."""
     current = processing_policy_fingerprint(settings)
-    return bool(current and user.voice_consent and user.voice_consent_policy == current)
+    return bool(
+        current
+        and user.voice_consent
+        and user.voice_consent_disclosure == STT_DISCLOSURE_VERSION
+        and user.voice_consent_policy == current
+    )
 
 
 @dataclass
@@ -392,11 +399,8 @@ async def translate_to_english(
             logger.warning("transcript translation was incomplete; returning untranslated")
             return None
         content = choice["message"]["content"]
-    except Exception as exc:  # noqa: BLE001 — translation is a degraded-mode extra
-        logger.warning(
-            "transcript translation failed (%s); returning untranslated",
-            type(exc).__name__,
-        )
+    except Exception:  # noqa: BLE001 — translation is a degraded-mode extra
+        logger.warning("transcript translation failed; returning untranslated")
         return None
     if isinstance(content, str) and len(content) > MAX_TRANSLATION_OUTPUT_CHARS:
         return None

@@ -9,6 +9,7 @@ import { canonicalOrigin, getBaseUrl } from "./api/client";
 import { prepareAudioRekey, abortInFlightAudioFlush, cleanupAudioRekey } from "./audioQueue";
 import { prepareQueueRekey, abortInFlightFlush } from "./offlineQueue";
 import { waitJournalDraftWrites } from "./journalDraft";
+import { accountStorageKey, ACCOUNT_STORAGE_PREFIX } from "./accountStorage";
 export interface LocalReplacement { key: string; before: string; after: string }
 export interface AtomicRekeyBody { operation_id: string; new_salt: string; new_verifier: string; consent_wraps: Array<{ consent_id: string; therapist_wrap_pub_key: string; ephemeral_pub: string; wrapped_key: string }> }
 interface Journal { v: 1; userId: string; origin: string; proof: string; changes: LocalReplacement[]; phase: "prepared" | "server" | "credential"; operationId: string; oldSaltB64?: string; tokens?: { old: string; next: string }; request?: AtomicRekeyBody }
@@ -18,7 +19,7 @@ export { markAccountDeleted, assertAccountActive, assertLocalWritesAllowed, __re
 export type { LocalWritePermit } from "./localWriteGuard";
 import { freezeLocalKeyWrites, installLocalDataKey, clearLocalKeyState, waitLocalWriteCommits, localWriteScopeEpoch, localKeyGeneration, assertLocalTransitionScope, commitLocalTransitionWrite, commitLocalErasureWrite } from "./localWriteGuard";
 async function journalKey(userId: string): Promise<string> {
-  return `@mindpattern/local-rekey.${Buffer.from(`${new URL(await getBaseUrl()).origin}\0${userId}`).toString("base64url")}`;
+  return accountStorageKey.localRekey(new URL(await getBaseUrl()).origin, userId);
 }
 
 // The device-sealed journal is chunked; a queue near its 1 MiB ceiling
@@ -62,14 +63,14 @@ function prove(journal: Journal, key: Buffer): void {
 /** Each authored/guard store must appear here; device-key-sealed preferences
  * and generation guards do not depend on the changing account data key. */
 export const LOCAL_KEY_BOUND_STORES: ReadonlyArray<readonly [string, string, "origin"?]> = [
-  ["@mindpattern/safety_plan_", "safety-plan"],
-  ["@mindpattern/safety_plan_draft_", "safety-plan-draft"],
-  ["@mindpattern/pending_measure_", "pending-measure"],
-  ["mindpattern.moodlog.", "moodlog"],
-  ["@mindpattern/question_feedback.", "feedback-local"],
-  ["mindpattern.entryVersions.", "entry-versions"],
-  ["mindpattern.entryV2Bound.", "entry-v2-bound"],
-  ["@mindpattern/journal-draft.v1.", "journal-draft", "origin"],
+  [ACCOUNT_STORAGE_PREFIX.safetyPlan, "safety-plan"],
+  [ACCOUNT_STORAGE_PREFIX.safetyPlanDraft, "safety-plan-draft"],
+  [ACCOUNT_STORAGE_PREFIX.pendingMeasure, "pending-measure"],
+  [ACCOUNT_STORAGE_PREFIX.moodLog, "moodlog"],
+  [ACCOUNT_STORAGE_PREFIX.feedback, "feedback-local"],
+  [ACCOUNT_STORAGE_PREFIX.entryVersions, "entry-versions"],
+  [ACCOUNT_STORAGE_PREFIX.entryV2Bound, "entry-v2-bound"],
+  [ACCOUNT_STORAGE_PREFIX.journalDraft, "journal-draft", "origin"],
 ] as const;
 export async function prepareLocalRekey(userId: string, oldKey: Buffer, newKey: Buffer, context?: { oldSaltB64: string }): Promise<void> {
   const scopeEpoch = localWriteScopeEpoch();

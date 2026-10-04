@@ -61,7 +61,7 @@ describe("password rotation ownership", () => {
     vi.spyOn(localRekey, "pendingLocalRekeyOldSalt").mockImplementation(async () => { started.resolve(); return held.promise; });
     const server = vi.spyOn(api, "rekeyStoredData"), proof = vi.spyOn(reauth, "verifyPasswordForVault");
     const pending = rotatePassword(input); await started.promise; const replacement = await replace(); held.resolve(null);
-    expect(await pending).toMatchObject({ ok: false, reason: "server", detail: expect.stringContaining("retired") });
+    expect(await pending).toMatchObject({ ok: false, reason: "server", detail: undefined });
     expect(proof).not.toHaveBeenCalled(); expect(server).not.toHaveBeenCalled();
     expect(vault.get().dataKey).toBe(replacement.dataKey); expect(vault.ownerUserId()).toBe(OTHER);
   });

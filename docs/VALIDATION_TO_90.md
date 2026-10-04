@@ -5,6 +5,27 @@ completed study or certification. Freeze the candidate commit, supported
 platforms and acceptance criteria before collecting results. Keep the audit
 baseline and raw failures; publish deductions as well as successes.
 
+## Current release-gate status
+
+No row below is completed by this repository. Clinical-performance or
+clinician-monitoring claims remain blocked until independent, dated evidence is
+linked and approved for the final intended use.
+
+| Done | External evidence required | Acceptance record |
+|---|---|---|
+| [ ] | Preregistered prospective validation on the frozen candidate, including sample-size rationale, endpoints, failures, calibration, and benefit/harms | `OPERATOR-FILL: protocol/report/owner/date` |
+| [ ] | Subgroup fairness assessment across relevant demographic, accessibility, device, and language groups, with predeclared tolerances and remediation | `OPERATOR-FILL: report/owner/date` |
+| [ ] | Qualified English and Spanish clinical/safety review of measures, crisis copy, questions, observations, uncertainty, and voice/translation output | `OPERATOR-FILL: reviewer credentials/report/date` |
+| [ ] | Real clinician workflow drill for positive item 9 and other safety signals, with monitoring disclosure, ownership, acknowledgment, escalation, coverage, and measured response SLA | `OPERATOR-FILL: SOP/drill log/owner/date` |
+| [ ] | Institutional/IRB or equivalent determination for every planned participant study | `OPERATOR-FILL: determination/reference/date` |
+| [ ] | Qualified medical-device analysis for actual intended use and marketing; HIPAA/HBNR and jurisdiction-specific privacy/consumer-health determinations | `OPERATOR-FILL: signed memoranda/counsel/date` |
+| [ ] | Approved public/store claims cross-checked against the evidence above; unsupported diagnosis, prediction, monitoring, efficacy, and classification claims removed | `OPERATOR-FILL: claim matrix/approver/date` |
+
+An unchecked row may be closed only by narrowing/withdrawing the affected
+claim or feature, or by attaching the named external evidence. Automated tests
+and synthetic simulations cannot substitute for human, clinical, legal, or
+regulatory evidence.
+
 ## Engineering acceptance
 
 Run the complete backend suite on supported Python versions, SQLite and

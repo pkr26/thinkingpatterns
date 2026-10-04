@@ -12,25 +12,35 @@ and the Settings knobs the fixes added.
 from __future__ import annotations
 
 import base64
+import asyncio
 import os
+import threading
 import time
 from datetime import timedelta
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.api._audit import (
+    ChainVerification,
+    JournalEvidence,
     append_access_log,
+    audit_journal_health,
+    compact_audit_journal,
     compute_entry_hash,
     compute_entry_mac,
     flush_audit_journal,
+    prune_access_logs,
+    read_journal_evidence,
     read_journal_head,
+    validate_audit_journal_path,
     verify_access_log_chain,
 )
 from app.cache import SlidingWindowCounter, TokenRevocationStore, _MAX_LOG_ENTRIES
 from app.config import Settings, _secret_env
-from app.models import AccessLog, TokenRevocation, utcnow
+from app.deps import ApiError
+from app.models import AccessLog, AuditChainState, TokenRevocation, utcnow
 from app.security import tokens as token_mod
 from tests.helpers import ClientEmulator, TherapistEmulator
 
@@ -61,7 +71,9 @@ async def chain_sessionmaker():
     engine = build_engine("sqlite+aiosqlite://")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    yield build_sessionmaker(engine)
+    raw_sessionmaker = build_sessionmaker(engine)
+
+    yield raw_sessionmaker
     await engine.dispose()
 
 
@@ -75,6 +87,7 @@ async def _seed_chain(sessionmaker, user_id: str, mac_key: bytes | None, n: int 
                 user_id=user_id,
                 action=f"read_insights{i}",
                 mac_key=mac_key,
+                allow_new_chain=i == 0,
             )
         await session.commit()
 
@@ -195,8 +208,10 @@ async def test_runtime_appends_seal_with_the_configured_key(client, app):
     """Integration: create_app configures the module-level MAC key from
     settings, so app-driven writes seal automatically and verify against
     the SAME settings-derived key the daily sweep uses."""
-    user_id = new_id_hex()
-    await _seed_chain(app.state.sessionmaker, user_id, mac_key=None)  # configured key
+    emu = ClientEmulator("runtime-mac", "configured-key-password")
+    await emu.register(client)
+    user_id = emu.user_id
+    assert user_id is not None
     mac_key = bytes.fromhex(app.state.settings.audit_mac_secret_hex)
     async with app.state.sessionmaker() as session:
         verdict = await verify_access_log_chain(session, user_id, mac_key=mac_key)
@@ -226,7 +241,13 @@ async def test_rewritten_row_fails_the_mac_without_the_key(chain_sessionmaker):
         )
         row.action = "forged_action"
         row.entry_hash = compute_entry_hash(
-            row.prev_hash, row.actor_id, row.user_id, row.action, row.at
+            row.prev_hash,
+            row.actor_id,
+            row.user_id,
+            row.action,
+            row.at,
+            actor_role=row.actor_role,
+            record_version=row.record_version,
         )
         # The attacker recomputes the whole chain — under THEIR key.
         row.entry_mac = compute_entry_mac(attacker_key, row.user_id, row.chain_seq, row.entry_hash)
@@ -275,10 +296,282 @@ async def test_journal_detects_tail_truncation_and_tolerates_lag(chain_sessionma
     assert "tail truncation" in verdict.reason
 
 
-async def test_append_retries_after_losing_the_unique_seq_race(chain_sessionmaker, monkeypatch):
-    """Two concurrent same-patient writes can read the same chain head;
-    the loser's flush used to IntegrityError its whole audited action
-    into a 500. The append now retries on the fresh head."""
+async def test_full_retention_prune_accepts_sealed_empty_then_appends(chain_sessionmaker):
+    """A legitimate full-prefix prune keeps its sealed high-water mark and
+    the next append continues at N+1 instead of looking like a new chain."""
+    mac_key = _mac_key()
+    user_id = new_id_hex()
+    old = utcnow() - timedelta(days=10)
+    async with chain_sessionmaker() as session:
+        for index in range(2):
+            await append_access_log(
+                session,
+                actor_id=user_id,
+                actor_role="patient",
+                user_id=user_id,
+                action=f"old_{index}",
+                at=old + timedelta(seconds=index),
+                mac_key=mac_key,
+                allow_new_chain=index == 0,
+            )
+        await session.commit()
+        cutoff = utcnow() - timedelta(days=1)
+        assert await prune_access_logs(session, cutoff=cutoff, mac_key=mac_key) == 2
+        await session.commit()
+        empty = await verify_access_log_chain(
+            session, user_id, mac_key=mac_key, retention_cutoff=cutoff
+        )
+        assert empty.ok and empty.rows_checked == 0
+
+        appended = await append_access_log(
+            session,
+            actor_id=user_id,
+            actor_role="patient",
+            user_id=user_id,
+            action="after_prune",
+            mac_key=mac_key,
+        )
+        await session.commit()
+        assert appended.chain_seq == 3
+        verified = await verify_access_log_chain(
+            session, user_id, mac_key=mac_key, retention_cutoff=cutoff
+        )
+        assert verified.ok and verified.rows_checked == 1
+
+
+async def test_prune_refuses_to_hide_deleted_current_middle_row(chain_sessionmaker):
+    """Retention may advance an anchor only after authenticating the whole
+    pre-prune trail.  Otherwise an expired seq-1 row could select an owner,
+    a DB attacker could delete current seq-2, and pruning could anchor seq-3
+    as though the gap had never existed."""
+    mac_key = _mac_key()
+    user_id = new_id_hex()
+    old = utcnow() - timedelta(days=10)
+    current = utcnow() - timedelta(hours=1)
+    async with chain_sessionmaker() as session:
+        for seq, at in enumerate((old, current, current + timedelta(seconds=1)), start=1):
+            await append_access_log(
+                session,
+                actor_id=user_id,
+                actor_role="patient",
+                user_id=user_id,
+                action=f"event_{seq}",
+                at=at,
+                mac_key=mac_key,
+                allow_new_chain=seq == 1,
+            )
+        await session.commit()
+        state = await session.get(AuditChainState, user_id)
+        assert state is not None
+        before = (
+            state.head_seq,
+            state.head_hash,
+            state.first_retained_seq,
+            state.first_retained_hash,
+            state.state_mac,
+        )
+        await session.execute(
+            delete(AccessLog).where(
+                AccessLog.user_id == user_id,
+                AccessLog.chain_seq == 2,
+            )
+        )
+        await session.commit()
+
+        with pytest.raises(ApiError) as excinfo:
+            await prune_access_logs(
+                session,
+                cutoff=utcnow() - timedelta(days=1),
+                mac_key=mac_key,
+            )
+        assert excinfo.value.code == "audit_integrity_error"
+        assert "failed verification" in excinfo.value.detail
+
+        await session.rollback()
+        unchanged = await session.get(AuditChainState, user_id, populate_existing=True)
+        assert unchanged is not None
+        assert (
+            unchanged.head_seq,
+            unchanged.head_hash,
+            unchanged.first_retained_seq,
+            unchanged.first_retained_hash,
+            unchanged.state_mac,
+        ) == before
+        remaining = (
+            (
+                await session.execute(
+                    select(AccessLog.chain_seq)
+                    .where(AccessLog.user_id == user_id)
+                    .order_by(AccessLog.chain_seq)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert remaining == [1, 3]
+
+
+async def test_deleted_chain_state_and_actor_role_tamper_fail_closed(chain_sessionmaker):
+    mac_key = _mac_key()
+    user_id = new_id_hex()
+    await _seed_chain(chain_sessionmaker, user_id, mac_key, n=1)
+    async with chain_sessionmaker() as session:
+        row = await session.scalar(select(AccessLog).where(AccessLog.user_id == user_id))
+        row.actor_role = "therapist"
+        await session.commit()
+        tampered = await verify_access_log_chain(session, user_id, mac_key=mac_key)
+        assert not tampered.ok and "entry_hash" in (tampered.reason or "")
+
+        await session.execute(delete(AuditChainState).where(AuditChainState.user_id == user_id))
+        await session.commit()
+        missing = await verify_access_log_chain(session, user_id, mac_key=mac_key)
+        assert not missing.ok and "state is missing" in (missing.reason or "")
+        with pytest.raises(ApiError) as excinfo:
+            await append_access_log(
+                session,
+                actor_id=user_id,
+                actor_role="patient",
+                user_id=user_id,
+                action="must_not_reset",
+                mac_key=mac_key,
+            )
+        assert excinfo.value.code == "audit_integrity_error"
+
+
+async def test_audit_mac_rotation_verifies_history_and_missing_old_key_fails(
+    chain_sessionmaker,
+):
+    user_id = new_id_hex()
+    old_key = bytes.fromhex("11" * 32)
+    new_key = bytes.fromhex("22" * 32)
+    async with chain_sessionmaker() as session:
+        first = await append_access_log(
+            session,
+            actor_id=user_id,
+            actor_role="patient",
+            user_id=user_id,
+            action="under_v1",
+            mac_keys={1: old_key},
+            current_mac_key_version=1,
+            allow_new_chain=True,
+        )
+        await session.commit()
+        second = await append_access_log(
+            session,
+            actor_id=user_id,
+            actor_role="patient",
+            user_id=user_id,
+            action="under_v2",
+            mac_keys={1: old_key, 2: new_key},
+            current_mac_key_version=2,
+        )
+        await session.commit()
+        assert (first.mac_key_version, second.mac_key_version) == (1, 2)
+        state = await session.get(AuditChainState, user_id)
+        assert state is not None and state.mac_key_version == 2
+        valid = await verify_access_log_chain(
+            session,
+            user_id,
+            mac_keys={1: old_key, 2: new_key},
+            current_mac_key_version=2,
+        )
+        assert valid.ok
+        retired_too_early = await verify_access_log_chain(
+            session,
+            user_id,
+            mac_keys={2: new_key},
+            current_mac_key_version=2,
+        )
+        assert not retired_too_early.ok
+        assert "version 1 is unavailable" in (retired_too_early.reason or "")
+
+
+def test_journal_reduction_allows_out_of_order_but_rejects_conflicting_duplicate(tmp_path):
+    owner = new_id_hex()
+    journal = tmp_path / "audit.journal"
+    journal.write_text(
+        f"{owner} 2 {'2' * 64} {'b' * 64} 2026-09-27T00:00:02+00:00\n"
+        f"{owner} 1 {'1' * 64} {'a' * 64} 2026-09-27T00:00:01+00:00\n"
+    )
+    evidence = read_journal_evidence(str(journal))[owner]
+    assert evidence.seq == 2 and not evidence.conflict
+
+    with journal.open("a", encoding="utf-8") as handle:
+        handle.write(f"{owner} 2 {'f' * 64} {'e' * 64} 2026-09-27T00:00:03+00:00\n")
+    evidence = read_journal_evidence(str(journal))[owner]
+    assert evidence.conflict
+    kept, dropped = compact_audit_journal(str(journal), "2030-01-01T00:00:00+00:00")
+    assert (kept, dropped) == (3, 0), "conflicting evidence must survive compaction"
+
+
+async def test_journal_compaction_serializes_with_append(chain_sessionmaker, tmp_path, monkeypatch):
+    """An append opened on the old inode must not be lost by os.replace."""
+    from app.api import _audit as audit_mod
+
+    owner = new_id_hex()
+    journal = tmp_path / "audit.journal"
+    journal.write_text(f"{owner} 1 {'1' * 64} {'a' * 64} 2026-09-27T00:00:01+00:00\n")
+    replacing = threading.Event()
+    release_replace = threading.Event()
+    real_replace = audit_mod.os.replace
+
+    def blocking_replace(source, destination):
+        replacing.set()
+        assert release_replace.wait(timeout=5)
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(audit_mod.os, "replace", blocking_replace)
+    compact_task = asyncio.create_task(
+        asyncio.to_thread(
+            compact_audit_journal,
+            str(journal),
+            "2030-01-01T00:00:00+00:00",
+        )
+    )
+    assert await asyncio.to_thread(replacing.wait, 5)
+
+    async with chain_sessionmaker() as session:
+        session.info["mindpattern_audit_journal_pending"] = [
+            (owner, 2, "2" * 64, "b" * 64, utcnow())
+        ]
+        flush_task = asyncio.create_task(flush_audit_journal(session, str(journal)))
+        await asyncio.sleep(0.05)
+        assert not flush_task.done(), "append must wait for compaction's replace boundary"
+        release_replace.set()
+        await compact_task
+        assert await flush_task == 1
+
+    evidence = read_journal_evidence(str(journal))[owner]
+    assert evidence.seq == 2
+    assert not evidence.conflict
+
+
+async def test_journal_failure_health_and_successful_recovery(chain_sessionmaker, tmp_path):
+    missing = tmp_path / "missing" / "audit.journal"
+    with pytest.raises(RuntimeError, match="parent directory does not exist"):
+        validate_audit_journal_path(str(missing))
+
+    directory_target = tmp_path / "directory-target"
+    directory_target.mkdir()
+    async with chain_sessionmaker() as session:
+        session.info["mindpattern_audit_journal_pending"] = [
+            (new_id_hex(), 1, "1" * 64, "a" * 64, utcnow())
+        ]
+        assert await flush_audit_journal(session, str(directory_target)) == 0
+        healthy, error = audit_journal_health()
+        assert not healthy and error == "io_failure"
+
+        recovered = tmp_path / "recovered.journal"
+        validate_audit_journal_path(str(recovered))
+        session.info["mindpattern_audit_journal_pending"] = [
+            (new_id_hex(), 1, "2" * 64, "b" * 64, utcnow())
+        ]
+        assert await flush_audit_journal(session, str(recovered)) == 1
+        assert audit_journal_health() == (True, None)
+
+
+async def test_durable_state_refuses_a_stale_head_read(chain_sessionmaker, monkeypatch):
+    """A missing DB tail can never reset a sequence protected by state."""
     user_id = new_id_hex()
     await _seed_chain(chain_sessionmaker, user_id, mac_key=None, n=1)  # real seq-1 row
     async with chain_sessionmaker() as session:
@@ -313,26 +606,29 @@ async def test_append_retries_after_losing_the_unique_seq_race(chain_sessionmake
             return await real_execute(statement, *a, **kw)
 
         monkeypatch.setattr(session, "execute", execute_missing_first_head)
-        row = await append_access_log(
-            session,
-            actor_id=new_id_hex(),
-            actor_role="patient",
-            user_id=user_id,
-            action="raced_action",
-        )
-        await session.commit()
-        assert row.chain_seq == 2
-        verdict = await verify_access_log_chain(session, user_id)
-    assert verdict.ok and verdict.rows_checked == 2
+        with pytest.raises(ApiError) as exc:
+            await append_access_log(
+                session,
+                actor_id=new_id_hex(),
+                actor_role="patient",
+                user_id=user_id,
+                action="raced_action",
+            )
+        assert exc.value.code == "audit_integrity_error"
+    assert state["missed"]
 
 
-async def test_daily_sweep_verifies_chains_and_counts_failures(client, app, monkeypatch):
+async def test_daily_sweep_verifies_chains_counts_failures_and_fails_readiness(
+    client, app, monkeypatch, caplog
+):
     """The chain verifier has a runtime caller now: the daily sweep walks
     recently-active patients and bumps a metrics counter on failure."""
     from app import main as main_mod
 
-    user_id = new_id_hex()
-    await _seed_chain(app.state.sessionmaker, user_id, mac_key=None, n=1)
+    emu = ClientEmulator("sweep-integrity", "sweep-password")
+    await emu.register(client)
+    user_id = emu.user_id
+    assert user_id is not None
     async with app.state.sessionmaker() as session:
         row = (
             (await session.execute(select(AccessLog).where(AccessLog.user_id == user_id)))
@@ -349,8 +645,80 @@ async def test_daily_sweep_verifies_chains_and_counts_failures(client, app, monk
     monkeypatch.setattr(
         app.state.metrics, "observe_audit_chain", lambda *, failures: observed.append(failures)
     )
-    await main_mod._prune_access_log_once(app)
+    caplog.set_level("ERROR", logger="mindpattern")
+    with pytest.raises(RuntimeError, match="audit chain verification failed"):
+        await main_mod._prune_access_log_once(app)
     assert sum(observed) >= 1
+    assert app.state.audit_maintenance_healthy is False
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert "audit chain verification failed for 1 owner(s)" in messages
+    assert user_id not in messages
+    assert all(record.exc_info is None for record in caplog.records)
+
+
+async def test_daily_sweep_round_robins_past_500_and_includes_journal_only_owner(
+    app, monkeypatch, tmp_path
+):
+    """The durable cursor reaches quiet/state-only and journal-only owners;
+    the old recent-row LIMIT 500 could permanently starve both."""
+    from app import main as main_mod
+    from app.api import _audit as audit_mod
+
+    mac_key = bytes.fromhex(app.state.settings.audit_mac_secret_hex)
+    now = utcnow() - timedelta(days=2)
+    state_ids = [f"{index:032x}" for index in range(501)]
+    async with app.state.sessionmaker() as session:
+        for user_id in state_ids:
+            state = AuditChainState(
+                user_id=user_id,
+                head_seq=1,
+                head_hash="a" * 64,
+                head_at=now,
+                first_retained_seq=None,
+                first_retained_hash=None,
+                state_version=1,
+                mac_key_version=1,
+                updated_at=now,
+            )
+            from app.api._audit import compute_chain_state_mac
+
+            state.state_mac = compute_chain_state_mac(mac_key, state)
+            session.add(state)
+        await session.commit()
+
+    journal_only = "f" * 32
+    journal = tmp_path / "audit.journal"
+    journal.write_text(f"{journal_only} 1 {'b' * 64} {'c' * 64} 2020-01-01T00:00:00+00:00\n")
+    app.state.settings.audit_journal_path = str(journal)
+    visited: list[str] = []
+
+    async def capture(_session, cursor, user_id, **kwargs):
+        from app.api._audit import (
+            IncrementalChainVerification,
+            seal_verification_checkpoint,
+        )
+
+        visited.append(user_id)
+        cursor.last_user_id = user_id
+        cursor.verification_owner_id = None
+        cursor.verification_snapshot_head_seq = None
+        cursor.verification_snapshot_head_hash = None
+        cursor.verification_next_seq = None
+        cursor.verification_previous_hash = None
+        cursor.verification_rows_checked = 0
+        seal_verification_checkpoint(
+            cursor,
+            kwargs["mac_keys"],
+            kwargs["current_mac_key_version"],
+        )
+        return IncrementalChainVerification(ok=True, complete=True, rows_checked=0)
+
+    monkeypatch.setattr(audit_mod, "verify_access_log_chain_incremental", capture)
+    await main_mod._prune_access_log_once(app)
+    assert len(visited) == 500
+    await main_mod._prune_access_log_once(app)
+    assert set(state_ids).issubset(visited)
+    assert journal_only in visited
 
 
 # ---------------------------------------------------------------------------
@@ -525,16 +893,43 @@ def test_read_journal_head_missing_file_is_none(tmp_path):
     assert read_journal_head(str(tmp_path / "absent.journal"), "u1") is None
 
 
-def test_read_journal_head_skips_malformed_lines(tmp_path):
+def test_read_journal_head_flags_malformed_lines_without_losing_valid_evidence(tmp_path):
+    owner = new_id_hex()
     journal = tmp_path / "audit.journal"
     journal.write_text(
         "garbage line\n"
-        "u1 notanum hash mac 2026-09-27T00:00:00+00:00\n"
-        "other 5 hash mac 2026-09-27T00:00:00+00:00\n"
-        "u1 7 aaaa bbbb 2026-09-27T01:00:00+00:00\n"
-        "u1 3 cccc dddd 2026-09-27T02:00:00+00:00\n"
+        f"{owner} 7 {'a' * 64} {'b' * 64} 2026-09-27T01:00:00+00:00\n"
+        f"{owner} 3 {'c' * 64} {'d' * 64} 2026-09-27T02:00:00+00:00\n"
     )
-    assert read_journal_head(str(journal), "u1") == (7, "2026-09-27T01:00:00+00:00")
+    assert read_journal_head(str(journal), owner) == (7, "2026-09-27T01:00:00+00:00")
+    assert audit_journal_health() == (False, "malformed_evidence")
+    original = journal.read_bytes()
+    with pytest.raises(RuntimeError, match="malformed.*evidence"):
+        compact_audit_journal(str(journal), "2030-01-01T00:00:00+00:00")
+    assert journal.read_bytes() == original
+
+
+async def test_corrupt_journal_fails_verification_even_after_db_state_deletion(
+    chain_sessionmaker, tmp_path
+):
+    mac_key = _mac_key()
+    owner = new_id_hex()
+    await _seed_chain(chain_sessionmaker, owner, mac_key, n=1)
+    journal = tmp_path / "audit.journal"
+    journal.write_text("truncated committed evidence")
+    async with chain_sessionmaker() as session:
+        await session.execute(delete(AccessLog).where(AccessLog.user_id == owner))
+        await session.execute(delete(AuditChainState).where(AuditChainState.user_id == owner))
+        await session.commit()
+        verdict = await verify_access_log_chain(
+            session,
+            owner,
+            mac_key=mac_key,
+            journal_path=str(journal),
+            retention_cutoff=utcnow() - timedelta(days=1),
+        )
+    assert not verdict.ok
+    assert "journal evidence is unavailable or malformed" in (verdict.reason or "")
 
 
 async def test_append_falls_back_to_bare_flush_without_savepoints(chain_sessionmaker, monkeypatch):
@@ -549,6 +944,7 @@ async def test_append_falls_back_to_bare_flush_without_savepoints(chain_sessionm
             actor_role="patient",
             user_id=user_id,
             action="bare_flush",
+            allow_new_chain=True,
         )
         await session.commit()
         assert row.chain_seq == 1
@@ -593,34 +989,42 @@ async def test_append_exhausts_retries_and_fails_loud(chain_sessionmaker, monkey
 
 
 async def test_verifier_empty_db_journal_branches(chain_sessionmaker, tmp_path):
-    """Empty trail + journal lines: an unparsable journal date reads as no
-    anchor (ok); a fresh journal date past the retention cutoff is tail
-    truncation; an old one is legitimate post-retention state."""
+    """Empty trail with external evidence cannot pass without durable state;
+    malformed evidence is an even earlier global integrity failure."""
     mac = _mac_key()
     user_id = new_id_hex()
     stale = tmp_path / "stale.journal"
-    stale.write_text(f"{user_id} 4 hash mac 2020-01-01T00:00:00+00:00\n")
+    stale.write_text(f"{user_id} 4 {'a' * 64} {'b' * 64} 2020-01-01T00:00:00+00:00\n")
     fresh = tmp_path / "fresh.journal"
-    fresh.write_text(f"{user_id} 4 hash mac {utcnow().isoformat()}\n")
+    fresh.write_text(f"{user_id} 4 {'a' * 64} {'b' * 64} {utcnow().isoformat()}\n")
     junk = tmp_path / "junk.journal"
-    junk.write_text(f"{user_id} 4 hash mac not-a-date\n")
+    junk.write_text(f"{user_id} 4 {'a' * 64} {'b' * 64} not-a-date\n")
     async with chain_sessionmaker() as session:
         old_cutoff = utcnow() - timedelta(days=730)
-        assert (
-            await verify_access_log_chain(
-                session, user_id, mac_key=mac, journal_path=str(stale), retention_cutoff=old_cutoff
+        for path in (stale,):
+            missing_state = await verify_access_log_chain(
+                session,
+                user_id,
+                mac_key=mac,
+                journal_path=str(path),
+                retention_cutoff=old_cutoff,
             )
-        ).ok
-        assert (
-            await verify_access_log_chain(
-                session, user_id, mac_key=mac, journal_path=str(junk), retention_cutoff=old_cutoff
-            )
-        ).ok
+            assert not missing_state.ok
+            assert "state is missing" in missing_state.reason
+        corrupt = await verify_access_log_chain(
+            session,
+            user_id,
+            mac_key=mac,
+            journal_path=str(junk),
+            retention_cutoff=old_cutoff,
+        )
+        assert not corrupt.ok
+        assert "unavailable or malformed" in (corrupt.reason or "")
         verdict = await verify_access_log_chain(
             session, user_id, mac_key=mac, journal_path=str(fresh), retention_cutoff=old_cutoff
         )
     assert not verdict.ok
-    assert "tail truncation" in verdict.reason
+    assert "state is missing" in verdict.reason
 
 
 async def test_verifier_flags_malformed_hash_and_journal_ahead_with_rows(
@@ -631,7 +1035,7 @@ async def test_verifier_flags_malformed_hash_and_journal_ahead_with_rows(
     await _seed_chain(chain_sessionmaker, user_id, mac, n=2)
     journal = str(tmp_path / "audit.journal")
     with open(journal, "w", encoding="utf-8") as handle:
-        handle.write(f"{user_id} 3 {'f' * 64} mac {utcnow().isoformat()}\n")
+        handle.write(f"{user_id} 3 {'f' * 64} {'a' * 64} {utcnow().isoformat()}\n")
     async with chain_sessionmaker() as session:
         row = (
             (await session.execute(select(AccessLog).where(AccessLog.user_id == user_id)))
@@ -653,7 +1057,7 @@ async def test_verifier_flags_malformed_hash_and_journal_ahead_with_rows(
         other = new_id_hex()
         await _seed_chain(chain_sessionmaker, other, mac, n=1)
         with open(journal, "a", encoding="utf-8") as handle:
-            handle.write(f"{other} 9 {'e' * 64} mac {utcnow().isoformat()}\n")
+            handle.write(f"{other} 9 {'e' * 64} {'b' * 64} {utcnow().isoformat()}\n")
         verdict = await verify_access_log_chain(session, other, mac_key=mac, journal_path=journal)
     assert not verdict.ok
     assert "tail truncation" in verdict.reason
@@ -682,14 +1086,35 @@ async def test_journal_flush_failure_never_fails_the_request(client, app, monkey
     assert granted["status"] == 201, granted
 
 
-async def test_sweep_tolerates_an_unparseable_mac_secret(client, app, monkeypatch):
-    """A settings object whose MAC secret is not valid hex (defensive —
-    Settings validates the explicit form, but the derived property could
-    break independently) keeps the sweep running link-only."""
+async def test_sweep_fails_closed_on_an_unavailable_mac_keyring(client, app, monkeypatch):
+    """Retention cannot fall back to unauthenticated link-only verification."""
     from types import SimpleNamespace
 
     from app import main as main_mod
 
+    emu = ClientEmulator("missing-keyring", "keyring-password")
+    await emu.register(client)
+    owner = emu.user_id
+    assert owner is not None
+    async with app.state.sessionmaker() as session:
+        before_rows = list(
+            (
+                await session.execute(
+                    select(AccessLog.id, AccessLog.chain_seq, AccessLog.entry_hash)
+                    .where(AccessLog.user_id == owner)
+                    .order_by(AccessLog.chain_seq)
+                )
+            ).all()
+        )
+        before_state = await session.get(AuditChainState, owner)
+        assert before_state is not None
+        before_state_values = (
+            before_state.head_seq,
+            before_state.head_hash,
+            before_state.first_retained_seq,
+            before_state.first_retained_hash,
+            before_state.state_mac,
+        )
     real_settings = app.state.settings
     fake = SimpleNamespace(
         access_log_retention_days=730,
@@ -698,7 +1123,30 @@ async def test_sweep_tolerates_an_unparseable_mac_secret(client, app, monkeypatc
     )
     monkeypatch.setattr(app.state, "settings", fake)
     try:
-        await main_mod._prune_access_log_once(app)  # must not raise
+        with pytest.raises(RuntimeError, match="requires a valid MAC key ring"):
+            await main_mod._prune_access_log_once(app)
+        assert app.state.audit_maintenance_healthy is False
+        assert "mindpattern_audit_maintenance_failures_total 1" in app.state.metrics.render(0)
+        async with app.state.sessionmaker() as session:
+            after_rows = list(
+                (
+                    await session.execute(
+                        select(AccessLog.id, AccessLog.chain_seq, AccessLog.entry_hash)
+                        .where(AccessLog.user_id == owner)
+                        .order_by(AccessLog.chain_seq)
+                    )
+                ).all()
+            )
+            after_state = await session.get(AuditChainState, owner)
+            assert after_state is not None
+            assert after_rows == before_rows
+            assert (
+                after_state.head_seq,
+                after_state.head_hash,
+                after_state.first_retained_seq,
+                after_state.first_retained_hash,
+                after_state.state_mac,
+            ) == before_state_values
     finally:
         monkeypatch.setattr(app.state, "settings", real_settings)
 

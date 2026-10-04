@@ -21,14 +21,16 @@ import { clearThresholdNotice } from "./thresholdNotice";
 import { clearReminderPrefs } from "./reminders";
 import { clearMeasureReminderPrefs, clearLastMeasureDate } from "./measureReminders";
 import { clearMoodMirrorPref } from "./healthkit";
-import { disableBiometricUnlock } from "./biometricUnlock";
+import { eraseBiometricUnlock } from "./biometricUnlock";
 import { forgetAllEntryVersions } from "./entryVersions";
 import { forgetAnalysisGeneration } from "./stateSeqGuard";
-import { clearUnlockFailures } from "./unlockBackoff";
+import { eraseUnlockFailures } from "./unlockBackoff";
 import { cancelDailyReminder, cancelMeasureReminder } from "./nativeFeatures";
-const PREFIX = "@mindpattern/erasure.v1.";
+import { ACCOUNT_STORAGE_PREFIX, accountStorageKey, accountStorageKeysForOwner } from "./accountStorage";
+import { scrubVoiceScratchForOwner } from "./audio/voiceScratch";
+const PREFIX = ACCOUNT_STORAGE_PREFIX.erasure;
 interface Erasure { userId: string; username: string | null; origin: string }
-const keyFor = (job: Erasure) => `${PREFIX}${Buffer.from(`${job.origin}\0${job.userId}`).toString("base64url")}`;
+const keyFor = (job: Erasure) => accountStorageKey.erasure(job.origin, job.userId);
 export async function eraseDeletedAccountLocals(userId: string, username: string | null, options: { origin?: string; preserveSession?: boolean } = {}): Promise<string[]> {
   const epoch = localWriteScopeEpoch();
   markAccountDeleted(userId);
@@ -43,10 +45,17 @@ export async function eraseDeletedAccountLocals(userId: string, username: string
 }
 async function cleanup(job: Erasure, options: { epoch?: number; preserveSession?: boolean } = {}): Promise<string[]> {
   let epoch = options.epoch ?? localWriteScopeEpoch();
-  const check = () => { if (epoch !== localWriteScopeEpoch()) throw new Error("The account/server changed during local erasure"); };
   if (canonicalOrigin(await getBaseUrl()) !== job.origin || epoch !== localWriteScopeEpoch()) return ["server scope changed"];
   const { userId, username } = job;
   markAccountDeleted(userId);
+  // Credential retirement is independent of feature cleanup. A failed
+  // notification/file/key deletion keeps this encrypted checkpoint, but
+  // can never keep (or restore) an authenticated deleted-account tuple.
+  let sessionFailed = false;
+  try { await api.retireDeletedSession(userId); }
+  catch { sessionFailed = true; }
+  epoch = localWriteScopeEpoch();
+  const check = () => { if (epoch !== localWriteScopeEpoch()) throw new Error("The account/server changed during local erasure"); };
   await waitLocalWriteCommits(userId);
   const currentOwner = await api.getUserId().catch(() => null);
   if (epoch !== localWriteScopeEpoch()) return ["account scope changed"];
@@ -64,36 +73,44 @@ async function cleanup(job: Erasure, options: { epoch?: number; preserveSession?
     ["crisis dialog stamp", () => clearCrisisDialogStamp(userId)], ["threshold notice", () => clearThresholdNotice(userId)],
     ["reminder preferences", () => clearReminderPrefs(userId)], ["check-in preferences", () => clearMeasureReminderPrefs(userId)],
     ["check-in cadence", () => clearLastMeasureDate(userId)], ["health preference", () => clearMoodMirrorPref(userId)],
-    ["biometric key", () => disableBiometricUnlock(userId)], ["entry guards", () => forgetAllEntryVersions(userId)],
-    ["analysis guard", () => forgetAnalysisGeneration(userId)],
+    ["biometric key", () => eraseBiometricUnlock(userId)], ["entry guards", () => forgetAllEntryVersions(userId)],
+    ["analysis guard", () => forgetAnalysisGeneration(userId)], ["voice scratch", () => scrubVoiceScratchForOwner(userId)],
 
   ];
   const requireCancellation = async (cancel: () => Promise<boolean>): Promise<void> => {
     if (!await cancel()) throw new Error("Notification cancellation could not be verified");
   };
   if (!currentOwner || currentOwner === userId) tasks.push(["daily notification", () => requireCancellation(cancelDailyReminder)], ["check-in notification", () => requireCancellation(cancelMeasureReminder)]);
-  if (username) tasks.push(["salt cache", () => api.clearCachedSalt(username)], ["key-envelope cache", () => api.clearCachedKeyEnvelope(username)], ["unlock failures", () => clearUnlockFailures(username)]);
+  if (username) tasks.push(["salt cache", () => api.clearCachedSalt(username)], ["key-envelope cache", () => api.clearCachedKeyEnvelope(username)], ["unlock failures", () => eraseUnlockFailures(username)]);
   const results = await Promise.allSettled(tasks.map(([, run]) => Promise.resolve().then(async () => {
     check(); await commitLocalErasureWrite(userId, epoch, run); check();
   })));
   const failed = results.flatMap((result, i) => result.status === "rejected" ? [tasks[i]![0]] : []);
+  if (sessionFailed) failed.push("deleted-account session");
   if (rotationFailed) failed.push("key rotation checkpoint");
   // Guard clear helpers intentionally tolerate transient failures; verify
   // their physical slots independently before declaring local erasure done.
-  try { check(); await commitLocalErasureWrite(userId, epoch, () => AsyncStorage.multiRemove([`mindpattern.entryVersions.${userId}`, `mindpattern.entryV2Bound.${userId}`, `mindpattern.stateSeq.${userId}`])); check(); }
+  try { check(); await commitLocalErasureWrite(userId, epoch, () => AsyncStorage.multiRemove([accountStorageKey.entryVersions(userId), accountStorageKey.entryV2Bound(userId), accountStorageKey.stateSequence(userId)])); check(); }
   catch { failed.push("persisted guards"); }
-  if (failed.length === 0 && currentOwner === userId && !options.preserveSession) {
-    try {
-      check(); const pending = api.clearSession(); epoch = localWriteScopeEpoch(); await pending; check();
-    } catch { failed.push("deleted-account session"); }
-  }
+  // Registry-backed final sweep: feature-specific helpers handle native
+  // side effects (files, Keychain, notifications), while this guarantees a
+  // newly registered account slot cannot be forgotten by the checklist.
+  try {
+    check();
+    const remaining = accountStorageKeysForOwner(await AsyncStorage.getAllKeys(), userId)
+      .filter(key => key !== keyFor(job));
+    if (remaining.length > 0) {
+      await commitLocalErasureWrite(userId, epoch, () => AsyncStorage.multiRemove(remaining));
+    }
+    check();
+  } catch { failed.push("account storage inventory"); }
   if (failed.length === 0) {
     try { check(); await commitLocalErasureWrite(userId, epoch, () => AsyncStorage.removeItem(keyFor(job))); check(); }
     catch { failed.push("cleanup checkpoint"); }
   }
   return failed;
 }
-export async function retryPendingAccountErasures(): Promise<void> {
+export async function retryPendingAccountErasures(): Promise<number> {
   for (const key of (await AsyncStorage.getAllKeys()).filter(k => k.startsWith(PREFIX))) {
     try {
       const raw = await secureStore.getItem(key); if (!raw) continue;
@@ -103,4 +120,5 @@ export async function retryPendingAccountErasures(): Promise<void> {
       await cleanup(job);
     } catch { /* Keep the job so a later start can retry all remaining work. */ }
   }
+  return (await AsyncStorage.getAllKeys()).filter(k => k.startsWith(PREFIX)).length;
 }

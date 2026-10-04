@@ -315,6 +315,7 @@ def main() -> int:
             "username": args.username,
             "salt": base64.b64encode(salt).decode(),
             "verifier": verifier_b64,
+            "age_attestation": "minimum_age_confirmed_v1",
         },
     )
     if register.status_code == 409:

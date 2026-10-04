@@ -35,7 +35,7 @@ from ..deps import (
     ApiError,
     get_session,
     require_regular_user,
-    require_therapist,
+    require_therapist_account,
     require_user,
 )
 from ..locks import lifecycle_locks, sharing_locks, sharing_patient_lock_key
@@ -43,8 +43,10 @@ from ..models import (
     KEY_SCHEME_V1,
     KEY_SCHEME_V2,
     AccessLog,
+    AuditChainState,
     AudioAttachment,
     Consent,
+    ConsentEvent,
     Entry,
     Insight,
     Measure,
@@ -55,6 +57,8 @@ from ..models import (
 )
 from ..schemas import (
     AccountDeleteRequest,
+    AccessLogExportRow,
+    ConsentEventOut,
     CredentialRotateRequest,
     ExportBundle,
     InsightOut,
@@ -63,6 +67,8 @@ from ..schemas import (
     LlmConsentResponse,
     PatientAccessLogOut,
     PasswordChangeRequest,
+    StepUpRequest,
+    StepUpResponse,
     ShareRecord,
     TotpConfirmRequest,
     TotpEnableResponse,
@@ -76,6 +82,10 @@ from ..schemas import (
     RecoveryStatusResponse,
 )
 from ._audit import append_access_log, parse_access_log_cursor
+from ._sharing_state import (
+    MAX_RETAINED_RELATIONSHIPS_PER_ACCOUNT,
+    add_consent_event,
+)
 from .auth import (
     AUTH_KEY_SIZE,
     SALT_BYTES,
@@ -84,6 +94,7 @@ from .auth import (
     hash_verifier_off_loop,
 )
 from ..security import crypto, envelope, kdf
+from ..security.deletion_tombstone import new_deletion_tombstone
 from ..security.enclave import zeroize
 from ..security.kdf import (
     KDF_PARAMS_MIN_PBKDF2_ITERATIONS,
@@ -234,6 +245,76 @@ async def _require_verifier(
     return target
 
 
+async def _require_step_up_or_verifier(
+    user: User,
+    *,
+    action: str,
+    proof: str | None,
+    verifier: str | None,
+    request: Request,
+    session: AsyncSession,
+) -> User:
+    """Authorize a sensitive action with a one-use proof or mobile fallback."""
+    if isinstance(proof, str):
+        request_state = getattr(request, "state", None)
+        valid = await request.app.state.step_up_store.consume(
+            proof,
+            user_id=user.id,
+            action=action,
+            token_jti=getattr(request_state, "mindpattern_token_jti", None),
+            token_epoch=getattr(request_state, "mindpattern_token_epoch", user.token_epoch),
+        )
+        if not valid:
+            raise ApiError(
+                status_code=403,
+                detail="step-up proof is invalid, expired, or already used",
+                code="step_up_invalid",
+            )
+        return user
+    if isinstance(verifier, str):
+        # Compatibility path for native clients that derive this value from
+        # a password typed immediately before the action.
+        return await _require_verifier(user, verifier, request, session)
+    raise ApiError(
+        status_code=403,
+        detail="fresh authentication is required for this action",
+        code="step_up_required",
+    )
+
+
+@router.post(
+    "/step-up",
+    response_model=StepUpResponse,
+    dependencies=[
+        Depends(make_rate_limiter("account-step-up", "auth_rate_limit", "auth_rate_window"))
+    ],
+)
+async def create_step_up_proof(
+    body: StepUpRequest,
+    request: Request,
+    user: User = Depends(require_regular_user),
+    session: AsyncSession = Depends(get_session),
+) -> StepUpResponse:
+    """Exchange a fresh password proof for one action-bound, one-use proof."""
+    fresh = await _require_verifier(user, body.verifier, request, session)
+    request_state = getattr(request, "state", None)
+    try:
+        proof, expires_in = await request.app.state.step_up_store.issue(
+            user_id=fresh.id,
+            action=body.action,
+            token_jti=getattr(request_state, "mindpattern_token_jti", None),
+            token_epoch=getattr(request_state, "mindpattern_token_epoch", fresh.token_epoch),
+        )
+    except RuntimeError:
+        raise ApiError(
+            status_code=503,
+            detail="step-up service is temporarily at capacity",
+            code="service_unavailable",
+            headers={"Retry-After": "1"},
+        ) from None
+    return StepUpResponse(proof=proof, action=body.action, expires_in=expires_in)
+
+
 def _epoch_fence_failed(fresh: User, expected_epoch: int) -> bool:
     """2026-09-26 audit M-B1: the in-fence epoch half of the M-2 pattern.
 
@@ -261,7 +342,11 @@ async def export_account(
     user: User = Depends(require_regular_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """Stream everything the server holds: ciphertext only.
+    """Stream the subject's portable account data and consent/access history.
+
+    Credential verifiers, TOTP secrets/codes, token revocations, rate-limit
+    state and audit-chain integrity anchors are security/operational records,
+    not portable content, and are intentionally excluded.
 
     The response is assembled incrementally (one entry per chunk) so a
     long journal cannot be materialized in memory as a single response
@@ -327,6 +412,21 @@ async def export_account(
         ) and await request.app.state.token_revocations.is_revoked_checked(session, export_jti):
             raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
         await ensure_no_rekey(session, fresh.id)
+        if (
+            await session.scalar(
+                select(Consent.id)
+                .where(Consent.user_id == fresh.id)
+                .order_by(Consent.id)
+                .offset(MAX_RETAINED_RELATIONSHIPS_PER_ACCOUNT)
+                .limit(1)
+            )
+            is not None
+        ):
+            raise ApiError(
+                status_code=413,
+                detail="retained sharing history exceeds the supported export size",
+                code="payload_too_large",
+            )
         # L-8 (2026-09-20): the insights section is SNAPSHOT-paginated, and
         # the snapshot of row IDS (ordered by created-at-at-cutoff for a
         # deterministic bundle) is captured here, in the same short head
@@ -351,23 +451,40 @@ async def export_account(
             .scalars()
             .all()
         )
-        # 2026-09-21 audit A-6: shares get the same frozen-id snapshot.
-        # The old (granted_at, id) keyset walked a MUTABLE column — a
-        # re-grant rewrites granted_at, so a re-grant mid-export moved the
-        # share across the cursor and silently dropped it from the bundle.
-        # Membership is frozen here instead; a row deleted between pages is
-        # skipped, but nothing that existed at the cutoff is ever dropped.
-        share_snapshot = list(
-            (
-                await session.execute(
-                    select(Consent.id)
-                    .where(Consent.user_id == fresh.id, Consent.granted_at <= cutoff)
-                    .order_by(Consent.granted_at.asc(), Consent.id.asc())
-                )
-            )
-            .scalars()
-            .all()
+        # Sharing membership is fenced by ``consents_revision`` and walked
+        # with an immutable id keyset below.  This avoids materializing a
+        # patient's lifetime relationship history before the first byte.
+        # Freeze the append-only audit sequence with indexed point reads.
+        # The chain-state row is the append/prune lock authority, so this
+        # short transaction cannot observe a torn head.  Export pages below
+        # keyset each sequence exactly once and reject any un-emitted gap.
+        audit_state = await session.scalar(
+            select(AuditChainState)
+            .where(AuditChainState.user_id == fresh.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
+        audit_first_seq = await session.scalar(
+            select(AccessLog.chain_seq)
+            .where(AccessLog.user_id == fresh.id)
+            .order_by(AccessLog.chain_seq)
+            .limit(1)
+        )
+        audit_last_seq = (
+            int(audit_state.head_seq)
+            if audit_state is not None and audit_first_seq is not None
+            else None
+        )
+        if audit_first_seq is not None and (
+            audit_state is None
+            or audit_state.first_retained_seq is None
+            or int(audit_state.first_retained_seq) != int(audit_first_seq)
+        ):
+            raise ApiError(
+                status_code=409,
+                detail="access history changed during export; retry",
+                code="collection_changed",
+            )
         export_settings = request.app.state.settings
         if (
             get_audio_store_cached(export_settings) is None
@@ -384,11 +501,20 @@ async def export_account(
                 code="audio_storage_unconfigured",
             )
         head = ExportBundle(
-            version=2,
+            version=3,
             username=fresh.username,
             exported_at=cutoff,
             user_id=fresh.id,
             salt=fresh.salt,
+            age_attestation_version=fresh.age_attestation_version,
+            age_attested_at=fresh.age_attested_at,
+            recovery_enabled=fresh.recovery_verifier is not None,
+            recovery_set_at=fresh.recovery_set_at,
+            recovery_scheme=(
+                "v2"
+                if fresh.recovery_verifier is not None and (fresh.recovery_scheme or 1) == 2
+                else ("v1" if fresh.recovery_verifier is not None else None)
+            ),
             # v2 key scheme (2026-09-26): the envelope travels with the
             # user's own document — export-then-delete on a v2 account
             # without it would destroy the only copy of the data key's
@@ -404,10 +530,16 @@ async def export_account(
             llm_consent_at=fresh.llm_consent_at,
             llm_consent_disclosure=fresh.llm_consent_disclosure,
             llm_consent_policy=fresh.llm_consent_policy,
+            voice_consent=bool(fresh.voice_consent),
+            voice_consent_at=fresh.voice_consent_at,
+            voice_consent_disclosure=fresh.voice_consent_disclosure,
+            voice_consent_policy=fresh.voice_consent_policy,
             # Shares are streamed in bounded metadata pages below, just like
             # ciphertext rows.  Keeping all consent records in this header
             # used an unbounded ``.all()`` before the first response byte.
             shares=[],
+            consent_events=[],
+            access_log=[],
             audio=[],
             entries=[],
             insights=[],
@@ -421,13 +553,39 @@ async def export_account(
 
     sessionmaker = request.app.state.sessionmaker
     head_json = json.dumps(
-        head.model_dump(mode="json", exclude={"shares", "entries", "insights", "measures", "audio"})
+        head.model_dump(
+            mode="json",
+            exclude={
+                "shares",
+                "consent_events",
+                "access_log",
+                "entries",
+                "insights",
+                "measures",
+                "audio",
+            },
+        )
     )[1:-1]
 
-    expected_export_revisions = (fresh.entries_revision, fresh.measures_revision)
+    expected_export_revisions = (
+        fresh.entries_revision,
+        fresh.measures_revision,
+        fresh.consents_revision,
+    )
 
     async def check_export_snapshot(page_session):
-        current = await page_session.get(User, fresh.id, populate_existing=True)
+        # Hold the revision authority row for this short page transaction.
+        # Every collection mutation advances a column on this row, so no
+        # writer can change membership between the revision check and the
+        # bounded page query.
+        current = (
+            await page_session.execute(
+                select(User)
+                .where(User.id == fresh.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
         if current is None or not current.is_active or current.token_epoch != expected_export_epoch:
             raise ApiError(status_code=401, detail="export session retired", code="unauthorized")
         if isinstance(
@@ -440,7 +598,11 @@ async def export_account(
         # A journal is therefore a snapshot change even if those counters
         # still equal the header's values. Never complete a mixed-key export.
         await ensure_no_rekey(page_session, fresh.id)
-        if (current.entries_revision, current.measures_revision) != expected_export_revisions:
+        if (
+            current.entries_revision,
+            current.measures_revision,
+            current.consents_revision,
+        ) != expected_export_revisions:
             raise ApiError(
                 status_code=409,
                 detail="account changed during export; retry",
@@ -453,11 +615,8 @@ async def export_account(
             yield head_json
             yield ',"shares":['
             first = True
-            # Snapshot-driven pages (audit A-6, see the head): walk the
-            # frozen id list in bounded chunks. granted_at is mutable
-            # (re-grant rewrites it) and must never back a keyset cursor.
-            for chunk_start in range(0, len(share_snapshot), EXPORT_METADATA_PAGE_SIZE):
-                chunk_ids = share_snapshot[chunk_start : chunk_start + EXPORT_METADATA_PAGE_SIZE]
+            share_cursor = ""
+            while True:
                 async with sessionmaker() as page_session:
                     await check_export_snapshot(page_session)
                     share_rows = (
@@ -467,37 +626,172 @@ async def export_account(
                                 Consent.status,
                                 Consent.granted_at,
                                 Consent.revoked_at,
+                                Consent.therapist_id,
+                                Consent.scope,
+                                Consent.disclosure,
+                                Consent.share_voice,
                                 User.username,
                                 User.display_name,
                             )
                             .join(User, Consent.therapist_id == User.id)
                             .where(
                                 Consent.user_id == fresh.id,
-                                Consent.id.in_(chunk_ids),
+                                Consent.id > share_cursor,
+                                User.is_active.is_(True),
                             )
+                            .order_by(Consent.id.asc())
+                            .limit(EXPORT_METADATA_PAGE_SIZE)
                         )
                     ).all()
-                    # SQL IN has no order guarantee: restore the frozen
-                    # snapshot order so the bundle is deterministic.
-                    shares_by_id = {row[0]: row for row in share_rows}
-                    if set(shares_by_id) != set(chunk_ids):
+                    # Export policy is the same as the live sharing views:
+                    # a retired therapist is no longer an exportable
+                    # counterpart. Refuse the snapshot while a bounded
+                    # physical purge is pending rather than silently omit a
+                    # row under an unchanged patient revision. The patient
+                    # row lock held by check_export_snapshot keeps purge's
+                    # revision bump from crossing this final liveness probe.
+                    inactive_relationship = await page_session.scalar(
+                        select(Consent.id)
+                        .join(User, Consent.therapist_id == User.id)
+                        .where(
+                            Consent.user_id == fresh.id,
+                            User.is_active.is_(False),
+                        )
+                        .limit(1)
+                    )
+                    if inactive_relationship is not None:
                         raise ApiError(
                             status_code=409,
-                            detail="sharing changed during export; retry",
+                            detail="account changed during export; retry",
                             code="collection_changed",
                         )
                     rendered = [
                         ShareRecord(
+                            id=consent_id,
+                            therapist_id=therapist_id,
                             therapist_username=username,
                             therapist_display_name=display_name or username,
                             status=status,
                             granted_at=granted_at,
                             revoked_at=revoked_at,
+                            scope=scope,
+                            disclosure=disclosure,
+                            share_voice=bool(share_voice),
                         ).model_dump(mode="json")
-                        for _, status, granted_at, revoked_at, username, display_name in (
-                            shares_by_id[row_id] for row_id in chunk_ids if row_id in shares_by_id
-                        )
+                        for consent_id, status, granted_at, revoked_at, therapist_id, scope, disclosure, share_voice, username, display_name in share_rows
                     ]
+                for item in rendered:
+                    yield ("" if first else ",") + json.dumps(item)
+                    first = False
+                if len(share_rows) < EXPORT_METADATA_PAGE_SIZE:
+                    break
+                share_cursor = share_rows[-1][0]
+
+            yield '],"consent_events":['
+            first = True
+            consent_cursor: tuple | None = None
+            while True:
+                async with sessionmaker() as page_session:
+                    await check_export_snapshot(page_session)
+                    consent_query = (
+                        select(ConsentEvent)
+                        .where(
+                            ConsentEvent.user_id == fresh.id,
+                            ConsentEvent.occurred_at <= cutoff,
+                        )
+                        .order_by(ConsentEvent.occurred_at, ConsentEvent.id)
+                        .limit(EXPORT_METADATA_PAGE_SIZE)
+                    )
+                    if consent_cursor is not None:
+                        last_at, last_id = consent_cursor
+                        consent_query = consent_query.where(
+                            or_(
+                                ConsentEvent.occurred_at > last_at,
+                                and_(
+                                    ConsentEvent.occurred_at == last_at,
+                                    ConsentEvent.id > last_id,
+                                ),
+                            )
+                        )
+                    rows = (await page_session.execute(consent_query)).scalars().all()
+                    rendered = [
+                        ConsentEventOut(
+                            id=row.id,
+                            kind=row.kind,
+                            action=row.action,
+                            disclosure=row.disclosure,
+                            policy=row.policy,
+                            consent_id=row.consent_id,
+                            share_voice=row.share_voice,
+                            event_version=row.event_version,
+                            occurred_at=row.occurred_at,
+                        ).model_dump(mode="json")
+                        for row in rows
+                    ]
+                    if rows:
+                        consent_cursor = (rows[-1].occurred_at, rows[-1].id)
+                if not rendered:
+                    break
+                for item in rendered:
+                    yield ("" if first else ",") + json.dumps(item)
+                    first = False
+
+            yield '],"access_log":['
+            first = True
+            audit_next_seq = int(audit_first_seq) if audit_first_seq is not None else None
+            while (
+                audit_next_seq is not None
+                and audit_last_seq is not None
+                and audit_next_seq <= audit_last_seq
+            ):
+                async with sessionmaker() as page_session:
+                    await check_export_snapshot(page_session)
+                    page_state = await page_session.scalar(
+                        select(AuditChainState)
+                        .where(AuditChainState.user_id == fresh.id)
+                        .with_for_update()
+                    )
+                    if page_state is None or page_state.head_seq < audit_last_seq:
+                        raise ApiError(
+                            status_code=409,
+                            detail="access history changed during export; retry",
+                            code="collection_changed",
+                        )
+                    rows = (
+                        (
+                            await page_session.execute(
+                                select(AccessLog)
+                                .where(
+                                    AccessLog.user_id == fresh.id,
+                                    AccessLog.chain_seq >= audit_next_seq,
+                                    AccessLog.chain_seq <= audit_last_seq,
+                                )
+                                .order_by(AccessLog.chain_seq)
+                                .limit(EXPORT_METADATA_PAGE_SIZE)
+                            )
+                        )
+                        .scalars()
+                        .all()
+                    )
+                    expected_sequences = list(range(audit_next_seq, audit_next_seq + len(rows)))
+                    if not rows or [int(row.chain_seq) for row in rows] != expected_sequences:
+                        raise ApiError(
+                            status_code=409,
+                            detail="access history changed during export; retry",
+                            code="collection_changed",
+                        )
+                    rendered = [
+                        AccessLogExportRow(
+                            id=row.id,
+                            actor_id=row.actor_id,
+                            actor_role=row.actor_role,
+                            action=row.action,
+                            at=row.at,
+                            chain_seq=row.chain_seq,
+                        ).model_dump(mode="json")
+                        for row in rows
+                    ]
+                    audit_next_seq = int(rows[-1].chain_seq) + 1
                 for item in rendered:
                     yield ("" if first else ",") + json.dumps(item)
                     first = False
@@ -983,6 +1277,12 @@ async def set_recovery_envelope(
     rotates the previous kit off: the OLD recovery key stops working the
     moment this returns.
     """
+    if body.scheme != "v2":
+        raise ApiError(
+            status_code=409,
+            detail="legacy recovery setup is retired; create a v2 recovery kit",
+            code="upgrade_required",
+        )
     expected_epoch = user.token_epoch
     await _require_verifier(user, body.password_verifier, request, session)
     try:
@@ -1882,6 +2182,7 @@ async def set_llm_consent(
     request: Request,
     user: User = Depends(require_regular_user),
     session: AsyncSession = Depends(get_session),
+    x_step_up_proof: str | None = Header(default=None),
 ):
     """Explicit, re-authenticated per-user opt-in for LLM analysis.
 
@@ -1895,7 +2196,14 @@ async def set_llm_consent(
     # Epoch BEFORE the proof (2026-09-26 audit follow-up N-2): the proof's
     # populate_existing re-read refreshes this same ORM object in place.
     expected_epoch = user.token_epoch
-    await _require_verifier(user, body.verifier, request, session)
+    await _require_step_up_or_verifier(
+        user,
+        action="llm_consent",
+        proof=x_step_up_proof,
+        verifier=body.verifier,
+        request=request,
+        session=session,
+    )
     # M-B1 (2026-09-26): the epoch this bearer authenticated under, for the
     # in-fence re-authorization below.
     async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
@@ -1922,9 +2230,20 @@ async def set_llm_consent(
                 detail="third-party analysis is not configured on this server",
                 code="llm_unavailable",
             )
+        if bool(fresh.llm_consent) == body.enabled and (
+            not body.enabled
+            or (
+                fresh.llm_consent_disclosure == LLM_DISCLOSURE_VERSION
+                and fresh.llm_consent_policy == policy
+            )
+        ):
+            return _consent_response(fresh, request.app.state.settings)
         fresh.llm_consent = body.enabled
+        consent_at = utcnow()
+        event_disclosure = LLM_DISCLOSURE_VERSION if body.enabled else fresh.llm_consent_disclosure
+        event_policy = policy if body.enabled else fresh.llm_consent_policy
         if body.enabled:
-            fresh.llm_consent_at = utcnow()
+            fresh.llm_consent_at = consent_at
             fresh.llm_consent_disclosure = LLM_DISCLOSURE_VERSION
             fresh.llm_consent_policy = policy
         else:
@@ -1932,6 +2251,18 @@ async def set_llm_consent(
             fresh.llm_consent_disclosure = None
             fresh.llm_consent_policy = None
         session.add(fresh)
+        await add_consent_event(
+            session,
+            ConsentEvent(
+                user_id=fresh.id,
+                kind="llm",
+                action="granted" if body.enabled else "withdrawn",
+                disclosure=event_disclosure,
+                policy=event_policy,
+                occurred_at=consent_at,
+            ),
+            permission_increasing=body.enabled,
+        )
         # 2026-09-29 deep-audit MEDIUM: the most consequential privacy
         # decision in the product — journal text flowing to a third-party
         # endpoint — now leaves a tamper-evident trail row. The columns
@@ -1987,6 +2318,7 @@ async def set_voice_consent(
     request: Request,
     user: User = Depends(require_regular_user),
     session: AsyncSession = Depends(get_session),
+    x_step_up_proof: str | None = Header(default=None),
 ):
     """Explicit, re-authenticated per-user opt-in for voice transcription.
 
@@ -1999,7 +2331,14 @@ async def set_voice_consent(
     fresh re-read, policy fingerprint).
     """
     expected_epoch = user.token_epoch
-    await _require_verifier(user, body.verifier, request, session)
+    await _require_step_up_or_verifier(
+        user,
+        action="voice_consent",
+        proof=x_step_up_proof,
+        verifier=body.verifier,
+        request=request,
+        session=session,
+    )
     async with lifecycle_locks.hold(f"llm-lifecycle:{user.id}"):
         fresh = (
             (
@@ -2021,9 +2360,22 @@ async def set_voice_consent(
                 detail="voice transcription is not configured on this server",
                 code="stt_unavailable",
             )
+        if bool(fresh.voice_consent) == body.enabled and (
+            not body.enabled
+            or (
+                fresh.voice_consent_disclosure == VOICE_DISCLOSURE_VERSION
+                and fresh.voice_consent_policy == policy
+            )
+        ):
+            return _voice_consent_response(fresh, request.app.state.settings)
         fresh.voice_consent = body.enabled
+        consent_at = utcnow()
+        event_disclosure = (
+            VOICE_DISCLOSURE_VERSION if body.enabled else fresh.voice_consent_disclosure
+        )
+        event_policy = policy if body.enabled else fresh.voice_consent_policy
         if body.enabled:
-            fresh.voice_consent_at = utcnow()
+            fresh.voice_consent_at = consent_at
             fresh.voice_consent_disclosure = VOICE_DISCLOSURE_VERSION
             fresh.voice_consent_policy = policy
         else:
@@ -2031,6 +2383,18 @@ async def set_voice_consent(
             fresh.voice_consent_disclosure = None
             fresh.voice_consent_policy = None
         session.add(fresh)
+        await add_consent_event(
+            session,
+            ConsentEvent(
+                user_id=fresh.id,
+                kind="voice",
+                action="granted" if body.enabled else "withdrawn",
+                disclosure=event_disclosure,
+                policy=event_policy,
+                occurred_at=consent_at,
+            ),
+            permission_increasing=body.enabled,
+        )
         # 2026-09-29 deep-audit MEDIUM: same trail-completeness fix as the
         # LLM toggle — recorded audio flowing off-server must be visible in
         # the chained, MAC-sealed history, not just in a mutable column.
@@ -2058,8 +2422,9 @@ async def delete_account(
     user: User = Depends(require_regular_user),
     session: AsyncSession = Depends(get_session),
     x_account_verifier: str | None = Header(default=None),
+    x_step_up_proof: str | None = Header(default=None),
 ):
-    """Hard delete: user row, all entries, all insights. No tombstones.
+    """Immediately retire the account and enqueue bounded physical erasure.
 
     Requires the verifier (password proof) — a bearer token alone must not
     be able to permanently destroy a journal. In-memory processing-session
@@ -2072,16 +2437,17 @@ async def delete_account(
     # sentinel, not a string.)
     header_verifier = x_account_verifier if isinstance(x_account_verifier, str) else None
     verifier = header_verifier if header_verifier is not None else (body.verifier if body else None)
-    if verifier is None:
-        raise ApiError(
-            status_code=422,
-            detail="account verifier required (X-Account-Verifier header)",
-            code="validation_error",
-        )
     # Epoch BEFORE the proof (2026-09-26 audit follow-up N-2): the proof's
     # populate_existing re-read refreshes this same ORM object in place.
     expected_epoch = user.token_epoch
-    await _require_verifier(user, verifier, request, session)
+    await _require_step_up_or_verifier(
+        user,
+        action="account_delete",
+        proof=x_step_up_proof,
+        verifier=verifier,
+        request=request,
+        session=session,
+    )
     if not user.is_active:
         raise ApiError(status_code=404, detail="account not found", code="not_found")
     # M-B1 (2026-09-26): capture the token's epoch at entry; the fences
@@ -2130,26 +2496,43 @@ async def delete_account(
                 user_id=user.id,
                 action="account_deleted",
             )
-            await session.execute(delete(Insight).where(Insight.user_id == user.id))
-            await session.execute(delete(Entry).where(Entry.user_id == user.id))
-            from ..services.audio_store import enqueue_audio_delete, drain_audio_deletions
-
-            store = get_audio_store_cached(request.app.state.settings)
-            audio_rows = list(
-                (
-                    await session.scalars(
-                        select(AudioAttachment).where(AudioAttachment.user_id == user.id)
-                    )
-                ).all()
+            session.add(
+                new_deletion_tombstone(
+                    fresh,
+                    secret=request.app.state.settings.auth_token_secret,
+                    auth_secret_version=request.app.state.settings.auth_secret_version,
+                    now=utcnow(),
+                )
             )
-            tombstones = [enqueue_audio_delete(session, row, store=store) for row in audio_rows]
-            await session.execute(delete(RekeyJournal).where(RekeyJournal.user_id == user.id))
-            await session.execute(delete(User).where(User.id == user.id))
+            from ..services.account_deletion import (
+                purge_one_account_page,
+                stage_account_deletion,
+            )
+
+            stage_account_deletion(session, fresh)
             await session.commit()
-            await drain_audio_deletions(session, request.app.state.settings, identifiers=tombstones)
+            # Preserve prompt hard-erasure semantics for ordinary small
+            # accounts while keeping request work strictly capped. Oversized
+            # accounts leave the same durable job for the background worker.
+            # This uses a fresh session: rolling back the request session
+            # after its terminal audit commit would suppress that committed
+            # row's post-response journal flush.
+            try:
+                async with request.app.state.sessionmaker() as purge_session:
+                    progress = await purge_one_account_page(
+                        purge_session,
+                        request.app.state.settings,
+                        owner_id=user.id,
+                    )
+                    await purge_session.commit()
+                request.app.state.account_deletion_backlog = progress.backlog
+            except Exception:  # noqa: BLE001 - logical erasure already committed
+                request.app.state.account_deletion_backlog = True
+                logger.error("bounded account purge deferred to background worker")
+            request.app.state.account_deletion_wakeup.set()
 
 
-# --- Optional therapist TOTP (2026-09-21 audit C-2/F-4, delivered 2026-09-22) --------
+# --- Required therapist TOTP before patient-data access -----------------------
 #
 # Therapist accounts read PHI-adjacent data with a password + scrypt
 # verifier and previously no second factor. Enrollment is a three-step
@@ -2157,7 +2540,8 @@ async def delete_account(
 # re-authenticated setup stores a PENDING wrapped secret and shows it to
 # the therapist exactly once; (2) enable proves the authenticator holds it
 # and arms the login check; (3) disable re-proves both halves and clears
-# everything. Patients stay password-only by design — the mobile client
+# everything. The returned one-time backup codes are the self-service
+# authenticator-loss recovery path. Patients stay password-only by design — the mobile client
 # has no TOTP surface, so setup is therapist-gated and a patient token
 # answers 403.
 
@@ -2172,7 +2556,7 @@ async def delete_account(
 async def totp_setup(
     body: TotpSetupRequest,
     request: Request,
-    user: User = Depends(require_therapist),
+    user: User = Depends(require_therapist_account),
     session: AsyncSession = Depends(get_session),
 ):
     """Arm a PENDING TOTP secret (nothing is enforced at login yet).
@@ -2182,8 +2566,8 @@ async def totp_setup(
     answers 409: re-arming must go through disable, which requires a live
     code — otherwise an attacker holding only the password half could
     strip the factor by re-running setup and logging in password-only
-    (the exact threat the factor exists for). A lost authenticator is the
-    documented operator path (clear users.totp_* by hand).
+    (the exact threat the factor exists for). A lost authenticator uses one
+    of the one-time backup codes minted at enablement.
     """
     if user.totp_enabled:
         raise ApiError(
@@ -2247,7 +2631,7 @@ async def totp_setup(
 async def totp_enable(
     body: TotpConfirmRequest,
     request: Request,
-    user: User = Depends(require_therapist),
+    user: User = Depends(require_therapist_account),
     session: AsyncSession = Depends(get_session),
 ):
     """Confirm enrollment by presenting a code from the PENDING secret.
@@ -2346,7 +2730,7 @@ async def totp_enable(
 async def totp_disable(
     body: TotpConfirmRequest,
     request: Request,
-    user: User = Depends(require_therapist),
+    user: User = Depends(require_therapist_account),
     session: AsyncSession = Depends(get_session),
 ):
     """Turn TOTP off: verifier (password half) + code (authenticator half).

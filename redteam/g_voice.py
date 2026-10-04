@@ -74,6 +74,7 @@ async def _register(client, username, password="correct horse battery staple"):
             "username": username,
             "salt": base64.b64encode(salt).decode(),
             "verifier": base64.b64encode(auth_key).decode(),
+            "age_attestation": "minimum_age_confirmed_v1",
         },
     )
     r.raise_for_status()

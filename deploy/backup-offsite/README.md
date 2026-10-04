@@ -30,20 +30,24 @@ explicitly.
 
 ## Enable
 
-Add to the owner-only secrets file (`/etc/mindpattern/secrets.env`, mode
-0600 — never the release env asset or the checkout):
+Install the credential-bearing rclone INI as a mode-0600 secret file. There is
+no environment fallback because that would expose provider credentials through
+`docker inspect`:
+
+```bash
+SECRET_DIR=/etc/mindpattern/secrets
+install -d -m 0700 "$SECRET_DIR"
+install -m 0600 deploy/secrets/rclone_config.example "$SECRET_DIR/rclone_config"
+# Edit $SECRET_DIR/rclone_config: replace every placeholder and configure the
+# exact remote named below before starting the service.
+```
+
+Add only the non-secret destination and behavior choices to the owner-only
+operator env (`/etc/mindpattern/operator.env`, mode 0600):
 
 ```dotenv
 # rclone destination spec; the remote must exist in the config below.
 BACKUP_OFFSITE_REMOTE=s3-offsite:mindpattern/backups
-# Full rclone config INI, double-quoted so the multi-line value parses
-# (Compose v2 dotenv supports quoted multi-line values). Example:
-BACKUP_OFFSITE_RCLONE_CONFIG="[s3-offsite]
-type = s3
-provider = AWS
-access_key_id = ...
-secret_access_key = ...
-region = us-east-1"
 # Optional: replication interval in seconds (default 3600, minimum 60).
 # BACKUP_OFFSITE_INTERVAL_SECONDS=3600
 ```
@@ -55,7 +59,7 @@ unchanged):
 
 ```bash
 docker compose \
-  --env-file /etc/mindpattern/secrets.env \
+  --env-file /etc/mindpattern/operator.env \
   --env-file "$RELEASE_ENV" \
   -f "$APP_DIR/docker-compose.yml" \
   -f "$APP_DIR/deploy/backup-offsite/docker-compose.yml" \

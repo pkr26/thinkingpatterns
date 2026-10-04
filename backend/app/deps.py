@@ -20,8 +20,16 @@ from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import ROLE_THERAPIST, ROLE_USER, RekeyJournal, User
+from .models import (
+    ROLE_THERAPIST,
+    ROLE_USER,
+    AccountDeletionTombstone,
+    RekeyJournal,
+    User,
+    utcnow,
+)
 from .security import tokens
+from .security.deletion_tombstone import verifies_deletion_tombstone
 
 # Codes assigned when the raised exception carries no explicit one.
 DEFAULT_ERROR_CODES: dict[int, str] = {
@@ -62,8 +70,9 @@ async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
         # could outlive a rolled-back transaction and read as tail
         # truncation). Track the outcome via session events, then flush the
         # staged journal entries once the request handler has finished.
-        # Best-effort and no-op unless an audit row was appended AND the
-        # journal path is configured.
+        # No-op unless an audit row was appended AND the journal path is
+        # configured. Post-commit I/O cannot roll back the action, but a
+        # failure flips readiness unhealthy until a later successful flush.
         #
         # Deep audit 2026-09-28 (C-1): "committed" is sticky — require_user
         # commits its auth read on EVERY authenticated request, and a
@@ -131,13 +140,15 @@ async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
                     info["mindpattern_audit_journal_pending"] = pending[:staged_at_commit]
                 try:
                     await flush_audit_journal(
-                        session, request.app.state.settings.audit_journal_path
+                        session,
+                        request.app.state.settings.audit_journal_path,
+                        failure_observer=request.app.state.metrics.observe_audit_journal_failure,
                     )
-                except Exception:  # noqa: BLE001 — journal is best-effort by contract
+                except Exception:  # noqa: BLE001 — action already committed
                     import logging
 
                     logging.getLogger(__name__).exception(
-                        "post-commit audit journal flush failed (benign; journal falls behind)"
+                        "post-commit audit journal flush failed; readiness remains unhealthy"
                     )
 
 
@@ -178,7 +189,39 @@ async def _authenticate_user(
     ):
         raise failure
     user = await session.get(User, payload["uid"])
+    # Logical erasure deliberately leaves a scrubbed inactive User row while
+    # its large child collections drain in bounded transactions.  Consult the
+    # authenticated deletion tombstone for both that state and the final
+    # physically-deleted state so offline clients receive the same explicit
+    # account-death signal throughout the purge.
     if user is None or not user.is_active:
+        tombstone = await session.get(AccountDeletionTombstone, payload["uid"])
+        if tombstone is not None:
+            expected_purpose = (
+                tokens.PURPOSE_THERAPIST
+                if tombstone.role == ROLE_THERAPIST
+                else tokens.PURPOSE_PATIENT
+            )
+            claimed_purpose = payload.get("purpose")
+            try:
+                tombstone_valid = verifies_deletion_tombstone(
+                    tombstone,
+                    secret=request.app.state.settings.auth_token_secret,
+                    auth_secret_version=request.app.state.settings.auth_secret_version,
+                    now=utcnow(),
+                )
+            except (AttributeError, TypeError, ValueError):
+                tombstone_valid = False
+            if (
+                tombstone_valid
+                and payload.get("ep", 1) == tombstone.token_epoch
+                and (claimed_purpose is None or claimed_purpose == expected_purpose)
+            ):
+                raise ApiError(
+                    status_code=410,
+                    detail="account no longer exists",
+                    code="account_deleted",
+                )
         raise failure
     # 2026-10-01 audit L5: the token's purpose claim ("patient"/"therapist")
     # must match the live DB role when present. Nothing branches on it today
@@ -223,6 +266,7 @@ async def _authenticate_user(
             "/api/processing/rekey",
             "/api/processing/sessions",
             "/api/account",
+            "/api/account/step-up",
             "/api/auth/logout",
         }
         allowed.update({"/api/account/llm-consent", "/api/account/voice-consent"})
@@ -313,16 +357,28 @@ async def require_regular_user(
     return user
 
 
-async def require_therapist(
+async def require_therapist_account(
     user: User = Depends(require_user),
 ) -> User:
-    """Sharing endpoints: only therapist accounts. Same 403-not-401 logic,
-    mirrored — a patient token is a valid session with the wrong role."""
+    """Role-only therapist gate for enrollment and own-account surfaces."""
     if user.role != ROLE_THERAPIST:
         raise ApiError(
             status_code=403,
             detail="not a therapist account",
             code="forbidden",
+        )
+    return user
+
+
+async def require_therapist(
+    user: User = Depends(require_therapist_account),
+) -> User:
+    """Patient-data gate: therapist accounts must complete MFA enrollment."""
+    if user.totp_enabled is not True:
+        raise ApiError(
+            status_code=403,
+            detail="multi-factor enrollment is required before accessing patient data",
+            code="mfa_enrollment_required",
         )
     return user
 

@@ -15,7 +15,7 @@
  */
 import React, { useCallback, useEffect, useState } from "react";
 import { Alert, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
-import { api, ApiError, type ListedConsent, type PairingLookup } from "../api/client";
+import { api, ApiError, SHARING_DISCLOSURE_VERSION, type ListedConsent, type PairingLookup } from "../api/client";
 import { vault } from "../vault";
 import { verifyPasswordForVault, isVerificationFailedError, isSessionExpiredError } from "../reauth";
 import { therapistKeyFingerprint, serverFingerprintMatches, wrapDataKeyForTherapist } from "../crypto/sharing";
@@ -35,20 +35,19 @@ type PendingAction =
 
 /**
  * The sharing-disclosure version THIS app renders (audit M-25 / H-14,
- * 2026-09-20): "v2" copy names journal entries, patterns/insights, the
- * wellbeing measures (PHQ-9 questionnaires, readable since 2026-09-19) and
+ * 2026-10-04): "v3" copy names journal entries, patterns/insights, all
+ * wellbeing measures (PHQ-9, GAD-7, and PHQ-2) and
  * the caseload summaries. The server echoes its own current version in
  * GET /meta (sharing_disclosure_version) and rejects a grant whose reviewed
  * disclosure is stale with 409 disclosure_outdated — the screen compares
  * the two BEFORE offering the grant card, so the person never spends a
  * password proof and a key wrap on a consent that cannot land.
  *
- * NOTE (resolved 2026-09-20): both sides now pin "v2" (client.ts
+ * NOTE: both sides pin the exported client constant (client.ts
  * SHARING_DISCLOSURE_VERSION, server consents.py), and the sanitized
  * code allowlist carries disclosure_outdated — the 409 branch below is
  * belt-and-braces for a server that moves first.
  */
-const SHARING_DISCLOSURE_VERSION_V2 = "v2";
 
 /** True when the 409 is specifically the disclosure gate. The sanitized
  *  code allowlist in client.ts carries disclosure_outdated (audit H-14);
@@ -117,7 +116,7 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
         // version; absent (legacy server / disabled) never counts as stale.
         const serverVersion = (meta as { sharing_disclosure_version?: unknown } | undefined)
           ?.sharing_disclosure_version;
-        setDisclosureStale(enabled && typeof serverVersion === "string" && serverVersion !== SHARING_DISCLOSURE_VERSION_V2);
+        setDisclosureStale(enabled && typeof serverVersion === "string" && serverVersion !== SHARING_DISCLOSURE_VERSION);
         if (enabled) {
           api.listConsents()
             .then((list) => {

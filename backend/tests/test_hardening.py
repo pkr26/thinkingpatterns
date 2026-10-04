@@ -19,7 +19,7 @@ from app.config import Settings
 from app.security import crypto
 from app.security.enclave import InMemoryKeyStore, KeyNotFound
 from app.security.tokens import TokenError, verify_token
-from tests.helpers import ClientEmulator
+from tests.helpers import ClientEmulator, production_secret_settings
 
 TODAY = date.today()
 
@@ -295,6 +295,13 @@ def test_production_accepts_real_config(monkeypatch):
     monkeypatch.setenv("MINDPATTERN_ENV", "production")
     monkeypatch.setenv("MINDPATTERN_TOKEN_SECRET", "x" * 48)
     monkeypatch.setenv("MINDPATTERN_DB_URL", "postgresql+asyncpg://u:p@h/db")
+    monkeypatch.setenv("MINDPATTERN_AUTH_TOKEN_SECRET", "a" * 48)
+    monkeypatch.setenv("MINDPATTERN_TOTP_WRAP_SECRET", "b" * 48)
+    monkeypatch.setenv("MINDPATTERN_PAIRING_SECRET", "c" * 48)
+    monkeypatch.setenv("MINDPATTERN_DECOY_SECRET", "d" * 48)
+    monkeypatch.setenv("MINDPATTERN_AUDIT_MAC_SECRET", "ab" * 32)
+    monkeypatch.setenv("MINDPATTERN_AUDIT_JOURNAL", "/tmp/mindpattern-hardening-audit.jsonl")
+    monkeypatch.setenv("MINDPATTERN_THERAPIST_ENROLLMENT_TOKEN", "e" * 48)
     s = Settings.from_env()
     assert s.environment == "production"
 
@@ -363,6 +370,7 @@ def test_llm_url_https_accepted():
         llm_provider_name="Example LLM",
         llm_data_retention="30 days",
         llm_policy_version="2026-09",
+        **production_secret_settings(),
     )
     assert s.llm_url == "https://llm.example.com/v1"
 
@@ -437,6 +445,7 @@ def test_cors_origins_require_exact_secure_origins():
             environment="production",
             database_url="postgresql+asyncpg://u:p@h/db",
             token_secret="x" * 48,
+            **production_secret_settings(),
             cors_origins=["http://localhost:5173"],
         )
 
@@ -487,6 +496,7 @@ async def test_create_all_only_runs_in_development(monkeypatch):
             environment="staging",
             database_url="postgresql+asyncpg://u:p@h/db",
             token_secret="x" * 48,
+            **production_secret_settings(),
         )
     )
     async with prod.router.lifespan_context(prod):
@@ -518,6 +528,7 @@ async def test_docs_hidden_in_any_non_development_env(monkeypatch, env):
         environment=env,
         database_url="postgresql+asyncpg://u:p@h/db",
         token_secret="x" * 48,
+        **production_secret_settings(),
     )
     app = create_app(settings)
     async with httpx.ASGITransport(app=app) as transport:

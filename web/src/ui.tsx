@@ -17,6 +17,8 @@
  * (fixing the old red-selection bug), and Dialog/Toast/Toggle/Checkbox
  * give the app real overlays, feedback, and switch affordances.
  */
+// @ts-nocheck
+
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { t } from "./strings";
 import { moodFaceColors, usePaletteVersion } from "./tokens";

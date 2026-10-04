@@ -263,19 +263,10 @@ class Settings:
     token_secret: str = field(default=DEFAULT_INSECURE_SECRET, repr=False)
     # 2026-09-26 remediation — purpose-split secrets. Resolution order for
     # each specific secret (see the properties below): the specific env
-    # var, else the LEGACY MINDPATTERN_TOKEN_SECRET, else fail exactly as
-    # token_secret itself does (the committed dev default is
-    # development-only). The "else legacy" arm is the documented
-    # deterministic rewrap path: when only the legacy var is set, each
-    # specific secret EQUALS the legacy value (identity derivation), the
-    # only derivation that keeps existing bearer signatures, wrapped TOTP
-    # secrets, and pairing-code digests valid across the upgrade — every
-    # purpose already domain-separates internally through its HKDF info
-    # label (totp-at-rest/v1, pairing-digest/v1, totp-backup-digest/v1),
-    # so key separation TODAY comes from those labels, and setting an
-    # explicit var upgrades a purpose to a fully independent secret
-    # (one-way: wrapped TOTP secrets and live pairing digests re-mint;
-    # bearer tokens invalidate cleanly via the ksv claim in the payload).
+    # var, else the legacy token secret in DEVELOPMENT ONLY. Every split
+    # secret is mandatory outside development; this prevents a missing
+    # secret mount from silently collapsing independent trust boundaries.
+    # The development fallback keeps historical local databases usable.
     # Resolution is LIVE (properties over fields) on purpose: tests and
     # tooling legitimately mutate ``token_secret`` after construction,
     # and a snapshot taken in __post_init__ would silently split the
@@ -311,11 +302,16 @@ class Settings:
     # Independent audit 2026-09-27: keyed seal for the access-log chain.
     # The link hashes are SHA-256 over public fields, so a DB-write attacker
     # could recompute them; the MAC key must live OUTSIDE the database.
-    # Explicit MINDPATTERN_AUDIT_MAC_SECRET (env or _FILE) wins; otherwise
-    # it is HKDF-derived from the token secret with its own info label, so
-    # rotating the token secret rotates the MAC key by construction. LIVE
-    # property on the same standing as the purpose-split secrets above.
+    # Explicit MINDPATTERN_AUDIT_MAC_SECRET (env or _FILE) is mandatory
+    # outside development.  A versioned historical key ring permits a
+    # deliberate rotation without invalidating old audit rows; development
+    # retains the deterministic HKDF fallback for local compatibility.
     audit_mac_secret_explicit: str = field(default="", repr=False)
+    audit_mac_key_version: int = 1
+    # Comma/newline/space-separated ``version:64-hex-key`` entries.  This is
+    # credential-bearing and therefore supports the same _FILE resolution
+    # as the current key.  It must never contain the current version.
+    audit_mac_previous_secrets_explicit: str = field(default="", repr=False)
 
     @property
     def audit_mac_secret_hex(self) -> str:
@@ -334,13 +330,47 @@ class Settings:
         )
         return hkdf.derive(self.token_secret.encode("utf-8")).hex()
 
+    @property
+    def audit_mac_keyring(self) -> dict[int, bytes]:
+        """All audit HMAC keys indexed by immutable on-row version."""
+        try:
+            current = bytes.fromhex(self.audit_mac_secret_hex)
+        except ValueError as exc:
+            raise RuntimeError(
+                "MINDPATTERN_AUDIT_MAC_SECRET must be 32 bytes of hex (64 chars)"
+            ) from exc
+        if len(current) != 32:
+            raise RuntimeError("MINDPATTERN_AUDIT_MAC_SECRET must be 32 bytes of hex (64 chars)")
+        ring = {self.audit_mac_key_version: current}
+        raw = self.audit_mac_previous_secrets_explicit.replace(",", " ")
+        for item in raw.split():
+            try:
+                version_text, secret_hex = item.split(":", 1)
+                version = int(version_text)
+                secret = bytes.fromhex(secret_hex)
+            except (TypeError, ValueError) as exc:
+                raise RuntimeError(
+                    "MINDPATTERN_AUDIT_MAC_PREVIOUS_SECRETS must contain version:64-hex-key entries"
+                ) from exc
+            if not 1 <= version <= 2**31 - 1 or len(secret) != 32:
+                raise RuntimeError(
+                    "MINDPATTERN_AUDIT_MAC_PREVIOUS_SECRETS must contain "
+                    "version(1..2147483647):64-hex-key entries"
+                )
+            if version in ring:
+                raise RuntimeError("audit MAC key versions must be unique")
+            ring[version] = secret
+        if len(set(ring.values())) != len(ring):
+            raise RuntimeError("audit MAC key versions must use distinct secrets")
+        return ring
+
     # Independent audit 2026-09-27: append-only journal anchoring the audit
     # chain's TAIL. A forward hash chain cannot detect deletion of its
     # newest rows; when this path is set (a volume-mounted file), every
     # committed audit append also writes a line here and verification flags
     # a journal that is AHEAD of the database head as tail truncation.
-    # Empty (default) keeps the honest link-only boundary; compose wires a
-    # named volume by default so production gets the anchor for free.
+    # Empty is permitted only for development compatibility; every
+    # non-development deployment must configure a durable writable target.
     audit_journal_path: str = ""
 
     # 2026-09-26 remediation (LOW c): server-side scrypt work factor.
@@ -361,8 +391,8 @@ class Settings:
     # the token secret by default, so rotating MINDPATTERN_TOKEN_SECRET
     # changes every decoy salt — a longitudinal observer could distinguish
     # "unknown user" responses across the rotation boundary. Set a
-    # dedicated secret to decouple the two lifecycles. Empty = derive from
-    # token_secret (the pre-existing behavior).
+    # dedicated secret to decouple the two lifecycles. Empty derives from
+    # token_secret only in development; non-development startup rejects it.
     decoy_secret: str = field(default="", repr=False)
     token_ttl_seconds: int = 86_400
 
@@ -506,6 +536,9 @@ class Settings:
     # Attachments (P2): 30-day expiry is the user-agreed retention story
     # (transcript is the durable record; audio is a 30-day convenience).
     audio_retention_days: int = 30
+    # Hard object-store reconciliation ceiling. Zero derives retention+1,
+    # preserving compatibility while ensuring an orphan cannot live forever.
+    audio_lifecycle_ceiling_days: int = 0
     audio_max_user_bytes: int = 64 * 1024 * 1024
     # Object storage: S3 when the bucket is named, else the local-dir
     # fallback (dev/self-host; the get_enricher-style "unconfigured
@@ -613,15 +646,15 @@ class Settings:
                     "MINDPATTERN_TOKEN_SECRET must be at least 32 characters "
                     f"in environment {self.environment!r}"
                 )
-        # Purpose-split explicit overrides: an explicitly set specific
-        # secret meets the same floor as the legacy secret (each one signs
-        # or wraps credential material). Derived (empty) overrides are
-        # validated transitively — they equal token_secret, checked above.
+        # Validate any supplied purpose secret here. Missing non-development
+        # mounts are rejected after the endpoint/database-specific checks so
+        # an unrelated configuration typo still names the setting at fault.
         if self.environment != "development":
             for name, explicit in (
                 ("MINDPATTERN_AUTH_TOKEN_SECRET", self.auth_token_secret_explicit),
                 ("MINDPATTERN_TOTP_WRAP_SECRET", self.totp_wrap_secret_explicit),
                 ("MINDPATTERN_PAIRING_SECRET", self.pairing_secret_explicit),
+                ("MINDPATTERN_DECOY_SECRET", self.decoy_secret),
             ):
                 if explicit.strip() and len(explicit.strip()) < 32:
                     raise RuntimeError(f"{name} must be at least 32 characters")
@@ -751,6 +784,12 @@ class Settings:
             raise RuntimeError("audio_max_duration_seconds must be <= 3600")
         if not 1 <= self.audio_retention_days <= 3_650:
             raise RuntimeError("audio_retention_days must be between 1 and 3650")
+        if self.audio_lifecycle_ceiling_days and not (
+            self.audio_retention_days < self.audio_lifecycle_ceiling_days <= 3_651
+        ):
+            raise RuntimeError(
+                "audio_lifecycle_ceiling_days must exceed audio_retention_days and be <= 3651"
+            )
         if self.audio_max_user_bytes > MAX_USER_BLOB_BYTES:
             raise RuntimeError("audio_max_user_bytes must be <= 8 GiB")
         if self.audio_max_body_bytes > MAX_BODY_BYTES:
@@ -792,28 +831,19 @@ class Settings:
         # usable key material — 32 bytes hex (64 chars). A typo'd value
         # would otherwise explode later inside create_app with an opaque
         # traceback instead of a named boot error.
+        if not 1 <= self.audit_mac_key_version <= 2**31 - 1:
+            raise RuntimeError("MINDPATTERN_AUDIT_MAC_KEY_VERSION must be between 1 and 2147483647")
         explicit_mac = self.audit_mac_secret_explicit.strip()
         if explicit_mac and (
             len(explicit_mac) != 64 or any(c not in "0123456789abcdefABCDEF" for c in explicit_mac)
         ):
             raise RuntimeError("MINDPATTERN_AUDIT_MAC_SECRET must be 32 bytes of hex (64 chars)")
-        # Pentest MED-2 (2026-09-29): without an explicit MAC secret the
-        # audit-chain key is HKDF-derived from the TOKEN secret — sound
-        # against a database-only attacker (the key never touches the DB),
-        # but one exfiltrated env value then both mints bearers AND re-forges
-        # the whole tamper-evident trail. Rotating to a dedicated secret is a
-        # one-way re-MAC (existing chains verify only under the key that
-        # sealed them), so this is a loud boot WARNING, not a boot failure:
-        # operators must make the split deliberately, knowing the trade.
-        if not explicit_mac and self.environment != "development":
-            logger.warning(
-                "MINDPATTERN_AUDIT_MAC_SECRET is unset: the audit-chain MAC "
-                "key is derived from MINDPATTERN_TOKEN_SECRET, so one "
-                "exfiltrated value would compromise both bearer minting and "
-                "the audit trail's tamper evidence. Set a dedicated 32-byte-"
-                "hex secret to decouple them (note: existing chains verify "
-                "only under the key that sealed them — rotate deliberately)."
-            )
+        # Parse and validate the complete ring at boot, including historical
+        # keys. Outside development a dedicated current key is mandatory.
+        # Verification fails closed if a row names a retired version, so old
+        # keys remain configured until retention has eliminated every row
+        # and state sealed by that version.
+        self.audit_mac_keyring
         # 2026-09-26 audit item 9: the edge buffers one complete body per
         # in-flight request, so the deployment's worst-case buffer memory is
         # this product. Refuse the combination up front with the arithmetic
@@ -991,6 +1021,25 @@ class Settings:
                     "production therapist sharing requires a controlled "
                     "MINDPATTERN_THERAPIST_ENROLLMENT_TOKEN of at least 32 characters"
                 )
+        if self.environment != "development":
+            for name, explicit in (
+                ("MINDPATTERN_AUTH_TOKEN_SECRET", self.auth_token_secret_explicit),
+                ("MINDPATTERN_TOTP_WRAP_SECRET", self.totp_wrap_secret_explicit),
+                ("MINDPATTERN_PAIRING_SECRET", self.pairing_secret_explicit),
+                ("MINDPATTERN_DECOY_SECRET", self.decoy_secret),
+            ):
+                if not explicit.strip():
+                    raise RuntimeError(f"{name} is required outside development")
+            if not explicit_mac:
+                raise RuntimeError(
+                    "MINDPATTERN_AUDIT_MAC_SECRET is required outside development "
+                    "and must be rotated with a new MINDPATTERN_AUDIT_MAC_KEY_VERSION"
+                )
+            if not self.audit_journal_path.strip():
+                raise RuntimeError(
+                    "MINDPATTERN_AUDIT_JOURNAL is required outside development; "
+                    "database state alone cannot reveal deletion of the entire audit chain"
+                )
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -1006,6 +1055,10 @@ class Settings:
             # one still readable via `docker inspect` env.
             metrics_token=_secret_env("MINDPATTERN_METRICS_TOKEN"),
             audit_mac_secret_explicit=_secret_env("MINDPATTERN_AUDIT_MAC_SECRET"),
+            audit_mac_key_version=_int_env("MINDPATTERN_AUDIT_MAC_KEY_VERSION", 1),
+            audit_mac_previous_secrets_explicit=_secret_env(
+                "MINDPATTERN_AUDIT_MAC_PREVIOUS_SECRETS"
+            ),
             audit_journal_path=os.getenv("MINDPATTERN_AUDIT_JOURNAL", "").strip(),
             scrypt_n=_int_env("MINDPATTERN_SCRYPT_N", 2**17),
             decoy_secret=_secret_env("MINDPATTERN_DECOY_SECRET"),
@@ -1068,6 +1121,7 @@ class Settings:
             audio_upload_rate_limit=_int_env("MINDPATTERN_AUDIO_UPLOAD_RATE_LIMIT", 30),
             audio_upload_rate_window=_int_env("MINDPATTERN_AUDIO_UPLOAD_RATE_WINDOW", 3600),
             audio_retention_days=_int_env("MINDPATTERN_AUDIO_RETENTION_DAYS", 30),
+            audio_lifecycle_ceiling_days=_int_env("MINDPATTERN_AUDIO_LIFECYCLE_CEILING_DAYS", 0),
             audio_max_user_bytes=_int_env("MINDPATTERN_AUDIO_MAX_USER_BYTES", 64 * 1024 * 1024),
             audio_bucket=os.getenv("MINDPATTERN_AUDIO_BUCKET", "").strip(),
             audio_bucket_region=os.getenv("MINDPATTERN_AUDIO_BUCKET_REGION", "").strip(),

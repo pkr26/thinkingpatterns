@@ -392,7 +392,7 @@ describe("SettingsScreen pins: the password re-auth card", () => {
       (root.root.findAllByType(Switch)[0].props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(false);
     });
     await flush();
-    expect(textOf(root)).toContain("Enter your password to disable third-party AI analysis");
+    expect(textOf(root)).toContain("Enter your password to disable third-party transcript translation");
   });
 
   it("the Confirm fill is danger red only for the delete kind (primary for llm)", async () => {
@@ -445,7 +445,7 @@ describe("SettingsScreen pins: export safety gate", () => {
     await pressLabel(root, "Why export is unavailable");
     expect(Alert.alert).toHaveBeenCalledWith(
       "Export unavailable in this build",
-      expect.stringContaining("verified secure file-export component"),
+      expect.stringContaining("sign in to the Fathom web app on a trusted computer"),
     );
     expect(api.exportAccount).not.toHaveBeenCalled();
     expect(Share.share).not.toHaveBeenCalled();

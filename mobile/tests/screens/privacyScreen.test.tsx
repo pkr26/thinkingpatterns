@@ -37,15 +37,18 @@ describe("PrivacyScreen", () => {
     expect(text).toContain("Temporary server decryption");
     expect(text).toContain("kept in memory for up to 5 minutes");
     expect(text).toContain("never persisted by the server");
-    // Optional AI analysis
-    expect(text).toContain("Optional AI analysis");
+    // Optional transcript translation
+    expect(text).toContain("Optional transcript translation");
     expect(text).toContain("Off by default");
-    expect(text).toContain("provider's data-retention policy applies");
+    expect(text).toContain("transcript is sent as soon as it is recorded");
+    expect(text).toContain("provider's retention policy applies");
+    expect(text).toContain("journal entries are not sent to a third party for pattern analysis");
     // Deletion scope
     expect(text).toContain("Deleting your data");
     expect(text).toContain("live database");
     expect(text).toContain("backups and server logs expire on the operator's own schedule");
-    expect(text).toContain("An exported bundle includes everything");
+    expect(text).toContain("An export contains your scoped account content");
+    expect(text).toContain("excludes security and operational records");
   });
 
   it("works fully offline — the policy lives in the app binary", async () => {

@@ -32,7 +32,9 @@ describe("encrypted account/server-bound typed draft custody", () => {
     await setBaseUrl("http://localhost:9000"); const otherOrigin = await journalDraftScope(user);
     await storage.setItem(otherOrigin.slot, raw);
     await expect(loadJournalDraft(key, otherOrigin)).rejects.toThrow("retained");
-    expect(await storage.getItem(scope.slot)).toBe(raw);
+    // Origin retirement removes every old-origin account family; the copied
+    // ciphertext at the new origin remains retained for explicit recovery.
+    expect(await storage.getItem(scope.slot)).toBeNull();
   });
   it("failed writes and reads retain the last recoverable ciphertext and support a real retry", async () => {
     const draft = words(); await saveJournalDraft(key, scope, draft); const before = await storage.getItem(scope.slot);

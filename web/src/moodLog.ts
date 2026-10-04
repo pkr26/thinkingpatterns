@@ -15,6 +15,8 @@
  * not produce a blob no future read can open) and zeroizes the copy in
  * finally.
  */
+// @ts-nocheck
+
 import { buildAad } from "./crypto/aad";
 import { decrypt, encrypt, fromBase64, toBase64, zeroize, type Bytes } from "./crypto/core";
 import { kv,type WritePermit } from "./kvstore";

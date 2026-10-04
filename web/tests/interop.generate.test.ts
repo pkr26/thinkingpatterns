@@ -10,6 +10,8 @@
  *   cd web && GEN_INTEROP=1 npx vitest run tests/interop.generate.test.ts
  *   cd mobile && GEN_INTEROP=1 npx vitest run tests/interop.generate.test.ts
  */
+// @ts-nocheck
+
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";

@@ -36,7 +36,12 @@ function isDevelopmentBuild(): boolean {
 
 function isExplicitLoopback(hostname: string): boolean {
   const host = hostname.toLowerCase();
-  return host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1";
+  return (
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "[::1]" ||
+    host === "::1"
+  );
 }
 
 export function normalizeApiBaseUrl(candidate: string): string {
@@ -44,12 +49,22 @@ export function normalizeApiBaseUrl(candidate: string): string {
   if (trimmed === "") return "";
   try {
     const url = new URL(trimmed);
-    const permittedProtocol = url.protocol === "https:"
-      || (isDevelopmentBuild() && url.protocol === "http:" && isExplicitLoopback(url.hostname));
+    const permittedProtocol =
+      url.protocol === "https:" ||
+      (isDevelopmentBuild() &&
+        url.protocol === "http:" &&
+        isExplicitLoopback(url.hostname));
     // Credentials, query strings, and fragments do not belong in a stable
     // API base.  In particular, a userinfo component is easy to misread in a
     // login form and has historically been used for URL spoofing.
-    if (!permittedProtocol || url.username || url.password || url.search || url.hash) return "";
+    if (
+      !permittedProtocol ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash
+    )
+      return "";
     return url.origin + url.pathname.replace(/\/+$/, "");
   } catch {
     return "";
@@ -59,7 +74,10 @@ export function normalizeApiBaseUrl(candidate: string): string {
 function requireSafeBaseUrl(baseUrl: string): string {
   const normalized = normalizeApiBaseUrl(baseUrl);
   if (!normalized || normalized !== baseUrl) {
-    throw new ApiError(0, "use an HTTPS server URL (or an explicit local development server)");
+    throw new ApiError(
+      0,
+      "use an HTTPS server URL (or an explicit local development server)",
+    );
   }
   return normalized;
 }
@@ -155,14 +173,19 @@ export function sanitizeDetail(text: string): string {
  * errors put a list of message objects there; both shapes sanitize.
  * Exported for tests: the sanitization is a security property. */
 export function detailToMessage(detail: unknown, status: number): string {
-  if (typeof detail === "string") return sanitizeDetail(detail) || `request failed (${status})`;
+  if (typeof detail === "string")
+    return sanitizeDetail(detail) || `request failed (${status})`;
   if (Array.isArray(detail)) {
     const parts = detail.map((d) =>
-      typeof d === "object" && d !== null && "msg" in d && typeof (d as { msg: unknown }).msg === "string"
+      typeof d === "object" &&
+      d !== null &&
+      "msg" in d &&
+      typeof (d as { msg: unknown }).msg === "string"
         ? (d as { msg: string }).msg
         : "invalid field",
     );
-    if (parts.length > 0) return sanitizeDetail(parts.join("; ")) || `request failed (${status})`;
+    if (parts.length > 0)
+      return sanitizeDetail(parts.join("; ")) || `request failed (${status})`;
   }
   return `request failed (${status})`;
 }
@@ -177,11 +200,23 @@ async function fetchWithTimeout(
 ): Promise<Response> {
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout>;
-  const cleanup = (): void => { clearTimeout(timer); sessionSignal?.removeEventListener("abort", abortForSessionEnd); };
-  const abortForSessionEnd = (): void => { controller.abort(); cleanup(); };
-  timer = setTimeout(() => { controller.abort(); cleanup(); }, REQUEST_TIMEOUT_MS);
+  const cleanup = (): void => {
+    clearTimeout(timer);
+    sessionSignal?.removeEventListener("abort", abortForSessionEnd);
+  };
+  const abortForSessionEnd = (): void => {
+    controller.abort();
+    cleanup();
+  };
+  timer = setTimeout(() => {
+    controller.abort();
+    cleanup();
+  }, REQUEST_TIMEOUT_MS);
   if (sessionSignal?.aborted) controller.abort();
-  else sessionSignal?.addEventListener("abort", abortForSessionEnd, { once: true });
+  else
+    sessionSignal?.addEventListener("abort", abortForSessionEnd, {
+      once: true,
+    });
   try {
     let response = await fetch(url, {
       ...init,
@@ -200,7 +235,10 @@ async function fetchWithTimeout(
     if (response.url) {
       try {
         if (new URL(response.url).origin !== new URL(expectedOrigin).origin) {
-          throw new ApiError(0, "server redirected the request to a different origin");
+          throw new ApiError(
+            0,
+            "server redirected the request to a different origin",
+          );
         }
       } catch (err) {
         if (err instanceof ApiError) throw err;
@@ -215,23 +253,58 @@ async function fetchWithTimeout(
       cleanup();
       return response;
     }
-    if (response instanceof Response && response.body) response = guardResponseStream(response,controller,cleanup,16 * 1024 * 1024);
-    for (const method of ["text", "json", "arrayBuffer", "blob", "formData"] as const) {
+    if (response instanceof Response && response.body)
+      response = guardResponseStream(
+        response,
+        controller,
+        cleanup,
+        16 * 1024 * 1024,
+      );
+    for (const method of [
+      "text",
+      "json",
+      "arrayBuffer",
+      "blob",
+      "formData",
+    ] as const) {
       const original = response[method]?.bind(response);
       if (!original) continue;
-      Object.defineProperty(response, method, { configurable: true, value: async () => {
-        try {
-          // Race consumption against abort even for alternate fetch implementations that ignore its signal.
-          const value = await new Promise<unknown>((resolve, reject) => {
-            const onAbort = (): void => reject(new ApiError(0, sessionSignal?.aborted ? "session ended" : "request timed out while reading response"));
-            if (controller.signal.aborted) { onAbort(); return; }
-            controller.signal.addEventListener("abort", onAbort, { once: true });
-            Promise.resolve(original()).then(resolve, reject).finally(() => controller.signal.removeEventListener("abort", onAbort));
-          });
-          if (controller.signal.aborted) throw new ApiError(0, "session ended or response timed out");
-          return value;
-        } finally { cleanup(); }
-      } });
+      Object.defineProperty(response, method, {
+        configurable: true,
+        value: async () => {
+          try {
+            // Race consumption against abort even for alternate fetch implementations that ignore its signal.
+            const value = await new Promise<unknown>((resolve, reject) => {
+              const onAbort = (): void =>
+                reject(
+                  new ApiError(
+                    0,
+                    sessionSignal?.aborted
+                      ? "session ended"
+                      : "request timed out while reading response",
+                  ),
+                );
+              if (controller.signal.aborted) {
+                onAbort();
+                return;
+              }
+              controller.signal.addEventListener("abort", onAbort, {
+                once: true,
+              });
+              Promise.resolve(original())
+                .then(resolve, reject)
+                .finally(() =>
+                  controller.signal.removeEventListener("abort", onAbort),
+                );
+            });
+            if (controller.signal.aborted)
+              throw new ApiError(0, "session ended or response timed out");
+            return value;
+          } finally {
+            cleanup();
+          }
+        },
+      });
     }
     if (response.status === 204 || response.body === null) {
       // Mocks may omit body while still implementing json/text. Native empty bodies need no deadline.
@@ -243,7 +316,10 @@ async function fetchWithTimeout(
     if (err instanceof ApiError) throw err;
     if (err instanceof Error && err.name === "AbortError") {
       if (sessionSignal?.aborted) throw new ApiError(0, "session ended");
-      throw new ApiError(0, `request timed out after ${REQUEST_TIMEOUT_MS / 1000}s`);
+      throw new ApiError(
+        0,
+        `request timed out after ${REQUEST_TIMEOUT_MS / 1000}s`,
+      );
     }
     throw err;
   }
@@ -284,11 +360,16 @@ async function requestWithResponse<T>(
   };
   let response: Response;
   try {
-    response = await fetchWithTimeout(`${activeSession.baseUrl}${API_PREFIX}${path}`, {
-      method,
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
-    }, activeSession.baseUrl, activeSession.controller.signal);
+    response = await fetchWithTimeout(
+      `${activeSession.baseUrl}${API_PREFIX}${path}`,
+      {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+      },
+      activeSession.baseUrl,
+      activeSession.controller.signal,
+    );
   } catch (err) {
     if (err instanceof ApiError) throw err;
     throw new ApiError(0, "server unreachable — check your connection");
@@ -301,8 +382,12 @@ async function requestWithResponse<T>(
     unauthorizedFired = true;
     unauthorizedHandler?.();
   }
-  if (response.status === 204) return { data: null as T, headers: response.headers };
-  const data = (await response.json().catch(err => { if (!response.ok && err instanceof SyntaxError) return {}; throw err; })) as { detail?: unknown; code?: unknown };
+  if (response.status === 204)
+    return { data: null as T, headers: response.headers };
+  const data = (await response.json().catch((err) => {
+    if (!response.ok && err instanceof SyntaxError) return {};
+    throw err;
+  })) as { detail?: unknown; code?: unknown };
   if (session !== activeSession) throw new ApiError(0, "session ended");
   if (!response.ok) {
     throw new ApiError(
@@ -314,7 +399,12 @@ async function requestWithResponse<T>(
   return { data: data as T, headers: response.headers };
 }
 
-async function request<T>(method: string, path: string, body?: unknown, extraHeaders: Record<string, string> = {}): Promise<T> {
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+  extraHeaders: Record<string, string> = {},
+): Promise<T> {
   return (await requestWithResponse<T>(method, path, body, extraHeaders)).data;
 }
 
@@ -330,16 +420,23 @@ async function authRequest<T>(
   const safeBaseUrl = requireSafeBaseUrl(baseUrl);
   let response: Response;
   try {
-    response = await fetchWithTimeout(`${safeBaseUrl}${API_PREFIX}${path}`, {
-      method,
-      headers: { "Content-Type": "application/json", ...extraHeaders },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    }, safeBaseUrl);
+    response = await fetchWithTimeout(
+      `${safeBaseUrl}${API_PREFIX}${path}`,
+      {
+        method,
+        headers: { "Content-Type": "application/json", ...extraHeaders },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      },
+      safeBaseUrl,
+    );
   } catch (err) {
     if (err instanceof ApiError) throw err;
     throw new ApiError(0, "server unreachable — check your connection");
   }
-  const data = (await response.json().catch(err => { if (err instanceof SyntaxError) return {}; throw err; })) as { detail?: unknown; code?: unknown };
+  const data = (await response.json().catch((err) => {
+    if (err instanceof SyntaxError) return {};
+    throw err;
+  })) as { detail?: unknown; code?: unknown };
   if (!response.ok) {
     throw new ApiError(
       response.status,
@@ -360,6 +457,8 @@ export interface TokenResponse {
    * side scheme), and the portal treats the bearer as an opaque string —
    *  unknown response fields must never break session adoption. */
   key_scheme?: string;
+  /** Clinician data routes remain blocked until mandatory MFA enrollment. */
+  mfa_enrollment_required?: boolean;
 }
 
 /** The therapist-side pairing SAS read (2026-09-26): the SAME "123 456"
@@ -376,11 +475,18 @@ export interface ServerMeta {
   sharing_available: boolean;
 }
 
+export const MINIMUM_AGE_ATTESTATION = "minimum_age_confirmed_v1" as const;
+
 export const auth = {
   meta: (baseUrl: string) => authRequest<ServerMeta>(baseUrl, "GET", "/meta"),
   saltFor: (baseUrl: string, username: string) =>
     authRequest<{ salt: string }>(baseUrl, "POST", "/auth/salt", { username }),
-  login: (baseUrl: string, username: string, verifierB64: string, totpCode?: string) =>
+  login: (
+    baseUrl: string,
+    username: string,
+    verifierB64: string,
+    totpCode?: string,
+  ) =>
     authRequest<TokenResponse>(
       baseUrl,
       "POST",
@@ -398,17 +504,19 @@ export const auth = {
       display_name: string;
       wrap_pub_key: string;
       wrap_key_blob: string;
+      age_attestation: typeof MINIMUM_AGE_ATTESTATION;
     },
     enrollmentToken?: string,
-  ) => authRequest<TokenResponse>(
-    baseUrl,
-    "POST",
-    "/therapist/register",
-    payload,
-    enrollmentToken?.trim()
-      ? { "X-Therapist-Enrollment-Token": enrollmentToken.trim() }
-      : {},
-  ),
+  ) =>
+    authRequest<TokenResponse>(
+      baseUrl,
+      "POST",
+      "/therapist/register",
+      payload,
+      enrollmentToken?.trim()
+        ? { "X-Therapist-Enrollment-Token": enrollmentToken.trim() }
+        : {},
+    ),
 
   /** S-12 (pentest 2026-09-26): revoke a JUST-MINTED bearer the portal is
    *  about to throw away — the patient-role rejection path used to drop the
@@ -423,7 +531,10 @@ export const auth = {
         `${baseUrl}${API_PREFIX}/auth/logout`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
           keepalive: true,
         },
         baseUrl,
@@ -432,7 +543,10 @@ export const auth = {
       return null;
     }
     if (response.status === 204) return null;
-    await response.json().catch(err => { if (err instanceof SyntaxError) return {}; throw err; });
+    await response.json().catch((err) => {
+      if (err instanceof SyntaxError) return {};
+      throw err;
+    });
     return null;
   },
 };
@@ -482,6 +596,26 @@ export interface Patient {
   summary_updated_at?: string | null;
 }
 
+/** Revoked relationship rows are retained, so an active patient may be
+ * displaced beyond the first page. Keep this in sync with the server cap. */
+export const THERAPIST_PATIENT_PAGE_SIZE = 200;
+export const MAX_THERAPIST_PATIENT_PAGES = 6;
+
+export interface PatientListPage {
+  patients: Patient[];
+  nextOffset: number | null;
+  /** Undefined only for a pre-snapshot server. */
+  revision?: string;
+}
+
+function patientsRevisionConflict(): ApiError {
+  return new ApiError(
+    409,
+    "patients changed while paging; retry the request",
+    "collection_changed",
+  );
+}
+
 export interface InsightsSummary {
   phase: string;
   active_days: number;
@@ -505,7 +639,10 @@ export interface InsightsSummary {
  *  silently pass (NaN !== NaN) or be coerced into a "match". */
 function validatedStateSeq(value: unknown, resource: string): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
-    throw new ApiError(0, `server returned an invalid ${resource} state sequence`);
+    throw new ApiError(
+      0,
+      `server returned an invalid ${resource} state sequence`,
+    );
   }
   return value;
 }
@@ -606,18 +743,24 @@ function validatedNextOffset(
   // Decimal-only parsing avoids Number("1e3"), signs, whitespace, and
   // precision loss quietly changing pagination state.
   if (!/^(?:0|[1-9][0-9]*)$/.test(header)) {
-    throw new ApiError(0, `server returned an invalid ${resource} continuation`);
+    throw new ApiError(
+      0,
+      `server returned an invalid ${resource} continuation`,
+    );
   }
   const nextOffset = Number(header);
   // Offset pagination must advance exactly past the materialized rows. This
   // catches a malformed/proxy-injected cursor before it can loop or skip
   // evidence, including the impossible "more after an empty page" case.
   if (
-    !Number.isSafeInteger(nextOffset)
-    || rowCount === 0
-    || nextOffset !== offset + rowCount
+    !Number.isSafeInteger(nextOffset) ||
+    rowCount === 0 ||
+    nextOffset !== offset + rowCount
   ) {
-    throw new ApiError(0, `server returned an invalid ${resource} continuation`);
+    throw new ApiError(
+      0,
+      `server returned an invalid ${resource} continuation`,
+    );
   }
   return nextOffset;
 }
@@ -629,9 +772,12 @@ function validatedNextOffset(
 const MAX_SIGNED_64_REVISION = "9223372036854775807";
 
 function isCanonicalRevision(revision: string): boolean {
-  return /^(?:0|[1-9][0-9]{0,18})$/.test(revision)
-    && (revision.length < MAX_SIGNED_64_REVISION.length
-      || (revision.length === MAX_SIGNED_64_REVISION.length && revision <= MAX_SIGNED_64_REVISION));
+  return (
+    /^(?:0|[1-9][0-9]{0,18})$/.test(revision) &&
+    (revision.length < MAX_SIGNED_64_REVISION.length ||
+      (revision.length === MAX_SIGNED_64_REVISION.length &&
+        revision <= MAX_SIGNED_64_REVISION))
+  );
 }
 
 /** Parse the optional collection snapshot token without ever allowing an
@@ -652,15 +798,24 @@ function validatedRevision(
     return undefined;
   }
   if (!isCanonicalRevision(header)) {
-    throw new ApiError(0, `server returned an invalid ${resource} snapshot revision`);
+    throw new ApiError(
+      0,
+      `server returned an invalid ${resource} snapshot revision`,
+    );
   }
   if (expectedRevision !== undefined && header !== expectedRevision) {
-    throw new ApiError(0, `server returned a changed ${resource} snapshot revision`);
+    throw new ApiError(
+      0,
+      `server returned a changed ${resource} snapshot revision`,
+    );
   }
   return header;
 }
 
-function assertExpectedRevision(revision: string | undefined, resource: string): void {
+function assertExpectedRevision(
+  revision: string | undefined,
+  resource: string,
+): void {
   if (revision !== undefined && !isCanonicalRevision(revision)) {
     throw new ApiError(0, `invalid ${resource} snapshot revision`);
   }
@@ -731,7 +886,10 @@ export const api = {
         `${activeSession.baseUrl}${API_PREFIX}/auth/logout`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${activeSession.token}` },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${activeSession.token}`,
+          },
           // 2026-09-26 audit follow-up (portal N-2): the audit doc's
           // keepalive requirement — a logout fired at sign-out must
           // survive the tab being closed/navigated inside the fetch
@@ -745,7 +903,10 @@ export const api = {
       throw new ApiError(0, "server unreachable — check your connection");
     }
     if (response.status === 204) return null;
-    const data = (await response.json().catch(err => { if (err instanceof SyntaxError) return {}; throw err; })) as { detail?: unknown; code?: unknown };
+    const data = (await response.json().catch((err) => {
+      if (err instanceof SyntaxError) return {};
+      throw err;
+    })) as { detail?: unknown; code?: unknown };
     if (!response.ok) {
       throw new ApiError(
         response.status,
@@ -756,13 +917,136 @@ export const api = {
     return null;
   },
   me: () => request<TherapistMe>("GET", "/therapist/me"),
-  installNotesCustody: (payload: { verifier: string; operation_id: string; expected_custody_version: number; custody_version: number; notes_keyring_blob: string }) =>
-    request<null>("PUT", "/therapist/custody", payload),
-  changePasswordAtomic: (payload: { verifier: string; operation_id: string; expected_custody_version: number; custody_version: number; new_salt: string; new_verifier: string; wrap_pub_key: string; wrap_key_blob: string; notes_keyring_blob: string }) =>
-    request<null>("PUT", "/therapist/password", payload),
+  installNotesCustody: (payload: {
+    verifier: string;
+    operation_id: string;
+    expected_custody_version: number;
+    custody_version: number;
+    notes_keyring_blob: string;
+  }) => request<null>("PUT", "/therapist/custody", payload),
+  changePasswordAtomic: (payload: {
+    verifier: string;
+    operation_id: string;
+    expected_custody_version: number;
+    custody_version: number;
+    new_salt: string;
+    new_verifier: string;
+    wrap_pub_key: string;
+    wrap_key_blob: string;
+    notes_keyring_blob: string;
+  }) => request<null>("PUT", "/therapist/password", payload),
   /** The newest 100 of this therapist's own audited actions (B-4). */
-  accessLog: () => request<AccessLogRow[]>("GET", "/therapist/access-log?limit=100"),
-  patients: () => request<Patient[]>("GET", "/therapist/patients"),
+  accessLog: () =>
+    request<AccessLogRow[]>("GET", "/therapist/access-log?limit=100"),
+  patientsPage: async (
+    params: { offset?: number; expectedRevision?: string } = {},
+  ): Promise<PatientListPage> => {
+    const offset = params.offset ?? 0;
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset > 1000) {
+      throw new ApiError(0, "invalid patient page offset");
+    }
+    assertExpectedRevision(params.expectedRevision, "patients");
+    const search = new URLSearchParams({
+      limit: String(THERAPIST_PATIENT_PAGE_SIZE),
+      offset: String(offset),
+    });
+    if (params.expectedRevision !== undefined)
+      search.set("expected_revision", params.expectedRevision);
+    const response = await requestWithResponse<Patient[]>(
+      "GET",
+      `/therapist/patients?${search.toString()}`,
+    );
+    if (
+      !Array.isArray(response.data) ||
+      response.data.length > THERAPIST_PATIENT_PAGE_SIZE
+    ) {
+      throw new ApiError(0, "server returned an invalid patients page");
+    }
+    const revision = validatedRevision(
+      response.headers.get("X-Patients-Revision"),
+      undefined,
+      "patients",
+    );
+    if (
+      params.expectedRevision !== undefined &&
+      revision !== params.expectedRevision
+    ) {
+      throw patientsRevisionConflict();
+    }
+    return {
+      patients: response.data,
+      nextOffset:
+        revision === undefined
+          ? validatedNextOffset(
+              response.headers.get("X-Next-Offset"),
+              offset,
+              response.data.length,
+              THERAPIST_PATIENT_PAGE_SIZE,
+              "patients",
+            )
+          : response.headers.get("X-Next-Offset") === null
+            ? null
+            : validatedNextOffset(
+                response.headers.get("X-Next-Offset"),
+                offset,
+                response.data.length,
+                THERAPIST_PATIENT_PAGE_SIZE,
+                "patients",
+              ),
+      revision,
+    };
+  },
+  patients: async (): Promise<Patient[]> => {
+    for (let attempt = 0; attempt <= 1; attempt += 1) {
+      try {
+        const all: Patient[] = [];
+        const seen = new Set<string>();
+        let offset = 0;
+        let revision: string | null = null;
+        let revisionMode: "unknown" | "snapshot" | "legacy" = "unknown";
+        for (let page = 0; page < MAX_THERAPIST_PATIENT_PAGES; page += 1) {
+          const result = await api.patientsPage({
+            offset,
+            ...(revisionMode === "snapshot" && revision !== null
+              ? { expectedRevision: revision }
+              : {}),
+          });
+          const receivedRevision = result.revision ?? null;
+          if (revisionMode === "unknown") {
+            revisionMode = receivedRevision === null ? "legacy" : "snapshot";
+            revision = receivedRevision;
+          } else if (
+            (revisionMode === "snapshot" && receivedRevision !== revision) ||
+            (revisionMode === "legacy" && receivedRevision !== null)
+          ) {
+            throw patientsRevisionConflict();
+          }
+          for (const patient of result.patients) {
+            if (seen.has(patient.user_id)) continue;
+            seen.add(patient.user_id);
+            all.push(patient);
+          }
+          if (result.nextOffset === null) return all;
+          offset = result.nextOffset;
+        }
+        throw new ApiError(
+          0,
+          "server keeps returning patient continuations — aborting the request",
+        );
+      } catch (err) {
+        if (
+          err instanceof ApiError &&
+          err.status === 409 &&
+          err.code === "collection_changed" &&
+          attempt < 1
+        ) {
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw new ApiError(0, "could not obtain a stable patient snapshot");
+  },
   patientInsights: async (userId: string): Promise<InsightsSummary> => {
     const summary = await request<InsightsSummary>(
       "GET",
@@ -774,7 +1058,10 @@ export const api = {
     // 2026-09-26 audit L: surface the echoed generation as a validated
     // integer — PatientView compares it against the seq embedded in the
     // decrypted blob (rollback-replay detection).
-    return { ...summary, state_seq: validatedStateSeq(summary.state_seq, "insights") };
+    return {
+      ...summary,
+      state_seq: validatedStateSeq(summary.state_seq, "insights"),
+    };
   },
   /** 2026-09-26 audit L: the measures traversal now runs the IDENTICAL
    *  snapshot-revision contract as entries and notes (backend
@@ -807,7 +1094,10 @@ export const api = {
       "GET",
       `/therapist/patients/${encodeURIComponent(userId)}/measures?${search.toString()}`,
     );
-    if (!Array.isArray(response.data) || response.data.length > THERAPIST_MEASURE_PAGE_SIZE) {
+    if (
+      !Array.isArray(response.data) ||
+      response.data.length > THERAPIST_MEASURE_PAGE_SIZE
+    ) {
       throw new ApiError(0, "server returned an invalid measures page");
     }
     return {
@@ -829,7 +1119,10 @@ export const api = {
   /** Fetch one kept voice recording for playback (VOICE_PLAN 2026-09-29).
    *  The consent must carry share_voice; the server audit-logs every
    *  access. Returns the encrypted blob — decryption stays client-side. */
-  patientAudio: (userId: string, attachmentId: string): Promise<PortalAudioAttachment> =>
+  patientAudio: (
+    userId: string,
+    attachmentId: string,
+  ): Promise<PortalAudioAttachment> =>
     request<PortalAudioAttachment>(
       "GET",
       `/therapist/patients/${encodeURIComponent(userId)}/audio/${encodeURIComponent(attachmentId)}`,
@@ -837,7 +1130,12 @@ export const api = {
 
   patientEntries: async (
     userId: string,
-    params: { since?: string; until?: string; offset?: number; expectedRevision?: string } = {},
+    params: {
+      since?: string;
+      until?: string;
+      offset?: number;
+      expectedRevision?: string;
+    } = {},
   ): Promise<PatientEntriesPage> => {
     const offset = params.offset ?? 0;
     if (!Number.isSafeInteger(offset) || offset < 0) {
@@ -859,7 +1157,10 @@ export const api = {
       "GET",
       `/therapist/patients/${encodeURIComponent(userId)}/entries?${search.toString()}`,
     );
-    if (!Array.isArray(response.data) || response.data.length > THERAPIST_ENTRY_PAGE_SIZE) {
+    if (
+      !Array.isArray(response.data) ||
+      response.data.length > THERAPIST_ENTRY_PAGE_SIZE
+    ) {
       throw new ApiError(0, "server returned an invalid evidence page");
     }
     return {
@@ -900,7 +1201,10 @@ export const api = {
       "GET",
       `/therapist/patients/${encodeURIComponent(userId)}/notes?${search.toString()}`,
     );
-    if (!Array.isArray(response.data) || response.data.length > THERAPIST_NOTE_PAGE_SIZE) {
+    if (
+      !Array.isArray(response.data) ||
+      response.data.length > THERAPIST_NOTE_PAGE_SIZE
+    ) {
       throw new ApiError(0, "server returned an invalid note page");
     }
     return {
@@ -919,10 +1223,25 @@ export const api = {
       ),
     };
   },
-  createNote: (userId: string, payload: { client_note_id: string; pattern_pid?: string | null; blob: string; custody_version?: number }) =>
-    request<Note>("POST", `/therapist/patients/${encodeURIComponent(userId)}/notes`, payload),
+  createNote: (
+    userId: string,
+    payload: {
+      client_note_id: string;
+      pattern_pid?: string | null;
+      blob: string;
+      custody_version?: number;
+    },
+  ) =>
+    request<Note>(
+      "POST",
+      `/therapist/patients/${encodeURIComponent(userId)}/notes`,
+      payload,
+    ),
   noteRevisions: (noteId: string) =>
-    request<NoteRevision[]>("GET", `/therapist/notes/${encodeURIComponent(noteId)}/revisions`),
+    request<NoteRevision[]>(
+      "GET",
+      `/therapist/notes/${encodeURIComponent(noteId)}/revisions`,
+    ),
   /** Deep-audit 2026-09-28 HIGH fix: the backend made base_version
    * REQUIRED on PATCH (2026-09-26 audit item 15 — fail-closed optimistic
    * concurrency for clinical notes); sending {blob} alone 400'd every
@@ -946,17 +1265,34 @@ export const api = {
     request<null>(
       "PUT",
       "/therapist/notes/rekey",
-      { items, ...(custodyVersion === undefined ? {} : { custody_version: custodyVersion }) },
+      {
+        items,
+        ...(custodyVersion === undefined
+          ? {}
+          : { custody_version: custodyVersion }),
+      },
       { "X-Account-Verifier": verifierB64 },
     ),
-  updateNote: (noteId: string, blob: string, baseVersion: number, custodyVersion?: number) =>
+  updateNote: (
+    noteId: string,
+    blob: string,
+    baseVersion: number,
+    custodyVersion?: number,
+  ) =>
     request<Note>("PATCH", `/therapist/notes/${encodeURIComponent(noteId)}`, {
       blob,
       base_version: baseVersion,
-      ...(custodyVersion === undefined ? {} : { custody_version: custodyVersion }),
+      ...(custodyVersion === undefined
+        ? {}
+        : { custody_version: custodyVersion }),
     }),
-  deleteNote: (noteId: string) => request<null>("DELETE", `/therapist/notes/${encodeURIComponent(noteId)}`),
-  newPairingCode: () => request<{ code: string; expires_in: number }>("POST", "/therapist/pairing-codes"),
+  deleteNote: (noteId: string) =>
+    request<null>("DELETE", `/therapist/notes/${encodeURIComponent(noteId)}`),
+  newPairingCode: () =>
+    request<{ code: string; expires_in: number }>(
+      "POST",
+      "/therapist/pairing-codes",
+    ),
   /** The therapist-side SAS read (2026-09-26): the patient reads their
    *  verification code (and their account id) back after entering this
    *  session's pairing code; entering that id here pulls the SAS the
@@ -982,12 +1318,16 @@ export const api = {
    *  bytes, base64). The server bumps the token epoch on success, so every
    *  bearer — this session's included — dies with the 204: the caller must
    *  sign the user out immediately after and say why. */
-  rotateCredential: (verifierB64: string, newSaltB64: string, newVerifierB64: string) =>
-    request<null>(
-      "PUT",
-      "/account/credential",
-      { verifier: verifierB64, new_salt: newSaltB64, new_verifier: newVerifierB64 },
-    ),
+  rotateCredential: (
+    verifierB64: string,
+    newSaltB64: string,
+    newVerifierB64: string,
+  ) =>
+    request<null>("PUT", "/account/credential", {
+      verifier: verifierB64,
+      new_salt: newSaltB64,
+      new_verifier: newVerifierB64,
+    }),
   /** Audit NEW-3 / F.4 (2026-09-22): PUT /therapist/wrap-key — re-publish
    *  the sharing keypair (backend schemas.WrapKeyRotateRequest). The proof
    *  of password knowledge rides the X-Account-Verifier header (the body
@@ -997,15 +1337,26 @@ export const api = {
    *  while both passwords are derivable, THEN rotateCredential), the
    *  recovery form undoes that window, and the compromise rotation
    *  publishes a genuinely fresh keypair. */
-  rotateWrapKey: (verifierB64: string, wrapPubKeyB64: string, wrapKeyBlobB64: string, expectedCustodyVersion?: number) =>
+  rotateWrapKey: (
+    verifierB64: string,
+    wrapPubKeyB64: string,
+    wrapKeyBlobB64: string,
+    expectedCustodyVersion?: number,
+  ) =>
     request<null>(
       "PUT",
       "/therapist/wrap-key",
-      { wrap_pub_key: wrapPubKeyB64, wrap_key_blob: wrapKeyBlobB64, ...(expectedCustodyVersion === undefined ? {} : { expected_custody_version: expectedCustodyVersion }) },
+      {
+        wrap_pub_key: wrapPubKeyB64,
+        wrap_key_blob: wrapKeyBlobB64,
+        ...(expectedCustodyVersion === undefined
+          ? {}
+          : { expected_custody_version: expectedCustodyVersion }),
+      },
       { "X-Account-Verifier": verifierB64 },
     ),
-  /** Optional therapist TOTP (2026-09-21 audit C-2/F-4, delivered
-   *  2026-09-22). Three-step enrollment, all verifier-gated: setup arms a
+  /** Therapist TOTP administration (mandatory before patient-data access).
+   *  Three-step enrollment is verifier-gated: setup arms a
    *  PENDING secret and shows it exactly once; enable proves the
    *  authenticator holds it; disable requires the verifier AND a fresh
    *  code (so neither a phished password nor a stolen bearer strips the
@@ -1026,32 +1377,74 @@ export const api = {
       code,
     }),
   totpDisable: (verifierB64: string, code: string) =>
-    request<null>("POST", "/account/totp/disable", { verifier: verifierB64, code }),
+    request<null>("POST", "/account/totp/disable", {
+      verifier: verifierB64,
+      code,
+    }),
 };
 
 /** Fence every stream read, including callers consuming Response.body directly. */
-function guardResponseStream(response: Response, controller: AbortController, cleanup: () => void, maxBytes: number): Response {
+function guardResponseStream(
+  response: Response,
+  controller: AbortController,
+  cleanup: () => void,
+  maxBytes: number,
+): Response {
   if (!response.body) return response;
-  const reader = response.body.getReader(); let received = 0; let finished = false;
+  const reader = response.body.getReader();
+  let received = 0;
+  let finished = false;
   const stream = new ReadableStream<Uint8Array>({
     start(target) {
-      const abort = () => { if (!finished) { finished = true; target.error(new ApiError(0,"session ended or response timed out")); void reader.cancel().catch(() => undefined); cleanup(); } };
-      if (controller.signal.aborted) abort(); else controller.signal.addEventListener("abort",abort,{once:true});
+      const abort = () => {
+        if (!finished) {
+          finished = true;
+          target.error(new ApiError(0, "session ended or response timed out"));
+          void reader.cancel().catch(() => undefined);
+          cleanup();
+        }
+      };
+      if (controller.signal.aborted) abort();
+      else controller.signal.addEventListener("abort", abort, { once: true });
     },
     async pull(target) {
       if (finished) return;
       try {
         const row = await reader.read();
         if (finished || controller.signal.aborted) return;
-        if (row.done) { finished = true; target.close(); cleanup(); return; }
+        if (row.done) {
+          finished = true;
+          target.close();
+          cleanup();
+          return;
+        }
         received += row.value.byteLength;
-        if (received > maxBytes) throw new ApiError(0,"Server response exceeded this client's safe size limit.");
+        if (received > maxBytes)
+          throw new ApiError(
+            0,
+            "Server response exceeded this client's safe size limit.",
+          );
         target.enqueue(row.value);
-      } catch (err) { if (!finished) { finished = true; target.error(err); void reader.cancel().catch(() => undefined); cleanup(); } }
+      } catch (err) {
+        if (!finished) {
+          finished = true;
+          target.error(err);
+          void reader.cancel().catch(() => undefined);
+          cleanup();
+        }
+      }
     },
-    cancel(reason) { finished = true; cleanup(); return reader.cancel(reason); },
+    cancel(reason) {
+      finished = true;
+      cleanup();
+      return reader.cancel(reason);
+    },
   });
-  const guarded = new Response(stream,{ status:response.status,statusText:response.statusText,headers:response.headers });
-  Object.defineProperty(guarded,"url",{value:response.url});
+  const guarded = new Response(stream, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+  Object.defineProperty(guarded, "url", { value: response.url });
   return guarded;
 }

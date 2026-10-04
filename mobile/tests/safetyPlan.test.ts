@@ -1,7 +1,7 @@
 /**
  * The local safety plan (2026-09-27): encrypted round-trip under the data
  * key, the hostile/oversized-record discipline (a plan that cannot be
- * validated reads as ABSENT, never as a partial plan), the locked/wrong-key
+ * validated fails closed as unreadable, never as a partial plan), the locked/wrong-key
  * fallback, deletion hygiene, and per-user slot isolation. Idiom:
  * tests/measures.test.tsx / the pendingMeasure discipline — REAL envelope
  * crypto, the in-memory AsyncStorage mock, no module mocks.
@@ -14,6 +14,7 @@ import {
   emptySafetyPlan,
   loadSafetyPlan,
   saveSafetyPlan,
+  SafetyPlanReadError,
   type SafetyPlan,
 } from "../src/safetyPlan";
 const storage = (await import("./helpers/storageMock")).default;
@@ -100,20 +101,20 @@ describe("safetyPlan: hostile and oversized records", () => {
     expect(loaded?.copingStrategies).toHaveLength(4000);
   });
 
-  it("a non-object record, a wrong-typed field, a missing field, and garbage bytes all read as absent", async () => {
+  it("a non-object record, a wrong-typed field, a missing field, and garbage bytes fail closed", async () => {
     await seedSlot(USER, dataKey, JSON.stringify(["not", "an", "object"]));
-    expect(await loadSafetyPlan(dataKey, USER)).toBeNull();
+    await expect(loadSafetyPlan(dataKey, USER)).rejects.toThrow(SafetyPlanReadError);
 
     await seedSlot(USER, dataKey, JSON.stringify({ ...emptySafetyPlan(), askForHelp: 42 }));
-    expect(await loadSafetyPlan(dataKey, USER)).toBeNull();
+    await expect(loadSafetyPlan(dataKey, USER)).rejects.toThrow(SafetyPlanReadError);
 
     const missing = emptySafetyPlan();
     delete (missing as Record<string, unknown>).professionals;
     await seedSlot(USER, dataKey, JSON.stringify(missing));
-    expect(await loadSafetyPlan(dataKey, USER)).toBeNull();
+    await expect(loadSafetyPlan(dataKey, USER)).rejects.toThrow(SafetyPlanReadError);
 
     await seedSlot(USER, dataKey, "not json at all {{");
-    expect(await loadSafetyPlan(dataKey, USER)).toBeNull();
+    await expect(loadSafetyPlan(dataKey, USER)).rejects.toThrow(SafetyPlanReadError);
   });
 
   it("extra unknown fields are ignored, never trusted into the plan", async () => {
@@ -125,29 +126,29 @@ describe("safetyPlan: hostile and oversized records", () => {
 });
 
 describe("safetyPlan: locked / wrong-key fallback", () => {
-  it("a DIFFERENT key (account switch / rotation) reads as absent, never as a partial plan", async () => {
+  it("a DIFFERENT key (account switch / rotation) fails closed", async () => {
     await saveSafetyPlan(dataKey, USER, aPlan());
-    expect(await loadSafetyPlan(otherKey, USER)).toBeNull();
+    await expect(loadSafetyPlan(otherKey, USER)).rejects.toThrow(SafetyPlanReadError);
   });
 
-  it("a blob bound to a DIFFERENT user (cross-account AAD) reads as absent", async () => {
+  it("a blob bound to a DIFFERENT user (cross-account AAD) fails closed", async () => {
     await seedSlot(USER, dataKey, JSON.stringify(aPlan()), OTHER_USER);
-    expect(await loadSafetyPlan(dataKey, USER)).toBeNull();
+    await expect(loadSafetyPlan(dataKey, USER)).rejects.toThrow(SafetyPlanReadError);
   });
 
-  it("a tampered blob reads as absent (GCM authentication fails)", async () => {
+  it("a tampered blob fails closed (GCM authentication fails)", async () => {
     await saveSafetyPlan(dataKey, USER, aPlan());
     const slotKey = `@mindpattern/safety_plan_${USER}`;
     const raw = Buffer.from((await storage.getItem(slotKey))!, "base64");
     raw[5] = raw[5]! ^ 0xff; // flip one ciphertext byte
     await storage.setItem(slotKey, raw.toString("base64"));
-    expect(await loadSafetyPlan(dataKey, USER)).toBeNull();
+    await expect(loadSafetyPlan(dataKey, USER)).rejects.toThrow(SafetyPlanReadError);
   });
 
-  it("a zeroized (locked-vault) key buffer reads as absent and never throws", async () => {
+  it("a zeroized (locked-vault) key buffer fails closed", async () => {
     await saveSafetyPlan(dataKey, USER, aPlan());
     const lockedKey = Buffer.alloc(32); // all zeros — the vault.lock() aftermath
-    expect(await loadSafetyPlan(lockedKey, USER)).toBeNull();
+    await expect(loadSafetyPlan(lockedKey, USER)).rejects.toThrow(SafetyPlanReadError);
   });
 
   it("the empty plan shape is fully blanked", () => {

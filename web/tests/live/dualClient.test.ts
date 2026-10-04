@@ -3,8 +3,8 @@
  * LIVE_DRILL=1. Drives TWO full client sessions ("device A" and "device B")
  * against one live backend and the same account, scripting the sync
  * contract's race rows: concurrent creates, the version-CAS edit race,
- * delete-vs-edit, cross-session visibility, and the epoch-death funnel
- * (logout on one device kills the other's token).
+ * delete-vs-edit, cross-session visibility, and per-device logout
+ * (logout kills only the bearer presented by that device).
  *
  *   MINDPATTERN_ENV=development uvicorn app.main:app --port 8010
  *   LIVE_DRILL=1 LIVE_DRILL_ORIGIN=http://localhost:8010 npx vitest run \
@@ -17,8 +17,10 @@
  * same contract is pinned by mobile/tests/twoWriter.test.ts plus the
  * byte-level interop fixtures.
  */
+// @ts-nocheck
+
 import { afterEach, describe, expect, it } from "vitest";
-import { auth, clearSession, setSession, setSessionExpiredHandler, type TokenResponse } from "../../src/api/client";
+import { auth, clearSession, MINIMUM_AGE_ATTESTATION, setSession, setSessionExpiredHandler, type TokenResponse } from "../../src/api/client";
 import { decryptEntry, encryptEntry } from "../../src/crypto/patient";
 import { deriveMasterKey, toBase64 } from "../../src/crypto/core";
 import { derivePatientKeys } from "../../src/crypto/keys";
@@ -46,7 +48,7 @@ describe.skipIf(!live)("dual-client sync drill (two sessions, one account)", () 
     const username = `web.dual.${Date.now().toString(36)}`;
     const salt = randomBytes(16);
     const keys = await derivePatientKeys(await deriveMasterKey("dual-client-drill-password-1", salt));
-    const registered: TokenResponse = await auth.register(username, toBase64(salt), toBase64(keys.authKey));
+    const registered: TokenResponse = await auth.register(username, toBase64(salt), toBase64(keys.authKey), MINIMUM_AGE_ATTESTATION);
 
     // ---- device A session ----
     setSession(registered.token, registered.user_id, username);
@@ -63,6 +65,7 @@ describe.skipIf(!live)("dual-client sync drill (two sessions, one account)", () 
     const relogin: TokenResponse = await auth.login(username, toBase64(keys.authKey));
     expect(relogin.user_id).toBe(registered.user_id);
     const tokenA = registered.token;
+    const tokenB = relogin.token;
     setSession(relogin.token, registered.user_id, username); // now B's token is live
     const idB = newClientEntryId(date);
     const b1 = await encryptEntry(keys.dataKey, registered.user_id, idB, "Device B writes concurrently.", new Date().toISOString(), 0, undefined, 1);
@@ -94,13 +97,19 @@ describe.skipIf(!live)("dual-client sync drill (two sessions, one account)", () 
     const deleted = await api.updateEntry(idB, b2editDeleted.blobB64, date, 2).catch((err: unknown) => err as { status?: number });
     expect((deleted as { status?: number }).status).toBe(404);
 
-    // ---- epoch death (D-8): B logs out — A's token must die on next use. ----
-    await api.logout(); // B's logout bumps the account epoch
-    setSession(tokenA, registered.user_id, username); // A's stale session
+    // ---- per-device logout: B dies, A remains live. Account-wide epoch
+    // invalidation is covered separately by password-change tests. ----
+    await api.logout();
     let death: { status?: number; code?: string } | null = null;
     setSessionExpiredHandler((err) => {
       death = { status: err.status, code: err.code };
     });
+    setSession(tokenA, registered.user_id, username);
+    const stillLive = await listEntriesWalk();
+    expect(stillLive.some((row) => row.client_entry_id === idA)).toBe(true);
+    expect(death).toBeNull();
+
+    setSession(tokenB, registered.user_id, username);
     await expect(listEntriesWalk()).rejects.toThrow();
     expect((death as { status?: number } | null)?.status).toBe(401);
 

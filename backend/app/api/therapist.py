@@ -12,9 +12,9 @@ touched, and revoked/unknown patients answer the same 404. Notes are the
 therapist's own record (they survive a revoke; account deletion on either
 side cascades them away with the row). The measures read additionally
 requires the consent to have been granted under the CURRENT sharing
-disclosure (H-14, 2026-09-20): legacy v1 grants never named measures, so
+disclosure: older grants did not name the full current measure set, so
 they authorize entries/insights/notes but answer 409 disclosure_outdated
-for measures until the patient re-consents under the v2 copy.
+for measures until the patient re-consents under the current v3 copy.
 
 Auditing: grant/revoke (by the patient) and every patient-data read/write
 (by the therapist) append access_log rows. The patient LIST is audited too
@@ -47,6 +47,7 @@ from ..deps import (
     get_session,
     require_sharing_enabled,
     require_therapist,
+    require_therapist_account,
 )
 from ..locks import (
     UserLocks,
@@ -58,6 +59,7 @@ from ..locks import (
 from ..models import (
     AccessLog,
     Consent,
+    ConsentEvent,
     Entry,
     Measure,
     PairingCode,
@@ -90,6 +92,7 @@ from ..schemas import (
 )
 from ..security import sharing, tokens
 from ..security.crypto import MIN_BLOB_SIZE
+from ..security.deletion_tombstone import new_deletion_tombstone
 from ..security.tokens import issue_token
 from ..services import threshold
 from ._audit import append_access_log, parse_access_log_cursor
@@ -101,6 +104,12 @@ from ._paging import (
     parse_expected_revision,
     select_byte_page,
     verify_fetched_page,
+)
+from ._sharing_state import (
+    MAX_RETAINED_RELATIONSHIPS_PER_ACCOUNT,
+    PATIENTS_REVISION_HEADER,
+    add_consent_event,
+    advance_sharing_revisions,
 )
 from .account import _require_verifier
 from .auth import SALT_BYTES, AUTH_KEY_SIZE, _auth_limiter, auth_work_slot, hash_verifier_off_loop
@@ -246,19 +255,6 @@ async def _increment_notes_revision(session: AsyncSession, therapist: User) -> i
         )
     await session.refresh(therapist, attribute_names=["notes_revision"])
     return therapist.notes_revision
-
-
-def access_log_prune_statement(now, retention_days: int):
-    # 2026-09-28 deep audit: the argument is REQUIRED — a hardcoded default
-    # silently pruned at 730 days if a future call site omitted it while
-    # the operator-tunable setting said otherwise. Both live call sites
-    # pass settings.access_log_retention_days explicitly.
-    """DELETE for audit rows past the retention window. THE one statement
-    for both call sites — the opportunistic prune in POST /therapist/
-    pairing-codes below and the lifespan's daily sweep (main.py): a
-    steady-state deployment creates no pairing codes, so the endpoint
-    alone never prunes and the table grows unbounded."""
-    return delete(AccessLog).where(AccessLog.at < now - timedelta(days=retention_days))
 
 
 MAX_WRAP_KEY_BLOB_BYTES = 1024  # b64 cap mirrors schemas; decoded bound
@@ -430,10 +426,20 @@ async def register_therapist(
         display_name=body.display_name,
         wrap_pub_key=body.wrap_pub_key,
         wrap_key_blob=key_blob,
+        age_attestation_version=body.age_attestation,
+        age_attested_at=utcnow(),
     )
     session.add(user)
     try:
         await session.flush()
+        await append_access_log(
+            session,
+            actor_id=user.id,
+            actor_role="therapist",
+            user_id=user.id,
+            action="account_created",
+            allow_new_chain=True,
+        )
         response = TokenResponse(
             token=issue_token(
                 user.id,
@@ -449,6 +455,7 @@ async def register_therapist(
             user_id=user.id,
             expires_in=settings.token_ttl_seconds,
             role="therapist",
+            mfa_enrollment_required=True,
         )
         await session.commit()
     except IntegrityError as exc:
@@ -467,7 +474,7 @@ async def register_therapist(
     ],
 )
 async def therapist_me(
-    user: User = Depends(require_therapist),
+    user: User = Depends(require_therapist_account),
 ) -> TherapistMeResponse:
     """Everything the portal needs to unlock its wrap key locally (the
     blob is decryptable only with the therapist's password-derived KEK)."""
@@ -496,7 +503,7 @@ async def therapist_me(
 async def rotate_wrap_key(
     body: WrapKeyRotateRequest,
     request: Request,
-    user: User = Depends(require_therapist),
+    user: User = Depends(require_therapist_account),
     session: AsyncSession = Depends(get_session),
     x_account_verifier: str | None = Header(default=None),
 ):
@@ -577,15 +584,27 @@ async def rotate_wrap_key(
         if body.wrap_pub_key != fresh.wrap_pub_key:
             # A compromised sharing identity is replaced, not archived. Its
             # existing wraps cannot be opened by the replacement identity.
-            active_patients = list(
-                (
-                    await session.scalars(
-                        select(Consent.user_id).where(
-                            Consent.therapist_id == fresh.id, Consent.status == "active"
-                        )
+            active_rows = (
+                await session.execute(
+                    select(
+                        Consent.id,
+                        Consent.user_id,
+                        Consent.disclosure,
+                        Consent.share_voice,
                     )
-                ).all()
-            )
+                    .where(Consent.therapist_id == fresh.id, Consent.status == "active")
+                    .limit(MAX_PATIENTS_PER_THERAPIST + 1)
+                )
+            ).all()
+            if len(active_rows) > MAX_PATIENTS_PER_THERAPIST:
+                raise ApiError(
+                    status_code=413,
+                    detail="active sharing exceeds the supported rotation size",
+                    code="payload_too_large",
+                )
+            active_patients = [row.user_id for row in active_rows]
+            active_by_patient = {row.user_id: row for row in active_rows}
+            changed_patients: list[str] = []
             for patient_id in sorted(active_patients):
                 if (
                     await session.scalar(
@@ -605,7 +624,7 @@ async def rotate_wrap_key(
                 await grant_guards.enter_async_context(
                     sharing_locks.hold(sharing_patient_lock_key(patient_id))
                 )
-                await session.execute(
+                changed = await session.execute(
                     update(Consent)
                     .where(
                         Consent.therapist_id == fresh.id,
@@ -622,8 +641,33 @@ async def rotate_wrap_key(
                         summary_updated_at=None,
                         share_voice=False,
                     )
+                    .returning(Consent.id)
+                )
+                changed_id = changed.scalar_one_or_none()
+                if changed_id is None:
+                    continue
+                previous = active_by_patient[patient_id]
+                await add_consent_event(
+                    session,
+                    ConsentEvent(
+                        user_id=patient_id,
+                        kind="sharing",
+                        action="withdrawn",
+                        disclosure=previous.disclosure,
+                        consent_id=changed_id,
+                        share_voice=bool(previous.share_voice),
+                        occurred_at=utcnow(),
+                    ),
+                    permission_increasing=False,
                 )
                 await _audit(session, fresh, patient_id, "sharing_identity_revoke")
+                changed_patients.append(patient_id)
+            if changed_patients:
+                await advance_sharing_revisions(
+                    session,
+                    patient_ids=changed_patients,
+                    therapist_ids=[fresh.id],
+                )
         fresh.wrap_pub_key = body.wrap_pub_key
         fresh.wrap_key_blob = key_blob
         await _audit(session, fresh, fresh.id, "wrap_key_rotate")
@@ -711,12 +755,11 @@ async def read_own_access_log(
 )
 async def delete_therapist_account(
     request: Request,
-    user: User = Depends(require_therapist),
+    user: User = Depends(require_therapist_account),
     session: AsyncSession = Depends(get_session),
     x_account_verifier: str | None = Header(default=None),
 ):
-    """Therapist account deletion (verifier-gated, like the patient's).
-    Cascades: consents (patients' shares die), notes, pairing codes."""
+    """Retire a therapist immediately, then purge child rows in pages."""
     verifier = x_account_verifier if isinstance(x_account_verifier, str) else None
     if verifier is None:
         raise ApiError(
@@ -762,8 +805,37 @@ async def delete_therapist_account(
             user_id=user.id,
             action="account_deleted",
         )
-        await session.execute(delete(User).where(User.id == user.id))
+        session.add(
+            new_deletion_tombstone(
+                fresh,
+                secret=request.app.state.settings.auth_token_secret,
+                auth_secret_version=request.app.state.settings.auth_secret_version,
+                now=utcnow(),
+            )
+        )
+        from ..services.account_deletion import (
+            purge_one_account_page,
+            stage_account_deletion,
+        )
+
+        stage_account_deletion(session, fresh)
         await session.commit()
+        try:
+            # Keep cleanup transaction state separate from the request
+            # session whose committed terminal audit row must still flush to
+            # the append-only journal after the response.
+            async with request.app.state.sessionmaker() as purge_session:
+                progress = await purge_one_account_page(
+                    purge_session,
+                    request.app.state.settings,
+                    owner_id=user.id,
+                )
+                await purge_session.commit()
+            request.app.state.account_deletion_backlog = progress.backlog
+        except Exception:  # noqa: BLE001 - logical erasure already committed
+            request.app.state.account_deletion_backlog = True
+            logger.error("bounded therapist purge deferred to background worker")
+        request.app.state.account_deletion_wakeup.set()
 
 
 # --- pairing ------------------------------------------------------------------
@@ -783,20 +855,10 @@ async def create_pairing_code(
     user: User = Depends(require_therapist),
     session: AsyncSession = Depends(get_session),
 ):
-    # Opportunistic housekeeping in the same transaction: dead code rows
-    # (consumed or long expired) cannot accumulate unboundedly.
     now = utcnow()
-    await session.execute(
-        delete(PairingCode).where(PairingCode.expires_at < now - PAIRING_RETENTION)
-    )
-    # access_log retention (2026-09-17): every therapist read appends a row
-    # forever before this — the table grew unbounded. Two years is the
-    # records-process window; time-based only (account deletion NEVER
-    # cascade-deletes audit rows — that property is what lets a trail
-    # outlive the account for its full retention period).
-    await session.execute(
-        access_log_prune_statement(now, request.app.state.settings.access_log_retention_days)
-    )
+    # Retention is intentionally NOT request-path housekeeping.  Pairing
+    # issuance performs only its bounded insert/retry work; scheduled
+    # maintenance owns deterministic cleanup batches.
     for _ in range(MAX_PAIRING_CODE_ATTEMPTS):
         code = sharing.generate_pairing_code()
         row = PairingCode(
@@ -901,6 +963,18 @@ async def pairing_sas(
 # --- patient reads ------------------------------------------------------------
 
 
+@asynccontextmanager
+async def _therapist_sharing_guard(session: AsyncSession, therapist: User):
+    """Fence data reads against retirement of the authenticated therapist."""
+
+    expected_epoch = therapist.token_epoch
+    async with sharing_locks.hold(sharing_therapist_lock_key(therapist.id)):
+        fresh = await session.get(User, therapist.id, populate_existing=True)
+        if fresh is None or not fresh.is_active or fresh.token_epoch != expected_epoch:
+            raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
+        yield fresh
+
+
 async def _active_consent(session: AsyncSession, therapist: User, user_id: str) -> Consent:
     """The ACTIVE consent for this pair, or a flat 404. Unknown patient,
     non-patient account, no consent, revoked consent — and, since the
@@ -942,15 +1016,37 @@ async def _active_consent(session: AsyncSession, therapist: User, user_id: str) 
 )
 async def list_patients(
     request: Request,
+    response: Response,
     user: User = Depends(require_therapist),
     session: AsyncSession = Depends(get_session),
+    limit: int = Query(default=100, ge=1, le=200),
+    offset: int = Query(default=0, ge=0, le=MAX_RETAINED_RELATIONSHIPS_PER_ACCOUNT),
+    expected_revision: str | None = Query(default=None),
 ):
     out: list[PatientOut] = []
+    expected = parse_expected_revision(expected_revision)
     # A list includes each active grant's wrapped data key.  Take the same
     # therapist->patient order as content reads and re-read each pair under
     # its patient fence; otherwise a revoke could clear the key just after a
     # bulk SELECT but before this endpoint returns it.
-    async with sharing_locks.hold(sharing_therapist_lock_key(user.id)):
+    async with _therapist_sharing_guard(session, user) as user:
+        revision = int(
+            await session.scalar(select(User.patients_revision).where(User.id == user.id)) or 0
+        )
+        assert_expected_revision(
+            expected,
+            revision,
+            collection="patients",
+            header_name=PATIENTS_REVISION_HEADER,
+        )
+        inactive_relationship = await session.scalar(
+            select(Consent.id)
+            .join(User, Consent.user_id == User.id)
+            .where(Consent.therapist_id == user.id, User.is_active.is_(False))
+            .limit(1)
+        )
+        if inactive_relationship is not None:
+            raise collection_changed_error("patients", PATIENTS_REVISION_HEADER, revision)
         # 2026-09-26 audit H-7: the CAP counts ACTIVE consents only — the
         # therapist-side twin of the patient list's F-9 rule. Consent rows
         # are never deleted (they carry disclosure history and note
@@ -964,9 +1060,12 @@ async def list_patients(
         active_count = int(
             (
                 await session.execute(
-                    select(func.count(Consent.id)).where(
+                    select(func.count(Consent.id))
+                    .join(User, Consent.user_id == User.id)
+                    .where(
                         Consent.therapist_id == user.id,
                         Consent.status == "active",
+                        User.is_active.is_(True),
                     )
                 )
             ).scalar_one()
@@ -977,52 +1076,39 @@ async def list_patients(
                 detail="patient list exceeds the supported caseload size",
                 code="payload_too_large",
             )
-        # 2026-09-26 audit follow-up (bounded listing): the per-patient
-        # fence now guards ACTIVE grants only — the only rows that serve
-        # key material or summaries. REVOKED rows are terminal metadata
-        # (no keys, no summary, no phase computation) assembled from the
-        # bulk read, with one batched existence re-check so a patient
-        # deleted mid-request vanishes from the response exactly as the
-        # locked re-fetch used to skip them. Lock+query work is thereby
-        # bounded by MAX_PATIENTS_PER_THERAPIST instead of lifetime
-        # history: a decades-long or imported caseload used to serialize
-        # thousands of sequential lock acquisitions under the therapist
-        # fence (the H-7 413 had bounded it at ~100 before).
+        retained_count = int(
+            await session.scalar(
+                select(func.count(Consent.id))
+                .join(User, Consent.user_id == User.id)
+                .where(Consent.therapist_id == user.id, User.is_active.is_(True))
+            )
+            or 0
+        )
+        if retained_count > MAX_RETAINED_RELATIONSHIPS_PER_ACCOUNT:
+            raise ApiError(
+                status_code=413,
+                detail="retained patient history exceeds the supported list size",
+                code="payload_too_large",
+            )
+        # Retained relationship history is paged.  Only this bounded page is
+        # existence-checked, audited, and guarded by per-patient fences.
         rows = (
             await session.execute(
                 select(Consent, User)
                 .join(User, Consent.user_id == User.id)
-                .where(Consent.therapist_id == user.id)
+                .where(
+                    Consent.therapist_id == user.id,
+                    User.is_active.is_(True),
+                )
                 .order_by(Consent.granted_at.desc(), Consent.id.desc())
+                .offset(offset)
+                .limit(limit + 1)
             )
         ).all()
+        has_more = len(rows) > limit
+        if has_more:
+            rows = rows[:limit]
         await session.commit()
-        revoked_patient_ids = [
-            row.Consent.user_id for row in rows if row.Consent.status != "active"
-        ]
-        alive_revoked: set[str] = set()
-        if revoked_patient_ids:
-            # Pentest I-5 (2026-09-29): existence alone used to decide
-            # liveness here, so a DEACTIVATED patient stayed listed in the
-            # revoked history while the active pass (audit item 20) and
-            # every content read (_active_consent) filter is_active — an
-            # account suspended by an operator now disappears from both
-            # passes consistently. Revoked rows serve no key material, so
-            # this is metadata consistency, not an access change.
-            alive_revoked = set(
-                (
-                    (
-                        await session.execute(
-                            select(User.id).where(
-                                User.id.in_(revoked_patient_ids), User.is_active.is_(True)
-                            )
-                        )
-                    )
-                    .scalars()
-                    .all()
-                )
-            )
-            await session.commit()
         # FIRST PASS — the revoked history: terminal metadata rows (no key
         # material, no summary, no phase computation), so no per-patient
         # fence is needed. 2026-09-26 audit item 19: their audit rows are
@@ -1034,11 +1120,6 @@ async def list_patients(
         for row in rows:
             consent, patient = row.Consent, row.User
             if consent.status == "active":
-                continue
-            if patient.id not in alive_revoked:
-                # The patient account was deleted between the bulk read
-                # and assembly; the locked re-fetch used to skip this
-                # pair, so it stays skipped here.
                 continue
             revoked_by_id[patient.id] = PatientOut(
                 user_id=patient.id,
@@ -1162,6 +1243,34 @@ async def list_patients(
             )
             if rendered is not None:
                 out.append(rendered)
+        final_revision_subquery = (
+            select(User.patients_revision).where(User.id == user.id).scalar_subquery()
+        )
+        inactive_relationship_subquery = (
+            select(Consent.id)
+            .join(User, Consent.user_id == User.id)
+            .where(Consent.therapist_id == user.id, User.is_active.is_(False))
+            .limit(1)
+            .scalar_subquery()
+        )
+        final_revision_value, inactive_relationship = (
+            await session.execute(select(final_revision_subquery, inactive_relationship_subquery))
+        ).one()
+        final_revision = int(final_revision_value or 0)
+        # Never emit a continuation whose scan cardinality differs from the
+        # response. A sanctioned deletion/revocation advances the revision;
+        # this explicit cardinality guard also fails closed on out-of-band
+        # database changes.
+        if final_revision != revision or len(out) != len(rows) or inactive_relationship is not None:
+            raise collection_changed_error("patients", PATIENTS_REVISION_HEADER, final_revision)
+        emit_page_headers(
+            response,
+            revision=revision,
+            header_name=PATIENTS_REVISION_HEADER,
+            has_more=has_more,
+            rows_returned=len(rows),
+            offset=offset,
+        )
     return out
 
 
@@ -1188,7 +1297,7 @@ async def read_patient_insights(
     # response construction, not merely with the initial SELECT.  The
     # therapist key also fences therapist-account deletion.  Every path that
     # takes both sharing locks uses this fixed order to avoid lock cycles.
-    async with sharing_locks.hold(sharing_therapist_lock_key(user.id)):
+    async with _therapist_sharing_guard(session, user) as user:
         async with sharing_locks.hold(sharing_patient_lock_key(user_id)):
             consent = await _active_consent(session, user, user_id)
             await _audit(session, user, consent.user_id, "read_insights")
@@ -1248,9 +1357,9 @@ async def read_patient_measures(
     this server never learns a score. Read is audit-logged like every
     other patient-data access.
 
-    H-14 (2026-09-20): the consent must ALSO have been granted under the
-    CURRENT sharing disclosure — the v1 copy named only entries and
-    patterns, so it cannot authorize measures. Legacy grants answer 409
+    The consent must ALSO have been granted under the CURRENT sharing
+    disclosure — v1 named no measures and v2 did not name the broadened
+    current measure set. Older grants answer 409
     disclosure_outdated (meta carries the current version) instead of
     serving data the patient never agreed to share in those terms.
 
@@ -1266,7 +1375,7 @@ async def read_patient_measures(
     if len(user_id) > 32:
         raise ApiError(status_code=404, detail="patient not found", code="not_found")
     out: list[MeasureOut] = []
-    async with sharing_locks.hold(sharing_therapist_lock_key(user.id)):
+    async with _therapist_sharing_guard(session, user) as user:
         async with sharing_locks.hold(sharing_patient_lock_key(user_id)):
             consent = await _active_consent(session, user, user_id)
             if consent.disclosure != SHARING_DISCLOSURE_VERSION:
@@ -1400,7 +1509,7 @@ async def read_patient_entries(
     if len(user_id) > 32:
         raise ApiError(status_code=404, detail="patient not found", code="not_found")
     result: list[EntryOut] = []
-    async with sharing_locks.hold(sharing_therapist_lock_key(user.id)):
+    async with _therapist_sharing_guard(session, user) as user:
         async with sharing_locks.hold(sharing_patient_lock_key(user_id)):
             consent = await _active_consent(session, user, user_id)
             revision = await current_entries_revision(session, consent.user_id)
@@ -1575,7 +1684,7 @@ async def read_patient_audio(
     result: AudioAttachmentOut
     async with (
         lifecycle_locks.hold(f"llm-lifecycle:{user_id}"),
-        sharing_locks.hold(sharing_therapist_lock_key(user.id)),
+        _therapist_sharing_guard(session, user) as user,
     ):
         async with sharing_locks.hold(sharing_patient_lock_key(user_id)):
             consent = await _active_consent(session, user, user_id)
@@ -1598,7 +1707,7 @@ async def read_patient_audio(
                 store = store_for_object(settings, row)
                 blob = await store.get(row.storage_key, max_bytes=settings.audio_max_body_bytes)
             except AudioStoreError:
-                logger.warning("audio get failed for attachment %s", row.id)
+                logger.warning("audio object get failed")
                 raise ApiError(
                     status_code=502,
                     detail="audio storage failed",
@@ -1636,12 +1745,13 @@ async def _note_target(session: AsyncSession, therapist: User, user_id: str) -> 
         (
             await session.execute(
                 select(Consent)
+                .join(User, User.id == Consent.user_id)
                 .where(
                     Consent.therapist_id == therapist.id,
                     Consent.user_id == user_id,
                     User.is_active.is_(True),
                 )
-                .join(User, User.id == Consent.user_id)
+                .with_for_update()
             )
         )
         .scalars()
@@ -2070,8 +2180,12 @@ async def update_note(
     row = (
         (
             await session.execute(
-                select(TherapistNote).where(
-                    TherapistNote.id == note_id, TherapistNote.therapist_id == user.id
+                select(TherapistNote)
+                .join(User, User.id == TherapistNote.user_id)
+                .where(
+                    TherapistNote.id == note_id,
+                    TherapistNote.therapist_id == user.id,
+                    User.is_active.is_(True),
                 )
             )
         )
@@ -2104,7 +2218,13 @@ async def update_note(
             (
                 await session.execute(
                     select(TherapistNote)
-                    .where(TherapistNote.id == note_id, TherapistNote.therapist_id == user.id)
+                    .join(User, User.id == TherapistNote.user_id)
+                    .where(
+                        TherapistNote.id == note_id,
+                        TherapistNote.therapist_id == user.id,
+                        User.is_active.is_(True),
+                    )
+                    .with_for_update()
                     .execution_options(populate_existing=True)
                 )
             )
@@ -2230,8 +2350,12 @@ async def rekey_notes(
         row = (
             (
                 await session.execute(
-                    select(TherapistNote).where(
-                        TherapistNote.id == item.note_id, TherapistNote.therapist_id == user.id
+                    select(TherapistNote)
+                    .join(User, User.id == TherapistNote.user_id)
+                    .where(
+                        TherapistNote.id == item.note_id,
+                        TherapistNote.therapist_id == user.id,
+                        User.is_active.is_(True),
                     )
                 )
             )
@@ -2292,7 +2416,13 @@ async def rekey_notes(
                 (
                     await session.execute(
                         select(TherapistNote)
-                        .where(TherapistNote.id == row.id)
+                        .join(User, User.id == TherapistNote.user_id)
+                        .where(
+                            TherapistNote.id == row.id,
+                            TherapistNote.therapist_id == user.id,
+                            User.is_active.is_(True),
+                        )
+                        .with_for_update()
                         .execution_options(populate_existing=True)
                     )
                 )
@@ -2386,9 +2516,14 @@ async def read_note_revisions(
     row = (
         (
             await session.execute(
-                select(TherapistNote).where(
-                    TherapistNote.id == note_id, TherapistNote.therapist_id == user.id
+                select(TherapistNote)
+                .join(User, User.id == TherapistNote.user_id)
+                .where(
+                    TherapistNote.id == note_id,
+                    TherapistNote.therapist_id == user.id,
+                    User.is_active.is_(True),
                 )
+                .with_for_update()
             )
         )
         .scalars()
@@ -2482,8 +2617,12 @@ async def delete_note(
     row = (
         (
             await session.execute(
-                select(TherapistNote).where(
-                    TherapistNote.id == note_id, TherapistNote.therapist_id == user.id
+                select(TherapistNote)
+                .join(User, User.id == TherapistNote.user_id)
+                .where(
+                    TherapistNote.id == note_id,
+                    TherapistNote.therapist_id == user.id,
+                    User.is_active.is_(True),
                 )
             )
         )
@@ -2500,7 +2639,13 @@ async def delete_note(
             (
                 await session.execute(
                     select(TherapistNote)
-                    .where(TherapistNote.id == note_id, TherapistNote.therapist_id == user.id)
+                    .join(User, User.id == TherapistNote.user_id)
+                    .where(
+                        TherapistNote.id == note_id,
+                        TherapistNote.therapist_id == user.id,
+                        User.is_active.is_(True),
+                    )
+                    .with_for_update()
                     .execution_options(populate_existing=True)
                 )
             )

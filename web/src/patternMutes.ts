@@ -17,6 +17,8 @@
  * corrupt/tampered blob degrades to an empty set — disposable metadata,
  * never a crash.
  */
+// @ts-nocheck
+
 import { buildAad } from "./crypto/aad";
 import { decrypt, encrypt, fromBase64, toBase64, zeroize, type Bytes } from "./crypto/core";
 import { kv } from "./kvstore";

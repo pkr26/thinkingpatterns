@@ -156,6 +156,102 @@
         },
         "overrides": []
       }
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Audit prune: oldest overdue",
+      "description": "Hours beyond the configured retention cutoff. S2 alert above 2h for 15m.",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "mindpattern-prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "max(mindpattern_audit_prune_oldest_overdue_seconds) / 3600" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h",
+          "decimals": 2,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 2 }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Audit verification cycle age",
+      "description": "Age of the durable incomplete verification cycle. S2 alert above 2h for 15m.",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "mindpattern-prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "max(mindpattern_audit_verification_cycle_age_seconds) / 3600" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h",
+          "decimals": 2,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 2 }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Audit maintenance failures (15m)",
+      "description": "Any increment is S2; readiness remains closed until a complete authenticated pass succeeds.",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "mindpattern-prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(mindpattern_audit_maintenance_failures_total[15m]))" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Bounded audit-maintenance backlog probes",
+      "description": "Boolean catch-up flags plus capped pending-row/owner probes. Use cursor movement and age panels to distinguish progress from a stall.",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "mindpattern-prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "max(mindpattern_audit_prune_backlog)", "legendFormat": "prune backlog" },
+        { "refId": "B", "expr": "max(mindpattern_audit_prune_pending_rows_probe)", "legendFormat": "pending rows (capped probe)" },
+        { "refId": "C", "expr": "max(mindpattern_audit_verification_backlog)", "legendFormat": "verification backlog" },
+        { "refId": "D", "expr": "max(mindpattern_audit_verification_pending_owners_probe)", "legendFormat": "pending owners (capped probe)" }
+      ],
+      "fieldConfig": { "defaults": { "decimals": 0, "custom": { "fillOpacity": 10 } }, "overrides": [] }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Account-erasure bounded purge",
+      "description": "Capped pending-job probe and oldest request age. Logical erasure is immediate; these track physical purge convergence without account labels.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "mindpattern-prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "max(mindpattern_account_deletion_pending_probe)", "legendFormat": "pending probe (capped)" },
+        { "refId": "B", "expr": "max(mindpattern_account_deletion_oldest_seconds) / 3600", "legendFormat": "oldest age (hours)" }
+      ],
+      "fieldConfig": { "defaults": { "decimals": 2, "custom": { "fillOpacity": 10 } }, "overrides": [] }
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Account-erasure worker failures",
+      "description": "Fixed privacy-safe failure categories only; no exception text, identifiers, paths, or object keys.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "mindpattern-prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum by (category) (increase(mindpattern_account_deletion_failures_total[15m]))", "legendFormat": "{{category}}" }
+      ],
+      "fieldConfig": { "defaults": { "decimals": 0, "custom": { "fillOpacity": 10 } }, "overrides": [] }
     }
   ]
 }

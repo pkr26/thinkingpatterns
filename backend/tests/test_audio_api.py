@@ -26,7 +26,7 @@ from app.services.stt import (
     normalize_language,
     normalize_mime,
 )
-from tests.helpers import ClientEmulator, TherapistEmulator
+from tests.helpers import ClientEmulator, TherapistEmulator, production_secret_settings
 
 SHARED_VECTORS = pathlib.Path(__file__).resolve().parents[2] / "shared" / "audio_vectors.json"
 
@@ -98,6 +98,7 @@ async def test_meta_reports_audio_availability(client, voice_settings):
     assert response.status_code == 200
     body = response.json()
     assert body["audio_available"] is True
+    assert body["stt_disclosure_version"] == "v2"
     assert body["stt_policy_fingerprint"]
     # L-31 discipline: with the flag off, every stt_* field is falsy.
     voice_settings.audio_enabled = False
@@ -106,6 +107,7 @@ async def test_meta_reports_audio_availability(client, voice_settings):
     assert body["audio_available"] is False
     assert body["stt_provider_name"] is None
     assert body["stt_data_retention"] is None
+    assert body["stt_disclosure_version"] is None
     assert body["stt_policy_fingerprint"] is None
 
 
@@ -430,6 +432,7 @@ def test_production_stt_requires_policy_terms():
             database_url="postgresql+asyncpg://u:p@h/db",
             stt_url="https://stt.example.com/v1",
             stt_api_key="k",
+            **production_secret_settings(),
         )
     ok = Settings(
         environment="production",
@@ -440,6 +443,7 @@ def test_production_stt_requires_policy_terms():
         stt_provider_name="ExampleSTT",
         stt_data_retention="zero-retention",
         stt_policy_version="v1",
+        **production_secret_settings(),
     )
     assert ok.stt_model == "whisper-1"
 

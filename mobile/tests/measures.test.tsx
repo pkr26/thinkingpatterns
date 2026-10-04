@@ -191,7 +191,7 @@ describe("MeasuresScreen", () => {
     expect(Alert.alert).not.toHaveBeenCalled();
   });
 
-  it("item 9 endorsement points at support only AFTER the save lands", async () => {
+  it("item 9 endorsement offers support after encrypted local persistence even when the network send is offline", async () => {
     vi.mocked(api.createMeasure).mockRejectedValueOnce(new ApiError(0, "offline"));
     const root = await render(<MeasuresScreen navigation={{ navigate: vi.fn(), goBack: vi.fn() }} />);
     await flush();
@@ -201,23 +201,28 @@ describe("MeasuresScreen", () => {
     }
     await pressLabel(root, "Record this check-in");
     await flush();
-    // 2026-09-26 audit LOW: an offline failure is a quiet INLINE status now
-    // (never a modal), the picks stay selected and the Record button stays
-    // enabled — that is the retry affordance until connectivity returns.
+    // The encrypted pending record lands before the network send. An offline
+    // API failure must therefore offer support immediately, while retaining
+    // the same picks/id for an idempotent retry.
+    expect(Alert.alert).toHaveBeenCalledWith(
+      "Support is available",
+      expect.stringContaining("does not monitor this response or alert anyone"),
+      expect.anything(),
+    );
+    expect(Alert.alert).toHaveBeenCalledWith(
+      "Support is available",
+      expect.stringContaining("immediate danger"),
+      expect.anything(),
+    );
     expect(Alert.alert).not.toHaveBeenCalledWith("Not recorded", expect.anything());
     expect(textOf(root)).toContain("Recording needs a connection right now. Your picks are still on screen.");
     expect(touchableByLabel(root, "Record this check-in").props.disabled).toBe(false);
-    // The picks really are still there (item 9 still selected for retry).
-    expect(Alert.alert).not.toHaveBeenCalledWith("Support is available", expect.anything());
 
-    // Retry succeeds: now the calm support pointer fires.
+    // Retry succeeds under the same id; the trigger-specific daily stamp
+    // prevents a duplicate dialog.
     await pressLabel(root, "Record this check-in");
     await flush();
-    expect(Alert.alert).toHaveBeenCalledWith(
-      "Support is available",
-      expect.stringContaining("you do not have to carry it alone"),
-      expect.anything(),
-    );
+    expect(Alert.alert.mock.calls.filter(([title]) => title === "Support is available")).toHaveLength(1);
   });
 
   it("a duplicate id (409) is treated as recorded, not an error", async () => {
@@ -274,7 +279,7 @@ describe("MeasuresScreen", () => {
       await flush();
       expect(Alert.alert).toHaveBeenCalledWith(
         "Hay apoyo disponible",
-        expect.stringContaining("no tiene que cargarlo en soledad"),
+        expect.stringContaining("no vigila esta respuesta ni avisa a nadie"),
         expect.anything(),
       );
       expect(nav.navigate).not.toHaveBeenCalledWith("Crisis"); // dismissible, not auto

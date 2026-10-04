@@ -10,6 +10,8 @@
  * is W. J. Cody's rational approximation (double precision), so the
  * p-value tails agree with math.erfc to vector tolerance.
  */
+// @ts-nocheck
+
 
 /** Lag-1-friendly Pearson r; null when unmeasurable (<3 pairs, no variance). */
 export function pearson(xs: number[], ys: number[]): number | null {

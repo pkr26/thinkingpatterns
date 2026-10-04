@@ -199,7 +199,7 @@ async def test_same_day_recompute_with_extra_pattern_serves_same_question(client
     assert second["pattern_pid"] == first["pattern_pid"]
 
 
-# --- H-14: disclosure v2 — legacy grants do not cover measures -----------------
+# --- H-14/PRIV-003: only the current disclosure covers measures ----------------
 
 
 async def test_v1_consent_refuses_measures_but_keeps_entries_and_insights(client):
@@ -239,7 +239,7 @@ async def test_v1_consent_refuses_measures_but_keeps_entries_and_insights(client
     # The meta block the mobile client branches on to offer re-consent.
     from app.api.consents import SHARING_DISCLOSURE_VERSION
 
-    assert SHARING_DISCLOSURE_VERSION == "v2"
+    assert SHARING_DISCLOSURE_VERSION == "v3"
     assert body["meta"]["sharing_disclosure_version"] == SHARING_DISCLOSURE_VERSION
     # The refusal served no data — and wrote no audit row.
     assert "read_measures" not in [row.action for row in await _audit_rows(client)]
@@ -843,10 +843,17 @@ class _FkCommitSession:
         self.rolled_back = True
 
 
-async def test_note_fk_violation_is_not_a_conflict():
+async def test_note_fk_violation_is_not_a_conflict(monkeypatch):
     """The patient account vanished between the consent read and the commit:
     404 (the pair no longer exists), never 409 'already exists'."""
     from app.api import therapist as therapist_module
+
+    async def audit_noop(*_args, **_kwargs):
+        return None
+
+    # The deliberately tiny session double models the note/FK commit race,
+    # not the independently covered authenticated audit chain.
+    monkeypatch.setattr(therapist_module, "_audit", audit_noop)
 
     therapist = _user("l12-therapist", epoch=1)
     therapist.role = "therapist"
@@ -889,6 +896,7 @@ async def test_display_name_rejects_control_and_bidi_characters(client):
     base_body = {
         "salt": th.salt_b64,
         "verifier": th.auth_key_b64,
+        "age_attestation": "minimum_age_confirmed_v1",
         "wrap_pub_key": th.wrap_pub_key,
         "wrap_key_blob": th.wrap_key_blob_b64(),
     }

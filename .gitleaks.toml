@@ -117,6 +117,21 @@ regexes = [
 ]
 
 [[allowlists]]
+# Two exact public strings trip the default generic-api-key heuristic:
+# "therapist" contains "api" immediately before the documented processing
+# label, and React-cxxstableapi is followed by CocoaPods' public spec checksum.
+# Do not add `paths` here: pinned gitleaks 8.30.1 skips a whole file on a
+# no-git path allowlist before evaluating its condition. Exact full matches
+# keep every other value in both files visible to the working-tree scanner;
+# a dependency bump must review and update the public checksum deliberately.
+description = "exact documentation phrase and public CocoaPods spec checksum"
+regexTarget = "match"
+regexes = [
+  '''therapist linkage, speech/translation''',
+  '''React-cxxstableapi: 1e0ad8a5ecb7f2f5440c012798cf20bec6341c1f''',
+]
+
+[[allowlists]]
 description = "React Native Xcode environment shim (pentest S-14, 2026-09-26)"
 paths = [
   '''mobile/ios/\.xcode\.env$''',

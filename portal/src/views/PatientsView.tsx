@@ -31,6 +31,7 @@ import {
   type CaseloadSummary,
 } from "../crypto";
 import { copyToClipboard, currentOrigin, downloadTextFile, randomBytes, sessionStore, visitAnchorStore } from "../platform";
+import { displayError } from "../errors";
 import { Button, Card, Disclosure, ErrorBanner, Field, Note } from "../ui";
 import { normalizeBaseUrl, passwordPolicyError } from "./LoginView";
 import { verifyInsightsGeneration, localDateISO, type PortalSession } from "./PatientView";
@@ -190,7 +191,7 @@ export function PatientsView(props: {
   const [interruptedSaltB64, setInterruptedSaltB64] = useState<string | null>(
     () => (props.session ? sessionStore.get(interruptedSaltKey(props.session.userId)) : null),
   );
-  // --- Optional TOTP second factor (2026-09-21 audit C-2/F-4, 2026-09-22) ---
+  // --- Therapist TOTP administration (mandatory before patient data) ---
   // totpStatus: null = not yet asked, then the server's answer via /me
   // once the panel opens. totpPending holds the setup response — the
   // secret is shown exactly once, until confirmed or the panel closes.
@@ -333,7 +334,7 @@ export function PatientsView(props: {
       if (props.onSessionsEnded) props.onSessionsEnded();
       else props.onSignOut();
     } catch (err) {
-      setSecError(err instanceof Error ? err.message : "could not change the password");
+      setSecError(displayError(err, "could not change the password"));
     } finally {
       wipeKeySet(currentKeys, newKeys);
       pkcs8?.fill(0);
@@ -393,7 +394,7 @@ export function PatientsView(props: {
       if (props.session) sessionStore.removePrefix(interruptedSaltKey(props.session.userId));
       setSecNotice("Sharing key recovered — it is sealed under your current sign-in password again. Your sign-in password never changed; you can retry the password change.");
     } catch (err) {
-      setSecError(err instanceof Error ? err.message : "could not recover the sharing key");
+      setSecError(displayError(err, "could not recover the sharing key"));
     } finally {
       wipeKeySet(currentKeys, intendedKeys);
       pkcs8?.fill(0);
@@ -443,7 +444,7 @@ export function PatientsView(props: {
         if (props.onSessionsEnded) props.onSessionsEnded(); else props.onSignOut();
       } finally { privateBytes.fill(0); identityKey.fill(0); wipeNotesKeyring(ring); }
     } catch (err) {
-      setSecError(err instanceof Error ? err.message : "could not rotate the sharing key");
+      setSecError(displayError(err, "could not rotate the sharing key"));
     } finally {
       wipeKeySet(currentKeys);
       setCompCurrent("");
@@ -452,7 +453,7 @@ export function PatientsView(props: {
     }
   };
 
-  // --- Optional TOTP second factor (2026-09-22) ---------------------------------
+  // --- Therapist TOTP administration -------------------------------------------
   // Every action is verifier-gated server-side; locally the same P-1
   // hygiene as the flows above: derive, send the b64 verifier once, wipe.
 
@@ -481,7 +482,7 @@ export function PatientsView(props: {
       // Every freshly minted secret starts masked (see totpSecretVisible).
       setTotpSecretVisible(false);
     } catch (err) {
-      setSecError(err instanceof Error ? err.message : "could not start two-factor setup");
+      setSecError(displayError(err, "could not start two-factor setup"));
     } finally {
       setTotpPw("");
       setTotpCode("");
@@ -506,7 +507,7 @@ export function PatientsView(props: {
           + "and losing every code AND the authenticator still needs an operator to clear.",
       );
     } catch (err) {
-      setSecError(err instanceof Error ? err.message : "could not enable two-factor");
+      setSecError(displayError(err, "could not enable two-factor"));
     } finally {
       setTotpPw("");
       setTotpCode("");
@@ -526,7 +527,7 @@ export function PatientsView(props: {
       setTotpBackupCodes(null);
       setSecNotice("Two-factor authentication is off. Sign-in is password-only again (the recovery-code set was destroyed with it).");
     } catch (err) {
-      setSecError(err instanceof Error ? err.message : "could not disable two-factor");
+      setSecError(displayError(err, "could not disable two-factor"));
     } finally {
       setTotpPw("");
       setTotpCode("");
@@ -584,7 +585,7 @@ export function PatientsView(props: {
         setLoaded(true);
       })
       .catch((err) => {
-        setError(err instanceof Error ? err.message : "could not load patients");
+        setError(displayError(err, "could not load patients"));
         setLoadFailed(true);
       });
   }, []);
@@ -654,7 +655,7 @@ export function PatientsView(props: {
       const { code } = await api.newPairingCode();
       setPairingCode(code);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "could not create a pairing code");
+      setError(displayError(err, "could not create a pairing code"));
     } finally {
       setBusy(false);
     }
@@ -690,7 +691,7 @@ export function PatientsView(props: {
       if (err instanceof ApiError && err.status === 404) {
         setSasError("pairing code not found or expired — generate a new code and try again");
       } else {
-        setSasError(err instanceof Error ? err.message : "could not load the verification code");
+        setSasError(displayError(err, "could not load the verification code"));
       }
     } finally {
       setSasBusy(false);
@@ -1226,10 +1227,9 @@ export function PatientsView(props: {
               {totpStatus === false && !totpPending && (
                 <>
                   <Note>
-                    Optional second factor for sign-in: after it is enabled, your password AND a
-                    6-digit code from an authenticator app are both required. Enabling mints a set
-                    of single-use recovery codes (shown once) so a lost authenticator no longer
-                    needs an operator to clear.
+                    Two-factor authentication is required before patient-data access. Your password
+                    AND a 6-digit code from an authenticator app are required at sign-in. Enrollment
+                    mints single-use recovery codes (shown once) for a lost authenticator.
                   </Note>
                   <Field label="Current password (to authorize setup)" value={totpPw} onChange={setTotpPw} type="password" autoComplete="current-password" />
                   <Button
@@ -1413,6 +1413,13 @@ export function PatientsView(props: {
             {secNotice}
           </Note>
         )}
+      </Card>
+      <Card title="Clinician data rights" deep>
+        <Note>
+          This portal does not currently provide a complete clinician-account export or self-service account deletion.
+          Contact your organization&apos;s privacy administrator to request an export or deletion. Patient charts can be
+          printed individually from each patient view, but that is not a complete account export.
+        </Note>
       </Card>
     </main>
   );

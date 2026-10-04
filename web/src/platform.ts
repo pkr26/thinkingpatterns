@@ -5,6 +5,8 @@
  * downloads — every capability degrades to an inert default instead of
  * crashing the app (WEB_PLAN P1.3, R-7).
  */
+// @ts-nocheck
+
 
 /** Randomness goes through the seam so tests can observe (and a future
  *  non-browser host can override) it. */

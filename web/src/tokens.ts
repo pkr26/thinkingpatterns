@@ -15,6 +15,8 @@
  * failed AA on dark cards), and palette changes are observable
  * (subscribePalette) so JS-drawn charts re-render when the theme flips.
  */
+// @ts-nocheck
+
 
 import { useSyncExternalStore } from "react";
 

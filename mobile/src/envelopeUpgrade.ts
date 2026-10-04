@@ -44,9 +44,13 @@ export type UpgradeOutcome =
       ok: false;
       stage: UpgradeStage;
       reason: "wrong-password" | "locked" | "no-account" | "offline" | "server" | "key-mismatch" | "session-expired";
-      /** Human-oriented detail (sanitized server text or a local constant). */
+      /** Client-authored local detail only; server detail is never rendered. */
       detail?: string;
     };
+
+function localErrorDetail(error: unknown): string | undefined {
+  return error instanceof ApiError ? undefined : error instanceof Error ? error.message : undefined;
+}
 
 export async function upgradeKeyProtection(input: {
   username: string;
@@ -145,7 +149,7 @@ export async function upgradeKeyProtection(input: {
       ok: false,
       stage: "wrap",
       reason: err instanceof ApiError ? "server" : "offline",
-      detail: err instanceof ApiError ? err.message : undefined,
+      detail: localErrorDetail(err),
     };
   } finally {
     if (master) zeroize(master);
@@ -172,12 +176,12 @@ export async function upgradeKeyProtection(input: {
       };
     }
     if (err instanceof ApiError && err.code === "processing_session_invalid") {
-      return { ok: false, stage: "upgrade", reason: "offline", detail: err.message };
+      return { ok: false, stage: "upgrade", reason: "offline" };
     }
     if (err instanceof ApiError && err.status === 403) {
       // A verifier rejection on a reauth-supplied proof: the typed password
       // did not match after all.
-      return { ok: false, stage: "upgrade", reason: "wrong-password", detail: err.message };
+      return { ok: false, stage: "upgrade", reason: "wrong-password" };
     }
     if (err instanceof ApiError && err.status === 401) {
       // Session death: the client hook has already locked the vault.
@@ -187,7 +191,7 @@ export async function upgradeKeyProtection(input: {
       ok: false,
       stage: "upgrade",
       reason: err instanceof ApiError ? "server" : "offline",
-      detail: err instanceof ApiError ? err.message : undefined,
+      detail: localErrorDetail(err),
     };
   }
 

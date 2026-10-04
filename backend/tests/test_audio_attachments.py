@@ -422,7 +422,8 @@ async def test_therapist_audio_requires_share_voice_flag(client, app, settings):
     missing_verifier = await client.put(
         f"/api/consents/{consent_id}/share-voice", headers=patient.headers, json={"enabled": True}
     )
-    assert missing_verifier.status_code == 422
+    assert missing_verifier.status_code == 403
+    assert missing_verifier.json()["code"] == "step_up_required"
     enabled = await client.put(
         f"/api/consents/{consent_id}/share-voice",
         headers={**patient.headers, "X-Account-Verifier": patient.auth_key_b64},

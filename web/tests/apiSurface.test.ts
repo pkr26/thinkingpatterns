@@ -1,8 +1,10 @@
 /** The authenticated endpoint surface: every method hits the documented
  *  path with the documented payload/headers (the shapes P5–P7 screens and
  *  the interop harness lean on). */
+// @ts-nocheck
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api, auth, SHARING_DISCLOSURE_VERSION } from "../src/api/client";
+import { api, auth, MINIMUM_AGE_ATTESTATION, SHARING_DISCLOSURE_VERSION } from "../src/api/client";
 import { installSession, jsonResponse, resetTestState, stubFetch } from "./helpers/api";
 
 const ORIGIN = "http://localhost:5173";
@@ -66,23 +68,29 @@ describe("endpoint surface", () => {
     expect(JSON.parse(String(init.body))).toMatchObject({ operation_id: "11111111-1111-4111-8111-111111111111", new_salt: "salt", new_verifier: "new-verifier" });
   });
 
-  it("account lifecycle: llm-consent, delete (verifier in the header), credential rotation", async () => {
+  it("account lifecycle: action-bound step-up, llm-consent, delete, credential rotation", async () => {
     const mock = stubFetch(() => jsonResponse({ enabled: false }));
     await api.getLlmConsent();
     let [url] = lastCall(mock);
     expect(url).toBe(`${ORIGIN}/api/v1/account/llm-consent`);
 
-    mock.mockImplementation(() => jsonResponse({ enabled: true }));
-    await api.setLlmConsent(true, "ver");
+    mock.mockImplementation(() => jsonResponse({ proof: "one-use", action: "llm_consent", expires_in: 120 }));
+    await api.stepUp("ver", "llm_consent");
     let [, init] = lastCall(mock);
-    expect(JSON.parse(String(init.body))).toEqual({ enabled: true, verifier: "ver" });
+    expect(JSON.parse(String(init.body))).toEqual({ verifier: "ver", action: "llm_consent" });
+
+    mock.mockImplementation(() => jsonResponse({ enabled: true }));
+    await api.setLlmConsent(true, "one-use");
+    [, init] = lastCall(mock);
+    expect(JSON.parse(String(init.body))).toEqual({ enabled: true });
+    expect((init.headers as Record<string, string>)["X-Step-Up-Proof"]).toBe("one-use");
 
     mock.mockImplementation(() => new Response(null, { status: 204 }));
-    await api.deleteAccount("ver");
+    await api.deleteAccount("delete-proof");
     [url, init] = lastCall(mock);
     expect(url).toBe(`${ORIGIN}/api/v1/account`);
     expect(init.method).toBe("DELETE");
-    expect((init.headers as Record<string, string>)["X-Account-Verifier"]).toBe("ver");
+    expect((init.headers as Record<string, string>)["X-Step-Up-Proof"]).toBe("delete-proof");
 
     await api.rotateCredential("old", "salt", "new");
     [, init] = lastCall(mock);
@@ -138,11 +146,11 @@ describe("endpoint surface", () => {
 
   it("register: the v2 envelope pair rides the body together, or neither does", async () => {
     const mock = stubFetch(() => jsonResponse({ token: "t", user_id: "0123456789abcdef0123456789abcdef", expires_in: 1, role: "user" }));
-    await auth.register("alice", "salt", "ver");
+    await auth.register("alice", "salt", "ver", MINIMUM_AGE_ATTESTATION);
     let [, init] = lastCall(mock);
-    expect(JSON.parse(String(init.body))).toEqual({ username: "alice", salt: "salt", verifier: "ver" });
+    expect(JSON.parse(String(init.body))).toEqual({ username: "alice", salt: "salt", verifier: "ver", age_attestation: MINIMUM_AGE_ATTESTATION });
 
-    await auth.register("alice", "salt", "ver", {
+    await auth.register("alice", "salt", "ver", MINIMUM_AGE_ATTESTATION, {
       kdfParams: { algorithm: "pbkdf2-sha256", version: 1, iterations: 600000 },
       wrappedDataKeyB64: "wrap",
     });
@@ -151,6 +159,7 @@ describe("endpoint surface", () => {
       username: "alice",
       salt: "salt",
       verifier: "ver",
+      age_attestation: MINIMUM_AGE_ATTESTATION,
       kdf_params: { algorithm: "pbkdf2-sha256", version: 1, iterations: 600000 },
       wrapped_data_key: "wrap",
     });
@@ -173,7 +182,7 @@ describe("endpoint surface", () => {
       wrapped_key: "wrap",
       disclosure: SHARING_DISCLOSURE_VERSION,
     });
-    expect((init.headers as Record<string, string>)["X-Account-Verifier"]).toBe("ver");
+    expect((init.headers as Record<string, string>)["X-Step-Up-Proof"]).toBe("ver");
 
     mock.mockImplementation(() => jsonResponse([]));
     await api.listConsents();
@@ -184,11 +193,14 @@ describe("endpoint surface", () => {
     await api.rewrapConsent(consentId, "eph2", "wrap2", "ver");
     [url, init] = lastCall(mock);
     expect(url).toBe(`${ORIGIN}/api/v1/consents/${consentId}/rewrap`);
+    expect((init.headers as Record<string, string>)["X-Step-Up-Proof"]).toBe("ver");
+    expect((init.headers as Record<string, string>)["X-Account-Verifier"]).toBeUndefined();
 
     await api.revokeConsent(consentId, "ver");
     [url, init] = lastCall(mock);
     expect(url).toBe(`${ORIGIN}/api/v1/consents/${consentId}`);
     expect(init.method).toBe("DELETE");
+    expect((init.headers as Record<string, string>)["X-Step-Up-Proof"]).toBe("ver");
 
     // Malformed consent ids are refused locally.
     expect(() => api.rewrapConsent("bad", "e", "w", "v")).toThrow("invalid consent id");

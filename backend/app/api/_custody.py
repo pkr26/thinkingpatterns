@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..cache import make_rate_limiter
-from ..deps import ApiError, get_session, require_sharing_enabled, require_therapist
+from ..deps import ApiError, get_session, require_sharing_enabled, require_therapist_account
 from ..locks import lifecycle_locks, sharing_locks, sharing_therapist_lock_key
 from ..models import ROLE_THERAPIST, User
 from ..schemas import TherapistCustodyRequest, TherapistPasswordRequest
@@ -78,7 +78,7 @@ async def _fresh(session: AsyncSession, user_id: str) -> User:
 async def install_custody(
     body: TherapistCustodyRequest,
     request: Request,
-    user: User = Depends(require_therapist),
+    user: User = Depends(require_therapist_account),
     session: AsyncSession = Depends(get_session),
 ) -> None:
     epoch = user.token_epoch

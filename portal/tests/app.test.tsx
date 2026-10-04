@@ -15,6 +15,7 @@ vi.mock("../src/api", async (importOriginal) => {
       meta: vi.fn(async () => ({ sharing_available: true })),
       saltFor: vi.fn(async () => ({ salt: "QUJDREVGR0hJSktMTU5P" })),
       login: vi.fn(async () => ({ token: "tok", user_id: "therapist-1", expires_in: 900, role: "therapist" })),
+      logoutBearer: vi.fn(async () => null),
       registerTherapist: vi.fn(async () => ({ token: "tok", user_id: "therapist-1", expires_in: 900, role: "therapist" })),
     },
     api: {
@@ -38,6 +39,8 @@ vi.mock("../src/api", async (importOriginal) => {
       updateNote: vi.fn(async () => ({})),
       deleteNote: vi.fn(async () => null),
       newPairingCode: vi.fn(async () => ({ code: "7X2KQM4N", expires_in: 900 })),
+      totpSetup: vi.fn(async () => ({ secret_base32: "JBSWY3DPEHPK3PXP", otpauth_uri: "otpauth://totp/Fathom:test" })),
+      totpEnable: vi.fn(async () => ({ backup_codes: ["ABCDE12345", "FGHIJ67890"] })),
     },
   };
 });
@@ -76,7 +79,7 @@ vi.mock("../src/crypto", async (importOriginal) => {
   };
 });
 
-const { api, clearSession, hasSession } = await import("../src/api");
+const { api, auth, ApiError, clearSession, hasSession } = await import("../src/api");
 const { App } = await import("../src/App");
 const { render, flush, textOf, press, typeInto } = await import("./helpers/rtr");
 
@@ -97,6 +100,75 @@ async function login() {
 }
 
 describe("App", () => {
+  it("blocks an existing unenrolled clinician before any patient or caseload request until MFA setup finishes", async () => {
+    vi.mocked(auth.login).mockResolvedValueOnce({ token: "tok", user_id: "therapist-1", expires_in: 900, role: "therapist", mfa_enrollment_required: true });
+    const root = await render(<App />);
+    await typeInto(root, "Username", "drportal");
+    await typeInto(root, "Password", "pw");
+    await press(root, "Sign in");
+    await flush();
+
+    expect(textOf(root)).toContain("Set up two-factor authentication to continue");
+    expect(textOf(root)).toContain("Patient data stays locked");
+    expect(api.me).not.toHaveBeenCalled();
+    expect(api.patients).not.toHaveBeenCalled();
+
+    await typeInto(root, "Authenticator code", "123456");
+    await press(root, "Enable two-factor authentication");
+    await flush();
+    expect(textOf(root)).toContain("ABCDE12345");
+    expect(textOf(root)).not.toContain("JBSWY3DPEHPK3PXP");
+    expect(textOf(root)).not.toContain("otpauth://");
+    expect(api.me).not.toHaveBeenCalled();
+    expect(api.patients).not.toHaveBeenCalled();
+
+    await press(root, "I saved the codes — continue");
+    await flush();
+    expect(api.me).toHaveBeenCalledTimes(1);
+    expect(api.patients).toHaveBeenCalledTimes(1);
+    expect(textOf(root)).toContain("Patients — Dr. Portal");
+  });
+
+  it("revokes the newly minted bearer when mandatory MFA enrollment is cancelled", async () => {
+    vi.mocked(auth.login).mockResolvedValueOnce({ token: "unenrolled-token", user_id: "therapist-1", expires_in: 900, role: "therapist", mfa_enrollment_required: true });
+    const root = await render(<App />);
+    await typeInto(root, "Username", "drportal");
+    await typeInto(root, "Password", "pw");
+    await press(root, "Sign in");
+    await flush();
+
+    await press(root, "Cancel and sign out");
+    await flush();
+    expect(auth.logoutBearer).toHaveBeenCalledWith(expect.any(String), "unenrolled-token");
+    expect(hasSession()).toBe(false);
+    expect(api.me).not.toHaveBeenCalled();
+    expect(api.patients).not.toHaveBeenCalled();
+    expect(textOf(root)).toContain("Sign in");
+  });
+
+  it("routes a newly registered clinician straight into the same blocking MFA enrollment", async () => {
+    vi.mocked(auth.registerTherapist).mockResolvedValueOnce({ token: "tok", user_id: "therapist-1", expires_in: 900, role: "therapist", mfa_enrollment_required: true });
+    const root = await render(<App />);
+    await press(root, "Create a therapist account instead");
+    await flush();
+    await typeInto(root, "Your name", "Dr. New");
+    await typeInto(root, "Username", "drnew");
+    await typeInto(root, "Password", "Strong!pass123");
+    await typeInto(root, "Repeat password", "Strong!pass123");
+    const age = root.root.findAllByType("input").find((node) => node.props.type === "checkbox")!;
+    await act(async () => { age.props.onChange({ target: { checked: true } }); });
+    await press(root, "Create account");
+    await flush();
+
+    expect(auth.registerTherapist).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ age_attestation: "minimum_age_confirmed_v1" }),
+    );
+    expect(textOf(root)).toContain("Set up two-factor authentication to continue");
+    expect(api.me).not.toHaveBeenCalled();
+    expect(api.patients).not.toHaveBeenCalled();
+  });
+
   it("logs in, unlocks the sharing key, and lands on Patients", async () => {
     const root = await login();
     expect(textOf(root)).toContain("Patients — Dr. Portal");
@@ -124,6 +196,15 @@ describe("App", () => {
     const root = await login();
     await flush();
     expect(textOf(root)).toContain("network down");
+  });
+
+  it("post-login API failures render stable copy, never hostile server detail", async () => {
+    const hostile = "<script>alert(1)</script> erreur interne";
+    vi.mocked(api.me).mockRejectedValueOnce(new ApiError(500, hostile, "service_unavailable"));
+    const root = await login();
+    await flush();
+    expect(textOf(root)).toContain("server is busy — try again");
+    expect(textOf(root)).not.toContain(hostile);
   });
 
   it("opens a patient and comes back; sign out returns to login", async () => {
@@ -589,15 +670,19 @@ it("opens a deep chart URL only after authenticated accessible-patient resolutio
   await act(async()=>root.unmount());window.location.hash="";lookup.mockResolvedValue([]);
 });
 
-it("rejects a chart route absent from this account and retains the patient list after a lookup failure", async () => {
+it("rejects a chart route absent from this account and maps lookup API detail to stable copy", async () => {
   const lookup = vi.mocked(api.patients); lookup.mockResolvedValue([]);
   window.location.hash = "#/patient/not-shared";
   const root = await login();await flush(8);
   expect(textOf(root)).toContain("Patients — Dr. Portal");
   expect(textOf(root)).not.toContain("Notes (private to you)");
-  lookup.mockRejectedValue(new Error("route lookup offline"));
+  const hostile = "<img src=x onerror=alert(1)> échec de recherche";
+  lookup.mockRejectedValue(new ApiError(500, hostile, "service_unavailable"));
+  window.location.hash = "#/patient/still-not-shared";
   await act(async()=>{window.dispatchEvent(new Event("hashchange"));});await flush(8);
   expect(textOf(root)).toContain("Patients — Dr. Portal");
+  expect(textOf(root)).toContain("server is busy — try again");
+  expect(textOf(root)).not.toContain(hostile);
   await act(async()=>root.unmount());window.location.hash="";lookup.mockResolvedValue([]);
 });
 

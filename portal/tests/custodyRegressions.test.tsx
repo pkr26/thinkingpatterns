@@ -4,7 +4,7 @@ import { PatientsView } from "../src/views/PatientsView";
 import { rawMatchSpans } from "../src/views/PatientView";
 import { api,auth,clearSession } from "../src/api";
 import { deriveMasterKey,derivePortalKeys,generateTherapistKeyPair,unlockWrapPrivateKeyWithNotesKey,encryptNote,decryptNoteAny,toBase64,fromBase64,openNotesKeyring,wipeNotesKeyring,openSealedPrivateKey,sealPrivateKeyForUpload } from "../src/crypto";
-import { loadPortalDraft,savePortalDraft } from "../src/noteDrafts";
+import { drainPortalDraftWritesForTests,loadPortalDraft,savePortalDraft } from "../src/noteDrafts";
 import { setKvBackendForTests,StorageReadError } from "../src/kvstore";
 import { render,press,typeInto,flush,textOf } from "./helpers/rtr";
 afterEach(()=>{vi.restoreAllMocks();vi.unstubAllGlobals();clearSession();});
@@ -64,6 +64,16 @@ describe("real crypto notes custody",()=>{
   const state={text:{general:"private general", "topic:work":"private work", "topic:family":"private family"},editing:{id:"n",text:"private edit"},pending:{general:{client_note_id:"exact-id",blob:"ciphertext",text:"private general",pattern_pid:null}}};
   await savePortalDraft(THERAPIST,PATIENT,key,state);expect([...map.values()].join("")).not.toContain("private");expect(await loadPortalDraft(THERAPIST,PATIENT,[key])).toEqual(state);expect(await loadPortalDraft("other",PATIENT,[key])).toBeNull();
   map.set(`portal.draft.${THERAPIST}.other`,map.values().next().value!);await expect(loadPortalDraft(THERAPIST,"other",[key])).rejects.toThrow("authenticated");setKvBackendForTests({getItem:async()=>{throw new Error("blocked");},setItem:async()=>{},removeItem:async()=>{}});await expect(loadPortalDraft(THERAPIST,PATIENT,[key])).rejects.toBeInstanceOf(StorageReadError);
+ });
+ it("drains queued draft writes before a test backend generation is replaced",async()=>{
+  const key=new Uint8Array(32).fill(8);const first=new Map<string,string>();const successor=new Map<string,string>();let writes=0;let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;});
+  setKvBackendForTests({getItem:async id=>first.get(id)??null,setItem:async(id,value)=>{writes+=1;if(writes===1)await gate;first.set(id,value);},removeItem:async id=>{first.delete(id);}});
+  const one=savePortalDraft(THERAPIST,PATIENT,key,{text:{general:"first generation"},editing:null,pending:{}});
+  await vi.waitFor(()=>expect(writes).toBe(1));
+  const two=savePortalDraft(THERAPIST,PATIENT,key,{text:{general:"final generation"},editing:null,pending:{}});
+  const drained=drainPortalDraftWritesForTests();release();await Promise.all([one,two,drained]);
+  setKvBackendForTests({getItem:async id=>successor.get(id)??null,setItem:async(id,value)=>{successor.set(id,value);},removeItem:async id=>{successor.delete(id);}});
+  await Promise.resolve();expect(writes).toBe(2);expect(first.size).toBe(1);expect(successor.size).toBe(0);
  });
  it("maps emoji-prefixed highlights to UTF-16 offsets",()=>{const text="😀 work";expect(rawMatchSpans(text,"work")).toEqual([[3,7]]);expect(text.slice(3,7)).toBe("work");});
 });

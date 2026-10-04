@@ -18,6 +18,7 @@ import { verifyPasswordForVault } from "./reauth";
 import { vault } from "./vault";
 import { disableBiometricUnlock } from "./biometricUnlock";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { accountStorageKey } from "./accountStorage";
 import { localWriteScopeEpoch, assertLocalTransitionScope, commitLocalTransitionWrite } from "./localWriteGuard";
 
 /** An attempt owns the original vault and scope. Its own setSession is the
@@ -106,10 +107,13 @@ export type RotationOutcome =
       ok: false;
       stage: RotationStage;
       reason: "wrong-password" | "offline" | "server" | "already-rotated-unverifiable" | "queue-blocked";
-      /** Human-oriented detail (already sanitized server text or a local
-       * constant) — the UI may render it after errors.ts treatment. */
+      /** Client-authored local detail only; server detail is never rendered. */
       detail?: string;
     };
+
+function localErrorDetail(error: unknown): string | undefined {
+  return error instanceof ApiError ? undefined : error instanceof Error ? error.message : undefined;
+}
 
 /** B-1 (2026-09-26 audit follow-up): the pending rotation salt, persisted
  * locally BEFORE the rekey attempt and cleared only on full completion.
@@ -119,7 +123,7 @@ export type RotationOutcome =
  * path unreachable in production. The salt is public material (the
  * server stores it in the clear after rotation); it is inert without
  * the password. Keyed by user so a shared device never crosses accounts. */
-const pendingSaltKey = (userId: string) => `mindpattern.rotatePendingSalt.${userId}`;
+const pendingSaltKey = accountStorageKey.pendingRotationSalt;
 
 async function loadPendingSalt(userId: string): Promise<Buffer | null> {
   try {
@@ -133,7 +137,10 @@ async function loadPendingSalt(userId: string): Promise<Buffer | null> {
 }
 
 async function storePendingSalt(userId: string, salt: Buffer): Promise<void> {
-  // Retry derivation must be durable before any remote mutation.
+  // The only caller runs this inside RotationScope.localCommit. That
+  // explicit transition lane remains valid while normal account writes are
+  // frozen, which is essential when a lost-response retry resumes a durable
+  // rotation checkpoint.
   await AsyncStorage.setItem(pendingSaltKey(userId), salt.toString("base64"));
 }
 
@@ -258,7 +265,7 @@ async function rotatePasswordV2(input: {
         ok: false,
         stage: "credential",
         reason: err instanceof ApiError ? "server" : "offline",
-        detail: err instanceof ApiError ? err.message : undefined,
+        detail: localErrorDetail(err),
       };
     }
     try {
@@ -291,7 +298,7 @@ async function rotatePasswordV2(input: {
       }
       if (err instanceof ApiError && err.status === 403) {
         // The typed old-password proof was rejected server-side.
-        return { ok: false, stage: "credential", reason: "wrong-password", detail: err.message };
+        return { ok: false, stage: "credential", reason: "wrong-password" };
       }
       // 401: the session-death hook has already locked the vault; the
       // server state is UNCHANGED (the swap is one transaction), so an
@@ -300,7 +307,7 @@ async function rotatePasswordV2(input: {
         ok: false,
         stage: "credential",
         reason: err instanceof ApiError ? "server" : "offline",
-        detail: err instanceof ApiError ? err.message : undefined,
+        detail: localErrorDetail(err),
       };
     }
 
@@ -361,7 +368,7 @@ async function rotatePasswordV2(input: {
       ok: false,
       stage: "verify",
       reason: err instanceof ApiError ? "server" : "offline",
-      detail: err instanceof ApiError ? err.message : undefined,
+      detail: localErrorDetail(err),
     };
   } finally {
     if (dataKey) zeroize(dataKey);
@@ -499,7 +506,7 @@ async function rotatePasswordOwned(input: {
         await scope.run(() => storeLocalRekeyRequest(userId, newKeys!.dataKey, body!));
       } catch (err) {
         scope.assert();
-        return { ok: false, stage: "rewrap", reason: err instanceof ApiError ? "server" : "offline", detail: err instanceof Error ? err.message : undefined };
+        return { ok: false, stage: "rewrap", reason: err instanceof ApiError ? "server" : "offline", detail: localErrorDetail(err) };
       }
     }
     if (body.new_salt !== newSaltB64 || body.new_verifier !== newVerifierB64) return { ok: false, stage: "verify", reason: "queue-blocked" };
@@ -527,7 +534,7 @@ async function rotatePasswordOwned(input: {
       }
     } catch (err) {
       scope.assert();
-      return { ok: false, stage: "rekey", reason: err instanceof ApiError && err.status === 403 ? "wrong-password" : err instanceof ApiError ? "server" : "offline", detail: err instanceof Error ? err.message : undefined };
+      return { ok: false, stage: "rekey", reason: err instanceof ApiError && err.status === 403 ? "wrong-password" : err instanceof ApiError ? "server" : "offline", detail: localErrorDetail(err) };
     }
     const counts = { entries: Number(result.entries), insights: Number(result.insights), measures: Number(result.measures) };
     const recoveryInvalidated = result.recovery_invalidated === true;
@@ -537,7 +544,7 @@ async function rotatePasswordOwned(input: {
       await scope.localCommit(() => clearUnlockProof(userId));
     } catch (err) {
       scope.assert();
-      return { ok: false, stage: "credential", reason: "offline", detail: err instanceof Error ? err.message : undefined };
+      return { ok: false, stage: "credential", reason: "offline", detail: localErrorDetail(err) };
     }
     // The atomic epoch bump retired every old bearer. Obtain the new
     // bearer before allowing account requests again.
@@ -589,7 +596,7 @@ async function rotatePasswordOwned(input: {
       ok: false,
       stage: "verify",
       reason: err instanceof ApiError ? "server" : "offline",
-      detail: err instanceof ApiError ? err.message : undefined,
+      detail: localErrorDetail(err),
     };
   } finally {
     // Nothing is derived yet → nothing to wipe (the H-2 restructure moved
@@ -613,6 +620,6 @@ export async function rotatePassword(input: {
 }): Promise<RotationOutcome> {
   try { return await rotatePasswordOwned(input); }
   catch (err) {
-    return { ok: false, stage: "verify", reason: err instanceof ApiError ? "server" : "offline", detail: err instanceof Error ? err.message : undefined };
+    return { ok: false, stage: "verify", reason: err instanceof ApiError ? "server" : "offline", detail: localErrorDetail(err) };
   }
 }

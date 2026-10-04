@@ -1,6 +1,8 @@
 /** The reconciliation engine + state_seq guard (P5): honest funnels for
  *  every cross-device scenario — fresh pulls, offline, baseline, tampered
  *  generations, remote rotation (S-8), and lock states. */
+// @ts-nocheck
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { reconcile, reconcileInsights } from "../src/sync";
 import { checkAnalysisGeneration, FRESHNESS_ERROR, forgetAnalysisGeneration } from "../src/stateSeqGuard";

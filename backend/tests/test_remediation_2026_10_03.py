@@ -34,7 +34,7 @@ from app.security import crypto
 from app.services import audio_store, statsig, stt
 from tests.helpers import ClientEmulator, EnvelopeClientEmulator, TherapistEmulator
 from tests.test_audio_attachments import _attachment_body, _make_entry, _voice_ready
-from tests.test_recovery_envelope import _setup_kit
+from tests.test_recovery_envelope import _setup_kit, recovery_verifier
 
 
 def b64(value: bytes) -> str:
@@ -95,7 +95,11 @@ async def test_clinician_password_is_one_atomic_custody_transaction(client, app)
     ).status_code == 401
     login = await client.post(
         "/api/auth/login",
-        json={"username": therapist.username, "verifier": replacement.auth_key_b64},
+        json={
+            "username": therapist.username,
+            "verifier": replacement.auth_key_b64,
+            "totp_code": therapist.totp_backup_codes.pop(0),
+        },
     )
     assert login.status_code == 200, login.text
     me = (
@@ -168,11 +172,12 @@ async def test_recovery_enrollment_revoked_during_hash_cannot_issue_token(client
     await patient.register(client)
     proof = os.urandom(32)
     await _setup_kit(client, patient, proof)
+    proof_verifier = recovery_verifier(proof)
     original = auth.hash_verifier_off_loop
 
     async def race(value, salt, **kwargs):
         result = await original(value, salt, **kwargs)
-        if value == proof:
+        if value == proof_verifier:
             async with app.state.sessionmaker() as session:
                 await session.execute(
                     update(User)
@@ -189,7 +194,12 @@ async def test_recovery_enrollment_revoked_during_hash_cannot_issue_token(client
 
     monkeypatch.setattr(auth, "hash_verifier_off_loop", race)
     response = await client.post(
-        "/api/auth/recover", json={"username": patient.username, "verifier": b64(proof)}
+        "/api/auth/recover",
+        json={
+            "username": patient.username,
+            "verifier": b64(proof_verifier),
+            "scheme": "v2",
+        },
     )
     assert response.status_code == 401, response.text
     async with app.state.sessionmaker() as session:
@@ -326,7 +336,7 @@ async def test_export_has_one_audio_key_and_complete_v2_aad_metadata(client, set
         return dict(pairs)
 
     bundle = json.loads(response.text, object_pairs_hook=unique)
-    assert bundle["version"] == 2 and bundle["username"] == patient.username
+    assert bundle["version"] == 3 and bundle["username"] == patient.username
     assert bundle["audio"][0]["content_version"] == 1
     assert bundle["audio"][0]["created_at"]
     assert base64.b64decode(bundle["audio"][0]["blob"])
@@ -599,6 +609,7 @@ async def test_legacy_audit_sealing_requires_exact_attestation_and_refuses_bad_e
     await _setup_kit(client, patient, os.urandom(32))
     async with app.state.sessionmaker() as session:
         row = await session.scalar(select(AccessLog).where(AccessLog.user_id == patient.user_id))
+        selected_row_id = row.id
         row.entry_mac = None
         await session.commit()
         snapshot, rows = await snapshot_rows(session, settings)
@@ -616,7 +627,8 @@ async def test_legacy_audit_sealing_requires_exact_attestation_and_refuses_bad_e
             digest,
             "operator independently reconciled trusted backup evidence for every legacy row",
         )
-        assert rows[0].entry_mac is None  # snapshot never silently seals
+        selected_snapshot_row = next(item for item in rows if item.id == selected_row_id)
+        assert selected_snapshot_row.entry_mac is None  # snapshot never silently seals
         row.entry_mac = "0" * 64
         await session.commit()
         with pytest.raises(ValueError, match="existing MAC"):
@@ -651,6 +663,7 @@ async def test_offline_audit_cli_snapshot_refuses_changed_evidence_then_seals_ex
                 prev_hash=None,
                 entry_hash=initial_hash,
                 entry_mac=None,
+                record_version=1,
             )
         )
         await session.commit()

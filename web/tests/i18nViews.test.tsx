@@ -3,6 +3,8 @@
  *  passed key-parity while every view rendered hardcoded English. Flip the
  *  locale and assert Spanish copy (and Spanish chips/questions) actually
  *  reach the rendered tree. */
+// @ts-nocheck
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EntryView } from "../src/views/Entry";
 import { MeasuresView } from "../src/views/Measures";

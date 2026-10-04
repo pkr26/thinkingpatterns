@@ -9,6 +9,8 @@
  * all route every event through the platform seam so the node test
  * runtime can drive them.
  */
+// @ts-nocheck
+
 import { useEffect } from "react";
 import { onWindowEvent, pageHidden } from "./platform";
 

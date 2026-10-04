@@ -857,7 +857,8 @@ class Client:
     def register_body(self) -> dict:
         return {"username": self.username,
                 "salt": base64.b64encode(self.salt).decode(),
-                "verifier": self.auth_b64}
+                "verifier": self.auth_b64,
+                "age_attestation": "minimum_age_confirmed_v1"}
 
     def encrypt(self, e: dict, content_version: int = 1) -> str:
         payload = {"v": e.get("payload_v", 1), "text": e["text"],
@@ -952,6 +953,7 @@ class Therapist:
         return {"username": self.username,
                 "salt": base64.b64encode(self.salt).decode(),
                 "verifier": self.auth_b64,
+                "age_attestation": "minimum_age_confirmed_v1",
                 "display_name": self.display_name,
                 "wrap_pub_key": self._pub_b64(),
                 "wrap_key_blob": self._key_blob_b64()}
@@ -1150,7 +1152,8 @@ async def run():
         r = await req(c, "POST", "/api/auth/register", json=maya.register_body())
         check("duplicate username -> 409 conflict", r.status_code == 409)
         bad = {"username": "has space!", "salt": maya.register_body()["salt"],
-               "verifier": maya.register_body()["verifier"]}
+               "verifier": maya.register_body()["verifier"],
+               "age_attestation": "minimum_age_confirmed_v1"}
         r = await req(c, "POST", "/api/auth/register", json=bad)
         check("invalid username charset -> 422", r.status_code == 422)
         r = await req(c, "POST", "/api/auth/register",
@@ -1165,6 +1168,7 @@ async def run():
                       json={"username": "notatherapist",
                             "salt": maya.register_body()["salt"],
                             "verifier": maya.register_body()["verifier"],
+                            "age_attestation": "minimum_age_confirmed_v1",
                             "display_name": "X", "wrap_pub_key": "garbage",
                             "wrap_key_blob": "garbage"})
         check("therapist register garbage wrap key -> 422", r.status_code == 422)

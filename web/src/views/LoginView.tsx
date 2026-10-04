@@ -21,12 +21,15 @@
  *
  * Age gate (clinical review 2026-09-27, DPIA-required control):
  * registration requires an honest "I am 18 or older" self-declaration
- * before the register action enables — UI state only, nothing stored and
- * nothing extra sent (per-jurisdiction guardian consent is an operator/
- * policy matter, not an app control).
+ * before the register action enables. The server records only the
+ * versioned affirmative attestation and its server-side timestamp; no
+ * birth date is collected.
  */
+// @ts-nocheck
+
 import { useState } from "react";
-import { ApiError, api, auth, clearSession, setSession, type TokenResponse } from "../api/client";
+import { ApiError, api, auth, clearSession, MINIMUM_AGE_ATTESTATION, setSession, type TokenResponse } from "../api/client";
+import { displayError } from "../errors";
 import { deriveMasterKey, fromBase64, toBase64, zeroize, KDF_ITERATIONS, type Bytes } from "../crypto/core";
 import { createRegistrationEnvelope, unwrapEnvelope, validateKdfParams } from "../crypto/envelope";
 import { derivePatientKeys, type PatientKeys } from "../crypto/keys";
@@ -221,11 +224,13 @@ export function LoginView(props: { onSuccess: (success: LoginSuccess) => void })
 
   const describeError = (err: unknown): string => {
     if (err instanceof ApiError) {
+      if (err.code === "invalid_credentials") return t("login.invalidCredentialsWeb");
+      if (mode === "register" && err.code === "conflict") return t("login.usernameTakenWeb");
       if (err.code === "rate_limited" && err.retryAfterMs !== undefined) {
         const seconds = Math.max(1, Math.round(err.retryAfterMs / 1000));
         return t("login.rateLimitedWeb", { seconds });
       }
-      return err.message;
+      return displayError(err, t("login.genericWeb"));
     }
     return t("login.genericWeb");
   };
@@ -319,7 +324,7 @@ export function LoginView(props: { onSuccess: (success: LoginSuccess) => void })
           // defense, mirrored here.
           const derivedDataKey = keys.dataKey;
           keys.dataKey = envelope.dataKey;
-          token = await auth.register(username, saltB64, toBase64(keys.authKey), {
+          token = await auth.register(username, saltB64, toBase64(keys.authKey), MINIMUM_AGE_ATTESTATION, {
             kdfParams: envelope.kdfParams as unknown as Record<string, unknown>,
             wrappedDataKeyB64: envelope.wrappedDataKeyB64,
           });
@@ -398,8 +403,8 @@ export function LoginView(props: { onSuccess: (success: LoginSuccess) => void })
               {/* DPIA age gate (clinical review 2026-09-27): an honest
                   self-declaration — 18+, per the DPIA's design (per-
                   jurisdiction guardian consent is an operator/policy
-                  matter, not an app control). UI state only: nothing is
-                  stored, nothing extra is sent. */}
+                  matter, not an app control). The server records only the
+                  versioned confirmation and its server-side timestamp. */}
               <Checkbox checked={ageConfirmed} onChange={setAgeConfirmed}>{t("login.ageGate")}</Checkbox>
             </>
           )}

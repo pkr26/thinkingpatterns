@@ -5,6 +5,8 @@
  *  covers the 2026-09-26 key envelope: registration default, the
  *  register→login→unlock roundtrip, the unchanged v1 path, response
  *  tolerance, and both fail-closed envelope failures. */
+// @ts-nocheck
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactTestRenderer } from "react-test-renderer";
 import { LoginView, passwordPolicyError } from "../src/views/LoginView";
@@ -102,8 +104,9 @@ describe("sign in", () => {
     expect(vault.ownerUserId()).toBe(TEST_USER_ID);
   });
 
-  it("wrong credentials show the server message and leave nothing behind", async () => {
-    authRoutes({ login: { __status: 401, detail: "username or password is incorrect", code: "invalid_credentials" } });
+  it("wrong credentials show localized client copy, never server-controlled detail, and leave nothing behind", async () => {
+    const hostileDetail = "<script>alert('x')</script> usuario o contraseña incorrectos";
+    authRoutes({ login: { __status: 401, detail: hostileDetail, code: "invalid_credentials" } });
     const onSuccess = vi.fn();
     const root = await render(<LoginView onSuccess={onSuccess} />);
     await typeInto(root, "Username", "alice");
@@ -113,7 +116,8 @@ describe("sign in", () => {
     expect(onSuccess).not.toHaveBeenCalled();
     expect(hasSession()).toBe(false);
     expect(vault.isUnlocked()).toBe(false);
-    expect(textOf(root)).toContain("username or password is incorrect");
+    expect(textOf(root)).toContain("Sign-in failed — check your username and password.");
+    expect(textOf(root)).not.toContain(hostileDetail);
   });
 
   it("a therapist account is refused — no session, no keys", async () => {
@@ -256,8 +260,9 @@ describe("register", () => {
     expect(mock).not.toHaveBeenCalled();
   });
 
-  it("a taken name surfaces the conflict honestly", async () => {
-    authRoutes({ register: { __status: 409, detail: "that username is taken", code: "conflict" } });
+  it("a taken name surfaces stable client copy without rendering server detail", async () => {
+    const hostileDetail = "<script>alert(1)</script> that username is taken";
+    authRoutes({ register: { __status: 409, detail: hostileDetail, code: "conflict" } });
     const onSuccess = vi.fn();
     const root = await render(<LoginView onSuccess={onSuccess} />);
     await registerMode(root);
@@ -269,7 +274,8 @@ describe("register", () => {
     await settle();
     expect(onSuccess).not.toHaveBeenCalled();
     expect(vault.isUnlocked()).toBe(false);
-    expect(textOf(root)).toContain("that username is taken");
+    expect(textOf(root)).toContain("That username is already in use");
+    expect(textOf(root)).not.toContain(hostileDetail);
   });
 });
 

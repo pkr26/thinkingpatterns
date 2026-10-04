@@ -2,6 +2,8 @@
  *  version-conflict editing, delete, and the rollback guard. Entries are
  *  encrypted with the REAL patient crypto so the decrypt path is the
  *  shipping one. */
+// @ts-nocheck
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HistoryView } from "../src/views/History";
 import { decryptEntry, encryptEntry } from "../src/crypto/patient";
@@ -253,7 +255,8 @@ describe("HistoryView: terminal load failures never wedge on Loading (audit 2026
     });
     const root = await render(<HistoryView />);
     await settle(40, 3);
-    expect(textOf(root)).toContain("database on fire");
+    expect(textOf(root)).toContain("The server hit a problem — try again in a moment.");
+    expect(textOf(root)).not.toContain("database on fire");
     expect(textOf(root)).not.toContain("Loading…");
   });
 

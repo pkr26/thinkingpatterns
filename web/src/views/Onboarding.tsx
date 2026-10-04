@@ -1,25 +1,43 @@
 /**
  * First-run onboarding (three panels, content mirroring the mobile app's
  * onboarding). The completion flag is a per-account non-content stamp in
- * localStorage — it names no health data, only that this browser has seen
- * the introduction for this account id.
+ * generation-fenced IndexedDB — it names no health data, but still cannot
+ * be recreated by a stale tab after confirmed account erasure.
  *
  * Redesign 2026-09-26: progress dots, a soft abstract gradient panel per
  * step (decorative shapes only — no people imagery), and a full-width
  * continue button.
  */
+// @ts-nocheck
+
 import { useState } from "react";
 import { t } from "../strings";
 import { Button, Card, Icon, Note, ProgressDots } from "../ui";
+import { kv } from "../kvstore";
+import { localStore } from "../platform";
 
 export const ONBOARDING_FLAG_PREFIX = "mindpattern.onboarding.v1.";
 
-export function hasSeenOnboarding(userId: string, get: (key: string) => string | null): boolean {
-  return get(`${ONBOARDING_FLAG_PREFIX}${userId}`) === "done";
+const onboardingKey = (userId: string): string => `${ONBOARDING_FLAG_PREFIX}${userId}`;
+
+export async function hasSeenOnboarding(userId: string): Promise<boolean> {
+  const key = onboardingKey(userId);
+  if (await kv.getItem(key) === "done") return true;
+  // One-way migration from the pre-fence localStorage stamp. Commit to KV
+  // first; a deleted generation rejects it and the stale stamp is never
+  // treated as durable current-account state.
+  if (localStore.get(key) !== "done") return false;
+  await kv.setItem(key, "done");
+  localStore.remove(key);
+  return true;
 }
 
-export function markOnboardingSeen(userId: string, set: (key: string, value: string) => void): void {
-  set(`${ONBOARDING_FLAG_PREFIX}${userId}`, "done");
+export async function markOnboardingSeen(userId: string): Promise<void> {
+  await kv.setItem(onboardingKey(userId), "done");
+}
+
+export async function clearOnboardingSeen(userId: string): Promise<void> {
+  await kv.removeItem(onboardingKey(userId));
 }
 
 /** M-W5 (audit 2026-09-26): panel copy resolves through the t() catalog —

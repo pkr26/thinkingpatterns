@@ -134,6 +134,12 @@ const deepText = (node: NodeLike): string => {
   return parts.join("");
 };
 
+async function confirmMinimumAge(root: Awaited<ReturnType<typeof render>>): Promise<void> {
+  const checkbox = root.root.findAllByType("input").find((node) => node.props.type === "checkbox");
+  if (!checkbox) throw new Error("minimum-age confirmation checkbox is missing");
+  await act(async () => { checkbox.props.onChange({ target: { checked: true } }); });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   window.localStorage.clear();
@@ -334,6 +340,7 @@ describe("audit fixes 2026-09-21 (AUDIT_2026-09-21.md 1.4)", () => {
     await typeInto(root, "Username", "drnew");
     await typeInto(root, "Password", "Strong!pass123");
     await typeInto(root, "Repeat password", "Strong!pass123");
+    await confirmMinimumAge(root);
     const form = root.root.findAllByType("form")[0]!;
     await act(async () => { form.props.onSubmit({ preventDefault: vi.fn() }); });
     await flush();

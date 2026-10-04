@@ -36,7 +36,7 @@ async def test_export_contains_ciphertext_only(client, app):
     assert response.status_code == 200
     bundle = response.json()
 
-    assert bundle["version"] == 2
+    assert bundle["version"] == 3
     # 2026-09-16 (finding H2): the cleartext username is gone from the
     # bundle — it was a free account marker for anyone holding the file.
     assert bundle["username"] == emu.username
@@ -237,9 +237,11 @@ async def test_delete_account_hard_cascades(client, app):
             counts[model.__tablename__] = rows.scalar_one()
     assert counts == {"users": 1, "entries": 1, "insights": 0}, counts
 
-    # Old token no longer authenticates (user row is gone).
+    # A short-lived authenticated tombstone gives offline clients an
+    # explicit terminal signal instead of an ambiguous credential failure.
     stale = await client.get("/api/entries", headers=emu.headers)
-    assert stale.status_code == 401
+    assert stale.status_code == 410
+    assert stale.json()["code"] == "account_deleted"
 
     # Other user untouched.
     survivor_entries = await client.get("/api/entries", headers=other.headers)
@@ -283,7 +285,7 @@ async def test_double_delete_fails_cleanly(client):
     emu = ClientEmulator("twice", "p")
     await emu.register(client)
     assert await emu.delete_account(client) == 204
-    assert await emu.delete_account(client) == 401
+    assert await emu.delete_account(client) == 410
 
 
 async def test_llm_consent_records_timestamp_and_disclosure(client, monkeypatch, settings):
@@ -323,12 +325,12 @@ async def test_llm_consent_records_timestamp_and_disclosure(client, monkeypatch,
     assert on.json()["enabled"] is True
     assert on.json()["active_for_current_policy"] is True
     assert datetime.fromisoformat(on.json()["llm_consent_at"]) == t1
-    assert on.json()["llm_consent_disclosure"] == account_api.LLM_DISCLOSURE_VERSION == "v1"
+    assert on.json()["llm_consent_disclosure"] == account_api.LLM_DISCLOSURE_VERSION == "v2"
 
     # The read path reports the same record (the client toggle reflects it).
     got = await client.get("/api/account/llm-consent", headers=emu.headers)
     assert datetime.fromisoformat(got.json()["llm_consent_at"]) == t1
-    assert got.json()["llm_consent_disclosure"] == "v1"
+    assert got.json()["llm_consent_disclosure"] == "v2"
     assert got.json()["active_for_current_policy"] is True
 
     # Withdrawal clears both fields — no stale consent claim on the row.
@@ -346,7 +348,7 @@ async def test_llm_consent_records_timestamp_and_disclosure(client, monkeypatch,
     monkeypatch.setattr(account_api, "utcnow", lambda: t2)
     on2 = await put(True)
     assert datetime.fromisoformat(on2.json()["llm_consent_at"]) == t2 > t1
-    assert on2.json()["llm_consent_disclosure"] == "v1"
+    assert on2.json()["llm_consent_disclosure"] == "v2"
     assert on2.json()["active_for_current_policy"] is True
 
 
@@ -371,7 +373,7 @@ async def test_export_bundle_carries_the_consent_record(client, monkeypatch, set
     bundle = (await client.get("/api/account/export", headers=emu.headers)).json()
     assert bundle["llm_consent"] is True
     assert datetime.fromisoformat(bundle["llm_consent_at"]) == t1
-    assert bundle["llm_consent_disclosure"] == "v1"
+    assert bundle["llm_consent_disclosure"] == "v2"
     assert bundle["llm_consent_policy"]
 
 
@@ -381,6 +383,7 @@ async def test_disclosure_version_change_makes_stale_consent_inert(client, monke
     disclosure version is part of the policy fingerprint (2026-09-18 audit
     fix), so journal plaintext never keeps flowing under the old text.
     """
+    from app.api import account as account_api
     from app.services import llm as llm_service
 
     settings.llm_url = "https://llm.example.test/v1"
@@ -395,7 +398,8 @@ async def test_disclosure_version_change_makes_stale_consent_inert(client, monke
 
     # The operator ships re-worded disclosure copy and bumps only the
     # disclosure version — NOT llm_policy_version.
-    monkeypatch.setattr(llm_service, "LLM_DISCLOSURE_VERSION", "v2")
+    monkeypatch.setattr(account_api, "LLM_DISCLOSURE_VERSION", "v-next")
+    monkeypatch.setattr(llm_service, "LLM_DISCLOSURE_VERSION", "v-next")
 
     stale = await client.get("/api/account/llm-consent", headers=emu.headers)
     assert stale.json()["enabled"] is True  # the historic choice is preserved

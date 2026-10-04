@@ -2,10 +2,12 @@
  * Presence checks use native metadata APIs; only an explicit unlock reads keys. */
 import * as Keychain from "react-native-keychain";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { captureLocalWritePermit, assertLocalWritePermit, commitLocalWrite, commitLocalErasureWrite, localWriteScopeEpoch } from "./localWriteGuard";
+import { captureLocalWritePermit, assertLocalWritePermit, commitLocalWrite, commitLocalErasureWrite, commitOriginErasureWrite, localWriteScopeEpoch } from "./localWriteGuard";
+import { accountStorageKey } from "./accountStorage";
 const SERVICE = "com.mindpattern.biometric-unlock.v1";
 const serviceFor = (userId: string): string => `${SERVICE}.${userId}`;
-const legacyDisabled = (userId: string): string => `@mindpattern/biometric.legacy-disabled.${userId}`;
+const legacyDisabled = accountStorageKey.biometricLegacyDisabled;
+const ownerMarker = accountStorageKey.biometricOwner;
 const authenticatedLegacyOwners = new Set<string>();
 let mutations: Promise<unknown> = Promise.resolve();
 function serialized<T>(run: () => Promise<T>): Promise<T> {
@@ -27,13 +29,26 @@ export async function enableBiometricUnlock(userId: string, dataKey: Buffer): Pr
   // admitted mutation so deletion/rotation cannot finish before it drains.
   await commitLocalWrite(permit, () => serialized(async () => {
     assertLocalWritePermit(permit);
+    // Publish the non-secret owner inventory before the native key. A crash
+    // after Keychain accepts the wrap must never leave an unenumerable
+    // per-owner service that a later origin retirement cannot discover.
+    await AsyncStorage.setItem(ownerMarker(userId), "1");
     const result = await Keychain.setGenericPassword(userId, encoded, {
       service: serviceFor(userId), accessControl: Keychain.ACCESS_CONTROL.BIOMETRY_CURRENT_SET,
       accessible: Keychain.ACCESSIBLE.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY,
     });
     if (!result) throw new Error("biometric secure storage rejected the data-key wrap");
-    await AsyncStorage.setItem(legacyDisabled(userId), "1");
-    if (authenticatedLegacyOwners.has(userId)) await Keychain.resetGenericPassword({ service: SERVICE });
+    // A prompting legacy read is the only safe way to attribute the shared
+    // upgrade-era slot. If it was not authenticated as this user, leave it
+    // protected and tombstone fallback for this account; it may belong to a
+    // different account that still uses this installation.
+    if (authenticatedLegacyOwners.has(userId)) {
+      await Keychain.resetGenericPassword({ service: SERVICE });
+      authenticatedLegacyOwners.delete(userId);
+      await AsyncStorage.removeItem(legacyDisabled(userId));
+    } else {
+      await AsyncStorage.setItem(legacyDisabled(userId), "1");
+    }
   }));
 }
 export async function disableBiometricUnlock(userId: string): Promise<void> {
@@ -50,6 +65,42 @@ export async function disableBiometricUnlock(userId: string): Promise<void> {
       await Keychain.resetGenericPassword({ service: SERVICE });
       authenticatedLegacyOwners.delete(userId);
     }
+    await AsyncStorage.removeItem(ownerMarker(userId));
+  }));
+}
+
+/** Irreversible account/origin retirement. Unlike the user-facing disable
+ * operation above, this lane retires the un-attributable legacy singleton
+ * as well: keeping it would leave a raw data-key wrap orphaned after the
+ * owning origin is gone. It also removes the temporary compatibility
+ * tombstone so no account-labelled metadata survives erasure. */
+export async function eraseBiometricUnlock(userId: string): Promise<void> {
+  const epoch = localWriteScopeEpoch();
+  await commitLocalErasureWrite(userId, epoch, () => serialized(async () => {
+    if (epoch !== localWriteScopeEpoch()) throw new Error("The biometric erasure belongs to a retired session");
+    await Keychain.resetGenericPassword({ service: serviceFor(userId) });
+    await Keychain.resetGenericPassword({ service: SERVICE });
+    authenticatedLegacyOwners.delete(userId);
+    await AsyncStorage.multiRemove([legacyDisabled(userId), ownerMarker(userId)]);
+  }));
+}
+/** Retire every biometric slot owned by the old API origin. The shared v1
+ * slot has no recoverable owner label, so it must be erased even when the
+ * credential tuple is already missing and the storage inventory contains
+ * only username-scoped caches. */
+export async function eraseOriginBiometricUnlocks(userIds: readonly string[]): Promise<void> {
+  const epoch = localWriteScopeEpoch();
+  const owners = [...new Set(userIds)];
+  await commitOriginErasureWrite(epoch, () => serialized(async () => {
+    if (epoch !== localWriteScopeEpoch()) throw new Error("The biometric erasure belongs to a retired origin");
+    for (const owner of owners) {
+      await Keychain.resetGenericPassword({ service: serviceFor(owner) });
+    }
+    await Keychain.resetGenericPassword({ service: SERVICE });
+    authenticatedLegacyOwners.clear();
+    const markers = owners.flatMap((owner) => [legacyDisabled(owner), ownerMarker(owner)]);
+    if (markers.length > 0) await AsyncStorage.multiRemove(markers);
+    if (epoch !== localWriteScopeEpoch()) throw new Error("The biometric erasure belongs to a retired origin");
   }));
 }
 export async function hasBiometricUnlock(userId: string): Promise<boolean> {

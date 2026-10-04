@@ -127,6 +127,7 @@ class LiveTherapistEmulator:
                 "username": self.username,
                 "salt": base64.b64encode(self.salt).decode(),
                 "verifier": base64.b64encode(self.auth_key).decode(),
+                "age_attestation": "minimum_age_confirmed_v1",
                 "display_name": self.display_name,
                 "wrap_pub_key": self.wrap_pub_key,
                 "wrap_key_blob": base64.b64encode(blob).decode(),
@@ -196,7 +197,12 @@ async def register_patient(client, username: str, password: str):
     emu = LiveClientEmulator(username, password)
     response = await client.post(
         "/api/auth/register",
-        json={"username": emu.username, "salt": emu.salt_b64, "verifier": emu.auth_key_b64},
+        json={
+            "username": emu.username,
+            "salt": emu.salt_b64,
+            "verifier": emu.auth_key_b64,
+            "age_attestation": "minimum_age_confirmed_v1",
+        },
     )
     if response.status_code == 409:
         print(f"  {username}: already exists — skipping (use a fresh db)")
@@ -368,6 +374,7 @@ async def main() -> None:
                 "username": therapist.username,
                 "salt": base64.b64encode(therapist.salt).decode(),
                 "verifier": base64.b64encode(therapist.auth_key).decode(),
+                "age_attestation": "minimum_age_confirmed_v1",
                 "display_name": therapist.display_name,
                 "wrap_pub_key": therapist.wrap_pub_key,
                 "wrap_key_blob": therapist.wrap_key_blob_b64(),

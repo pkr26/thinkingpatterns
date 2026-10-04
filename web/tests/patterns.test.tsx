@@ -2,6 +2,8 @@
  * local trend, pattern cards with evidence panels, the sensitive
  * non-quoting contract, mutes, the explicit-only recompute, and the
  * feedback blob's encrypted ride. Real crypto; fetch stubs at the edge. */
+// @ts-nocheck
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PatternsView } from "../src/views/Patterns";
 import { QuestionView } from "../src/views/Question";

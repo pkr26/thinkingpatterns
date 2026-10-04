@@ -87,6 +87,8 @@ describe("unlockProof pins", () => {
   // orphaned instance).
   it("the sealed marker is exactly 'mindpattern-unlock-proof/v1'", async () => {
     const s = (await import("./helpers/storageMock")).default;
+    const { changeLocalSessionOwner } = await import("../src/localWriteGuard");
+    changeLocalSessionOwner("u9");
     const { storeUnlockProof } = await import("../src/unlockProof");
     const dataKey = Buffer.alloc(32, 7);
     await storeUnlockProof(dataKey, "u9");
@@ -99,6 +101,8 @@ describe("unlockProof pins", () => {
   it("unlockProofExists is genuinely false when nothing is stored (and after clear)", async () => {
     const s = (await import("./helpers/storageMock")).default;
     await s.__reset();
+    const { changeLocalSessionOwner } = await import("../src/localWriteGuard");
+    changeLocalSessionOwner("u1");
     const { storeUnlockProof, clearUnlockProof, unlockProofExists } = await import("../src/unlockProof");
     expect(await unlockProofExists("u-none")).toBe(false);
     const dataKey = Buffer.alloc(32, 7);
@@ -137,6 +141,8 @@ describe("onboarding pins", () => {
 
   it("recordOnboardingSeen persists exactly the '1' sentinel", async () => {
     const s = (await import("./helpers/storageMock")).default;
+    const { changeLocalSessionOwner } = await import("../src/localWriteGuard");
+    changeLocalSessionOwner("user-1");
     const { recordOnboardingSeen } = await import("../src/onboarding");
     await recordOnboardingSeen("user-1");
     expect(await s.getItem("@mindpattern/onboarding_seen_user-1")).toBe("1");

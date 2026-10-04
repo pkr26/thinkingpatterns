@@ -53,6 +53,7 @@ const { deriveKeysAsync } = await import("../../src/crypto/MindPatternCrypto");
 const { LoginScreen, passwordStrength } = await import("../../src/screens/LoginScreen");
 const { takePendingOnboarding } = await import("../../src/onboarding");
 const { vault } = await import("../../src/vault");
+const { __resetLocalKeyLifecycleForTests } = await import("../../src/localWriteGuard");
 const { render, flush, textOf, allText, pressLabel, typeInto, inputByPlaceholder, toggleSwitch } = await import("../helpers/rtr");
 const { resetApi } = await import("../helpers/apiMock");
 
@@ -79,6 +80,7 @@ function textNode(root: Awaited<ReturnType<typeof render>>, match: string | ((s:
 }
 
 beforeEach(() => {
+  __resetLocalKeyLifecycleForTests();
   resetApi(api as never);
   vi.mocked(deriveKeysAsync).mockReset();
   vi.mocked(deriveKeysAsync).mockImplementation(async (password: string, salt: Buffer) => ({

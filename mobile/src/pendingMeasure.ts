@@ -26,6 +26,7 @@ import { captureLocalWritePermit, captureOpaqueLocalWritePermit, commitLocalWrit
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { buildAad, decrypt, encrypt } from "./crypto/envelope";
 import { INSTRUMENTS, type MeasureId } from "./measures";
+import { accountStorageKey } from "./accountStorage";
 
 /** One completed-but-unsent questionnaire. */
 export interface PendingMeasure {
@@ -40,7 +41,7 @@ export interface PendingMeasure {
   date: string;
 }
 
-const key = (userId: string): string => `@mindpattern/pending_measure_${userId}`;
+const key = accountStorageKey.pendingMeasure;
 
 /** Full validation of anything read back from storage, the reminders.ts
  *  discipline: a hostile or half-written record is null, never hour-99

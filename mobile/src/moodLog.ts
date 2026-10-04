@@ -26,6 +26,7 @@ import { captureLocalWritePermit, assertLocalWritePermit, commitLocalWrite, type
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { buildAad, decrypt, encrypt } from "./crypto/envelope";
 import { zeroize } from "./crypto/kdf";
+import { accountStorageKey } from "./accountStorage";
 
 export interface MoodDay {
   date: string; // YYYY-MM-DD
@@ -37,7 +38,7 @@ export interface MoodDay {
   energy?: number;
 }
 
-const key = (userId: string): string => `mindpattern.moodlog.${userId}`;
+const key = accountStorageKey.moodLog;
 const MAX_DAYS = 400;
 
 /** Serializes every read-modify-write cycle: two rapid recordMood calls

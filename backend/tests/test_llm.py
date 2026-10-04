@@ -347,7 +347,7 @@ def test_extract_failure_contributes_nothing_and_is_recorded():
 
     analyzer._post = raising_post
     assert analyzer.extract_patterns(corpus, findings=findings) == []
-    assert analyzer.last_error == "RuntimeError"
+    assert analyzer.last_error == "provider_failure"
     # A later success clears the failure state (the response reports the
     # LAST call honestly).
     analyzer._post = lambda payload: _llm_response([])
@@ -364,7 +364,7 @@ def test_extract_failure_when_model_output_is_not_json():
     # or the (correct) no-narratable-findings early-return skips dispatch.
     findings = [Pattern("temporal", "work", 12, 0.9, {"day": "Sunday"})]
     assert analyzer.extract_patterns([entry(0, "calm")], findings=findings) == []
-    assert analyzer.last_error == "JSONDecodeError"
+    assert analyzer.last_error == "provider_failure"
 
 
 def test_extract_handles_missing_choices_and_patterns_keys():
@@ -374,12 +374,12 @@ def test_extract_handles_missing_choices_and_patterns_keys():
     analyzer._post = lambda payload: {}
     findings = [Pattern("temporal", "work", 12, 0.9, {"day": "Sunday"})]
     assert analyzer.extract_patterns([entry(0, "calm")], findings=findings) == []
-    assert analyzer.last_error == "KeyError"
+    assert analyzer.last_error == "provider_failure"
     # A JSON-null body is a failure (TypeError), not an empty success —
     # but an EMPTY patterns list is a clean success.
     analyzer._post = lambda payload: _llm_response(None)  # type: ignore[arg-type]
     assert analyzer.extract_patterns([entry(0, "calm")], findings=findings) == []
-    assert analyzer.last_error == "TypeError"
+    assert analyzer.last_error == "provider_failure"
     analyzer._post = lambda payload: _llm_response([])
     assert analyzer.extract_patterns([entry(0, "calm")], findings=findings) == []
     assert analyzer.last_error is None

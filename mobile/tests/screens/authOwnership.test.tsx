@@ -59,7 +59,7 @@ describe("authentication attempt custody",()=>{
   const recovery=Buffer.alloc(32,7),data=Buffer.alloc(32,8),gate=deferred<Buffer>(),master=Buffer.alloc(32,6);
   vi.mocked(api.recoverLogin).mockResolvedValue({token:"recovery-token",user_id:A,username:"alice",recovery_scheme:"v2",recovery_wrapped_data_key:sealDataKeyForRecoveryV2(recovery,data,A).toString("base64")} as never);
   vi.mocked(deriveMasterKeyAsync).mockImplementation(()=>gate.promise);
-  const pending=recoverAccountWithKey("alice",recovery.toString("base64"),"New credential long!").catch(error=>error);await flush();
+  const pending=recoverAccountWithKey("alice",recovery.toString("base64"),"New credential long!","v2").catch(error=>error);await flush();
   changeLocalOrigin();changeLocalSessionOwner(B);await act(async()=>{gate.resolve(master);});await flush();
   expect(await pending).toBeInstanceOf(Error);expect(api.resetPasswordWithRecovery).not.toHaveBeenCalled();expect(api.clearSession).not.toHaveBeenCalled();expect(master.every(byte=>byte===0)).toBe(true);
  });

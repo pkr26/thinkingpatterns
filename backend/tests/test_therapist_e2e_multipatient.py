@@ -327,6 +327,8 @@ class TestAct1Linking:
             assert consents[0]["therapist_wrap_pub_key"] == world.th.wrap_pub_key
 
     async def test_pairing_code_is_single_use_and_grant_needs_the_password(self, client):
+        from app.api.consents import SHARING_DISCLOSURE_VERSION
+
         th = TherapistEmulator("solo-dr", "pw", "Dr. Solo")
         await th.register(client)
         patient = ClientEmulator("solo-p", "pw")
@@ -336,7 +338,7 @@ class TestAct1Linking:
         lookup = await patient.pairing_lookup(client, code)
         assert lookup["status"] == 200
 
-        # A stolen bearer alone cannot widen disclosure: no verifier -> 422.
+        # A stolen bearer alone cannot widen disclosure: no fresh proof.
         wrap = {
             "ephemeral_pub": lookup["body"]["wrap_pub_key"],  # shape-valid stand-in
             "wrapped_key": base64.b64encode(b"x" * 60).decode("ascii"),
@@ -344,9 +346,10 @@ class TestAct1Linking:
         no_verifier = await client.post(
             "/api/consents",
             headers=patient.headers,
-            json={"code": code, **wrap, "disclosure": "v2"},
+            json={"code": code, **wrap, "disclosure": SHARING_DISCLOSURE_VERSION},
         )
-        assert no_verifier.status_code == 422, no_verifier.text
+        assert no_verifier.status_code == 403, no_verifier.text
+        assert no_verifier.json()["code"] == "step_up_required"
 
         granted = await patient.grant_consent(
             client, code, lookup["body"]["wrap_pub_key"], lookup["body"]["therapist_id"]

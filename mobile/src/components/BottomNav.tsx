@@ -77,7 +77,6 @@ export function BottomNav({
             accessibilityLabel={help ? tr("nav.getHelpA11y") : item.label}
           >
             <Text
-              maxFontSizeMultiplier={1.3}
               style={{
                 color: help ? t.colors.text : active ? t.colors.accent : t.colors.muted,
                 fontSize: 12,

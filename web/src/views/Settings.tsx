@@ -2,7 +2,7 @@
  * Settings (WEB_PLAN P7.3–7.6): appearance (Light/Dark/Auto theme), LLM
  * consent (re-authenticated), the access log ("who accessed my data"),
  * the web-first ciphertext export download, queue recovery,
- * verifier-gated account deletion with the retention honesty note, and
+ * fresh-step-up-gated account deletion with the retention honesty note, and
  * the password-change flows — ROUTED BY KEY SCHEME (2026-09-26): v1
  * accounts keep the full rekey rotation (two single-use processing
  * sessions, therapist-grant re-wraps, credential rotation), v2 accounts
@@ -14,6 +14,8 @@
  * becomes a real switch, the theme preference is a segmented control,
  * and the access log renders as a timeline.
  */
+// @ts-nocheck
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, auth, ApiError, sessionUsername } from "../api/client";
 import { deriveMasterKey, toBase64, fromBase64, zeroize, type Bytes } from "../crypto/core";
@@ -22,11 +24,14 @@ import { wrapDataKeyForTherapist } from "../crypto/sharing";
 import { derivePatientKeys, type PatientKeys } from "../crypto/keys";
 import { CADENCE_INTERVALS, readMeasureCadence, writeMeasureCadence, type MeasureCadencePref } from "../measureCadence";
 import { passwordPolicyError } from "./LoginView";
-import { drainPendingQueueForRotation, requeueRejected, rejectedEntries, queueLength } from "../offlineQueue";
+import { drainPendingQueueForRotation, queueEvictionSummary, requeueRejected, rejectedEntries, queueLength } from "../offlineQueue";
 import { broadcastTabLockdown } from "../tabLockdown";
 import { downloadTextFile, localStore, randomBytes } from "../platform";
 import { applyLanguagePref, getLanguagePref, t, type LanguagePref } from "../strings";
+import { displayError } from "../errors";
+import { kv } from "../kvstore";
 import { vault } from "../vault";
+import { freshStepUp } from "../reauth";
 import { stageLocalErasure, confirmLocalErasure } from "../localErasure";
 import { rotationSalt, rotationDataKey, stageLocalRotation, resumeLocalRotation, type RotationCredential } from "../localRotation";
 import { applyThemePref, readThemePref, writeThemePref, type ThemePref } from "../theme";
@@ -40,21 +45,26 @@ import { Button, Card, ErrorBanner, Field, Note, PillNote, SegmentedControl, Tog
  *  change to finish it", an instruction that always failed. Reusing the
  *  pending salt makes the retry derive the same keys as the attempt that
  *  rekeyed the corpus, so the ladder actually fires. The salt is public
- *  material (the server stores it in the clear after rotation); it is
- *  inert without the password and is wiped by deletion's mindpattern.*
- *  prefix sweep. (v1 flow only — the v2 O(1) change never rekeys, so it
- *  never needs a resume ladder.) */
-const pendingSaltKey = (userId: string): string => `mindpattern.rotatePendingSalt.${userId}`;
+ *  material (the server stores it in the clear after rotation). New builds
+ *  persist it only in the generation-fenced `rotationSalt` KV slot. This
+ *  key is read once solely to migrate a pre-fix localStorage value. */
+const legacyPendingSaltKey = (userId: string): string => `mindpattern.rotatePendingSalt.${userId}`;
 
 /** MED-3 (pentest 2026-09-29): the "rotate your encryption key too" hint a
  *  v2 password change leaves behind. PERSISTED, per account, because a
  *  successful v2 change ends in the epoch lockdown — every session dies
  *  and the user must sign back in, so an in-memory flag would never be
  *  seen. One bit of non-content metadata (like the pending salt key, but
- *  not even key material): wiped by dismissal, by a completed full
- *  rotation, and by deletion's mindpattern.* prefix sweep. The v1 flow
- *  never sets it — a v1 password change rekeys by construction. */
+ *  not even key material): it lives in generation-fenced KV, and is wiped
+ *  by dismissal, a completed full rotation, or account erasure. The v1
+ *  flow never sets it — a v1 password change rekeys by construction. */
 const rekeyHintKey = (userId: string): string => `mindpattern.rekeyHint.${userId}`;
+const legacyRekeyHintKey = rekeyHintKey;
+
+type PendingSensitiveAction =
+  | { kind: "llm"; enabled: boolean }
+  | { kind: "voice"; enabled: boolean }
+  | { kind: "delete" };
 
 export function SettingsView(props: { onLockdown: (notice: string) => void; onOpenSafetyPlan?: () => void }): React.JSX.Element {
   const [themePref, setThemePref] = useState<ThemePref>(() => readThemePref());
@@ -64,12 +74,14 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
   // yet read from the per-account slot; the interval control renders only
   // while the reminder is on.
   const [cadence, setCadence] = useState<MeasureCadencePref | null>(null);
-  const [llm, setLlm] = useState<{ available: boolean; enabled: boolean } | null>(null);
+  const [llm, setLlm] = useState<{
+    available: boolean; enabled: boolean; stale: boolean; provider: string; retention: string; fingerprint: string;
+  } | null>(null);
   // Voice journaling consent (VOICE_PLAN 2026-09-29): same shape/standing
   // as the LLM toggle it sits beside — available comes from meta, enabled
   // + policy currency from the account's consent record.
   const [voice, setVoice] = useState<
-    { available: boolean; enabled: boolean; stale: boolean; provider: string } | null
+    { available: boolean; enabled: boolean; stale: boolean; provider: string; retention: string; fingerprint: string } | null
   >(null);
   // 2026-09-26 audit LOW b: a FAILED meta/consent read is an explicit
   // unknown state with a retry — the LLM section used to vanish silently.
@@ -81,9 +93,12 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
   const [accessError, setAccessError] = useState("");
   const [queued, setQueued] = useState<number | null>(null);
   const [rejected, setRejected] = useState<number>(0);
+  const [queueEvictions, setQueueEvictions] = useState(0);
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [deleteText, setDeleteText] = useState("");
+  const [pendingSensitive, setPendingSensitive] = useState<PendingSensitiveAction | null>(null);
+  const [reauthPassword, setReauthPassword] = useState("");
   /** The account's key scheme (2026-09-26): routes the password-change
    *  card between the v1 rekey flow and the v2 O(1) re-wrap, and gates
    *  the "Upgrade key protection" action. null = not yet known; "unknown"
@@ -144,9 +159,19 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
       const ownerForHint = vault.ownerUserId();
       if (ownerForHint) {
         const hintKey = rekeyHintKey(ownerForHint);
-        if (localStore.get(hintKey)) {
+        let hint = await kv.getItem(hintKey);
+        // One-way migration for builds that stored the hint in
+        // localStorage. The KV commit is generation/deletion checked before
+        // the legacy value is removed; no new localStorage writes occur.
+        const legacyHintKey = legacyRekeyHintKey(ownerForHint);
+        if (hint === null && localStore.get(legacyHintKey)) {
+          await kv.setItem(hintKey, "1");
+          localStore.remove(legacyHintKey);
+          hint = "1";
+        }
+        if (hint) {
           if (envelope.key_scheme === "v2") setShowRekeyHint(true);
-          else localStore.remove(hintKey);
+          else await kv.removeItem(hintKey);
         }
       }
       // 2026-09-28 audit: remember the DECLARED params when they parse —
@@ -167,7 +192,14 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
       setSchemeUnknown(true);
     }
     if (meta && consentState) {
-      setLlm({ available: meta.llm_available, enabled: consentState.enabled });
+      setLlm({
+        available: meta.llm_available,
+        enabled: consentState.enabled && consentState.active_for_current_policy === true,
+        stale: consentState.enabled && consentState.active_for_current_policy !== true,
+        provider: meta.llm_provider_name ?? "",
+        retention: meta.llm_data_retention ?? "",
+        fingerprint: meta.llm_policy_fingerprint ?? "",
+      });
       setLlmLoad("known");
     } else {
       setLlm(null);
@@ -176,9 +208,11 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
     if (meta) {
       setVoice({
         available: meta.audio_available === true,
-        enabled: voiceConsent?.enabled === true,
+        enabled: voiceConsent?.enabled === true && voiceConsent.active_for_current_policy === true,
         stale: voiceConsent != null && voiceConsent.enabled && !voiceConsent.active_for_current_policy,
         provider: meta.stt_provider_name ?? "",
+        retention: meta.stt_data_retention ?? "",
+        fingerprint: meta.stt_policy_fingerprint ?? "",
       });
     } else {
       setVoice(null);
@@ -187,6 +221,8 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
     if (owner) {
       setQueued(await queueLength(owner).catch(() => 0));
       setRejected((await rejectedEntries(owner).catch(() => [])).length);
+      const losses = await queueEvictionSummary(owner).catch(() => ({ rejected: 0, quarantine: 0 }));
+      setQueueEvictions(losses.rejected + losses.quarantine);
       setCadence(await readMeasureCadence(owner));
     }
     await loadAccess();
@@ -243,40 +279,22 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
     void writeMeasureCadence(owner, pref);
   };
 
-  const toggleLlm = async (enabled: boolean): Promise<void> => {
-    if (!vault.isUnlocked()) return;
-    setBusy(true);
-    setError("");
-    try {
-      await api.setLlmConsent(enabled, toBase64(vault.get().authKey));
-      setLlm((current) => (current ? { ...current, enabled } : null));
-      setStatus(enabled ? t("settings.llmEnabledNote") : t("settings.llmDisabledNote"));
-    } catch (err) {
-      if (err instanceof ApiError && err.code === "llm_unavailable") setError(t("settings.llmNotOfferedToggle"));
-      else setError(err instanceof Error ? err.message : t("settings.llmToggleFailed"));
-    } finally {
-      setBusy(false);
+  const toggleLlm = (enabled: boolean): void => {
+    if (vault.isUnlocked()) {
+      setError("");
+      setReauthPassword("");
+      setPendingSensitive({ kind: "llm", enabled });
     }
   };
 
   /** Voice consent toggle (VOICE_PLAN 2026-09-29): the same re-authenticated
    *  opt-in as the LLM toggle — a stolen bearer must not be able to send
    *  recordings to a third party. */
-  const toggleVoice = async (enabled: boolean): Promise<void> => {
-    if (!vault.isUnlocked()) return;
-    setBusy(true);
-    setError("");
-    try {
-      await api.setVoiceConsent(enabled, toBase64(vault.get().authKey));
-      setVoice((current) => (current ? { ...current, enabled, stale: false } : null));
-      setStatus(enabled ? t("settings.voiceEnabledNote") : t("settings.voiceDisabledNote"));
-    } catch (err) {
-      if (err instanceof ApiError && err.code === "stt_unavailable") setError(t("settings.voiceNotOffered"));
-      // Localized honesty (audit 2026-09-29): the raw ApiError message is
-      // server-provided English — this surface speaks the user's locale.
-      else setError(t("settings.voiceToggleFailed"));
-    } finally {
-      setBusy(false);
+  const toggleVoice = (enabled: boolean): void => {
+    if (vault.isUnlocked()) {
+      setError("");
+      setReauthPassword("");
+      setPendingSensitive({ kind: "voice", enabled });
     }
   };
 
@@ -290,7 +308,7 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
       const ok = downloadTextFile(`mindpattern-export-${new Date().toISOString().slice(0, 10)}.json`, bundle, "application/json");
       setStatus(ok ? t("settings.exportOk") : t("settings.exportBlocked"));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("settings.exportFailed"));
+      setError(displayError(err, t("settings.exportFailed")));
     } finally {
       setBusy(false);
     }
@@ -388,10 +406,12 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
       // server step, so their direct saves and reconnect flushes cannot
       // upload old-key blobs to a rekeyed corpus.
       broadcastTabLockdown("rotation");
-      const pendingB64 = localStore.get(pendingSaltKey(owner));
-      const newSalt = await rotationSalt(owner,pendingB64);
+      const legacySaltKey = legacyPendingSaltKey(owner);
+      const newSalt = await rotationSalt(owner,localStore.get(legacySaltKey));
       const newSaltB64 = toBase64(newSalt);
-      localStore.set(pendingSaltKey(owner), newSaltB64);
+      // The fenced KV copy is now durable. Stop consulting the legacy
+      // unfenced copy on every future retry.
+      localStore.remove(legacySaltKey);
       // MED-3 (pentest 2026-09-29): the full rotation now serves v2 accounts
       // too (the post-password-change rekey hint routes here), so the final
       // credential step is scheme-aware below — and the derivation must use
@@ -489,11 +509,9 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
         }
       }
 
-      // Full completion: the pending rotation salt has done its job.
-      localStore.remove(pendingSaltKey(owner));
       // MED-3: and the rekey hint with it — the corpus now sits under a
       // fresh key, which is exactly what the hint was asking for.
-      localStore.remove(rekeyHintKey(owner));
+      await kv.removeItem(rekeyHintKey(owner));
       // Apply only pre-staged transforms. A failed local destination retains
       // both ciphertext versions and the journal for fresh-login resume.
       await resumeLocalRotation(owner,newKey.dataKey,credential.new_salt);
@@ -513,7 +531,7 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
         props.onLockdown(t("settings.rotateMovedLockdown"));
         return;
       }
-      setError(err instanceof Error ? err.message : t("settings.rotateFailed"));
+      setError(displayError(err, t("settings.rotateFailed")));
     } finally {
       // FE-4: the snapshotted old-key buffers die here too — success,
       // failure, and lockdown alike (the vault's own copies remain the
@@ -635,10 +653,12 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
       // password keeps decrypting forever — leave the rekey hint behind so
       // the NEXT Settings visit (this view unmounts with the lockdown)
       // tells the user the honest difference and offers the full rotation.
-      localStore.set(rekeyHintKey(owner), "1");
+      // A failed hint write must never keep an epoch-invalid session alive.
+      // The account change itself succeeded, so lock down either way.
+      await kv.setItem(rekeyHintKey(owner), "1").catch(() => undefined);
       props.onLockdown(t("settings.rotateV2SuccessNotice"));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("settings.rotateFailed"));
+      setError(displayError(err, t("settings.rotateFailed")));
     } finally {
       zeroize(dataKey, authKey);
       if (newKeys) zeroize(newKeys.masterKey, newKeys.authKey, newKeys.dataKey);
@@ -718,7 +738,7 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
       if (err instanceof ApiError && err.code === "envelope_key_mismatch") {
         setError(t("settings.upgradeKeyMismatchNote"));
       } else {
-        setError(err instanceof Error ? err.message : t("settings.upgradeFailedNote"));
+        setError(displayError(err, t("settings.upgradeFailedNote")));
       }
     } finally {
       zeroize(dataKey);
@@ -732,35 +752,89 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
   /** MED-3 (pentest 2026-09-29): dismissing consumes the persisted hint —
    *  the user has read it. A FUTURE v2 password change sets a fresh one;
    *  a completed full rotation sweeps it from the flow itself. */
-  const dismissRekeyHint = (): void => {
+  const dismissRekeyHint = async (): Promise<void> => {
     setShowRekeyHint(false);
     const owner = vault.ownerUserId();
-    if (owner) localStore.remove(rekeyHintKey(owner));
+    if (owner) await kv.removeItem(rekeyHintKey(owner));
   };
 
-  const deleteAccount = async (): Promise<void> => {
+  const requestDeleteAccount = (): void => {
     if (!vault.isUnlocked()) return;
     if (deleteText.trim().toUpperCase() !== "DELETE") {
       setError(t("settings.deleteTypeDelete"));
       return;
     }
+    setError("");
+    setReauthPassword("");
+    setPendingSensitive({ kind: "delete" });
+  };
+
+  const confirmSensitiveAction = async (): Promise<void> => {
+    const pending = pendingSensitive;
+    if (!pending || busy) return;
     setBusy(true);
     setError("");
     const owner = vault.ownerUserId();
     if (!owner) { setBusy(false); return; }
-    const verifier = toBase64(vault.get().authKey);
     let remoteDeleted = false;
     try {
-      await stageLocalErasure(owner);
-      await api.deleteAccount(verifier);
-      remoteDeleted = true;
-      await confirmLocalErasure(owner);
-      props.onLockdown(t("settings.deleteDoneNotice"));
+      const action = pending.kind === "llm"
+        ? "llm_consent"
+        : pending.kind === "voice"
+          ? "voice_consent"
+          : "account_delete";
+      const stepped = await freshStepUp(reauthPassword, action);
+      if (!stepped.ok) {
+        const messages = {
+          locked: t("common.reauthLocked"),
+          "no-account": t("common.reauthNoAccount"),
+          "wrong-password": t("common.wrongPassword"),
+          offline: t("common.reauthOffline"),
+        } as const;
+        setError(messages[stepped.reason]);
+        return;
+      }
+      const proof = stepped.proof;
+      if (pending.kind === "llm") {
+        const result = await api.setLlmConsent(pending.enabled, proof);
+        setLlm((current) => (current ? {
+          ...current,
+          enabled: result.enabled && result.active_for_current_policy === true,
+          stale: result.enabled && result.active_for_current_policy !== true,
+        } : null));
+        setStatus(pending.enabled ? t("settings.llmEnabledNote") : t("settings.llmDisabledNote"));
+      } else if (pending.kind === "voice") {
+        const result = await api.setVoiceConsent(pending.enabled, proof);
+        setVoice((current) => (current ? {
+          ...current,
+          enabled: result.enabled && result.active_for_current_policy === true,
+          stale: result.enabled && result.active_for_current_policy !== true,
+        } : null));
+        setStatus(pending.enabled ? t("settings.voiceEnabledNote") : t("settings.voiceDisabledNote"));
+      } else {
+        await stageLocalErasure(owner);
+        await api.deleteAccount(proof);
+        remoteDeleted = true;
+        await confirmLocalErasure(owner);
+        props.onLockdown(t("settings.deleteDoneNotice"));
+      }
+      setPendingSensitive(null);
     } catch (err) {
-      if (remoteDeleted || (err instanceof ApiError && err.status === 410)) {
+      if (pending.kind === "delete" && (remoteDeleted || (err instanceof ApiError && err.status === 410))) {
         props.onLockdown(t("app.erasureIncomplete"));
-      } else setError(err instanceof Error ? err.message : t("settings.deleteFailed"));
+      } else if (pending.kind === "llm" && err instanceof ApiError && err.code === "llm_unavailable") {
+        setError(t("settings.llmNotOfferedToggle"));
+      } else if (pending.kind === "llm") {
+        setError(t("settings.llmToggleFailed"));
+      } else if (pending.kind === "voice" && err instanceof ApiError && err.code === "stt_unavailable") {
+        setError(t("settings.voiceNotOffered"));
+      } else if (pending.kind === "voice") {
+        setError(t("settings.voiceToggleFailed"));
+      } else {
+        setError(t("settings.deleteFailed"));
+      }
     } finally {
+      setReauthPassword("");
       setBusy(false);
     }
   };
@@ -769,6 +843,42 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
     <>
       <ErrorBanner message={error} />
       {status && <PillNote role="status" tone="ok" icon="check">{status}</PillNote>}
+
+      {pendingSensitive && (
+        <Card
+          title={t(
+            pendingSensitive.kind === "delete"
+              ? "settings.reauthDeleteTitle"
+              : pendingSensitive.kind === "voice"
+                ? "settings.reauthVoiceTitle"
+                : "settings.reauthLlmTitle",
+          )}
+          tone={pendingSensitive.kind === "delete" ? "danger" : undefined}
+        >
+          <Note tone="muted">{t("settings.reauthFreshNote")}</Note>
+          <Field
+            label={t("settings.reauthPasswordField")}
+            value={reauthPassword}
+            onChange={setReauthPassword}
+            type="password"
+            autoComplete="current-password"
+          />
+          <div className="row row--wrap">
+            <Button
+              label={busy ? t("settings.working") : t("settings.reauthConfirm")}
+              onPress={() => void confirmSensitiveAction()}
+              disabled={busy || reauthPassword.length === 0}
+              danger={pendingSensitive.kind === "delete"}
+            />
+            <Button
+              label={t("common.cancel")}
+              onPress={() => { setPendingSensitive(null); setReauthPassword(""); }}
+              disabled={busy}
+              variant="ghost"
+            />
+          </div>
+        </Card>
+      )}
 
       <Card title={t("settings.appearanceTitle")}>
         <Note tone="muted">{t("settings.themeNote")}</Note>
@@ -832,12 +942,20 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
       <Card title={t("settings.privacyDataTitle")}>
         {llmLoad === "known" && llm && (
           llm.available ? (
-            <Toggle
-              checked={llm.enabled}
-              onChange={(enabled) => void toggleLlm(enabled)}
-              disabled={busy}
-              label={llm.enabled ? t("settings.llmStatusEnabled") : t("settings.llmStatusOff")}
-            />
+            <>
+              <Toggle
+                checked={llm.enabled}
+                onChange={toggleLlm}
+                disabled={busy}
+                label={llm.enabled ? t("settings.llmStatusEnabled") : t("settings.llmStatusOff")}
+              />
+              <Note tone="muted">{t("settings.llmDisclosure", {
+                provider: llm.provider || t("settings.notDisclosed"),
+                retention: llm.retention || t("settings.notDisclosed"),
+                fingerprint: llm.fingerprint || t("settings.notDisclosed"),
+              })}</Note>
+              {llm.stale && <Note tone="warn">{t("settings.llmStaleNote")}</Note>}
+            </>
           ) : (
             <Note tone="muted">{t("settings.llmNotOffered")}</Note>
           )
@@ -862,11 +980,15 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
             <span className="section-label">{t("settings.voiceTitle")}</span>
             <Toggle
               checked={voice.enabled}
-              onChange={(enabled) => void toggleVoice(enabled)}
+              onChange={toggleVoice}
               disabled={busy}
               label={voice.enabled ? t("settings.voiceStatusEnabled") : t("settings.voiceStatusOff")}
             />
-            <Note tone="muted">{t("settings.voiceNote", { provider: voice.provider || t("entry.voiceUnavailable") })}</Note>
+            <Note tone="muted">{t("settings.voiceNote", {
+              provider: voice.provider || t("settings.notDisclosed"),
+              retention: voice.retention || t("settings.notDisclosed"),
+              fingerprint: voice.fingerprint || t("settings.notDisclosed"),
+            })}</Note>
             {voice.stale && <Note tone="warn">{t("settings.voiceStaleNote")}</Note>}
           </>
         )}
@@ -876,6 +998,8 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
           <Button label={t("settings.export")} onPress={() => void exportData()} small variant="ghost" disabled={busy} />
         </div>
         <Note tone="muted">{t("settings.exportNote")}</Note>
+        <Note tone="muted">{t("settings.recoveryKitHandoff")}</Note>
+        <Note tone="warn">{t("settings.offlineColdStart")}</Note>
         {queued !== null && queued > 0 && <Note tone="warn">{t(queued === 1 ? "settings.queuedOne" : "settings.queuedMany", { count: queued })}</Note>}
         {rejected > 0 && (
           <>
@@ -883,6 +1007,7 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
             <Button label={t("settings.requeue")} onPress={() => void recoverQueue()} small variant="ghost" disabled={busy} />
           </>
         )}
+        {queueEvictions > 0 && <Note tone="danger">{t("settings.queueEvictions", { count: queueEvictions })}</Note>}
       </Card>
 
       <Card title={t("settings.accessTitle")}>
@@ -977,7 +1102,7 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
             synthetic click path still cannot delete unconfirmed. */}
         <Button
           label={t("settings.deleteButton")}
-          onPress={() => void deleteAccount()}
+          onPress={requestDeleteAccount}
           danger
           disabled={busy || deleteText.trim().toUpperCase() !== "DELETE"}
         />

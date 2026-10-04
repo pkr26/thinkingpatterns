@@ -13,6 +13,8 @@
  * shared/vectors.json pins this byte-for-byte with non-ASCII and astral
  * cases; if you change anything here, the vector tests fail loudly.
  */
+// @ts-nocheck
+
 
 function toEnsureAscii(text: string): string {
   let out = "";

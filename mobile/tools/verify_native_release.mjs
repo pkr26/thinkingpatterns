@@ -511,10 +511,45 @@ try {
   const pbx = readFileSync("ios/MindPattern.xcodeproj/project.pbxproj", "utf8");
   const resources = pbx.match(/Begin PBXResourcesBuildPhase section[\s\S]*?End PBXResourcesBuildPhase section/)?.[0] ?? "";
   if (resources.includes("PrivacyInfo.xcprivacy in Resources")) pass("iOS bundled privacy manifest"); else fail("iOS bundled privacy manifest", "PrivacyInfo.xcprivacy must be in the app Resources phase");
+  const privacyManifest = readFileSync("ios/MindPattern/PrivacyInfo.xcprivacy", "utf8");
+  const requiredCollectedTypes = [
+    "NSPrivacyCollectedDataTypeUserID",
+    "NSPrivacyCollectedDataTypeHealth",
+    "NSPrivacyCollectedDataTypeOtherUserContent",
+    "NSPrivacyCollectedDataTypeAudioData",
+    "NSPrivacyCollectedDataTypeProductInteraction",
+    "NSPrivacyCollectedDataTypeOtherDataTypes",
+  ];
+  const invalidCollectedTypes = requiredCollectedTypes.filter((type) => {
+    const marker = `<string>${type}</string>`;
+    const at = privacyManifest.indexOf(marker);
+    if (at < 0) return true;
+    const start = privacyManifest.lastIndexOf("<dict>", at);
+    const end = privacyManifest.indexOf("</dict>", at);
+    const block = start >= 0 && end >= 0 ? privacyManifest.slice(start, end) : "";
+    return !block.includes("<key>NSPrivacyCollectedDataTypeLinked</key>\n\t\t\t<true/>")
+      || !block.includes("<key>NSPrivacyCollectedDataTypeTracking</key>\n\t\t\t<false/>")
+      || !block.includes("NSPrivacyCollectedDataTypePurposeAppFunctionality");
+  });
+  if (invalidCollectedTypes.length === 0) pass("iOS collected-data privacy declarations", "six linked, non-tracking app-functionality categories");
+  else fail("iOS collected-data privacy declarations", `missing or incorrectly scoped: ${invalidCollectedTypes.join(", ")}`);
   const iconsDir = "ios/MindPattern/Images.xcassets/AppIcon.appiconset";
   const icons = JSON.parse(readFileSync(`${iconsDir}/Contents.json`, "utf8"));
   if (icons.images.length > 0 && icons.images.every(x => x.filename && existsSync(`${iconsDir}/${x.filename}`))) pass("iOS populated app icons"); else fail("iOS populated app icons", "every declared icon must have a real image");
   if (!pbx.includes("org.reactjs.native.example")) pass("iOS product bundle identity"); else fail("iOS product bundle identity", "React Native template bundle id must be replaced");
+  const wrapper = readFileSync("android/gradle/wrapper/gradle-wrapper.properties", "utf8");
+  if (/distributionUrl=.*gradle-9\.4\.1-bin\.zip/.test(wrapper) && /distributionSha256Sum=2ab2958f2a1e51120c326cad6f385153bb11ee93b3c216c5fccebfdfbb7ec6cb/.test(wrapper)) pass("Gradle wrapper checksum pin");
+  else fail("Gradle wrapper checksum pin", "Gradle 9.4.1 URL and its official SHA-256 must remain paired");
+  const gradleLock = readFileSync("android/app/gradle.lockfile", "utf8");
+  const settingsGradleLock = readFileSync("android/settings-gradle.lockfile", "utf8");
+  const gradleVerification = readFileSync("android/gradle/verification-metadata.xml", "utf8");
+  const gradleProperties = readFileSync("android/gradle.properties", "utf8");
+  if (gradleLock.includes("This file is expected to be part of source control") && settingsGradleLock.includes("This file is expected to be part of source control") && gradleVerification.includes("<sha256 value=") && gradleVerification.includes("<verify-metadata>true</verify-metadata>") && gradleProperties.includes("org.gradle.dependency.verification=strict")) pass("Android dependency locks and strict checksum verification");
+  else fail("Android dependency locks and strict checksum verification", "commit app/settings lock states, SHA-256 verification metadata, and strict verification mode");
+  const gemLock = readFileSync("ios/Gemfile.lock", "utf8");
+  const podLock = readFileSync("ios/Podfile.lock", "utf8");
+  if (gemLock.includes("BUNDLED WITH") && podLock.includes("COCOAPODS: 1.15.2") && podLock.includes("PODFILE CHECKSUM:")) pass("iOS Ruby and CocoaPods lockfiles");
+  else fail("iOS Ruby and CocoaPods lockfiles", "Gemfile.lock and Podfile.lock must pin the native tool and pod closures");
   const bridge = readFileSync(BRIDGE_PATH, "utf8");
   if (bridge.includes('#import "RCTAppleHealthKit.h"') && /associations:nil\s+metadata:nil/.test(bridge) && bridge.includes("!isfinite(valence)")) pass("HealthKit category header/factory/finite valence contract"); else fail("HealthKit category header/factory/finite valence contract", "complete superclass import, metadata selector and finite continuous valence are required");
   if (process.argv.includes("--release")) {

@@ -16,7 +16,9 @@ it("the iOS release wrapper runs its real preflight from the mobile root and pre
       env: { ...process.env, CONFIGURATION: "Release", PROJECT_DIR: ios, NODE_BINARY: process.execPath,
         REACT_NATIVE_PATH: native, MINDPATTERN_API_ORIGIN: "https://synthetic-release-origin.mindpattern-audit.com" },
     });
-    expect(output).toContain("Native release preflight passed: all 22 checks green.");
+    // The direct preflight has 25 checks; the wrapper supplies a production
+    // origin and therefore runs the additional configured-origin gate.
+    expect(output).toContain("Native release preflight passed: all 26 checks green.");
     expect(output).toContain(`Xcode bundle working directory: ${ios}`);
   } finally { rmSync(native, { recursive: true, force: true }); }
 });

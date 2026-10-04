@@ -93,7 +93,12 @@ async def register(client, username: str, password: str) -> ClientEmulator | Non
     emu = LiveClientEmulator(username, password)
     response = await client.post(
         "/api/auth/register",
-        json={"username": emu.username, "salt": emu.salt_b64, "verifier": emu.auth_key_b64},
+        json={
+            "username": emu.username,
+            "salt": emu.salt_b64,
+            "verifier": emu.auth_key_b64,
+            "age_attestation": "minimum_age_confirmed_v1",
+        },
     )
     if response.status_code == 409:
         print(f"  {username}: already exists — skipping seed (use a fresh db file)")

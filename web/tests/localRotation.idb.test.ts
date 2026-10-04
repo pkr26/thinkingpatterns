@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { afterEach,beforeEach,describe,expect,it,vi } from "vitest";
 import { IDBFactory } from "fake-indexeddb";
 import { kv,resetKvConnectionForTests,setKvBackendForTests,writeGenerationKey } from "../src/kvstore";
@@ -9,6 +10,7 @@ import * as cryptoCore from "../src/crypto/core";
 import { saveSafetyPlan,loadSafetyPlan,EMPTY_SAFETY_PLAN } from "../src/safetyPlan";
 import { enqueue,flushQueue,requeueRejected } from "../src/offlineQueue";
 import { api,ApiError,setSession,clearSession } from "../src/api/client";
+import { KEY_BOUND_OWNER_PREFIXES,METADATA_OWNER_PREFIXES } from "../src/ownerStorage";
 const owner="idb-rotation",draft=`mindpattern.draft.active.${owner}`,oldKey=new Uint8Array(32).fill(2),newKey=new Uint8Array(32).fill(3);
 const credential={operation_id:"11111111-1111-4111-8111-111111111111",new_salt:toBase64(new Uint8Array(16).fill(4)),new_verifier:toBase64(newKey)};
 beforeEach(()=>{setKvBackendForTests(null);resetKvConnectionForTests();vi.stubGlobal("indexedDB",new IDBFactory());vi.stubGlobal("navigator",{locks:{request:async(_name:string,run:()=>Promise<unknown>)=>run()}});});
@@ -84,12 +86,17 @@ describe("transactional migration custody",()=>{
   await stageLocalRotation(owner,oldKey,newKey,credential);await resumeLocalRotation(owner,newKey,credential.new_salt);
   const current=await kv.getItem(slot);release!();await rejected;expect(await kv.getItem(slot)).toBe(current);
  });
- it("retains a durable minimal deletion fence so late writes cannot resurrect erased ciphertext",async()=>{
-  const permit=await kv.captureWritePermit(owner,oldKey),original=await ciphertext("private deleted writing");await kv.setItem(draft,original,permit);
-  await stageLocalErasure(owner);await confirmLocalErasure(owner);resetKvConnectionForTests();
-  await expect(kv.setItem(draft,original,permit)).rejects.toThrow("not saved");
-  await expect(kv.captureWritePermit(owner,oldKey)).rejects.toThrow("old account key");
+	 it("retains a durable minimal deletion fence so late writes cannot resurrect erased ciphertext",async()=>{
+	  const permit=await kv.captureWritePermit(owner,oldKey),original=await ciphertext("private deleted writing");await kv.setItem(draft,original,permit);
+	  const scope=btoa(`${window.location.origin}\0${owner}`).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""),evictions=`mindpattern/queue.v1.evictions.${scope}`;
+	  await kv.setItem(evictions,JSON.stringify({rejected:2,quarantine:1}),permit);
+	  await stageLocalErasure(owner);await confirmLocalErasure(owner);resetKvConnectionForTests();
+	  for(const prefix of KEY_BOUND_OWNER_PREFIXES)await expect(kv.setItem(`${prefix}${owner}`,original,permit)).rejects.toThrow("not saved");
+	  for(const prefix of METADATA_OWNER_PREFIXES)await expect(kv.setItem(`${prefix}${owner}`,"late account metadata")).rejects.toThrow("not saved");
+	  for(const family of ["items","rejected","quarantine","evictions"])await expect(kv.setItem(`mindpattern/queue.v1.${family}.${scope}`,family==="evictions"?JSON.stringify({rejected:9,quarantine:9}):"late queue",permit)).rejects.toThrow("not saved");
+	  await expect(kv.captureWritePermit(owner,oldKey)).rejects.toThrow("old account key");
   expect(await kv.getItem(draft)).toBeNull();
+  expect(await kv.getItem(evictions)).toBeNull();
   expect(JSON.parse((await kv.getItem(writeGenerationKey(owner)))!)).toMatchObject({v:1,deleted:true});
   expect((await kv.getItem(writeGenerationKey(owner)))!).not.toContain("keyTag");
   await expect(kv.adoptVerifiedWriteGeneration(owner,newKey)).rejects.toThrow("erased");

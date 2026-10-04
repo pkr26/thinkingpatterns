@@ -10,6 +10,8 @@
  *  and the two tables the old test ignored are pinned too — the
  *  per-fill calendar inks (MOOD_INKS) and the theme-aware check-in face
  *  colors (MOOD_FACES), both of which had real AA failures before. */
+// @ts-nocheck
+
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";

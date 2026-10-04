@@ -70,6 +70,7 @@ from ..security.kdf import (
 from ..security.sharing import backup_code_digest
 from ..security.tokens import issue_token
 from ..security.totp import unwrap_secret, verify_code
+from ._audit import append_access_log
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -166,6 +167,7 @@ async def _close_read_transaction(session: AsyncSession) -> None:
 
 
 DECOY_SALT_INFO = b"mindpattern/decoy-salt/v1"
+RECOVERY_LIMIT_INFO = b"mindpattern/recovery-rate-limit/v1"
 
 
 def decoy_salt(username: str, secret: str) -> str:
@@ -175,6 +177,18 @@ def decoy_salt(username: str, secret: str) -> str:
     decoy_key = hkdf_sha256(secret.encode("utf-8"), None, DECOY_SALT_INFO)
     digest = hmac.new(decoy_key, b"decoy:" + username.encode("utf-8"), hashlib.sha256).digest()
     return base64.b64encode(digest[:SALT_BYTES]).decode("ascii")
+
+
+def recovery_failure_key(username: str, secret: str) -> str:
+    """Opaque bucket id using the database lookup's exact username semantics.
+
+    Registration and lookup are case-sensitive and do not trim. Collapsing
+    case or whitespace here would let an unknown spelling spend a real
+    account's recovery budget even though it can never select that row.
+    """
+    key = hkdf_sha256(secret.encode("utf-8"), None, RECOVERY_LIMIT_INFO)
+    digest = hmac.new(key, username.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"recovery-fail:{digest}"
 
 
 def _issue(request: Request, user: User) -> TokenResponse:
@@ -204,6 +218,7 @@ def _issue(request: Request, user: User) -> TokenResponse:
         expires_in=settings.token_ttl_seconds,
         role=user.role,
         key_scheme=user.key_scheme if user.key_scheme else KEY_SCHEME_V1,
+        mfa_enrollment_required=user.role == ROLE_THERAPIST and user.totp_enabled is not True,
     )
 
 
@@ -312,6 +327,8 @@ async def register(
         key_scheme=KEY_SCHEME_V2 if wrapped_key_bytes is not None else "v1",
         wrapped_data_key=wrapped_key_bytes,
         kdf_params=kdf_params_json,
+        age_attestation_version=body.age_attestation,
+        age_attested_at=utcnow(),
     )
     session.add(user)
     try:
@@ -319,6 +336,14 @@ async def register(
         # must not persist, or the username is silently consumed (first
         # request 500, every retry 409 "taken").
         await session.flush()
+        await append_access_log(
+            session,
+            actor_id=user.id,
+            actor_role="patient",
+            user_id=user.id,
+            action="account_created",
+            allow_new_chain=True,
+        )
         response = _issue(request, user)
         await session.commit()
     except IntegrityError as exc:
@@ -427,6 +452,18 @@ async def recover_login(
     through their TOTP recovery codes; a recovery kit here would bypass
     that factor entirely.
     """
+    settings = request.app.state.settings
+    recovery_fail_key = recovery_failure_key(
+        body.username, settings.decoy_secret.strip() or settings.token_secret
+    )
+    # Apply the same opaque keyed budget before account lookup for known,
+    # unknown, inactive, unenrolled, and wrong-scheme inputs alike.
+    check_keyed_limit_without_count(
+        request,
+        recovery_fail_key,
+        settings.verifier_failure_limit,
+        settings.auth_rate_window,
+    )
     async with auth_work_slot(request):
         result = await session.execute(select(User).where(User.username == body.username))
         user = result.scalar_one_or_none()
@@ -457,43 +494,22 @@ async def recover_login(
                 limiter=_auth_limiter(request),
                 n=request.app.state.settings.scrypt_n,
             )
+            record_keyed_failure(request, recovery_fail_key, settings.auth_rate_window)
             raise ApiError(
                 status_code=401, detail="invalid credentials", code="invalid_credentials"
             )
-        # 2026-10-01 audit C1: scheme negotiation. The client's hint says
-        # which verifier DERIVATION it sent (v2 = domain-separated HKDF,
-        # never the raw key; v1 = legacy raw key). A mismatch is protocol
-        # negotiation, not a credential miss: a distinct code lets the
-        # client retry once with the other scheme WITHOUT the attempt
-        # counting against the keyed failure budget.
+        # The scheme is an explicit part of the credential.  It must not be
+        # an enrollment oracle: wrong scheme, wrong proof and no kit all
+        # perform a scrypt burn and return the same flat failure.
         stored_scheme = 2 if (user.recovery_scheme or 1) == 2 else 1
         hint_scheme = 2 if body.scheme == "v2" else 1
-        if hint_scheme != stored_scheme:
-            raise ApiError(
-                status_code=401,
-                detail="recovery kit scheme mismatch; retry with the other scheme",
-                code="recovery_scheme_mismatch",
-            )
-        # 2026-10-01 audit LOW (D-4 asymmetry): per-USERNAME failure budget
-        # for recovery-key guessing — reachable only past the existence-blind
-        # gate above (decoy burn for unknown accounts), so there is no
-        # lockout oracle for unauthenticated spray; only ACTUAL failures
-        # spend it, like the TOTP and verifier buckets.
-        settings = request.app.state.settings
-        recovery_fail_key = f"recovery-fail:{user.username}"
-        check_keyed_limit_without_count(
-            request,
-            recovery_fail_key,
-            settings.verifier_failure_limit,
-            settings.auth_rate_window,
-        )
         candidate = await hash_verifier_off_loop(
             recovery_key,
             recovery_salt,
             limiter=_auth_limiter(request),
             n=settings.scrypt_n,
         )
-        if not hmac.compare_digest(candidate, bytes(verifier_hash)):
+        if hint_scheme != stored_scheme or not hmac.compare_digest(candidate, bytes(verifier_hash)):
             record_keyed_failure(request, recovery_fail_key, settings.auth_rate_window)
             raise ApiError(
                 status_code=401, detail="invalid credentials", code="invalid_credentials"
@@ -514,6 +530,7 @@ async def recover_login(
                 or fresh.recovery_wrapped_data_key != sealed_key
                 or (2 if (fresh.recovery_scheme or 1) == 2 else 1) != stored_scheme
             ):
+                record_keyed_failure(request, recovery_fail_key, settings.auth_rate_window)
                 raise ApiError(
                     status_code=401, detail="invalid credentials", code="invalid_credentials"
                 )

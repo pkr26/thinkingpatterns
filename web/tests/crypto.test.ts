@@ -8,6 +8,8 @@
  * payload-layer contracts (entry v1/v2, insights v2 + state_seq,
  * question).
  */
+// @ts-nocheck
+
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";

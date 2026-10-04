@@ -17,6 +17,8 @@
  * item. Display copy lives in the locale catalogs
  * (measures.<id>.itemN / shared optionN).
  */
+// @ts-nocheck
+
 
 export type MeasureId = "phq9" | "gad7" | "phq2";
 

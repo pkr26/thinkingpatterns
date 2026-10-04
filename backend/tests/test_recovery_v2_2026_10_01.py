@@ -9,9 +9,9 @@ could open the journal. Scheme v2 splits the derivations:
   seal KEK (never sent) = HKDF(recovery_key, "mindpattern/recovery-seal/v2")
 
 The server stores only which scheme a kit uses and verifies opaquely.
-Legacy v1 kits keep working (scheme negotiation answers a distinct
-recovery_scheme_mismatch so the client can retry once), and replacing a
-kit always records the scheme the client declared.
+Legacy v1 kits keep working only when the caller explicitly declares v1.
+New v1 enrollment is retired, and a scheme mismatch is deliberately
+indistinguishable from every other invalid recovery proof.
 """
 
 from __future__ import annotations
@@ -104,7 +104,9 @@ class TestRecoveryV2:
         assert after.json()["enabled"] is True
         assert after.json()["scheme"] == "v2"
 
-    async def test_scheme_mismatch_is_negotiation_not_a_credential_miss(self, client, recovery_key):
+    async def test_legacy_v1_requires_explicit_scheme_without_oracle(
+        self, client, app, recovery_key
+    ):
         emu = ClientEmulator("rec2-mism", "correct horse battery staple")
         await emu.register(client)
         sealed = os.urandom(WRAPPED)
@@ -119,9 +121,26 @@ class TestRecoveryV2:
                 "scheme": "v1",
             },
         )
-        assert response.status_code == 204, response.text
+        assert response.status_code == 409, response.text
+        assert response.json()["code"] == "upgrade_required"
 
-        # ...a v2 hint answers the DISTINCT negotiation code...
+        # Simulate a kit enrolled before v1 retirement.
+        from app.api.auth import hash_verifier_off_loop
+        from app.models import User, utcnow
+        from sqlalchemy import select
+
+        salt = os.urandom(16)
+        digest = await hash_verifier_off_loop(recovery_key, salt, n=app.state.settings.scrypt_n)
+        async with app.state.sessionmaker() as session:
+            row = await session.scalar(select(User).where(User.id == emu.user_id))
+            row.recovery_salt = salt
+            row.recovery_verifier = digest
+            row.recovery_wrapped_data_key = sealed
+            row.recovery_set_at = utcnow()
+            row.recovery_scheme = 1
+            await session.commit()
+
+        # A v2 hint is the same flat credential miss as any bad proof.
         v2_hint = await client.post(
             "/api/auth/recover",
             json={
@@ -131,7 +150,7 @@ class TestRecoveryV2:
             },
         )
         assert v2_hint.status_code == 401
-        assert v2_hint.json()["code"] == "recovery_scheme_mismatch"
+        assert v2_hint.json()["code"] == "invalid_credentials"
 
         # ...and the v1 retry (the client's fallback) succeeds.
         retry = await client.post(
@@ -141,7 +160,7 @@ class TestRecoveryV2:
         assert retry.status_code == 200, retry.text
         assert retry.json()["recovery_scheme"] == "v1"
 
-    async def test_v2_kit_rejects_a_v1_hint_with_the_negotiation_code(self, client, recovery_key):
+    async def test_v2_kit_rejects_a_v1_hint_without_an_oracle(self, client, recovery_key):
         emu = ClientEmulator("rec2-v1hint", "correct horse battery staple")
         await emu.register(client)
         await _setup_v2(client, emu, recovery_key)
@@ -150,7 +169,92 @@ class TestRecoveryV2:
             json={"username": "rec2-v1hint", "verifier": b64(recovery_key), "scheme": "v1"},
         )
         assert response.status_code == 401
-        assert response.json()["code"] == "recovery_scheme_mismatch"
+        assert response.json()["code"] == "invalid_credentials"
+
+    async def test_recovery_scheme_is_required(self, client, recovery_key):
+        emu = ClientEmulator("rec2-explicit", "correct horse battery staple")
+        await emu.register(client)
+        await _setup_v2(client, emu, recovery_key)
+        response = await client.post(
+            "/api/auth/recover",
+            json={"username": emu.username, "verifier": b64(recovery_key)},
+        )
+        assert response.status_code == 422
+        assert response.json()["code"] == "validation_error"
+
+    async def test_failure_budget_is_uniform_and_opaque_for_every_enrollment_state(
+        self, client, app, settings, recovery_key
+    ):
+        """Known-kit, no-kit, unknown and wrong-scheme probes consume the
+        same normalized per-identifier budget.  The counter key must not
+        retain the supplied username in process memory."""
+        settings.auth_rate_limit = 100
+        settings.verifier_failure_limit = 2
+
+        wrong_proof = ClientEmulator("rec-budget-proof", "correct horse battery staple")
+        await wrong_proof.register(client)
+        await _setup_v2(client, wrong_proof, recovery_key)
+        wrong_scheme = ClientEmulator("rec-budget-scheme", "correct horse battery staple")
+        await wrong_scheme.register(client)
+        await _setup_v2(client, wrong_scheme, recovery_key)
+        no_kit = ClientEmulator("rec-budget-nokit", "correct horse battery staple")
+        await no_kit.register(client)
+
+        cases = [
+            (
+                wrong_proof.username,
+                b64(os.urandom(32)),
+                "v2",
+            ),
+            (
+                wrong_scheme.username,
+                b64(hkdf_info(recovery_key, VERIFIER_INFO)),
+                "v1",
+            ),
+            (no_kit.username, b64(os.urandom(32)), "v2"),
+            ("rec-budget-unknown", b64(os.urandom(32)), "v2"),
+        ]
+        for username, verifier, scheme in cases:
+            observed: list[tuple[int, str]] = []
+            for _attempt in range(3):
+                response = await client.post(
+                    "/api/auth/recover",
+                    json={"username": username, "verifier": verifier, "scheme": scheme},
+                )
+                observed.append((response.status_code, response.json()["code"]))
+            assert observed == [
+                (401, "invalid_credentials"),
+                (401, "invalid_credentials"),
+                (429, "rate_limited"),
+            ]
+
+        keys = list(app.state.rate_counter._hits)  # noqa: SLF001 -- privacy contract pin
+        for username, _verifier, _scheme in cases:
+            assert all(username not in key for key in keys)
+
+    async def test_recovery_budget_preserves_exact_case_and_whitespace_lookup_semantics(
+        self, client, settings, recovery_key
+    ):
+        settings.auth_rate_limit = 100
+        settings.verifier_failure_limit = 2
+        enrolled = ClientEmulator("RecCaseBudget", "correct horse battery staple")
+        await enrolled.register(client)
+        await _setup_v2(client, enrolled, recovery_key)
+        verifier = b64(os.urandom(32))
+
+        async def attempt(username: str) -> int:
+            response = await client.post(
+                "/api/auth/recover",
+                json={"username": username, "verifier": verifier, "scheme": "v2"},
+            )
+            return response.status_code
+
+        assert [await attempt(enrolled.username) for _ in range(3)] == [401, 401, 429]
+        # These inputs do not select the registered row, so neither may
+        # inherit its exhausted bucket. Each exact lookup gets its own
+        # identical two-failure budget.
+        assert [await attempt(enrolled.username.lower()) for _ in range(3)] == [401, 401, 429]
+        assert [await attempt(f" {enrolled.username} ") for _ in range(3)] == [401, 401, 429]
 
     async def test_reset_proven_by_the_v2_verifier(self, client, recovery_key):
         emu = ClientEmulator("rec2-reset", "correct horse battery staple")

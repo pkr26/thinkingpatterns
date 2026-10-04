@@ -13,8 +13,9 @@
  * exactly like the mood log and pending measures (the vault/kvstore
  * idiom). It never leaves the device, the server stores nothing, and a
  * filesystem reader gets ciphertext. Per-user slot:
- * @mindpattern/safety_plan_<userId>. A wrong key (account switch,
- * rotation) or tampered blob reads as ABSENT, never as a partial plan.
+ * @mindpattern/safety_plan_<userId>. Absence is distinct from an unreadable
+ * record: a wrong key, tamper, or invalid shape fails closed so the UI can
+ * block an accidental overwrite of safety-critical content.
  *
  * POSITION IN THE SAFETY SURFACE: a SUPPLEMENT, never a gate. The static
  * crisis resources (numbers, chat, 911) stay first, always available,
@@ -23,6 +24,7 @@
  */
 import { captureLocalWritePermit, captureOpaqueLocalWritePermit, commitLocalWrite, type LocalWritePermit } from "./localRekey";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { accountStorageKey } from "./accountStorage";
 import { buildAad, decrypt, encrypt } from "./crypto/envelope";
 
 /** The six Stanley-Brown-inspired fields, in the screen's display order. */
@@ -68,8 +70,8 @@ export function emptySafetyPlan(): SafetyPlan {
   };
 }
 
-const key = (userId: string): string => `@mindpattern/safety_plan_${userId}`;
-const draftKey = (userId: string): string => `@mindpattern/safety_plan_draft_${userId}`;
+const key = accountStorageKey.safetyPlan;
+const draftKey = accountStorageKey.safetyPlanDraft;
 
 /** Full validation of anything read back from storage (the pendingMeasure
  *  discipline): every field must be a bounded string; anything else is a
@@ -88,6 +90,16 @@ function parsePlan(raw: string | null): SafetyPlan | null {
     return plan;
   } catch {
     return null;
+  }
+}
+
+/** A saved-plan slot exists but cannot be authenticated or validated. The
+ * screen must not turn this into an empty editable plan: doing so lets the
+ * next Save silently overwrite potentially recoverable safety content. */
+export class SafetyPlanReadError extends Error {
+  constructor() {
+    super("The saved safety plan could not be opened or validated");
+    this.name = "SafetyPlanReadError";
   }
 }
 
@@ -112,10 +124,9 @@ export async function saveSafetyPlan(dataKey: Buffer, userId: string, plan: Safe
   } finally { keyCopy.fill(0); plaintext.fill(0); }
 }
 
-/** The plan for this account, or null when absent, corrupt, or under the
- *  wrong key (account switch / rotation). Never throws — a plan that
- *  cannot be read is reported as absent; the user can always write a new
- *  one, and the static crisis resources never depended on it. */
+/** The plan for this account, or null only when no saved slot exists.
+ *  Existing ciphertext that cannot be authenticated or validated throws a
+ *  typed error so callers fail closed and preserve the original bytes. */
 export async function loadSafetyPlan(dataKey: Buffer, userId: string): Promise<SafetyPlan | null> {
   const keyCopy = Buffer.from(dataKey);
   let plain: Buffer | null = null;
@@ -123,8 +134,13 @@ export async function loadSafetyPlan(dataKey: Buffer, userId: string): Promise<S
     const raw = await AsyncStorage.getItem(key(userId));
     if (!raw) return null;
     plain = decrypt(keyCopy, Buffer.from(raw, "base64"), buildAad("safety-plan", userId));
-    return parsePlan(plain.toString("utf8"));
-  } catch { return null; }
+    const parsed = parsePlan(plain.toString("utf8"));
+    if (parsed === null) throw new SafetyPlanReadError();
+    return parsed;
+  } catch (error) {
+    if (error instanceof SafetyPlanReadError) throw error;
+    throw new SafetyPlanReadError();
+  }
   finally { keyCopy.fill(0); plain?.fill(0); }
 }
 

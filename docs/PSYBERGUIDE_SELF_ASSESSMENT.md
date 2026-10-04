@@ -77,11 +77,16 @@ open until the operator completes them.
       data flows ships at `docs/PRIVACY_POLICY_TEMPLATE.md` — complete
       its LEGAL-REVIEW placeholders and publish; the in-app offline copy
       is the source)
-- [ ] App store privacy nutrition labels (data: journal text, entered by
-      user, encrypted; no tracking, no third-party SDKs)
+- [ ] App store privacy nutrition labels reconciled to the complete inventory:
+      linked identifier, health/user/audio content, access/action and consent
+      history (**Product Interaction**), and age-attestation/account metadata
+      (**Other Data Types**, or the operator's documented current-taxonomy
+      mapping); no tracking or third-party analytics SDKs. Retain dated
+      Store Connect/Play Console evidence for the candidate build.
 - [x] Research summary = RESEARCH.md *(exists; citations re-verified
       2026-09-26 and cross-checked against the shipped engine constants
       in `backend/app/services/brain.py`)*
-- [ ] Point of contact for the expert review
-      (`docs/security.txt.example` carries the contact placeholder
-      operators must fill)
+- [ ] Point of contact for the expert review. The tagged web release generates
+      `security.txt` only from validated operator variables and fails closed
+      when they are absent; `docs/security.txt.example` remains a template for
+      any additional served origin.

@@ -9,7 +9,8 @@ import { engine } from "./crypto/engine";
 import { decryptAudio, encryptAudio } from "./crypto/MindPatternCrypto";
 import { flushQueue, pendingEntryIds } from "./offlineQueue";
 import { cachedEnvelope, fetchEnvelope } from "./keyScheme";
-const KEY_PREFIX = "@mindpattern/audioqueue.v1";
+import { ACCOUNT_STORAGE_PREFIX } from "./accountStorage";
+const KEY_PREFIX = ACCOUNT_STORAGE_PREFIX.audioQueue;
 export const MAX_AUDIO_QUEUE_ITEMS = 12;
 export const MAX_TAKE_BYTES = 6_000_000;
 const SESSION_EXPIRED_RETRY_MS = 15 * 60_000;
@@ -30,10 +31,10 @@ let mutex: Promise<unknown> = Promise.resolve();
 function serialized<T>(op: () => Promise<T>): Promise<T> {
   const result = mutex.then(op, op); mutex = result.catch(() => {}); return result;
 }
-const keyFor = (origin: string, userId: string, id: string): string => `${KEY_PREFIX}:${canonicalOrigin(origin)}:${userId}:${id}`;
-const erasedKey = (origin: string, userId: string): string => `@mindpattern/audioqueue.erase.${Buffer.from(`${canonicalOrigin(origin)}\0${userId}`).toString("base64url")}`;
+const keyFor = (origin: string, userId: string, id: string): string => `${KEY_PREFIX}${canonicalOrigin(origin)}:${userId}:${id}`;
+const erasedKey = (origin: string, userId: string): string => `${ACCOUNT_STORAGE_PREFIX.audioErase}${Buffer.from(`${canonicalOrigin(origin)}\0${userId}`).toString("base64url")}`;
 async function scopeKeys(origin: string, userId: string): Promise<string[]> {
-  const prefix = `${KEY_PREFIX}:${canonicalOrigin(origin)}:${userId}:`;
+  const prefix = `${KEY_PREFIX}${canonicalOrigin(origin)}:${userId}:`;
   return (await AsyncStorage.getAllKeys()).filter(k => k.startsWith(prefix)).sort();
 }
 const fileScope = (origin: string, userId: string): string => Buffer.from(`${canonicalOrigin(origin)}\0${userId}`).toString("base64url");

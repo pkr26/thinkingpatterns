@@ -10,7 +10,8 @@ from .. import __version__
 from ..api.consents import SHARING_DISCLOSURE_VERSION
 from ..cache import make_rate_limiter
 from ..schemas import MetaResponse
-from ..services.llm import processing_policy_fingerprint
+from ..services.llm import LLM_DISCLOSURE_VERSION, processing_policy_fingerprint
+from ..services.stt import STT_DISCLOSURE_VERSION
 from ..services.stt import processing_policy_fingerprint as stt_policy_fingerprint
 
 router = APIRouter(prefix="/meta", tags=["meta"])
@@ -47,6 +48,7 @@ async def get_meta(request: Request) -> MetaResponse:
         llm_available=llm_available,
         llm_provider_name=(settings.llm_provider_name.strip() or None) if llm_available else None,
         llm_data_retention=(settings.llm_data_retention.strip() or None) if llm_available else None,
+        llm_disclosure_version=LLM_DISCLOSURE_VERSION if llm_available else None,
         llm_policy_fingerprint=processing_policy_fingerprint(settings),
         sharing_available=bool(settings.therapist_sharing_enabled),
         sharing_disclosure_version=(
@@ -70,6 +72,9 @@ async def get_meta(request: Request) -> MetaResponse:
             (settings.stt_data_retention.strip() or None)
             if settings.audio_enabled and settings.stt_url.strip()
             else None
+        ),
+        stt_disclosure_version=(
+            STT_DISCLOSURE_VERSION if settings.audio_enabled and settings.stt_url.strip() else None
         ),
         stt_policy_fingerprint=(
             stt_policy_fingerprint(settings)

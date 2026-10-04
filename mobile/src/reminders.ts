@@ -21,6 +21,8 @@
  * hour 99 or a notification at 3:47 the user never chose).
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { accountStorageKey } from "./accountStorage";
+import { commitActiveAccountWrite } from "./localWriteGuard";
 
 export interface ReminderPrefs {
   enabled: boolean;
@@ -43,7 +45,7 @@ export const DEFAULT_REMINDER_PREFS: Readonly<ReminderPrefs> = {
   ...DEFAULT_REMINDER_TIME,
 };
 
-const key = (userId: string): string => `@mindpattern/reminders_${userId}`;
+const key = accountStorageKey.reminders;
 
 /** Full validation of anything read back from storage. null = not a usable
  *  record (absent, unparsable, or hostile). */
@@ -73,7 +75,7 @@ export async function getReminderPrefs(userId: string): Promise<ReminderPrefs> {
 }
 
 async function writePrefs(userId: string, prefs: ReminderPrefs): Promise<void> {
-  await AsyncStorage.setItem(key(userId), JSON.stringify(prefs));
+  await commitActiveAccountWrite(userId, () => AsyncStorage.setItem(key(userId), JSON.stringify(prefs)));
 }
 
 /** Flip the opt-in, preserving the stored time (or the default when none

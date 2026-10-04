@@ -59,7 +59,8 @@ async def c2_resource_exhaustion() -> None:
             ak, _ = derive_keys(f"pw-{i}", salt, iterations=1000)
             return (await client.post("/api/v1/auth/register", json={
                 "username": f"c2_flood_{i}", "salt": base64.b64encode(salt).decode(),
-                "verifier": base64.b64encode(ak).decode()})).status_code
+                "verifier": base64.b64encode(ak).decode(),
+                "age_attestation": "minimum_age_confirmed_v1"})).status_code
 
         codes = await asyncio.gather(*[one(i) for i in range(8)])
         dt = time.perf_counter() - t0

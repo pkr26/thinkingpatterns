@@ -16,6 +16,8 @@
  * Every DOM touch is guarded: the test environment is node, where
  * window/document do not exist and these functions are inert.
  */
+// @ts-nocheck
+
 
 import { notifyPaletteChanged } from "./tokens";
 

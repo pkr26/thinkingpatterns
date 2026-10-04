@@ -50,6 +50,8 @@
  * it (clearMoodMirrorPref rides the SettingsScreen deletion flow).
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { accountStorageKey } from "./accountStorage";
+import { commitActiveAccountWrite } from "./localWriteGuard";
 import { Platform } from "react-native";
 import type { NativeCapability } from "./nativeFeatures";
 
@@ -259,7 +261,7 @@ interface MirrorPrefs {
 /** OFF until the user opts in — the app never writes to Health unasked. */
 const DEFAULT_MIRROR_PREFS: Readonly<MirrorPrefs> = { enabled: false };
 
-const key = (userId: string): string => `@mindpattern/mirror_mood_to_health_${userId}`;
+const key = accountStorageKey.healthMirror;
 const preferenceGeneration = new Map<string, number>();
 const preferenceRevision = (userId: string) => preferenceGeneration.get(userId) ?? 0;
 function invalidatePreference(userId: string): void { preferenceGeneration.set(userId, preferenceRevision(userId) + 1); }
@@ -292,7 +294,7 @@ export async function getMoodMirrorPref(userId: string): Promise<boolean> {
 }
 
 async function writePrefs(userId: string, prefs: MirrorPrefs): Promise<void> {
-  await AsyncStorage.setItem(key(userId), JSON.stringify(prefs));
+  await commitActiveAccountWrite(userId, () => AsyncStorage.setItem(key(userId), JSON.stringify(prefs)));
 }
 
 /** Flip the opt-in. Throwing surfaces to the caller as an honest failure —

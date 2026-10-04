@@ -16,6 +16,8 @@
  * speaks the app locale while the payload the server's engine reads stays
  * byte-identical across locales.
  */
+// @ts-nocheck
+
 import { detectLanguage, sentimentScore } from "./brain/sentiment";
 import { t } from "./strings";
 

@@ -373,7 +373,7 @@ describe("rotatePassword v2 branch (O(1) rewrap)", () => {
       oldPassword: OLD_PASSWORD,
       newPassword: NEW_PASSWORD,
     });
-    expect(outcome).toEqual({ ok: false, stage: "credential", reason: "offline" });
+    expect(outcome).toEqual({ ok: false, stage: "credential", reason: "offline", detail: "network unreachable" });
     expect(api.changePassword).not.toHaveBeenCalled();
     expect(api.login).not.toHaveBeenCalled();
   });

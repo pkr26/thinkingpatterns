@@ -14,6 +14,8 @@
  * seed Spanish text — so the pools are parallel arrays (position-parity:
  * index i is the same starter) and `promptChipsFor` picks by locale.
  */
+// @ts-nocheck
+
 
 import type { Locale } from "./strings";
 

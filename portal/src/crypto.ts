@@ -272,6 +272,18 @@ export interface MeasureReading {
   measureDate: string;
 }
 
+const MEASURE_LIMITS = {
+  phq9: { maxScore: 27 },
+  gad7: { maxScore: 21 },
+  phq2: { maxScore: 6 },
+} as const;
+
+type KnownMeasure = keyof typeof MEASURE_LIMITS;
+
+function knownMeasure(value: unknown): value is KnownMeasure {
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(MEASURE_LIMITS, value);
+}
+
 /** Decrypt one patient-recorded measure blob. The payload is the patient's
  *  client contract: {"v":1,"measure":"phq9","score":N,"item9":R,
  *  "completed_at":ISO} — item9 rides phq9 only (an endorsed PHQ-9 item 9
@@ -296,28 +308,44 @@ export async function decryptMeasure(
       buildAad("measure", userId, measure.client_measure_id),
     );
     const payload = decodeJson(plain) as Record<string, unknown>;
-    const score = payload.score;
-    // F-6 (2026-09-21): an out-of-range score (a PHQ-9 is 0-27 rendered on
-    // a 0-100 scale by the mobile app) is corrupt or hostile data — REJECT
-    // it, never clamp it into a plausible-looking wrong value.
-    if (typeof score !== "number" || !Number.isFinite(score) || score < 0 || score > 100) {
+    // The current wire schema is exactly v1 and carries a validated score,
+    // not the full response array. Item-count/per-item revalidation is
+    // therefore unavailable at this trust boundary; strict instrument
+    // identity, integer totals, and instrument ceilings are enforced here.
+    // Unknown future schemas must not be interpreted with today's labels.
+    if (payload.v !== 1 || !knownMeasure(payload.measure)) {
       return null;
     }
-    const measureName = typeof payload.measure === "string" ? payload.measure.slice(0, 24) : "measure";
+    const measureName = payload.measure;
+    const score = payload.score;
+    const limit = MEASURE_LIMITS[measureName];
+    // Scores are sums of integer 0-3 item responses. Reject fractions and
+    // enforce the instrument-specific ceiling; never clamp hostile data
+    // into a clinically plausible-looking value.
+    if (
+      typeof score !== "number"
+      || !Number.isInteger(score)
+      || score < 0
+      || score > limit.maxScore
+    ) {
+      return null;
+    }
     // item9 (2026-09-27): parsed ONLY for phq9, and only as an integer
     // 0-3 — anything else (a gad7 carrying the field, a 7, a string, a
     // negative) is not a fact this portal may render, so it reads as
-    // absent. The READING is not dropped: a hostile item9 degrades the
-    // field, never the whole row.
+    // absent. For PHQ-9, a PRESENT malformed item9 invalidates the whole
+    // row: selectively dropping a self-harm response while retaining its
+    // total would create a dangerously incomplete clinical display.
     const rawItem9 = payload.item9;
-    const item9 =
-      measureName === "phq9"
-        && typeof rawItem9 === "number"
-        && Number.isInteger(rawItem9)
-        && rawItem9 >= 0
-        && rawItem9 <= 3
-        ? rawItem9
-        : null;
+    if (
+      rawItem9 !== undefined
+      && (measureName !== "phq9"
+        || typeof rawItem9 !== "number"
+        || !Number.isInteger(rawItem9)
+        || rawItem9 < 0
+        || rawItem9 > 3)
+    ) return null;
+    const item9 = measureName === "phq9" && typeof rawItem9 === "number" ? rawItem9 : null;
     return {
       measure: measureName,
       score: Math.round(score),

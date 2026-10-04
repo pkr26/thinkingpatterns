@@ -8,6 +8,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { clearSession, api, hasSession, setUnauthorizedHandler, type Patient } from "./api";
+import { displayError } from "./errors";
 import { unlockWrapPrivateKeyWithNotesKey, openNotesKeyring, wipeNotesKeyring, type NotesKeyring } from "./crypto";
 import { LoginView, type PortalKeys } from "./views/LoginView";
 import { PatientsView, resetScanConfirmation } from "./views/PatientsView";
@@ -73,7 +74,7 @@ export function App(): React.JSX.Element {
         else { setNotice("That patient is not available to this account."); setView({ kind: "patients" }); }
       } catch (error) {
         if (!alive || request !== generation) return;
-        setNotice(error instanceof Error ? error.message : "The patient could not be opened. Retry when connected.");
+        setNotice(displayError(error, "The patient could not be opened. Retry when connected."));
         setView({ kind: "patients" });
       }
     };
@@ -300,9 +301,7 @@ export function App(): React.JSX.Element {
         setUnlockError(
           err instanceof Error && err.name === "TamperError"
             ? "your stored sharing key could not be unlocked with this password — sign in with the account's password"
-            : err instanceof Error
-              ? err.message
-              : "could not unlock your sharing key",
+            : displayError(err, "could not unlock your sharing key"),
         );
         setView({ kind: "login" });
       }
@@ -354,22 +353,25 @@ export function App(): React.JSX.Element {
   }
 
   return (
-    <ViewBoundary resetKey="patients">
-      <PatientsView
-        displayName={displayName}
-        session={session}
-        onOpen={(patient) => { writePatientRoute(patient.user_id); setView({ kind: "patient", patient }); }}
-        onSignOut={() => {
-          // Same explicit-sign-out anchor carve-out as the chart's button.
-          lockDown("Signed out. Your in-memory keys were cleared.", { clearAnchors: true });
-        }}
-        // NEW-3 / F.4 (2026-09-22): a successful password change killed every
-        // bearer (the server bumps the token epoch), so the lock-down notice
-        // says why the user is suddenly back at the sign-in screen.
-        onSessionsEnded={() => {
-          lockDown("Password changed. Every session — including this one — has ended; sign in with your new password.");
-        }}
-      />
-    </ViewBoundary>
+    <>
+      {notice && <InfoBanner message={notice} flush />}
+      <ViewBoundary resetKey="patients">
+        <PatientsView
+          displayName={displayName}
+          session={session}
+          onOpen={(patient) => { writePatientRoute(patient.user_id); setView({ kind: "patient", patient }); }}
+          onSignOut={() => {
+            // Same explicit-sign-out anchor carve-out as the chart's button.
+            lockDown("Signed out. Your in-memory keys were cleared.", { clearAnchors: true });
+          }}
+          // NEW-3 / F.4 (2026-09-22): a successful password change killed every
+          // bearer (the server bumps the token epoch), so the lock-down notice
+          // says why the user is suddenly back at the sign-in screen.
+          onSessionsEnded={() => {
+            lockDown("Password changed. Every session — including this one — has ended; sign in with your new password.");
+          }}
+        />
+      </ViewBoundary>
+    </>
   );
 }

@@ -2,11 +2,12 @@
  * failures and unreadable ciphertext never become an empty draft. */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { canonicalOrigin, getBaseUrl } from "./api/client";
+import { accountStorageKey, ACCOUNT_STORAGE_PREFIX } from "./accountStorage";
 import { captureLocalWritePermit, assertLocalWritePermit, commitLocalWrite } from "./localRekey";
 import { engine } from "./crypto/engine";
 import { buildAad, decrypt, encrypt } from "./crypto/envelope";
 
-export const JOURNAL_DRAFT_PREFIX = "@mindpattern/journal-draft.v1.";
+export const JOURNAL_DRAFT_PREFIX = ACCOUNT_STORAGE_PREFIX.journalDraft;
 export interface JournalDraft {
   v: 1; editorId: string; revision: number; text: string;
   mood: number | null; energy: number | null; sleep: number | null; tags: string[];
@@ -30,10 +31,10 @@ export function newJournalDraft(): JournalDraft {
 }
 export async function journalDraftScope(userId: string): Promise<JournalDraftScope> {
   const origin = canonicalOrigin(new URL(await getBaseUrl()).origin);
-  return { userId, origin, slot: `${JOURNAL_DRAFT_PREFIX}${Buffer.from(`${origin}\0${userId}`).toString("base64url")}` };
+  return { userId, origin, slot: accountStorageKey.journalDraft(origin, userId) };
 }
 function checkScope(scope: JournalDraftScope): void {
-  if (!scope.userId || canonicalOrigin(new URL(scope.origin).origin) !== scope.origin || scope.slot !== `${JOURNAL_DRAFT_PREFIX}${Buffer.from(`${scope.origin}\0${scope.userId}`).toString("base64url")}`) throw new Error("Invalid draft account/server scope");
+  if (!scope.userId || canonicalOrigin(new URL(scope.origin).origin) !== scope.origin || scope.slot !== accountStorageKey.journalDraft(scope.origin, scope.userId)) throw new Error("Invalid draft account/server scope");
 }
 function valid(value: unknown): value is JournalDraft {
   if (!value || typeof value !== "object") return false;

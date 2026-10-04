@@ -11,6 +11,13 @@ export interface DraftState {
 const empty = (): DraftState => ({ text: {}, editing: null, pending: {} });
 const chains = new Map<string, Promise<unknown>>();
 const slot = (owner: string, patient: string) => `portal.draft.${owner}.${patient}`;
+
+/** Test lifecycle seam: callers must drain encrypted writes before replacing
+ * the injected storage backend. Production never swaps its IndexedDB backend. */
+export async function drainPortalDraftWritesForTests(): Promise<void> {
+  while (chains.size > 0) await Promise.allSettled([...chains.values()]);
+}
+
 export async function savePortalDraft(owner: string, patient: string, key: Bytes, state: DraftState): Promise<void> {
   const id = slot(owner, patient); const keyCopy = new Uint8Array(key); const plain = new TextEncoder().encode(JSON.stringify({ v: 1, state }));
   const run = async () => {
@@ -18,7 +25,10 @@ export async function savePortalDraft(owner: string, patient: string, key: Bytes
     finally { keyCopy.fill(0); plain.fill(0); }
   };
   const result = (chains.get(id) ?? Promise.resolve()).then(run,run);
-  chains.set(id,result.catch(() => undefined)); await result;
+  const tail = result.catch(() => undefined);
+  chains.set(id,tail);
+  void tail.then(() => { if (chains.get(id) === tail) chains.delete(id); });
+  await result;
 }
 export async function loadPortalDraft(owner: string, patient: string, keys: Bytes[]): Promise<DraftState | null> {
   await chains.get(slot(owner,patient));

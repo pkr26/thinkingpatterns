@@ -126,7 +126,7 @@ jobs:
         run: npm test
       - name: Mobile dependency audit
         working-directory: mobile
-        run: npm audit --audit-level=moderate
+        run: npm run audit:dependencies
 
   android-build:
     # A static preflight cannot detect Expo/Gradle/C++ incompatibilities.
@@ -151,7 +151,48 @@ jobs:
             'ndk;27.1.12297006' 'cmake;3.22.1'
       - name: Compile Android application and native modules
         working-directory: mobile/android
-        run: ./gradlew :app:assembleDebug --no-daemon --max-workers=2 -PreactNativeArchitectures=arm64-v8a,x86_64
+        run: ./gradlew :app:assembleDebug --dependency-verification strict --no-daemon --max-workers=2 -PreactNativeArchitectures=arm64-v8a,x86_64
+      - name: Prove Gradle resolution reproduces the committed lock state
+        working-directory: mobile/android
+        run: |
+          ./gradlew :app:dependencies --write-locks --dependency-verification strict --no-daemon --max-workers=2
+          git diff --exit-code -- app/gradle.lockfile settings-gradle.lockfile gradle/verification-metadata.xml
+
+  ios-build:
+    # Resolve only the committed Ruby/Pod closures, then compile for the
+    # simulator without signing. This catches Podfile/Xcode/native-module
+    # drift while leaving certificates and store credentials outside CI.
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - uses: ruby/setup-ruby@d354de180d0c9e813cfddfcbdc079945d4be589b # v1.275.0
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+          working-directory: mobile/ios
+      - name: Install exact JavaScript and CocoaPods closures
+        working-directory: mobile
+        run: |
+          npm ci
+          cd ios
+          bundle exec pod install --deployment
+      - name: Compile the iOS app without signing
+        working-directory: mobile/ios
+        run: |
+          xcodebuild \
+            -workspace MindPattern.xcworkspace \
+            -scheme MindPattern \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
 
   native-release-preflight:
     # mobile/tools/verify_native_release.mjs is the fail-closed gate for the
@@ -325,7 +366,10 @@ jobs:
           mkdir -p deploy/secrets
           printf '%s\n' "$pg_password" > deploy/secrets/postgres_password
           openssl rand -hex 32 > deploy/secrets/token_secret
-          : > deploy/secrets/auth_token_secret
+          for name in auth_token_secret totp_wrap_secret pairing_secret decoy_secret audit_mac_secret; do
+            openssl rand -hex 32 > "deploy/secrets/$name"
+          done
+          : > deploy/secrets/audit_mac_previous_secrets
           openssl rand -base64 32 > deploy/secrets/backup_key
           # Independent audit 2026-09-27: the metrics token rides the same
           # file-mount chain (api MINDPATTERN_METRICS_TOKEN_FILE); ONE
@@ -333,6 +377,9 @@ jobs:
           openssl rand -hex 16 > deploy/secrets/metrics_token
           chmod 600 .env deploy/secrets/postgres_password \
             deploy/secrets/token_secret deploy/secrets/auth_token_secret \
+            deploy/secrets/totp_wrap_secret deploy/secrets/pairing_secret \
+            deploy/secrets/decoy_secret deploy/secrets/audit_mac_secret \
+            deploy/secrets/audit_mac_previous_secrets \
             deploy/secrets/backup_key deploy/secrets/metrics_token
           # 2026-09-28 audit L-4: the monitoring stack reads its COPY of the
           # same token from deploy/monitoring/token (prometheus
@@ -344,7 +391,7 @@ jobs:
           chmod 600 deploy/monitoring/token
           cmp -s deploy/secrets/metrics_token deploy/monitoring/token \
             || { echo '::error::metrics token sinks diverged' >&2; exit 1; }
-      - name: Assert the db password never reaches a container environment
+      - name: Assert secret values never reach a container environment
         # Pentest 2026-09-29 (MED-1): the api used to receive
         # MINDPATTERN_DB_URL with ${POSTGRES_PASSWORD} interpolated raw
         # into its environment — readable via `docker inspect`. The fixed
@@ -355,32 +402,47 @@ jobs:
         # (docker-entrypoint.sh assembles the URL from it in-process).
         run: |
           set -euo pipefail
-          test -f deploy/secrets/postgres_password \
-            || { echo "::error::deploy/secrets/postgres_password was not written by the previous step" >&2; exit 1; }
-          file_password=$(cat deploy/secrets/postgres_password)
-          if [ -z "$file_password" ]; then
-            echo "::error::deploy/secrets/postgres_password is empty" >&2
-            exit 1
-          fi
-          rendered=$(docker compose -f docker-compose.yml -f docker-compose.dev.yml config)
-          if printf '%s' "$rendered" | grep -q 'MINDPATTERN_DB_URL'; then
+          secret_files=(token_secret auth_token_secret totp_wrap_secret pairing_secret decoy_secret audit_mac_secret metrics_token postgres_password backup_key)
+          for name in "${secret_files[@]}"; do
+            test -s "deploy/secrets/$name" \
+              || { echo "::error::deploy/secrets/$name is missing or empty" >&2; exit 1; }
+          done
+          test -f deploy/secrets/audit_mac_previous_secrets \
+            || { echo "::error::required audit history file is missing" >&2; exit 1; }
+          rendered_json=$(mktemp)
+          docker compose -f docker-compose.yml -f docker-compose.dev.yml config --format json > "$rendered_json"
+          if jq -e '.services.api.environment | has("MINDPATTERN_DB_URL")' "$rendered_json" >/dev/null; then
             echo "::error::rendered compose still carries MINDPATTERN_DB_URL — the api environment must never contain it (MED-1 regression)" >&2
             exit 1
           fi
-          if printf '%s' "$rendered" | grep -qF "$file_password"; then
-            echo "::error::rendered compose contains the postgres password in plaintext (MED-1 regression)" >&2
+          for key in MINDPATTERN_TOKEN_SECRET MINDPATTERN_AUTH_TOKEN_SECRET \
+                     MINDPATTERN_TOTP_WRAP_SECRET MINDPATTERN_PAIRING_SECRET \
+                     MINDPATTERN_DECOY_SECRET MINDPATTERN_AUDIT_MAC_SECRET \
+                     MINDPATTERN_AUDIT_MAC_PREVIOUS_SECRETS \
+                     MINDPATTERN_METRICS_TOKEN; do
+            if jq -e --arg key "$key" '.services.api.environment | has($key)' "$rendered_json" >/dev/null; then
+              echo "::error::rendered api environment exposes $key instead of file-only delivery" >&2
+              exit 1
+            fi
+          done
+          if jq -e '.services.backup.environment | has("BACKUP_KEY")' "$rendered_json" >/dev/null; then
+            echo "::error::rendered backup environment exposes BACKUP_KEY instead of file-only delivery" >&2
             exit 1
           fi
-          if ! printf '%s' "$rendered" | grep -q postgres_password; then
-            echo "::error::rendered compose does not reference the postgres_password secret (the api/db mounts drifted)" >&2
-            exit 1
-          fi
-          echo "compose render: no MINDPATTERN_DB_URL, no plaintext password, postgres_password secret mounted"
+          for name in "${secret_files[@]}"; do
+            value=$(cat "deploy/secrets/$name")
+            if grep -qF "$value" "$rendered_json"; then
+              echo "::error::rendered compose contains plaintext from deploy/secrets/$name" >&2
+              exit 1
+            fi
+          done
+          echo "compose render: all credentials are non-empty file mounts and no plaintext secret is present"
       - name: Validate compose and build both local source images
         # --progress=plain (2026-09-26): a bare "build" failure reports
         # only the failing stage; the plain renderer shows the compile/apt
         # output needed to diagnose digest/base drift from the run log.
         run: |
+          docker pull cgr.dev/chainguard/minio:latest@sha256:4cf4831a2bbcf13ddca09c1cbcc9faff716dd3c4247e0babc32864b8ee8e0034
           docker compose -f docker-compose.yml -f docker-compose.dev.yml config --quiet
           docker compose -f docker-compose.yml -f docker-compose.dev.yml build --progress=plain
       - name: Trivy vulnerability scan of both built images (2026-09-21 audit G-6)
@@ -429,7 +491,7 @@ jobs:
         run: |
           curl --fail --silent --show-error --output /dev/null \
             -H 'Content-Type: application/json' \
-            --data '{"username":"backup-restore-probe","salt":"AAAAAAAAAAAAAAAAAAAAAA==","verifier":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}' \
+            --data '{"username":"backup-restore-probe","salt":"AAAAAAAAAAAAAAAAAAAAAA==","verifier":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","age_attestation":"minimum_age_confirmed_v1"}' \
             http://127.0.0.1:8000/api/v1/auth/register
       - name: Create, authenticate, and actually restore a backup
         run: |
@@ -697,6 +759,33 @@ jobs:
           tar xzf gitleaks.tgz gitleaks
           sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
           gitleaks version
+      - name: Prove narrow false-positive rules still expose planted secrets
+        run: |
+          probe_dir=$(mktemp -d)
+          trap 'find "$probe_dir" -type f -delete; rmdir "$probe_dir/docs" "$probe_dir/mobile/ios" "$probe_dir/mobile" "$probe_dir"' EXIT
+          mkdir -p "$probe_dir/docs" "$probe_dir/mobile/ios"
+          probe_secret="ghp_$(printf '%s%s%s' 'A1b2C3d4E5f6' 'G7h8I9j0K1l2' 'M3n4O5p6Q7r8')"
+          printf '%s\n%s\n' \
+            '| policy | therapist linkage, speech/translation processing |' \
+            "$probe_secret" > "$probe_dir/docs/OPERATOR_PACK.md"
+          printf '%s\n%s\n' \
+            '  React-cxxstableapi: 1e0ad8a5ecb7f2f5440c012798cf20bec6341c1f' \
+            "$probe_secret" > "$probe_dir/mobile/ios/Podfile.lock"
+          probe_status=0
+          gitleaks detect --source "$probe_dir" --no-git --config .gitleaks.toml \
+            --redact --exit-code 7 --report-format json --report-path "$probe_dir/report.json" \
+            || probe_status=$?
+          test "$probe_status" -eq 7
+          python3 - "$probe_dir/report.json" <<'PY'
+          import json
+          import sys
+
+          findings = json.load(open(sys.argv[1], encoding="utf-8"))
+          files = {str(row["File"]).replace("\\", "/") for row in findings}
+          assert len(findings) == 2, findings
+          assert any(path.endswith("/docs/OPERATOR_PACK.md") for path in files), files
+          assert any(path.endswith("/mobile/ios/Podfile.lock") for path in files), files
+          PY
       - name: Scan full git history
         run: gitleaks detect --source . --config .gitleaks.toml --redact --exit-code 1
       - name: Scan working tree (untracked files included)

@@ -414,6 +414,11 @@ class _VanishingConsentSession:
 
     async def execute(self, statement):
         text = str(statement).lower()
+        if text.lstrip().startswith("update users"):
+            # Sharing snapshot bumps now reject inactive counterpart rows;
+            # this fake represents the still-active rows immediately before
+            # the therapist cascade wins at commit.
+            return SimpleNamespace(rowcount=1)
         # 2026-09-26 audit M-B1: _require_verifier now re-reads the USER
         # row through this session before comparing the verifier. The
         # discriminator cannot be a bare "consent" substring — the users
@@ -475,7 +480,7 @@ async def _real_user(app, emu) -> object:
         )
 
 
-async def test_revoke_maps_stale_consent_to_404(client, app):
+async def test_revoke_maps_stale_consent_to_404(client, app, monkeypatch):
     from app.api import consents as consents_module
 
     emu = ClientEmulator("revoke-race", "deep-password")
@@ -490,7 +495,18 @@ async def test_revoke_maps_stale_consent_to_404(client, app):
         user_id=emu.user_id,
         therapist_id=th.user_id,
         status="active",
+        share_voice=False,
+        disclosure="v3",
     )
+
+    # This unit fake targets the commit-time cascade mapping, not the audit
+    # chain. Runtime chain append/verification is covered through real
+    # sessions elsewhere; bypass it so the intentionally tiny fake reaches
+    # its StaleDataError seam.
+    async def append_noop(*_args, **_kwargs):
+        return SimpleNamespace()
+
+    monkeypatch.setattr(consents_module, "append_access_log", append_noop)
     session = _VanishingConsentSession(user, fake_consent, SimpleNamespace())
     with pytest.raises(ApiError) as excinfo:
         await consents_module.revoke_consent(
@@ -513,7 +529,7 @@ async def test_revoke_maps_stale_consent_to_404(client, app):
     assert excinfo.value.code == "not_found"
 
 
-async def test_rewrap_maps_stale_consent_to_404(client, app):
+async def test_rewrap_maps_stale_consent_to_404(client, app, monkeypatch):
     from app.api import consents as consents_module
 
     emu = ClientEmulator("rewrap-race", "deep-password")
@@ -529,6 +545,11 @@ async def test_rewrap_maps_stale_consent_to_404(client, app):
         therapist_id=th.user_id,
         status="active",
     )
+
+    async def append_noop(*_args, **_kwargs):
+        return SimpleNamespace()
+
+    monkeypatch.setattr(consents_module, "append_access_log", append_noop)
     wrap = patient_wrap_for(emu, th.wrap_pub_key, th.user_id or "")
     session = _VanishingConsentSession(user, fake_consent, SimpleNamespace())
     with pytest.raises(ApiError) as excinfo:
@@ -553,7 +574,7 @@ async def test_rewrap_maps_stale_consent_to_404(client, app):
     assert excinfo.value.code == "not_found"
 
 
-async def test_rewrap_maps_post_commit_refresh_race_to_404(client, app):
+async def test_rewrap_maps_post_commit_refresh_race_to_404(client, app, monkeypatch):
     """Final verification 2026-09-22: the A-5 fix mapped the StaleDataError
     around the rewrap commit, but the post-commit `refresh` kept a narrower
     500 window — a therapist deletion cascade can land between a successful
@@ -600,6 +621,11 @@ async def test_rewrap_maps_post_commit_refresh_race_to_404(client, app):
         therapist_id=th.user_id,
         status="active",
     )
+
+    async def append_noop(*_args, **_kwargs):
+        return SimpleNamespace()
+
+    monkeypatch.setattr(consents_module, "append_access_log", append_noop)
     wrap = patient_wrap_for(emu, th.wrap_pub_key, th.user_id or "")
     session = _RefreshVanishingSession(user, fake_consent, SimpleNamespace())
     session.deleted_error = ObjectDeletedError(instance_state(real_consent))

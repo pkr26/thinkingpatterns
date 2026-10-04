@@ -62,13 +62,16 @@ reproduces the audit's main finding).*
    near-duplicate phrase clustering is 80% of a rumination detector already.
 
 7. **Regulatory line to hold (FDA general-wellness):** "observes patterns in your
-   journal" = wellness; "predicts/foresees depression relapse" = device claim. Our own
-   README currently leans on "foreseeing depressive recurrence" adjacent language when
-   justifying the EWMA chart — the *implementation* is fine (we surface "your entries
-   have read lower lately"), but marketing/README phrasing must stay on the wellness
-   side. FTC precedent (BetterHelp $7.8M, Cerebral ~$7M, GoodRx, Monument) makes
-   privacy-marketing-vs-practice consistency an enforcement target; our opt-in LLM path
-   needs named-provider, retention, and no-training disclosure, and crisis-safe behavior.
+   journal" = wellness; "predicts/foresees depression relapse" = device claim. The
+   recurrence literature cited for EWMA is research context, not a product claim; the
+   shipped copy stays observational (for example, "your entries have read lower
+   lately") and must remain on the wellness side. FTC precedent (BetterHelp $7.8M,
+   Cerebral ~$7M, GoodRx, Monument) makes
+   privacy-marketing-vs-practice consistency an enforcement target. Production journal
+   recompute is deterministic and does not dispatch journal text to an LLM; any future
+   reactivation would require named-provider, retention, no-training, and crisis-safe
+   disclosure before release. Separately opted-in speech/translation is the active
+   external-provider path.
 
 ---
 
@@ -276,15 +279,18 @@ behavior, not intent:
 - **PANAS** (Watson, Clark & Tellegen 1988) is the affect standard; **circumplex**
   (Russell 1980; Posner et al. 2005): valence × arousal — two sliders capture affect
   economically. Single-item mood measures are psychometrically defensible (Verster 2021;
-  Allen 2022; Song 2023). What v1 actually ships: a daily mood score DERIVED from entry
-  text (the deterministic graded lexicon), with an optional client-computed sentiment
-  tag honored when present — no self-report slider exists yet; adding one (and a second
-  "energy" slider for the circumplex) is planned work that would give EWMA a second
-  validated channel.
+  Allen 2022; Song 2023). What currently ships is an optional five-level, one-tap
+  self-report for both mood and energy behind an "add details" disclosure. Explicit
+  picks ride inside the encrypted entry and the device-local mood log; when no mood pick
+  exists, the local/server analyzers may use deterministic text sentiment instead. These
+  lightweight product check-ins are not represented as a validated PANAS or circumplex
+  instrument.
 - **PHQ-9** thresholds 5/10/15/20 (Kroenke et al. 2001); MCID ≈ 4–5 points (Löwe 2006;
-  Bauer-Staeb 2021). We don't administer screeners (and shouldn't, wellness-framed) —
-  but our *internal* "is this shift meaningful" bar should borrow the MCID mindset:
-  define a minimum meaningful within-person shift, not just statistical significance.
+  Bauer-Staeb 2021). The shipped clients administer optional PHQ-9, GAD-7 and PHQ-2
+  wellbeing measures (and may share their client-encrypted results with a therapist
+  after explicit consent). They are not a diagnosis or a monitored emergency service. Product claims,
+  item-9 follow-up, clinical workflow, and regulatory classification therefore remain
+  release-governance questions, not something a wellness label decides by itself.
 - **EMA phrasing**: 0–10 or 7-point sliders with concrete anchors; momentary ("right
   now") vs "today overall" are distinct streams (Stone & Shiffman 2002).
 
@@ -305,20 +311,20 @@ emotion granularity** once licensing is confirmed.
 
 ---
 
-## 4. Safety, ethics & regulatory (the table stakes we currently miss)
+## 4. Safety, ethics & regulatory (current controls and remaining gates)
 
 ### 4.1 Where we stand vs. the 2026 checklist
 
 | Requirement | Standard/source | Us today |
 |---|---|---|
-| Crisis resources reachable in 1–2 taps from anywhere; 988 call/text/chat + Crisis Text Line 741741 + 911 guidance; offline-cached | 2026 Frontiers framework; APA advisory; only ~35% of apps comply | **Missing entirely** |
-| Safe-messaging-compliant response to self-harm/suicidal content; route to humans, never AI reassurance | #chatsafe (Orygen/JED); Illinois WOPR Act (2025) mandates escalation for behavioral-health AI; character.ai litigation ongoing | Missing (our LLM path returns `[]` on any failure — silent) |
-| Persistent "not a medical device / not an emergency service" disclaimer | Apple 1.4.1; Youper pattern; FDA boundary | Partial (footnote in Insights screen) |
-| No diagnosis/treatment/relapse-*prediction* claims | FDA general-wellness line; AMA; APA; NICE ESF Tier B posture | Mostly good — but README phrasing ("foreseeing depressive recurrence") flirts with the line; keep the citation, soften the claim to "detects sustained shifts" |
-| Granular, withdrawable opt-in per processing purpose (pattern analysis vs LLM), never bundled | GDPR Art. 9 explicit consent; Washington MHMDA opt-in; FTC orders | Good (re-auth for LLM enable) — add named-provider/retention/no-training disclosure at the consent screen |
-| No "anonymous" claims unless defensible | FTC skepticism (BetterHelp $7.8M; Cerebral ~$7M; GoodRx $1.5M; Monument) | Fine |
-| Deletion extends to third parties users consented to | FTC Cerebral/Monument orders (direct third-party deletion) | Documented gap in README (LLM provider retention "out of our hands") — needs a provider with contractual deletion/Zero-Data-Retention |
-| AI disclosure ("AI, not human") at first use + store listing | Illinois WOPR; emerging norm | N/A (we're not conversational) but the LLM analyzer consent copy should carry it |
+| Crisis resources reachable in 1–2 taps from anywhere; 988 call/text/chat + Crisis Text Line 741741 + 911 guidance; offline-cached | 2026 Frontiers framework; APA advisory; only ~35% of apps comply | Shipped clients expose static 988 call/text, Crisis Text Line 741741, 911 guidance and an international-resource link through global navigation; the core resources are local and remain available when the API is offline. Real-device action/link checks and periodic resource review remain release duties. |
+| Safe-messaging-compliant response to self-harm/suicidal content; route to humans, never AI reassurance | #chatsafe (Orygen/JED); Illinois WOPR Act (2025) mandates escalation for behavioral-health AI; character.ai litigation ongoing | Static crisis resources and deterministic client prompts ship; journal-LLM dispatch is disabled. A monitored clinical follow-up workflow does not ship. |
+| Persistent intended-use / not-an-emergency-service boundary, with medical-device status reviewed for the final claims | Apple 1.4.1; Youper pattern; FDA boundary | Emergency boundary ships; formal classification for named measures + clinician sharing remains a qualified-review release gate |
+| No diagnosis/treatment/relapse-*prediction* claims | FDA general-wellness line; AMA; APA; NICE ESF Tier B posture | Current product copy describes observations and sustained shifts, not recurrence prediction. Research citations must remain evidence context rather than marketing claims. |
+| Granular, withdrawable opt-in per external processing purpose, never bundled | GDPR Art. 9 explicit consent; Washington MHMDA opt-in; FTC orders | Speech/translation consent is distinct. Legacy journal-LLM consent/config remains dormant and must not be described as active processing. |
+| No "anonymous" claims unless defensible | FTC skepticism (BetterHelp $7.8M; Cerebral ~$7M; GoodRx $1.5M; Monument) | No anonymity claim: the server stores pseudonymous usernames plus the metadata and consent records described in the privacy/operator documents. |
+| Deletion extends to third parties users consented to | FTC Cerebral/Monument orders (direct third-party deletion) | Active speech/translation providers need a completed retention/deletion contract; journal-LLM processing remains disabled. |
+| AI disclosure ("AI, not human") at first use + store listing | Illinois WOPR; emerging norm | Apply to any future generated-text feature; none is active in production recompute. |
 
 ### 4.2 The privacy paradox to manage
 
@@ -332,15 +338,15 @@ Longer term, on-device analysis (the README already names it as the path) is bot
 industry direction (Apple Foundation Models, iOS 26) and the clean end-state; the
 deterministic brain ports to the client unchanged — it's pure functions over JSON.
 
-### 4.3 Crisis design decision (needed before v3 ships)
+### 4.3 Current crisis design boundary
 
-Standard-pattern stepped model for a journaling app: (1) crisis resources always
-reachable from Settings + Insights; (2) if the *deterministic* analyzer (never the LLM)
-notices sustained severe-negative language, gently surface the resources card — never a
-diagnosis, never an alarm, never a push notification about crisis content. This is the
-"5 types of crisis support" ladder Wysa is credited with; even implementing rungs 1–2
-moves us from the non-compliant 65% to the compliant 35%, and it is the single most
-judge-visible safety upgrade.
+The shipped clients implement the bounded first rungs of the stepped model:
+(1) static crisis resources are globally reachable and API-independent; and
+(2) the deterministic client-side phrase contract can gently surface the support
+dialog while crisis-adjacent cards stay non-quoting. It never diagnoses, raises an
+alarm, or sends a crisis-content push notification. This is a self-help resource
+boundary, not clinical monitoring: no human escalation or monitored follow-up
+workflow ships, and product/operator materials must not imply one.
 
 ### 4.4 Self-harm/ED adjacency — the two-tier suppression philosophy
 
@@ -394,8 +400,8 @@ Prioritized by (evidence strength × impact on insight quality × implementation
 
 Explicitly **not** doing (evidence/regulatory): critical slowing down as a standalone
 claim (mixed replications), bipolar language of any kind, relapse-*prediction* claims
-(FDA line), PHQ-style screeners (Tier C drift), passive sensing (privacy posture is our
-moat), LLM-generated insight claims without the deterministic core underneath.
+   (FDA line), diagnostic claims from the optional PHQ-9/GAD-7/PHQ-2 wellbeing measures,
+   passive sensing (privacy posture is our moat), or LLM-generated insight claims.
 
 ---
 

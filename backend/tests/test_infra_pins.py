@@ -482,6 +482,7 @@ class TestSettingsReprHidesSecrets:
             "decoy_secret",
             "metrics_token",
             "audit_mac_secret_explicit",
+            "audit_mac_previous_secrets_explicit",
             "llm_api_key",
             # Voice journaling (2026-09-29): STT + object-storage
             # credentials join the masked set.

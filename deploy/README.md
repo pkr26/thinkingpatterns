@@ -5,7 +5,9 @@ it has no application `build:` stanza. It requires both
 `MINDPATTERN_API_IMAGE` and `MINDPATTERN_BACKUP_IMAGE` as immutable `@sha256`
 references. A tagged GitHub release publishes the exact
 `mindpattern-release-vX.Y.Z.env` fragment containing those references, plus
-the verified therapist-portal archive and a SHA-256 file for each asset.
+the verified patient-web and therapist-portal archives, SHA-256 manifests,
+an in-toto/SLSA provenance statement, and Sigstore bundles. Checksums detect
+corruption; the bundles authenticate the GitHub Actions publisher identity.
 
 > **Compliance documents**: before first public service, complete the
 > operator/compliance pack — `docs/OPERATOR_PACK.md` indexes the privacy
@@ -31,6 +33,7 @@ updates for service images):
 | `prom/blackbox-exporter:v0.25.0@sha256:b04a9fef4fa0…` | `deploy/monitoring/docker-compose.yml` | 2026-09-22 audit G-7/NEW-4 | same inspect-and-replace discipline |
 | `prom/node-exporter:v1.9.1@sha256:d00a542e409e…` | `deploy/monitoring/docker-compose.yml` | 2026-09-26 (resolved from the Docker Hub registry API) | same inspect-and-replace discipline |
 | `prom/alertmanager:v0.28.0@sha256:d5155cfac40a…` | `deploy/monitoring/docker-compose.yml` | 2026-09-26 | same inspect-and-replace discipline |
+| `cgr.dev/chainguard/minio:latest@sha256:4cf4831a2bbc…` | `docker-compose.dev.yml` (development/CI audio store only) | 2026-10-04 (pull, readiness endpoint, and persistent `/data` smoke-tested) | resolve the current Chainguard index, smoke-test readiness + named-volume persistence, then replace tag and digest together; never use this development service as production object storage |
 | `rclone/rclone:1.69.1@sha256:600f51856285…` | `deploy/backup-offsite/docker-compose.yml` | 2026-09-22 audit G-7/NEW-4 (including the tag repair: `v1.69.1` does not exist on Docker Hub — rclone tags are unprefixed) | same inspect-and-replace discipline |
 | `aquasec/trivy:0.61.0@sha256:6967db29ce52…` | `.github/workflows/ci.yml` + `.github/workflows/release.yml` (image scanner) | 2026-09-22 (final verification) | version- and sha256-pinned scanner; re-pin deliberately |
 | gitleaks 8.30.1, cosign-installer (`@c56c2d3e…` v3.8.0) | CI workflows | 2026-09-22/26 | version- and sha256-pinned external tools; bump on review |
@@ -51,9 +54,11 @@ development and CI integration testing; never add it to a production command.
 Likewise, never use `--build` when deploying a tagged release: that would
 replace a provenance/SBOM-attested image with an unreviewed local build.
 
-The public release env asset contains image references only. It deliberately
-does not contain `MINDPATTERN_TOKEN_SECRET`, database credentials, `BACKUP_KEY`,
-or proxy settings. Keep those in an owner-only file outside the checkout.
+The public release env asset contains image references only. All credentials
+are file-mounted from an operator-owned directory outside the checkout; never
+put `MINDPATTERN_*_SECRET`, a database password, a metrics token, or
+`BACKUP_KEY` in any Compose env file. Non-secret proxy settings and the secret
+directory path may live in an owner-only operator env file.
 
 ## The audit journal volume
 
@@ -66,6 +71,33 @@ anchor binds an attacker with DATABASE-only write access; anyone who can
 write the volume can truncate it too. The api's daily sweep compacts the
 file at the retention boundary (minus a 7-day margin), atomically — do not
 edit or rotate it by hand unless the api is stopped.
+
+Outside development, startup creates and fsyncs a probe in that directory
+before the service becomes available. An append or compaction I/O failure
+increments `mindpattern_audit_journal_failures_total` and makes `/readyz`
+return 503 until a later durable journal operation succeeds. Monitoring ships
+an S2 alert for any counter increase as well as the readiness probe; do not
+bypass either signal to keep a deployment serving.
+
+## Audio object-storage lifecycle release gate
+
+If kept recordings are enabled, set
+`MINDPATTERN_AUDIO_RETENTION_DAYS` (30 by default) and
+`MINDPATTERN_AUDIO_LIFECYCLE_CEILING_DAYS` (must be greater than retention;
+`0` derives retention + 1). The application commits deletion tombstones,
+retries provider deletes, inventories both S3 and local stores, and removes
+untracked `audio/` objects older than that ceiling. Prometheus alerts on a
+queue lasting 30 minutes and on an oldest tombstone above two hours.
+
+That loop is not an independent guarantee during a prolonged API or credential
+outage. Before production enablement, configure the object-storage provider's
+native lifecycle policy for prefix `audio/` to expire objects no later than the
+same ceiling. A self-hosted local store needs an independent host policy with
+the equivalent age ceiling; the development MinIO service is not a production
+backstop. Record the deployed values, provider rule export, and a drill that
+deletes both a tracked expired object and an untracked object in
+`docs/OPERATOR_PACK.md`. Keep recording storage disabled while that evidence is
+missing.
 
 ## Operator tooling (opt-in, outside the release contract)
 
@@ -94,9 +126,10 @@ the production compose or either overlay:
 ## Deploy a tagged release
 
 The following initial-install sequence is for a Linux host with Docker Compose
-v2, `docker buildx`, `sha256sum`, and the GitHub CLI (`gh`). For a private
-repository or package, authenticate `gh` and Docker to the organization that
-owns the release; this repository cannot safely invent those credentials.
+v2, `docker buildx`, `sha256sum`, `jq`, `cosign` 3.x, and the GitHub CLI
+(`gh`). For a private repository or package, authenticate `gh` and Docker to
+the organization that owns the release; this repository cannot safely invent
+those credentials.
 
 ```bash
 REPOSITORY=pkr26/thinkingpatterns       # change for a fork
@@ -107,25 +140,60 @@ ASSET_DIR="$APP_DIR/release-assets/$TAG"
 git clone --branch "$TAG" --depth 1 "https://github.com/$REPOSITORY.git" "$APP_DIR"
 mkdir -p "$ASSET_DIR"
 gh release download "$TAG" --repo "$REPOSITORY" --dir "$ASSET_DIR" \
-  --pattern "mindpattern-portal-${TAG}.tar.gz" \
-  --pattern "mindpattern-portal-${TAG}.tar.gz.sha256" \
-  --pattern "mindpattern-web-${TAG}.tar.gz" \
-  --pattern "mindpattern-web-${TAG}.tar.gz.sha256" \
-  --pattern "mindpattern-release-${TAG}.env" \
-  --pattern "mindpattern-release-${TAG}.env.sha256"
+  --pattern "mindpattern-portal-${TAG}.tar.gz*" \
+  --pattern "mindpattern-web-${TAG}.tar.gz*" \
+  --pattern "mindpattern-browser-${TAG}.provenance.json*" \
+  --pattern "mindpattern-release-${TAG}.env*"
 
 (
   cd "$ASSET_DIR"
+  # Verify publisher identity FIRST. Do not use an identity regexp: the exact
+  # repository, workflow path, and tag ref are part of the trust decision.
+  CERT_IDENTITY="https://github.com/$REPOSITORY/.github/workflows/release.yml@refs/tags/$TAG"
+  OIDC_ISSUER="https://token.actions.githubusercontent.com"
+  for asset in \
+    "mindpattern-portal-${TAG}.tar.gz" \
+    "mindpattern-portal-${TAG}.tar.gz.sha256" \
+    "mindpattern-web-${TAG}.tar.gz" \
+    "mindpattern-web-${TAG}.tar.gz.sha256" \
+    "mindpattern-browser-${TAG}.provenance.json" \
+    "mindpattern-release-${TAG}.env" \
+    "mindpattern-release-${TAG}.env.sha256"; do
+    cosign verify-blob \
+      --bundle "$asset.sigstore.json" \
+      --certificate-identity "$CERT_IDENTITY" \
+      --certificate-oidc-issuer "$OIDC_ISSUER" \
+      "$asset"
+  done
+
+  # Then verify byte-level checksums and bind the provenance subjects to the
+  # two archives actually downloaded.
   sha256sum -c "mindpattern-portal-${TAG}.tar.gz.sha256"
   sha256sum -c "mindpattern-web-${TAG}.tar.gz.sha256"
   sha256sum -c "mindpattern-release-${TAG}.env.sha256"
+  portal_sha=$(sha256sum "mindpattern-portal-${TAG}.tar.gz" | awk '{print $1}')
+  web_sha=$(sha256sum "mindpattern-web-${TAG}.tar.gz" | awk '{print $1}')
+  commit=$(git rev-parse HEAD)
+  jq -e \
+    --arg portal "mindpattern-portal-${TAG}.tar.gz" --arg portal_sha "$portal_sha" \
+    --arg web "mindpattern-web-${TAG}.tar.gz" --arg web_sha "$web_sha" \
+    --arg repository "https://github.com/$REPOSITORY" --arg commit "$commit" '
+      ._type == "https://in-toto.io/Statement/v1" and
+      .predicateType == "https://slsa.dev/provenance/v1" and
+      .predicate.buildDefinition.buildType ==
+        "https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1" and
+      any(.subject[]; .name == $portal and .digest.sha256 == $portal_sha) and
+      any(.subject[]; .name == $web and .digest.sha256 == $web_sha) and
+      any(.predicate.buildDefinition.resolvedDependencies[];
+        .uri == $repository and .digest.gitCommit == $commit)
+    ' "mindpattern-browser-${TAG}.provenance.json" >/dev/null
 )
 
 RELEASE_ENV="$ASSET_DIR/mindpattern-release-${TAG}.env"
 "$APP_DIR/deploy/verify-release-env.sh" "$RELEASE_ENV"
 ```
 
-The verifier does not source the downloaded file. It accepts exactly the two
+The release-env verifier does not source the downloaded file. It accepts exactly the two
 expected keys and rejects tags, blank values, duplicate keys, non-GHCR paths,
 and anything other than a lowercase 64-hex SHA-256 manifest digest. Inspect
 both remote manifest lists before the first pull. The output must name the
@@ -138,85 +206,77 @@ docker buildx imagetools inspect "$API_IMAGE"
 docker buildx imagetools inspect "$BACKUP_IMAGE"
 ```
 
-Create `/etc/mindpattern/secrets.env` with mode `0600` for a first deployment
-(or retain the existing file on an upgrade). It must contain at least:
-
-```dotenv
-MINDPATTERN_TOKEN_SECRET=<a unique 32+-character secret>
-BACKUP_KEY=<a unique base64 backup-encryption key>
-MINDPATTERN_TRUST_PROXY_HEADERS=0
-```
-
-**Purpose-split secrets (2026-09-26) — recommended for every new
-deployment.** The backend accepts dedicated secrets per purpose; each
-falls back to `MINDPATTERN_TOKEN_SECRET` (identity derivation) when
-unset, so existing deployments keep working, but a fresh deployment
-should set all four from day one (rotation of one purpose then never
-disturbs the others):
-
-```dotenv
-MINDPATTERN_AUTH_TOKEN_SECRET=<openssl rand -hex 32>   # bearer signing
-MINDPATTERN_TOTP_WRAP_SECRET=<openssl rand -hex 32>    # therapist TOTP at rest
-MINDPATTERN_PAIRING_SECRET=<openssl rand -hex 32>      # pairing-code HMAC digests
-MINDPATTERN_DECOY_SECRET=<openssl rand -hex 32>        # unknown-user decoy salts
-```
-
-Caveats before ever CHANGING these on a live deployment: setting
-`MINDPATTERN_AUTH_TOKEN_SECRET` (even to the same bytes as the legacy
-secret) bumps the token key-scheme version and invalidates every
-outstanding bearer; `MINDPATTERN_TOTP_WRAP_SECRET` rotation is one-way
-(wrapped therapist secrets must be re-armed); `MINDPATTERN_PAIRING_SECRET`
-rotation kills live pairing codes. The full rotation procedure is
-`docs/INCIDENT_RUNBOOK.md` "Rotating `MINDPATTERN_TOKEN_SECRET`" —
-read it before touching any of them.
-
-Generate values once with `openssl rand -hex 32`, `openssl rand -hex 16`, and
-`openssl rand -base64 32`; store them in the approved secret manager and that
-owner-only file. Do not place secrets in the release env asset or checkout.
-
-**File-mounted secrets (2026-09-26 infra audit) — compose reads these
-INSTEAD of env where the consumer supports it.** Container environment
-variables are visible to `docker inspect` on the host, so the signing and
-backup secrets additionally mount as compose `secrets:` files under
-`deploy/secrets/` (examples committed; real files gitignored; the app
-resolves `<VAR>_FILE`, the db reads `POSTGRES_PASSWORD_FILE` natively, the
-backup worker builds its pgpass line and passes `-pass file:` to openssl;
-independent audit 2026-09-27 added the metrics token, the last secret that
-still shipped as plain env):
+Create a file-only secret directory and generate every required purpose key
+independently. The checked-in production Compose file has no plaintext secret
+environment fallback: a missing file makes Compose refuse to start, and CI
+also rejects empty files and rendered plaintext values.
 
 ```bash
-mkdir -p "$APP_DIR/deploy/secrets" && cd "$APP_DIR/deploy/secrets"
-openssl rand -hex 32  > token_secret        # = MINDPATTERN_TOKEN_SECRET
-: > auth_token_secret                       # optional; empty = derive
-openssl rand -hex 16  > postgres_password   # the ONLY copy (MED-1 2026-09-29: no .env mirror)
-openssl rand -base64 32 > backup_key        # = BACKUP_KEY
-openssl rand -hex 16  > metrics_token       # api /metrics bearer; SAME value must
-                                            # go into deploy/monitoring/token for
-                                            # prometheus' bearer_token_file
-chmod 600 token_secret auth_token_secret postgres_password backup_key metrics_token
-# Only if you use the off-site replication overlay:
-cp rclone_config.example rclone_config && $EDITOR rclone_config  # fill the S3 remote
-chmod 600 rclone_config
+SECRET_DIR=/etc/mindpattern/secrets
+install -d -m 0700 "$SECRET_DIR"
+umask 077
+for name in token_secret auth_token_secret totp_wrap_secret pairing_secret decoy_secret; do
+  openssl rand -hex 32 > "$SECRET_DIR/$name"
+done
+openssl rand -hex 32    > "$SECRET_DIR/audit_mac_secret"  # exactly 32 bytes as hex
+: > "$SECRET_DIR/audit_mac_previous_secrets"              # empty until first rotation
+openssl rand -hex 16    > "$SECRET_DIR/metrics_token"
+openssl rand -hex 16    > "$SECRET_DIR/postgres_password" # hex-only: embedded in DB URL
+openssl rand -base64 32 > "$SECRET_DIR/backup_key"
+chmod 600 "$SECRET_DIR"/*
+for name in token_secret auth_token_secret totp_wrap_secret pairing_secret \
+            decoy_secret audit_mac_secret metrics_token postgres_password backup_key; do
+  test -s "$SECRET_DIR/$name" || { echo "empty secret: $name" >&2; exit 1; }
+done
+test -f "$SECRET_DIR/audit_mac_previous_secrets"
 ```
 
-The database password never enters any container environment (pentest
-MED-1, 2026-09-29): the api mounts the same `postgres_password` secret the
-db reads, and `backend/docker-entrypoint.sh` assembles `MINDPATTERN_DB_URL`
-from it in-process before `exec uvicorn` — `docker inspect` shows neither
-the URL nor the password. An explicitly exported `MINDPATTERN_DB_URL`
-(custom deployments, the dev overlay) still overrides the assembly.
+Keep the dedicated audit-MAC key stable. Production requires it so rotating
+the bearer/root token does not invalidate historical audit verification. Audit
+rows record `MINDPATTERN_AUDIT_MAC_KEY_VERSION`; the default first version is
+`1`. During a deliberate rotation, increment that non-secret version, move the
+old key into `audit_mac_previous_secrets` as `old-version:64hex`, and only then
+replace `audit_mac_secret`. Duplicate versions, duplicate key material, and
+malformed historical entries fail boot. Follow `docs/INCIDENT_RUNBOOK.md` for
+the pre/post verification and retirement procedure.
+
+Create `/etc/mindpattern/operator.env` with mode `0600`. It contains paths and
+non-secret deployment choices only—never credential values:
+
+```dotenv
+MINDPATTERN_SECRETS_DIR=/etc/mindpattern/secrets
+MINDPATTERN_AUDIT_MAC_KEY_VERSION=1
+MINDPATTERN_TRUST_PROXY_HEADERS=0
+MINDPATTERN_TRUSTED_PROXY_IPS=
+```
+
+If monitoring is enabled, copy the exact API metrics credential to the
+Prometheus file sink and assert equality (Prometheus does not expand env vars):
+
+```bash
+install -m 0600 "$SECRET_DIR/metrics_token" "$APP_DIR/deploy/monitoring/token"
+cmp -s "$SECRET_DIR/metrics_token" "$APP_DIR/deploy/monitoring/token"
+```
+
+The database password never enters the static container configuration: the
+API entrypoint assembles its database URL in-process from the mounted file,
+Postgres reads `POSTGRES_PASSWORD_FILE`, and the backup worker builds a
+temporary pgpass file. Likewise, application credentials resolve only through
+their `_FILE` variables and the backup key is passed to OpenSSL by file. An
+explicitly supplied `MINDPATTERN_DB_URL` remains a custom/development override;
+do not use that override in the production Compose contract.
 
 Use a shell function so an exported host variable cannot override the release
-image references. The release env file is passed *after* the secrets file, so
-it wins even if the secrets file accidentally contains an old image key.
+image references. The public release env file is passed after the non-secret
+operator env file and therefore remains authoritative for image digests.
 
 ```bash
-SECRETS_ENV=/etc/mindpattern/secrets.env
+OPERATOR_ENV=/etc/mindpattern/operator.env
 compose() {
   (
     unset MINDPATTERN_API_IMAGE MINDPATTERN_BACKUP_IMAGE
     docker compose \
-      --env-file "$SECRETS_ENV" \
+      --env-file "$OPERATOR_ENV" \
       --env-file "$RELEASE_ENV" \
       -f "$APP_DIR/docker-compose.yml" "$@"
   )
@@ -229,6 +289,7 @@ printf '%s\n' "$rendered_images" | grep -Fx "$BACKUP_IMAGE"
 
 compose pull
 compose up -d --wait
+```
 
 > **Recorded decision required (2026-10-01 audit M19):** the default
 > deployment ships WITHOUT backups and without stale-backup alerting — the
@@ -238,6 +299,8 @@ compose up -d --wait
 > `MindPatternBackupHeartbeat*` alert rules) or write down, here in your
 > deploy notes, that this instance deliberately runs without backups. A
 > silent default is not a decision.
+
+```bash
 curl --fail --silent --show-error http://127.0.0.1:8000/readyz
 
 # Optional, profile-gated encrypted backups; this uses the independently
@@ -247,7 +310,7 @@ compose --profile backups up -d backup
 # The rehearsal forwards these files to Compose without sourcing either one.
 # It reads the live db service's role/database rather than assuming defaults.
 bash "$APP_DIR/backend/scripts/rehearse_restore.sh" \
-  --env-file "$SECRETS_ENV" --env-file "$RELEASE_ENV"
+  --env-file "$OPERATOR_ENV" --env-file "$RELEASE_ENV"
 ```
 
 Do not replace `compose pull`/`compose up` with `--build`. A successful pull
@@ -267,9 +330,9 @@ nginx -t && systemctl reload nginx
 ```
 
 For later releases, use a clean checkout of that exact tag, download and
-verify that tag's six release assets again (portal + web archives, the
-release env fragment, and each one's SHA-256 file), and repeat the same
-digest checks.
+verify that tag's archives, checksum files, Sigstore bundles, provenance
+statement, and release-env fragment again, and repeat the same identity,
+subject-digest, and manifest checks.
 Use an atomic static-content promotion procedure if the site cannot tolerate
 replacing `portal/dist` in place; do not rebuild the portal on production.
 
@@ -280,11 +343,21 @@ overlay. These names are not deployable release references.
 
 ```bash
 cd /path/to/thinkingpatterns
+mkdir -p deploy/secrets
+umask 077
+for name in token_secret auth_token_secret totp_wrap_secret pairing_secret decoy_secret; do
+  openssl rand -hex 32 > "deploy/secrets/$name"
+done
+openssl rand -hex 32 > deploy/secrets/audit_mac_secret
+: > deploy/secrets/audit_mac_previous_secrets
+openssl rand -hex 16 > deploy/secrets/metrics_token
+openssl rand -hex 16 > deploy/secrets/postgres_password
+openssl rand -base64 32 > deploy/secrets/backup_key
+chmod 600 deploy/secrets/{token_secret,auth_token_secret,totp_wrap_secret,pairing_secret,decoy_secret,audit_mac_secret,audit_mac_previous_secrets,metrics_token,postgres_password,backup_key}
 cat > .env <<EOF
-MINDPATTERN_TOKEN_SECRET=$(openssl rand -hex 32)
-BACKUP_KEY=$(openssl rand -base64 32)
 MINDPATTERN_API_IMAGE=mindpattern-api:local
 MINDPATTERN_BACKUP_IMAGE=mindpattern-backup:local
+MINDPATTERN_AUDIT_MAC_KEY_VERSION=1
 EOF
 
 docker compose --env-file .env \
@@ -367,11 +440,14 @@ Two operator steps were added with the 2026-09-26 hardening pass:
   irreversible at scale (removal takes months to propagate) and commits
   every subdomain of the registered domain to HTTPS. The header ships
   ready; submit only when that commitment is intended.
-- **security.txt contact:** `web/public/.well-known/security.txt` (RFC
-  9116) ships with an example contact. Replace the `Contact:` and
-  `Canonical:` lines with the real ones before serving publicly — a
-  placeholder disclosure channel is worse than none because it looks
-  monitored. Keep `Expires:` within a year and refresh it with releases.
+- **security.txt contact:** there is no committed public placeholder. A
+  generic `npm run build` omits the file; tagged release builds run
+  `npm run build:release`, which refuses to build unless repository variables
+  `SECURITY_TXT_CONTACT` (`mailto:` or HTTPS), `SECURITY_TXT_CANONICAL`
+  (HTTPS and ending `/.well-known/security.txt`), and
+  `SECURITY_TXT_EXPIRES` (future ISO-8601, no more than 366 days out) are
+  present and non-placeholder. Configure and test the monitored contact before
+  tagging; the generated file is inside the signed web archive.
 - The built shell carries Subresource Integrity hashes on every local
   subresource (stamped by `web/tools/add-sri.mjs` during
   `npm run build`). If you serve an `index.html` you did not build from
@@ -386,7 +462,7 @@ the same hostname. It enforces a restrictive CSP, disables request-inventory
 access logs, and keeps the API on the host's loopback interface.
 
 Before enabling it, replace `portal.example.com`, install a valid TLS
-certificate, set a real `MINDPATTERN_TOKEN_SECRET`, and keep
+certificate, provision every file-mounted secret above, and keep
 `MINDPATTERN_TRUST_PROXY_HEADERS=0` unless nginx is the only path to the API.
 If enabling proxy headers, set `MINDPATTERN_TRUSTED_PROXY_IPS` to the nginx
 source address/CIDR as observed **inside the API container**. This is not
@@ -440,8 +516,8 @@ safe procedure:
    This is your restore point. For a dump that lives off-site, fetch it
    with the authenticated path in `docs/INCIDENT_RUNBOOK.md` (machine-
    tested by `backend/scripts/rehearse_restore.sh --remote`), and exercise
-   a full throwaway restore any time with
-   `BACKUP_KEY=… bash backend/scripts/rehearse_restore.sh`.
+   a full throwaway restore any time with the file-mounted key and
+   `bash backend/scripts/rehearse_restore.sh --env-file "$OPERATOR_ENV" --env-file "$RELEASE_ENV"`.
 2. **Pin the previous release images** in `.env`
    (`MINDPATTERN_API_IMAGE` / `MINDPATTERN_BACKUP_IMAGE` back to the
    prior @sha256 references from the release env asset) and
@@ -464,4 +540,3 @@ it is the contract for a NON-nginx static host (e.g. a CDN object store)
 and exists so the three configs (nginx, `_headers`, index.html meta
 fallback) are pinned identical by `web/tests/securityConfig.test.ts`.
 Do not "clean up" any one of the three: the test fails if they drift.
-

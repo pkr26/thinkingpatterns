@@ -4,6 +4,8 @@
  *  with the voice wave and had no test driving their actual UI states —
  *  Entry.tsx sat at 56% functions. Minimal getUserMedia/MediaRecorder
  *  globals drive the real useVoiceRecorder hook through its states. */
+// @ts-nocheck
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
 

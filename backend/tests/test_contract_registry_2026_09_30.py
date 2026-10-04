@@ -46,13 +46,17 @@ MODULES = [
     "app/api/_audit.py",
     "app/api/_paging.py",
     "app/api/_custody.py",
+    "app/api/_sharing_state.py",
     "app/security/crypto.py",
+    "app/security/deletion_tombstone.py",
     "app/security/enclave.py",
     "app/security/envelope.py",
     "app/security/kdf.py",
     "app/security/sharing.py",
+    "app/security/step_up.py",
     "app/security/tokens.py",
     "app/security/totp.py",
+    "app/services/account_deletion.py",
     "app/services/audio_store.py",
     "app/services/crisis.py",
     "app/services/llm.py",
@@ -109,6 +113,30 @@ FROZEN_REGISTRY = {
         (
             "ApiError",
             (
+                ("code", "audit_integrity_error"),
+                ("detail", "audit chain head differs from durable state"),
+                ("status_code", 500),
+            ),
+        ),
+        (
+            "ApiError",
+            (
+                ("code", "audit_integrity_error"),
+                ("detail", "audit chain state does not verify"),
+                ("status_code", 500),
+            ),
+        ),
+        (
+            "ApiError",
+            (
+                ("code", "audit_integrity_error"),
+                ("detail", "audit chain state is missing"),
+                ("status_code", 500),
+            ),
+        ),
+        (
+            "ApiError",
+            (
                 ("code", "internal_error"),
                 ("detail", "audit chain append lost the seq race repeatedly"),
                 ("status_code", 500),
@@ -118,6 +146,9 @@ FROZEN_REGISTRY = {
             "ApiError",
             (("code", "validation_error"), ("detail", "malformed cursor"), ("status_code", 422)),
         ),
+        ("ApiError", ()),
+        ("RuntimeError", ()),
+        ("ValueError", ()),
     ],
     "app/api/_custody.py": [
         (
@@ -186,6 +217,24 @@ FROZEN_REGISTRY = {
             ),
         ),
     ],
+    "app/api/_sharing_state.py": [
+        (
+            "ApiError",
+            (
+                ("code", "payload_too_large"),
+                ("detail", "consent history has reached the retained safety limit"),
+                ("status_code", 413),
+            ),
+        ),
+        (
+            "ApiError",
+            (
+                ("code", "service_unavailable"),
+                ("detail", "unable to advance sharing snapshot"),
+                ("status_code", 503),
+            ),
+        ),
+    ],
     "app/api/account.py": [
         (
             "ApiError",
@@ -215,6 +264,14 @@ FROZEN_REGISTRY = {
             "ApiError",
             (
                 ("code", "collection_changed"),
+                ("detail", "access history changed during export; retry"),
+                ("status_code", 409),
+            ),
+        ),
+        (
+            "ApiError",
+            (
+                ("code", "collection_changed"),
                 ("detail", "account changed during export; retry"),
                 ("status_code", 409),
             ),
@@ -232,14 +289,6 @@ FROZEN_REGISTRY = {
             (
                 ("code", "collection_changed"),
                 ("detail", "record disappeared during export; retry"),
-                ("status_code", 409),
-            ),
-        ),
-        (
-            "ApiError",
-            (
-                ("code", "collection_changed"),
-                ("detail", "sharing changed during export; retry"),
                 ("status_code", 409),
             ),
         ),
@@ -295,6 +344,14 @@ FROZEN_REGISTRY = {
         (
             "ApiError",
             (
+                ("code", "payload_too_large"),
+                ("detail", "retained sharing history exceeds the supported export size"),
+                ("status_code", 413),
+            ),
+        ),
+        (
+            "ApiError",
+            (
                 ("code", "processing_session_invalid"),
                 ("detail", "processing session missing or expired"),
                 ("status_code", 403),
@@ -335,6 +392,30 @@ FROZEN_REGISTRY = {
         (
             "ApiError",
             (
+                ("code", "service_unavailable"),
+                ("detail", "step-up service is temporarily at capacity"),
+                ("status_code", 503),
+            ),
+        ),
+        (
+            "ApiError",
+            (
+                ("code", "step_up_invalid"),
+                ("detail", "step-up proof is invalid, expired, or already used"),
+                ("status_code", 403),
+            ),
+        ),
+        (
+            "ApiError",
+            (
+                ("code", "step_up_required"),
+                ("detail", "fresh authentication is required for this action"),
+                ("status_code", 403),
+            ),
+        ),
+        (
+            "ApiError",
+            (
                 ("code", "stt_unavailable"),
                 ("detail", "voice transcription is not configured on this server"),
                 ("status_code", 409),
@@ -349,6 +430,14 @@ FROZEN_REGISTRY = {
             (("code", "unauthorized"), ("detail", "export session retired"), ("status_code", 401)),
         ),
         ("ApiError", (("code", "unauthorized"), ("detail", "invalid token"), ("status_code", 401))),
+        (
+            "ApiError",
+            (
+                ("code", "upgrade_required"),
+                ("detail", "legacy recovery setup is retired; create a v2 recovery kit"),
+                ("status_code", 409),
+            ),
+        ),
         (
             "ApiError",
             (
@@ -589,14 +678,6 @@ FROZEN_REGISTRY = {
         (
             "ApiError",
             (
-                ("code", "recovery_scheme_mismatch"),
-                ("detail", "recovery kit scheme mismatch; retry with the other scheme"),
-                ("status_code", 401),
-            ),
-        ),
-        (
-            "ApiError",
-            (
                 ("code", "service_unavailable"),
                 ("detail", "authentication service busy; retry shortly"),
                 ("status_code", 503),
@@ -679,6 +760,22 @@ FROZEN_REGISTRY = {
             "ApiError",
             (
                 ("code", "payload_too_large"),
+                ("detail", "retained sharing history exceeds the supported list size"),
+                ("status_code", 413),
+            ),
+        ),
+        (
+            "ApiError",
+            (
+                ("code", "payload_too_large"),
+                ("detail", "retained sharing history has reached the supported limit"),
+                ("status_code", 413),
+            ),
+        ),
+        (
+            "ApiError",
+            (
+                ("code", "payload_too_large"),
                 ("detail", "sharing history exceeds the supported list size"),
                 ("status_code", 413),
             ),
@@ -700,14 +797,6 @@ FROZEN_REGISTRY = {
             ),
         ),
         ("ApiError", (("code", "unauthorized"), ("detail", "invalid token"), ("status_code", 401))),
-        (
-            "ApiError",
-            (
-                ("code", "validation_error"),
-                ("detail", "account verifier required (X-Account-Verifier header)"),
-                ("status_code", 422),
-            ),
-        ),
         (
             "ApiError",
             (
@@ -874,6 +963,22 @@ FROZEN_REGISTRY = {
                     "no question for today; open a processing session and run /insights/recompute",
                 ),
                 ("status_code", 404),
+            ),
+        ),
+        (
+            "ApiError",
+            (
+                ("code", "payload_too_large"),
+                ("detail", "active sharing exceeds the supported rotation size"),
+                ("status_code", 413),
+            ),
+        ),
+        (
+            "ApiError",
+            (
+                ("code", "payload_too_large"),
+                ("detail", "active sharing exceeds the supported summary size"),
+                ("status_code", 413),
             ),
         ),
         (
@@ -1280,7 +1385,23 @@ FROZEN_REGISTRY = {
             "ApiError",
             (
                 ("code", "payload_too_large"),
+                ("detail", "active sharing exceeds the supported rotation size"),
+                ("status_code", 413),
+            ),
+        ),
+        (
+            "ApiError",
+            (
+                ("code", "payload_too_large"),
                 ("detail", "patient list exceeds the supported caseload size"),
+                ("status_code", 413),
+            ),
+        ),
+        (
+            "ApiError",
+            (
+                ("code", "payload_too_large"),
+                ("detail", "retained patient history exceeds the supported list size"),
                 ("status_code", 413),
             ),
         ),
@@ -1445,6 +1566,14 @@ FROZEN_REGISTRY = {
     "app/deps.py": [
         (
             "ApiError",
+            (
+                ("code", "account_deleted"),
+                ("detail", "account no longer exists"),
+                ("status_code", 410),
+            ),
+        ),
+        (
+            "ApiError",
             (("code", "forbidden"), ("detail", "not a therapist account"), ("status_code", 403)),
         ),
         (
@@ -1452,6 +1581,14 @@ FROZEN_REGISTRY = {
             (
                 ("code", "forbidden"),
                 ("detail", "therapist accounts cannot access journal endpoints"),
+                ("status_code", 403),
+            ),
+        ),
+        (
+            "ApiError",
+            (
+                ("code", "mfa_enrollment_required"),
+                ("detail", "multi-factor enrollment is required before accessing patient data"),
                 ("status_code", 403),
             ),
         ),
@@ -1477,7 +1614,9 @@ FROZEN_REGISTRY = {
     "app/security/envelope.py": [("ValueError", ())],
     "app/security/kdf.py": [("KdfParamsError", ()), ("ValueError", ())],
     "app/security/sharing.py": [("SharingError", ())],
+    "app/security/step_up.py": [("RuntimeError", ())],
     "app/security/tokens.py": [("TokenError", ()), ("ValueError", ())],
+    "app/services/account_deletion.py": [("RuntimeError", ())],
     "app/services/audio_store.py": [
         (
             "ApiError",
@@ -1489,6 +1628,7 @@ FROZEN_REGISTRY = {
         ),
         ("AudioStoreError", ()),
         ("ValueError", ()),
+        ("sqlite3.DatabaseError", ()),
     ],
     "app/services/llm.py": [("ValueError", ())],
     "app/services/patterns.py": [("ValueError", ())],
@@ -1498,23 +1638,20 @@ FROZEN_REGISTRY = {
 }
 FROZEN_LOGS = {
     "app/api/_audit.py": [
-        ("exception", "audit journal append failed (journal falls behind; benign)")
+        ("error", "audit journal append failed; readiness is now unhealthy"),
+        ("error", "audit journal contains malformed evidence at line %d"),
     ],
+    "app/api/account.py": [("error", "bounded account purge deferred to background worker")],
     "app/api/audio.py": [
-        ("warning", "audio get failed for attachment %s"),
-        ("warning", "audio put failed for user %s"),
-        ("warning", "stt upstream failed for user %s (%s)"),
+        ("warning", "audio object get failed"),
+        ("warning", "audio object put failed"),
+        ("warning", "stt upstream failed"),
     ],
-    "app/api/therapist.py": [("warning", "audio get failed for attachment %s")],
+    "app/api/therapist.py": [
+        ("error", "bounded therapist purge deferred to background worker"),
+        ("warning", "audio object get failed"),
+    ],
     "app/config.py": [
-        (
-            "warning",
-            "MINDPATTERN_AUDIT_MAC_SECRET is unset: the audit-chain MAC key is derived "
-            "from MINDPATTERN_TOKEN_SECRET, so one exfiltrated value would compromise both "
-            "bearer minting and the audit trail's tamper evidence. Set a dedicated "
-            "32-byte-hex secret to decouple them (note: existing chains verify only under "
-            "the key that sealed them — rotate deliberately).",
-        ),
         (
             "warning",
             "MINDPATTERN_LLM_URL is set but MINDPATTERN_LLM_API_KEY is empty — LLM "
@@ -1527,15 +1664,16 @@ FROZEN_LOGS = {
         ),
     ],
     "app/main.py": [
-        ("error", "audit MAC secret is not valid hex; chain verification runs link-only"),
-        ("error", "audit chain verification FAILED for user %s at seq %s: %s"),
+        ("error", "account deletion sweep failed; category=%s; retrying with bounded backoff"),
+        ("error", "audio retention sweep failed unexpectedly; retrying next cycle"),
+        ("error", "audit chain verification failed for %d owner(s)"),
+        ("error", "audit journal compaction failed; retrying next cycle"),
+        ("error", "audit maintenance refused: MAC key ring is invalid"),
         ("error", "cross-host ownership lost; admission is closed until restart"),
-        ("exception", "access_log retention sweep failed; retrying next cycle"),
-        ("exception", "audio retention sweep failed; retrying next cycle"),
-        ("exception", "audit journal compaction failed; retrying next cycle"),
-        ("exception", "initial housekeeping pass failed; retrying in 24h"),
-        ("exception", "processing-key expiry sweep failed; retrying shortly"),
-        ("exception", "readiness check failed: database or schema unavailable"),
+        ("error", "initial housekeeping pass failed; retrying shortly"),
+        ("error", "processing-key expiry sweep failed; retrying shortly"),
+        ("error", "readiness check failed: database or schema unavailable"),
+        ("error", "retention sweep failed; retrying shortly"),
         ("info", "audio retention sweep removed %d expired attachment(s)"),
         ("info", "audit journal compacted: %d lines kept, %d older than %s dropped"),
         (
@@ -1546,11 +1684,12 @@ FROZEN_LOGS = {
             "proxy, which must append its observation; do not enable uvicorn --proxy-headers "
             "because this middleware needs the raw peer to verify the boundary.",
         ),
+        ("warning", "audio retention sweep deferred after storage failure"),
         ("warning", "pg_advisory_unlock failed; disconnect releases the lock"),
-        ("warning", "token-revocation hydration skipped (schema not present yet?): %s"),
+        ("warning", "token-revocation hydration skipped because storage is unavailable"),
     ],
     "app/middleware.py": [
-        ("exception", "unhandled error serving method=%s"),
+        ("error", "unhandled request failure"),
         (
             "warning",
             "X-Forwarded-For chain contained only trusted-proxy addresses; rate "
@@ -1565,12 +1704,18 @@ FROZEN_LOGS = {
             "on the direct peer",
         ),
     ],
-    "app/services/audio_store.py": [("warning", "audio deletion deferred: tombstone %s")],
+    "app/services/audio_store.py": [
+        ("warning", "audio deletion deferred after object-store failure"),
+        (
+            "warning",
+            "audio lifecycle reconciliation deferred %d object(s); storage error class(es): %s",
+        ),
+    ],
     "app/services/llm.py": [
-        ("warning", "llm enrichment failed (%s); continuing with deterministic patterns only")
+        ("warning", "llm enrichment failed; continuing with deterministic patterns only")
     ],
     "app/services/stt.py": [
-        ("warning", "transcript translation failed (%s); returning untranslated"),
+        ("warning", "transcript translation failed; returning untranslated"),
         ("warning", "transcript translation was incomplete; returning untranslated"),
     ],
     "app/singleprocess.py": [
@@ -1585,23 +1730,20 @@ FROZEN_LOGS = {
 }
 FROZEN_LOGS = {
     "app/api/_audit.py": [
-        ("exception", "audit journal append failed (journal falls behind; benign)")
+        ("error", "audit journal append failed; readiness is now unhealthy"),
+        ("error", "audit journal contains malformed evidence at line %d"),
     ],
+    "app/api/account.py": [("error", "bounded account purge deferred to background worker")],
     "app/api/audio.py": [
-        ("warning", "audio get failed for attachment %s"),
-        ("warning", "audio put failed for user %s"),
-        ("warning", "stt upstream failed for user %s (%s)"),
+        ("warning", "audio object get failed"),
+        ("warning", "audio object put failed"),
+        ("warning", "stt upstream failed"),
     ],
-    "app/api/therapist.py": [("warning", "audio get failed for attachment %s")],
+    "app/api/therapist.py": [
+        ("error", "bounded therapist purge deferred to background worker"),
+        ("warning", "audio object get failed"),
+    ],
     "app/config.py": [
-        (
-            "warning",
-            "MINDPATTERN_AUDIT_MAC_SECRET is unset: the audit-chain MAC key is derived "
-            "from MINDPATTERN_TOKEN_SECRET, so one exfiltrated value would compromise both "
-            "bearer minting and the audit trail's tamper evidence. Set a dedicated "
-            "32-byte-hex secret to decouple them (note: existing chains verify only under "
-            "the key that sealed them — rotate deliberately).",
-        ),
         (
             "warning",
             "MINDPATTERN_LLM_URL is set but MINDPATTERN_LLM_API_KEY is empty — LLM "
@@ -1614,15 +1756,16 @@ FROZEN_LOGS = {
         ),
     ],
     "app/main.py": [
-        ("error", "audit MAC secret is not valid hex; chain verification runs link-only"),
-        ("error", "audit chain verification FAILED for user %s at seq %s: %s"),
+        ("error", "account deletion sweep failed; category=%s; retrying with bounded backoff"),
+        ("error", "audio retention sweep failed unexpectedly; retrying next cycle"),
+        ("error", "audit chain verification failed for %d owner(s)"),
+        ("error", "audit journal compaction failed; retrying next cycle"),
+        ("error", "audit maintenance refused: MAC key ring is invalid"),
         ("error", "cross-host ownership lost; admission is closed until restart"),
-        ("exception", "access_log retention sweep failed; retrying next cycle"),
-        ("exception", "audio retention sweep failed; retrying next cycle"),
-        ("exception", "audit journal compaction failed; retrying next cycle"),
-        ("exception", "initial housekeeping pass failed; retrying in 24h"),
-        ("exception", "processing-key expiry sweep failed; retrying shortly"),
-        ("exception", "readiness check failed: database or schema unavailable"),
+        ("error", "initial housekeeping pass failed; retrying shortly"),
+        ("error", "processing-key expiry sweep failed; retrying shortly"),
+        ("error", "readiness check failed: database or schema unavailable"),
+        ("error", "retention sweep failed; retrying shortly"),
         ("info", "audio retention sweep removed %d expired attachment(s)"),
         ("info", "audit journal compacted: %d lines kept, %d older than %s dropped"),
         (
@@ -1633,11 +1776,12 @@ FROZEN_LOGS = {
             "proxy, which must append its observation; do not enable uvicorn --proxy-headers "
             "because this middleware needs the raw peer to verify the boundary.",
         ),
+        ("warning", "audio retention sweep deferred after storage failure"),
         ("warning", "pg_advisory_unlock failed; disconnect releases the lock"),
-        ("warning", "token-revocation hydration skipped (schema not present yet?): %s"),
+        ("warning", "token-revocation hydration skipped because storage is unavailable"),
     ],
     "app/middleware.py": [
-        ("exception", "unhandled error serving method=%s"),
+        ("error", "unhandled request failure"),
         (
             "warning",
             "X-Forwarded-For chain contained only trusted-proxy addresses; rate "
@@ -1652,12 +1796,18 @@ FROZEN_LOGS = {
             "on the direct peer",
         ),
     ],
-    "app/services/audio_store.py": [("warning", "audio deletion deferred: tombstone %s")],
+    "app/services/audio_store.py": [
+        ("warning", "audio deletion deferred after object-store failure"),
+        (
+            "warning",
+            "audio lifecycle reconciliation deferred %d object(s); storage error class(es): %s",
+        ),
+    ],
     "app/services/llm.py": [
-        ("warning", "llm enrichment failed (%s); continuing with deterministic patterns only")
+        ("warning", "llm enrichment failed; continuing with deterministic patterns only")
     ],
     "app/services/stt.py": [
-        ("warning", "transcript translation failed (%s); returning untranslated"),
+        ("warning", "transcript translation failed; returning untranslated"),
         ("warning", "transcript translation was incomplete; returning untranslated"),
     ],
     "app/singleprocess.py": [
@@ -1678,6 +1828,16 @@ for _rel in MODULES:
         REGISTRY[_rel] = _r
     if _l:
         LOGS[_rel] = _l
+
+
+def test_error_contract_module_inventory():
+    """A module gaining or losing its first constant error remains visible."""
+    assert set(REGISTRY) == set(FROZEN_REGISTRY)
+
+
+def test_log_contract_module_inventory():
+    """A module gaining or losing its first constant log remains visible."""
+    assert set(LOGS) == set(FROZEN_LOGS)
 
 
 @pytest.mark.parametrize("rel", sorted(FROZEN_REGISTRY))

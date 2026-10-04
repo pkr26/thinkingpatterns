@@ -19,8 +19,9 @@ import { captureLocalWritePermit, captureOpaqueLocalWritePermit, assertLocalWrit
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { buildAad, encrypt, decrypt } from "./crypto/envelope";
 import { zeroize } from "./crypto/kdf";
+import { accountStorageKey } from "./accountStorage";
 
-const key = (userId: string): string => `@mindpattern/question_feedback.${userId}`;
+const key = accountStorageKey.feedback;
 const MAX_PENDING = 100;
 
 export interface FeedbackTap {

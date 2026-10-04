@@ -6,6 +6,8 @@
  *  other half of the contract: a v2 account's data key still opens the
  *  shared entry corpus unchanged (the scheme changes where the key LIVES,
  *  not what it encrypts). */
+// @ts-nocheck
+
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";

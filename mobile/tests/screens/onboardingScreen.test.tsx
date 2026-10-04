@@ -26,10 +26,14 @@ const { hasSeenOnboarding, recordOnboardingSeen } = await import("../../src/onbo
 const { render, flush, textOf, pressLabel, allText, touchableByLabel, act } = await import("../helpers/rtr");
 const { resetApi } = await import("../helpers/apiMock");
 const storage = (await import("../helpers/storageMock")).default;
+const { accountStorageKey } = await import("../../src/accountStorage");
+const { changeLocalSessionOwner, __resetLocalKeyLifecycleForTests } = await import("../../src/localWriteGuard");
 
 const nav = { navigate: vi.fn(), replace: vi.fn() };
 
 beforeEach(() => {
+  __resetLocalKeyLifecycleForTests();
+  changeLocalSessionOwner("user-1");
   resetApi(api as never);
   storage.__reset();
   touchActivity.mockClear();
@@ -240,7 +244,7 @@ describe("E-10 panel resume (audit round 2, 2026-09-21, F-11)", () => {
   // left off — the screen restores the stored index on mount and persists
   // index+1 on advance; completion wipes the position (never an out-of-range
   // "3", never a replay for a finished account).
-  const PANEL_KEY = "@mindpattern/onboarding_panel";
+  const PANEL_KEY = accountStorageKey.onboardingPanel("user-1");
 
   it("mounting with a stored panel index starts at that panel", async () => {
     await storage.setItem(PANEL_KEY, "1"); // a previous session advanced once

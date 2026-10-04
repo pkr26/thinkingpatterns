@@ -364,6 +364,7 @@ async def b3_enumeration() -> None:
                 "username": "b3_known",
                 "salt": base64.b64encode(b"\x01" * 16).decode(),
                 "verifier": base64.b64encode(b"\x01" * 32).decode(),
+                "age_attestation": "minimum_age_confirmed_v1",
             },
         )
         verdict(
