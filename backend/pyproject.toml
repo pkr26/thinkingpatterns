@@ -6,28 +6,28 @@ requires-python = ">=3.12"
 dependencies = [
     # Keep direct pins aligned with requirements.in; update both together.
     "aiosqlite==0.22.1",
-    "alembic==1.19.2",
-    "boto3==1.40.11",
-    "cryptography==50.0.1",
-    "fastapi==0.141.1",
-    "greenlet==3.3.2",
+    "alembic==1.20.0",
+    "boto3==1.43.107",
+    "cryptography==50.0.2",
+    "fastapi==0.142.2",
+    "greenlet==3.5.6",
     "httpx==0.28.1",
-    "sqlalchemy==2.0.52",
-    "uvicorn[standard]==0.52.4",
+    "sqlalchemy==2.1.2",
+    "uvicorn[standard]==0.54.0",
 ]
 
 [project.optional-dependencies]
-postgres = ["asyncpg==0.30.0"]
+postgres = ["asyncpg==0.31.0"]
 dev = [
     # Keep development pins aligned with requirements.dev.in.
-    "hypothesis==6.168.2",
-    "mypy==2.3.1",
+    "hypothesis==6.168.3",
+    "mypy==2.4.0",
     "mutmut==2.4.4",
     "pip-audit==2.10.1",
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
     "pytest-cov==7.1.0",
-    "ruff==0.16.6",
+    "ruff==0.16.10",
 ]
 
 [tool.ruff]

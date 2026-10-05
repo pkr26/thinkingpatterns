@@ -2,11 +2,11 @@
 # development install artifact; it is hash-checked just like production.
 -r requirements.in
 
-hypothesis==6.168.2
-mypy==2.3.1
+hypothesis==6.168.3
+mypy==2.4.0
 mutmut==2.4.4
 pip-audit==2.10.1
 pytest==9.1.1
 pytest-asyncio==1.4.0
 pytest-cov==7.1.0
-ruff==0.16.6
+ruff==0.16.10
