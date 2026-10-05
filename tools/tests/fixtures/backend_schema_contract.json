@@ -1,0 +1,2951 @@
+{
+  "access_log": {
+    "columns": [
+      {
+        "default": {
+          "generated": "random opaque ID"
+        },
+        "name": "id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": true,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "actor_id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "actor_role",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(16)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(16)"
+      },
+      {
+        "default": null,
+        "name": "user_id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "action",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": {
+          "generated": "current UTC time"
+        },
+        "name": "at",
+        "nullable": false,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      },
+      {
+        "default": null,
+        "name": "chain_seq",
+        "nullable": false,
+        "postgresql_type": "BIGINT",
+        "primary_key": false,
+        "server_default": "1",
+        "sqlite_type": "BIGINT"
+      },
+      {
+        "default": null,
+        "name": "prev_hash",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(64)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(64)"
+      },
+      {
+        "default": null,
+        "name": "entry_hash",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(64)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(64)"
+      },
+      {
+        "default": null,
+        "name": "entry_mac",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(64)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(64)"
+      },
+      {
+        "default": {
+          "value": 1
+        },
+        "name": "mac_key_version",
+        "nullable": false,
+        "postgresql_type": "INTEGER",
+        "primary_key": false,
+        "server_default": "1",
+        "sqlite_type": "INTEGER"
+      },
+      {
+        "default": {
+          "value": 2
+        },
+        "name": "record_version",
+        "nullable": false,
+        "postgresql_type": "INTEGER",
+        "primary_key": false,
+        "server_default": "2",
+        "sqlite_type": "INTEGER"
+      }
+    ],
+    "constraints": [
+      {
+        "columns": [
+          "id"
+        ],
+        "kind": "PrimaryKeyConstraint",
+        "name": null
+      }
+    ],
+    "indexes": [
+      {
+        "columns": [
+          "actor_id",
+          "at"
+        ],
+        "name": "ix_access_log_actor",
+        "predicates": {
+          "postgresql": null,
+          "sqlite": null
+        },
+        "unique": false
+      },
+      {
+        "columns": [
+          "at"
+        ],
+        "name": "ix_access_log_at",
+        "predicates": {
+          "postgresql": null,
+          "sqlite": null
+        },
+        "unique": false
+      },
+      {
+        "columns": [
+          "user_id",
+          "at"
+        ],
+        "name": "ix_access_log_user",
+        "predicates": {
+          "postgresql": null,
+          "sqlite": null
+        },
+        "unique": false
+      },
+      {
+        "columns": [
+          "user_id",
+          "chain_seq"
+        ],
+        "name": "uq_access_log_user_chain_seq",
+        "predicates": {
+          "postgresql": null,
+          "sqlite": null
+        },
+        "unique": true
+      }
+    ]
+  },
+  "account_deletion_jobs": {
+    "columns": [
+      {
+        "default": null,
+        "name": "user_id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": true,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "role",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(16)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(16)"
+      },
+      {
+        "default": {
+          "value": "note_revisions"
+        },
+        "name": "phase",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": false,
+        "server_default": "'note_revisions'",
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": {
+          "value": 0
+        },
+        "name": "attempts",
+        "nullable": false,
+        "postgresql_type": "INTEGER",
+        "primary_key": false,
+        "server_default": "0",
+        "sqlite_type": "INTEGER"
+      },
+      {
+        "default": {
+          "generated": "current UTC time"
+        },
+        "name": "requested_at",
+        "nullable": false,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      },
+      {
+        "default": {
+          "generated": "current UTC time"
+        },
+        "name": "updated_at",
+        "nullable": false,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      }
+    ],
+    "constraints": [
+      {
+        "columns": [
+          "user_id"
+        ],
+        "kind": "PrimaryKeyConstraint",
+        "name": null
+      }
+    ],
+    "indexes": [
+      {
+        "columns": [
+          "phase"
+        ],
+        "name": "ix_account_deletion_jobs_phase",
+        "predicates": {
+          "postgresql": null,
+          "sqlite": null
+        },
+        "unique": false
+      },
+      {
+        "columns": [
+          "requested_at"
+        ],
+        "name": "ix_account_deletion_jobs_requested",
+        "predicates": {
+          "postgresql": null,
+          "sqlite": null
+        },
+        "unique": false
+      },
+      {
+        "columns": [
+          "updated_at",
+          "user_id"
+        ],
+        "name": "ix_account_deletion_jobs_updated",
+        "predicates": {
+          "postgresql": null,
+          "sqlite": null
+        },
+        "unique": false
+      }
+    ]
+  },
+  "account_deletion_tombstones": {
+    "columns": [
+      {
+        "default": null,
+        "name": "user_id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": true,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "role",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(16)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(16)"
+      },
+      {
+        "default": null,
+        "name": "token_epoch",
+        "nullable": false,
+        "postgresql_type": "BIGINT",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "BIGINT"
+      },
+      {
+        "default": null,
+        "name": "auth_secret_version",
+        "nullable": false,
+        "postgresql_type": "INTEGER",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "INTEGER"
+      },
+      {
+        "default": null,
+        "name": "deleted_at",
+        "nullable": false,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      },
+      {
+        "default": null,
+        "name": "expires_at",
+        "nullable": false,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      },
+      {
+        "default": {
+          "value": 1
+        },
+        "name": "record_version",
+        "nullable": false,
+        "postgresql_type": "INTEGER",
+        "primary_key": false,
+        "server_default": "1",
+        "sqlite_type": "INTEGER"
+      },
+      {
+        "default": null,
+        "name": "record_mac",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(64)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(64)"
+      }
+    ],
+    "constraints": [
+      {
+        "columns": [
+          "user_id"
+        ],
+        "kind": "PrimaryKeyConstraint",
+        "name": null
+      }
+    ],
+    "indexes": [
+      {
+        "columns": [
+          "expires_at"
+        ],
+        "name": "ix_account_deletion_tombstones_expiry",
+        "predicates": {
+          "postgresql": null,
+          "sqlite": null
+        },
+        "unique": false
+      }
+    ]
+  },
+  "audio_attachments": {
+    "columns": [
+      {
+        "default": {
+          "generated": "random opaque ID"
+        },
+        "name": "id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": true,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "user_id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "client_entry_id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(64)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(64)"
+      },
+      {
+        "default": null,
+        "name": "backend",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(8)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(8)"
+      },
+      {
+        "default": null,
+        "name": "storage_key",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(256)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(256)"
+      },
+      {
+        "default": null,
+        "name": "storage_locator",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(2048)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(2048)"
+      },
+      {
+        "default": null,
+        "name": "size_bytes",
+        "nullable": false,
+        "postgresql_type": "INTEGER",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "INTEGER"
+      },
+      {
+        "default": null,
+        "name": "mime_type",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(64)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(64)"
+      },
+      {
+        "default": null,
+        "name": "duration_seconds",
+        "nullable": false,
+        "postgresql_type": "INTEGER",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "INTEGER"
+      },
+      {
+        "default": {
+          "value": 1
+        },
+        "name": "content_version",
+        "nullable": false,
+        "postgresql_type": "INTEGER",
+        "primary_key": false,
+        "server_default": "1",
+        "sqlite_type": "INTEGER"
+      },
+      {
+        "default": {
+          "generated": "current UTC time"
+        },
+        "name": "created_at",
+        "nullable": false,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      },
+      {
+        "default": null,
+        "name": "expires_at",
+        "nullable": false,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      }
+    ],
+    "constraints": [
+      {
+        "columns": [
+          "id"
+        ],
+        "kind": "PrimaryKeyConstraint",
+        "name": null
+      },
+      {
+        "columns": [
+          "user_id",
+          "client_entry_id"
+        ],
+        "kind": "UniqueConstraint",
+        "name": "uq_audio_user_client_entry"
+      },
+      {
+        "columns": [
+          "user_id"
+        ],
+        "deferrable": null,
+        "initially": null,
+        "kind": "ForeignKeyConstraint",
+        "name": null,
+        "ondelete": "CASCADE",
+        "onupdate": null,
+        "targets": [
+          "users.id"
+        ]
+      }
+    ],
+    "indexes": [
+      {
+        "columns": [
+          "user_id",
+          "expires_at"
+        ],
+        "name": "ix_audio_user_expires",
+        "predicates": {
+          "postgresql": null,
+          "sqlite": null
+        },
+        "unique": false
+      }
+    ]
+  },
+  "audio_deletions": {
+    "columns": [
+      {
+        "default": {
+          "generated": "random opaque ID"
+        },
+        "name": "id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": true,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "owner_id",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "backend",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(8)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(8)"
+      },
+      {
+        "default": null,
+        "name": "storage_key",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(256)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(256)"
+      },
+      {
+        "default": null,
+        "name": "storage_locator",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(2048)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(2048)"
+      },
+      {
+        "default": {
+          "generated": "current UTC time"
+        },
+        "name": "not_before",
+        "nullable": false,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      },
+      {
+        "default": {
+          "value": 0
+        },
+        "name": "attempts",
+        "nullable": false,
+        "postgresql_type": "INTEGER",
+        "primary_key": false,
+        "server_default": "0",
+        "sqlite_type": "INTEGER"
+      },
+      {
+        "default": {
+          "generated": "current UTC time"
+        },
+        "name": "created_at",
+        "nullable": false,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      }
+    ],
+    "constraints": [
+      {
+        "columns": [
+          "id"
+        ],
+        "kind": "PrimaryKeyConstraint",
+        "name": null
+      }
+    ],
+    "indexes": [
+      {
+        "columns": [
+          "not_before"
+        ],
+        "name": "ix_audio_deletions_not_before",
+        "predicates": {
+          "postgresql": null,
+          "sqlite": null
+        },
+        "unique": false
+      },
+      {
+        "columns": [
+          "owner_id"
+        ],
+        "name": "ix_audio_deletions_owner_id",
+        "predicates": {
+          "postgresql": null,
+          "sqlite": null
+        },
+        "unique": false
+      }
+    ]
+  },
+  "audio_inventory_cursor": {
+    "columns": [
+      {
+        "default": null,
+        "name": "store_id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(64)",
+        "primary_key": true,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(64)"
+      },
+      {
+        "default": null,
+        "name": "after_key",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(256)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(256)"
+      },
+      {
+        "default": {
+          "generated": "current UTC time"
+        },
+        "name": "updated_at",
+        "nullable": false,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      }
+    ],
+    "constraints": [
+      {
+        "columns": [
+          "store_id"
+        ],
+        "kind": "PrimaryKeyConstraint",
+        "name": null
+      }
+    ],
+    "indexes": []
+  },
+  "audit_chain_state": {
+    "columns": [
+      {
+        "default": null,
+        "name": "user_id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": true,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "head_seq",
+        "nullable": false,
+        "postgresql_type": "BIGINT",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "BIGINT"
+      },
+      {
+        "default": null,
+        "name": "head_hash",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(64)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(64)"
+      },
+      {
+        "default": null,
+        "name": "head_at",
+        "nullable": false,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      },
+      {
+        "default": null,
+        "name": "first_retained_seq",
+        "nullable": true,
+        "postgresql_type": "BIGINT",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "BIGINT"
+      },
+      {
+        "default": null,
+        "name": "first_retained_hash",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(64)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(64)"
+      },
+      {
+        "default": {
+          "value": 1
+        },
+        "name": "state_version",
+        "nullable": false,
+        "postgresql_type": "INTEGER",
+        "primary_key": false,
+        "server_default": "1",
+        "sqlite_type": "INTEGER"
+      },
+      {
+        "default": {
+          "value": 1
+        },
+        "name": "mac_key_version",
+        "nullable": false,
+        "postgresql_type": "INTEGER",
+        "primary_key": false,
+        "server_default": "1",
+        "sqlite_type": "INTEGER"
+      },
+      {
+        "default": null,
+        "name": "state_mac",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(64)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(64)"
+      },
+      {
+        "default": {
+          "generated": "current UTC time"
+        },
+        "name": "updated_at",
+        "nullable": false,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      }
+    ],
+    "constraints": [
+      {
+        "columns": [
+          "user_id"
+        ],
+        "kind": "PrimaryKeyConstraint",
+        "name": null
+      }
+    ],
+    "indexes": []
+  },
+  "audit_sweep_cursor": {
+    "columns": [
+      {
+        "default": null,
+        "name": "id",
+        "nullable": false,
+        "postgresql_type": "INTEGER",
+        "primary_key": true,
+        "server_default": null,
+        "sqlite_type": "INTEGER"
+      },
+      {
+        "default": null,
+        "name": "last_user_id",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "prune_last_user_id",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "verification_cycle_started_at",
+        "nullable": true,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      },
+      {
+        "default": null,
+        "name": "verification_owner_id",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "verification_snapshot_head_seq",
+        "nullable": true,
+        "postgresql_type": "BIGINT",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "BIGINT"
+      },
+      {
+        "default": null,
+        "name": "verification_snapshot_head_hash",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(64)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(64)"
+      },
+      {
+        "default": null,
+        "name": "verification_next_seq",
+        "nullable": true,
+        "postgresql_type": "BIGINT",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "BIGINT"
+      },
+      {
+        "default": null,
+        "name": "verification_previous_hash",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(64)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(64)"
+      },
+      {
+        "default": {
+          "value": 0
+        },
+        "name": "verification_rows_checked",
+        "nullable": false,
+        "postgresql_type": "BIGINT",
+        "primary_key": false,
+        "server_default": "0",
+        "sqlite_type": "BIGINT"
+      },
+      {
+        "default": null,
+        "name": "verification_mac_key_version",
+        "nullable": true,
+        "postgresql_type": "INTEGER",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "INTEGER"
+      },
+      {
+        "default": null,
+        "name": "verification_checkpoint_mac",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(64)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(64)"
+      },
+      {
+        "default": null,
+        "name": "prune_cycle_started_at",
+        "nullable": true,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      },
+      {
+        "default": {
+          "generated": "current UTC time"
+        },
+        "name": "updated_at",
+        "nullable": false,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      }
+    ],
+    "constraints": [
+      {
+        "columns": [
+          "id"
+        ],
+        "kind": "PrimaryKeyConstraint",
+        "name": null
+      }
+    ],
+    "indexes": []
+  },
+  "consent_events": {
+    "columns": [
+      {
+        "default": {
+          "generated": "random opaque ID"
+        },
+        "name": "id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": true,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "user_id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "kind",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(16)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(16)"
+      },
+      {
+        "default": null,
+        "name": "action",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(16)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(16)"
+      },
+      {
+        "default": null,
+        "name": "disclosure",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(64)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(64)"
+      },
+      {
+        "default": null,
+        "name": "policy",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(64)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(64)"
+      },
+      {
+        "default": null,
+        "name": "consent_id",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "share_voice",
+        "nullable": true,
+        "postgresql_type": "BOOLEAN",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "BOOLEAN"
+      },
+      {
+        "default": {
+          "value": 1
+        },
+        "name": "event_version",
+        "nullable": false,
+        "postgresql_type": "INTEGER",
+        "primary_key": false,
+        "server_default": "1",
+        "sqlite_type": "INTEGER"
+      },
+      {
+        "default": {
+          "generated": "current UTC time"
+        },
+        "name": "occurred_at",
+        "nullable": false,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      }
+    ],
+    "constraints": [
+      {
+        "columns": [
+          "id"
+        ],
+        "kind": "PrimaryKeyConstraint",
+        "name": null
+      },
+      {
+        "columns": [
+          "user_id"
+        ],
+        "deferrable": null,
+        "initially": null,
+        "kind": "ForeignKeyConstraint",
+        "name": null,
+        "ondelete": "CASCADE",
+        "onupdate": null,
+        "targets": [
+          "users.id"
+        ]
+      }
+    ],
+    "indexes": [
+      {
+        "columns": [
+          "user_id",
+          "occurred_at"
+        ],
+        "name": "ix_consent_events_user_at",
+        "predicates": {
+          "postgresql": null,
+          "sqlite": null
+        },
+        "unique": false
+      }
+    ]
+  },
+  "consents": {
+    "columns": [
+      {
+        "default": {
+          "generated": "random opaque ID"
+        },
+        "name": "id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": true,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "user_id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "therapist_id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": {
+          "value": "active"
+        },
+        "name": "status",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(16)",
+        "primary_key": false,
+        "server_default": "'active'",
+        "sqlite_type": "VARCHAR(16)"
+      },
+      {
+        "default": {
+          "value": "full"
+        },
+        "name": "scope",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(16)",
+        "primary_key": false,
+        "server_default": "'full'",
+        "sqlite_type": "VARCHAR(16)"
+      },
+      {
+        "default": {
+          "generated": "current UTC time"
+        },
+        "name": "granted_at",
+        "nullable": false,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      },
+      {
+        "default": null,
+        "name": "revoked_at",
+        "nullable": true,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      },
+      {
+        "default": null,
+        "name": "ephemeral_pub",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(256)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(256)"
+      },
+      {
+        "default": null,
+        "name": "wrapped_key",
+        "nullable": true,
+        "postgresql_type": "BYTEA",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "BLOB"
+      },
+      {
+        "default": null,
+        "name": "summary_blob",
+        "nullable": true,
+        "postgresql_type": "BYTEA",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "BLOB"
+      },
+      {
+        "default": null,
+        "name": "summary_eph_pub",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(256)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(256)"
+      },
+      {
+        "default": null,
+        "name": "summary_updated_at",
+        "nullable": true,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      },
+      {
+        "default": null,
+        "name": "disclosure",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(64)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(64)"
+      },
+      {
+        "default": {
+          "value": false
+        },
+        "name": "share_voice",
+        "nullable": false,
+        "postgresql_type": "BOOLEAN",
+        "primary_key": false,
+        "server_default": "false",
+        "sqlite_type": "BOOLEAN"
+      }
+    ],
+    "constraints": [
+      {
+        "columns": [
+          "id"
+        ],
+        "kind": "PrimaryKeyConstraint",
+        "name": null
+      },
+      {
+        "columns": [
+          "therapist_id"
+        ],
+        "deferrable": null,
+        "initially": null,
+        "kind": "ForeignKeyConstraint",
+        "name": null,
+        "ondelete": "CASCADE",
+        "onupdate": null,
+        "targets": [
+          "users.id"
+        ]
+      },
+      {
+        "columns": [
+          "user_id",
+          "therapist_id"
+        ],
+        "kind": "UniqueConstraint",
+        "name": "uq_consents_user_therapist"
+      },
+      {
+        "columns": [
+          "user_id"
+        ],
+        "deferrable": null,
+        "initially": null,
+        "kind": "ForeignKeyConstraint",
+        "name": null,
+        "ondelete": "CASCADE",
+        "onupdate": null,
+        "targets": [
+          "users.id"
+        ]
+      }
+    ],
+    "indexes": [
+      {
+        "columns": [
+          "therapist_id",
+          "status"
+        ],
+        "name": "ix_consents_therapist_status",
+        "predicates": {
+          "postgresql": null,
+          "sqlite": null
+        },
+        "unique": false
+      }
+    ]
+  },
+  "entries": {
+    "columns": [
+      {
+        "default": {
+          "generated": "random opaque ID"
+        },
+        "name": "id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": true,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "user_id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "client_entry_id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(64)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(64)"
+      },
+      {
+        "default": null,
+        "name": "blob",
+        "nullable": false,
+        "postgresql_type": "BYTEA",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "BLOB"
+      },
+      {
+        "default": null,
+        "name": "entry_date",
+        "nullable": false,
+        "postgresql_type": "DATE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATE"
+      },
+      {
+        "default": {
+          "generated": "current UTC time"
+        },
+        "name": "received_at",
+        "nullable": false,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      },
+      {
+        "default": {
+          "value": 1
+        },
+        "name": "content_version",
+        "nullable": false,
+        "postgresql_type": "BIGINT",
+        "primary_key": false,
+        "server_default": "1",
+        "sqlite_type": "BIGINT"
+      },
+      {
+        "default": {
+          "value": 0
+        },
+        "name": "aad_guard_version",
+        "nullable": false,
+        "postgresql_type": "SMALLINT",
+        "primary_key": false,
+        "server_default": "0",
+        "sqlite_type": "SMALLINT"
+      },
+      {
+        "default": null,
+        "name": "aad_guard_key_version",
+        "nullable": true,
+        "postgresql_type": "INTEGER",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "INTEGER"
+      },
+      {
+        "default": null,
+        "name": "aad_guard_mac",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(64)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(64)"
+      }
+    ],
+    "constraints": [
+      {
+        "columns": [
+          "id"
+        ],
+        "kind": "PrimaryKeyConstraint",
+        "name": null
+      },
+      {
+        "columns": [
+          "user_id",
+          "client_entry_id"
+        ],
+        "kind": "UniqueConstraint",
+        "name": "uq_user_client_entry"
+      },
+      {
+        "columns": [
+          "user_id"
+        ],
+        "deferrable": null,
+        "initially": null,
+        "kind": "ForeignKeyConstraint",
+        "name": null,
+        "ondelete": "CASCADE",
+        "onupdate": null,
+        "targets": [
+          "users.id"
+        ]
+      }
+    ],
+    "indexes": [
+      {
+        "columns": [
+          "user_id",
+          "entry_date"
+        ],
+        "name": "ix_entries_user_date",
+        "predicates": {
+          "postgresql": null,
+          "sqlite": null
+        },
+        "unique": false
+      },
+      {
+        "columns": [
+          "user_id",
+          "received_at",
+          "id"
+        ],
+        "name": "ix_entries_user_received_id",
+        "predicates": {
+          "postgresql": null,
+          "sqlite": null
+        },
+        "unique": false
+      }
+    ]
+  },
+  "entry_guard_bootstrap": {
+    "columns": [
+      {
+        "default": null,
+        "name": "id",
+        "nullable": false,
+        "postgresql_type": "INTEGER",
+        "primary_key": true,
+        "server_default": null,
+        "sqlite_type": "INTEGER"
+      },
+      {
+        "default": null,
+        "name": "completed_at",
+        "nullable": true,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      }
+    ],
+    "constraints": [
+      {
+        "columns": [
+          "id"
+        ],
+        "kind": "PrimaryKeyConstraint",
+        "name": null
+      }
+    ],
+    "indexes": []
+  },
+  "insights": {
+    "columns": [
+      {
+        "default": {
+          "generated": "random opaque ID"
+        },
+        "name": "id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": true,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "user_id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "kind",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "for_date",
+        "nullable": true,
+        "postgresql_type": "DATE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATE"
+      },
+      {
+        "default": null,
+        "name": "blob",
+        "nullable": false,
+        "postgresql_type": "BYTEA",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "BLOB"
+      },
+      {
+        "default": {
+          "value": 0
+        },
+        "name": "state_seq",
+        "nullable": false,
+        "postgresql_type": "BIGINT",
+        "primary_key": false,
+        "server_default": "0",
+        "sqlite_type": "BIGINT"
+      },
+      {
+        "default": {
+          "generated": "current UTC time"
+        },
+        "name": "created_at",
+        "nullable": false,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      }
+    ],
+    "constraints": [
+      {
+        "columns": [
+          "id"
+        ],
+        "kind": "PrimaryKeyConstraint",
+        "name": null
+      },
+      {
+        "columns": [
+          "user_id",
+          "kind",
+          "for_date"
+        ],
+        "kind": "UniqueConstraint",
+        "name": "uq_insights_user_kind_date"
+      },
+      {
+        "columns": [
+          "user_id"
+        ],
+        "deferrable": null,
+        "initially": null,
+        "kind": "ForeignKeyConstraint",
+        "name": null,
+        "ondelete": "CASCADE",
+        "onupdate": null,
+        "targets": [
+          "users.id"
+        ]
+      }
+    ],
+    "indexes": [
+      {
+        "columns": [
+          "user_id",
+          "kind",
+          "for_date"
+        ],
+        "name": "ix_insights_user_kind_date",
+        "predicates": {
+          "postgresql": null,
+          "sqlite": null
+        },
+        "unique": false
+      },
+      {
+        "columns": [
+          "user_id",
+          "kind"
+        ],
+        "name": "uq_insights_user_kind_undated",
+        "predicates": {
+          "postgresql": "for_date IS NULL",
+          "sqlite": "for_date IS NULL"
+        },
+        "unique": true
+      }
+    ]
+  },
+  "measures": {
+    "columns": [
+      {
+        "default": {
+          "generated": "random opaque ID"
+        },
+        "name": "id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": true,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "user_id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "client_measure_id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(64)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(64)"
+      },
+      {
+        "default": null,
+        "name": "blob",
+        "nullable": false,
+        "postgresql_type": "BYTEA",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "BLOB"
+      },
+      {
+        "default": null,
+        "name": "measure_date",
+        "nullable": false,
+        "postgresql_type": "DATE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATE"
+      },
+      {
+        "default": {
+          "generated": "current UTC time"
+        },
+        "name": "received_at",
+        "nullable": false,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      }
+    ],
+    "constraints": [
+      {
+        "columns": [
+          "id"
+        ],
+        "kind": "PrimaryKeyConstraint",
+        "name": null
+      },
+      {
+        "columns": [
+          "user_id",
+          "client_measure_id"
+        ],
+        "kind": "UniqueConstraint",
+        "name": "uq_user_client_measure"
+      },
+      {
+        "columns": [
+          "user_id"
+        ],
+        "deferrable": null,
+        "initially": null,
+        "kind": "ForeignKeyConstraint",
+        "name": null,
+        "ondelete": "CASCADE",
+        "onupdate": null,
+        "targets": [
+          "users.id"
+        ]
+      }
+    ],
+    "indexes": [
+      {
+        "columns": [
+          "user_id",
+          "measure_date"
+        ],
+        "name": "ix_measures_user_date",
+        "predicates": {
+          "postgresql": null,
+          "sqlite": null
+        },
+        "unique": false
+      }
+    ]
+  },
+  "pairing_codes": {
+    "columns": [
+      {
+        "default": {
+          "generated": "random opaque ID"
+        },
+        "name": "id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": true,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "therapist_id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "code_hash",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(128)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(128)"
+      },
+      {
+        "default": {
+          "generated": "current UTC time"
+        },
+        "name": "created_at",
+        "nullable": false,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      },
+      {
+        "default": null,
+        "name": "expires_at",
+        "nullable": false,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      },
+      {
+        "default": null,
+        "name": "consumed_at",
+        "nullable": true,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      }
+    ],
+    "constraints": [
+      {
+        "columns": [
+          "code_hash"
+        ],
+        "kind": "UniqueConstraint",
+        "name": "uq_pairing_codes_code_hash"
+      },
+      {
+        "columns": [
+          "id"
+        ],
+        "kind": "PrimaryKeyConstraint",
+        "name": null
+      },
+      {
+        "columns": [
+          "therapist_id"
+        ],
+        "deferrable": null,
+        "initially": null,
+        "kind": "ForeignKeyConstraint",
+        "name": null,
+        "ondelete": "CASCADE",
+        "onupdate": null,
+        "targets": [
+          "users.id"
+        ]
+      }
+    ],
+    "indexes": [
+      {
+        "columns": [
+          "expires_at"
+        ],
+        "name": "ix_pairing_codes_expires_at",
+        "predicates": {
+          "postgresql": null,
+          "sqlite": null
+        },
+        "unique": false
+      },
+      {
+        "columns": [
+          "therapist_id"
+        ],
+        "name": "ix_pairing_codes_therapist_id",
+        "predicates": {
+          "postgresql": null,
+          "sqlite": null
+        },
+        "unique": false
+      }
+    ]
+  },
+  "rekey_journal": {
+    "columns": [
+      {
+        "default": {
+          "generated": "random opaque ID"
+        },
+        "name": "id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": true,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "user_id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "operation_id",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(36)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(36)"
+      },
+      {
+        "default": null,
+        "name": "request_digest",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(64)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(64)"
+      },
+      {
+        "default": null,
+        "name": "old_key_fingerprint",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(64)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(64)"
+      },
+      {
+        "default": null,
+        "name": "new_key_fingerprint",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(64)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(64)"
+      },
+      {
+        "default": {
+          "value": "entries"
+        },
+        "name": "stage",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(16)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(16)"
+      },
+      {
+        "default": null,
+        "name": "entry_cursor",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "measure_cursor",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": {
+          "value": 0
+        },
+        "name": "entries_done",
+        "nullable": false,
+        "postgresql_type": "BIGINT",
+        "primary_key": false,
+        "server_default": "0",
+        "sqlite_type": "BIGINT"
+      },
+      {
+        "default": {
+          "value": 0
+        },
+        "name": "insights_done",
+        "nullable": false,
+        "postgresql_type": "BIGINT",
+        "primary_key": false,
+        "server_default": "0",
+        "sqlite_type": "BIGINT"
+      },
+      {
+        "default": {
+          "value": 0
+        },
+        "name": "measures_done",
+        "nullable": false,
+        "postgresql_type": "BIGINT",
+        "primary_key": false,
+        "server_default": "0",
+        "sqlite_type": "BIGINT"
+      },
+      {
+        "default": {
+          "generated": "current UTC time"
+        },
+        "name": "created_at",
+        "nullable": false,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      },
+      {
+        "default": {
+          "generated": "current UTC time"
+        },
+        "name": "updated_at",
+        "nullable": false,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      }
+    ],
+    "constraints": [
+      {
+        "columns": [
+          "id"
+        ],
+        "kind": "PrimaryKeyConstraint",
+        "name": null
+      }
+    ],
+    "indexes": [
+      {
+        "columns": [
+          "user_id"
+        ],
+        "name": "ix_rekey_journal_user",
+        "predicates": {
+          "postgresql": null,
+          "sqlite": null
+        },
+        "unique": false
+      }
+    ]
+  },
+  "therapist_note_revisions": {
+    "columns": [
+      {
+        "default": {
+          "generated": "random opaque ID"
+        },
+        "name": "id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": true,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "note_id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "therapist_id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "blob",
+        "nullable": false,
+        "postgresql_type": "BYTEA",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "BLOB"
+      },
+      {
+        "default": {
+          "generated": "current UTC time"
+        },
+        "name": "created_at",
+        "nullable": false,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      }
+    ],
+    "constraints": [
+      {
+        "columns": [
+          "id"
+        ],
+        "kind": "PrimaryKeyConstraint",
+        "name": null
+      },
+      {
+        "columns": [
+          "note_id"
+        ],
+        "deferrable": null,
+        "initially": null,
+        "kind": "ForeignKeyConstraint",
+        "name": null,
+        "ondelete": "CASCADE",
+        "onupdate": null,
+        "targets": [
+          "therapist_notes.id"
+        ]
+      },
+      {
+        "columns": [
+          "therapist_id"
+        ],
+        "deferrable": null,
+        "initially": null,
+        "kind": "ForeignKeyConstraint",
+        "name": null,
+        "ondelete": "CASCADE",
+        "onupdate": null,
+        "targets": [
+          "users.id"
+        ]
+      }
+    ],
+    "indexes": [
+      {
+        "columns": [
+          "note_id",
+          "created_at"
+        ],
+        "name": "ix_note_revisions_note_created",
+        "predicates": {
+          "postgresql": null,
+          "sqlite": null
+        },
+        "unique": false
+      },
+      {
+        "columns": [
+          "therapist_id"
+        ],
+        "name": "ix_note_revisions_therapist_id",
+        "predicates": {
+          "postgresql": null,
+          "sqlite": null
+        },
+        "unique": false
+      }
+    ]
+  },
+  "therapist_notes": {
+    "columns": [
+      {
+        "default": {
+          "generated": "random opaque ID"
+        },
+        "name": "id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": true,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "therapist_id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "user_id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "client_note_id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(64)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(64)"
+      },
+      {
+        "default": null,
+        "name": "pattern_pid",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(200)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(200)"
+      },
+      {
+        "default": null,
+        "name": "blob",
+        "nullable": false,
+        "postgresql_type": "BYTEA",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "BLOB"
+      },
+      {
+        "default": {
+          "generated": "current UTC time"
+        },
+        "name": "created_at",
+        "nullable": false,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      },
+      {
+        "default": {
+          "generated": "current UTC time"
+        },
+        "name": "updated_at",
+        "nullable": false,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      },
+      {
+        "default": {
+          "value": 1
+        },
+        "name": "version",
+        "nullable": false,
+        "postgresql_type": "BIGINT",
+        "primary_key": false,
+        "server_default": "1",
+        "sqlite_type": "BIGINT"
+      }
+    ],
+    "constraints": [
+      {
+        "columns": [
+          "id"
+        ],
+        "kind": "PrimaryKeyConstraint",
+        "name": null
+      },
+      {
+        "columns": [
+          "therapist_id",
+          "client_note_id"
+        ],
+        "kind": "UniqueConstraint",
+        "name": "uq_notes_therapist_client"
+      },
+      {
+        "columns": [
+          "therapist_id"
+        ],
+        "deferrable": null,
+        "initially": null,
+        "kind": "ForeignKeyConstraint",
+        "name": null,
+        "ondelete": "CASCADE",
+        "onupdate": null,
+        "targets": [
+          "users.id"
+        ]
+      },
+      {
+        "columns": [
+          "user_id"
+        ],
+        "deferrable": null,
+        "initially": null,
+        "kind": "ForeignKeyConstraint",
+        "name": null,
+        "ondelete": "CASCADE",
+        "onupdate": null,
+        "targets": [
+          "users.id"
+        ]
+      }
+    ],
+    "indexes": [
+      {
+        "columns": [
+          "therapist_id",
+          "user_id",
+          "created_at",
+          "id"
+        ],
+        "name": "ix_notes_therapist_patient_created",
+        "predicates": {
+          "postgresql": null,
+          "sqlite": null
+        },
+        "unique": false
+      },
+      {
+        "columns": [
+          "user_id"
+        ],
+        "name": "ix_notes_user_id",
+        "predicates": {
+          "postgresql": null,
+          "sqlite": null
+        },
+        "unique": false
+      }
+    ]
+  },
+  "token_revocation": {
+    "columns": [
+      {
+        "default": null,
+        "name": "jti",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(64)",
+        "primary_key": true,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(64)"
+      },
+      {
+        "default": null,
+        "name": "expires_at",
+        "nullable": false,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      },
+      {
+        "default": {
+          "generated": "current UTC time"
+        },
+        "name": "created_at",
+        "nullable": false,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      }
+    ],
+    "constraints": [
+      {
+        "columns": [
+          "jti"
+        ],
+        "kind": "PrimaryKeyConstraint",
+        "name": null
+      }
+    ],
+    "indexes": [
+      {
+        "columns": [
+          "expires_at"
+        ],
+        "name": "ix_token_revocation_expiry",
+        "predicates": {
+          "postgresql": null,
+          "sqlite": null
+        },
+        "unique": false
+      }
+    ]
+  },
+  "totp_backup_codes": {
+    "columns": [
+      {
+        "default": {
+          "generated": "random opaque ID"
+        },
+        "name": "id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": true,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "user_id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "digest",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(64)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(64)"
+      },
+      {
+        "default": null,
+        "name": "used_at",
+        "nullable": true,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      },
+      {
+        "default": {
+          "generated": "current UTC time"
+        },
+        "name": "created_at",
+        "nullable": false,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      }
+    ],
+    "constraints": [
+      {
+        "columns": [
+          "id"
+        ],
+        "kind": "PrimaryKeyConstraint",
+        "name": null
+      },
+      {
+        "columns": [
+          "user_id"
+        ],
+        "deferrable": null,
+        "initially": null,
+        "kind": "ForeignKeyConstraint",
+        "name": null,
+        "ondelete": "CASCADE",
+        "onupdate": null,
+        "targets": [
+          "users.id"
+        ]
+      }
+    ],
+    "indexes": [
+      {
+        "columns": [
+          "user_id"
+        ],
+        "name": "ix_totp_backup_codes_user_id",
+        "predicates": {
+          "postgresql": null,
+          "sqlite": null
+        },
+        "unique": false
+      }
+    ]
+  },
+  "users": {
+    "columns": [
+      {
+        "default": {
+          "generated": "random opaque ID"
+        },
+        "name": "id",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": true,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "username",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(64)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(64)"
+      },
+      {
+        "default": null,
+        "name": "salt",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(128)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(128)"
+      },
+      {
+        "default": null,
+        "name": "verifier",
+        "nullable": false,
+        "postgresql_type": "BYTEA",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "BLOB"
+      },
+      {
+        "default": null,
+        "name": "scrypt_salt",
+        "nullable": false,
+        "postgresql_type": "BYTEA",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "BLOB"
+      },
+      {
+        "default": {
+          "generated": "current UTC time"
+        },
+        "name": "created_at",
+        "nullable": false,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      },
+      {
+        "default": {
+          "value": true
+        },
+        "name": "is_active",
+        "nullable": false,
+        "postgresql_type": "BOOLEAN",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "BOOLEAN"
+      },
+      {
+        "default": null,
+        "name": "age_attestation_version",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(32)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(32)"
+      },
+      {
+        "default": null,
+        "name": "age_attested_at",
+        "nullable": true,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      },
+      {
+        "default": {
+          "value": "user"
+        },
+        "name": "role",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(16)",
+        "primary_key": false,
+        "server_default": "'user'",
+        "sqlite_type": "VARCHAR(16)"
+      },
+      {
+        "default": null,
+        "name": "display_name",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(120)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(120)"
+      },
+      {
+        "default": null,
+        "name": "wrap_pub_key",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(256)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(256)"
+      },
+      {
+        "default": null,
+        "name": "wrap_key_blob",
+        "nullable": true,
+        "postgresql_type": "BYTEA",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "BLOB"
+      },
+      {
+        "default": null,
+        "name": "notes_keyring_blob",
+        "nullable": true,
+        "postgresql_type": "BYTEA",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "BLOB"
+      },
+      {
+        "default": {
+          "value": 0
+        },
+        "name": "custody_version",
+        "nullable": false,
+        "postgresql_type": "BIGINT",
+        "primary_key": false,
+        "server_default": "0",
+        "sqlite_type": "BIGINT"
+      },
+      {
+        "default": null,
+        "name": "custody_operation_id",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(36)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(36)"
+      },
+      {
+        "default": null,
+        "name": "custody_operation_digest",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(64)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(64)"
+      },
+      {
+        "default": null,
+        "name": "custody_operation_epoch",
+        "nullable": true,
+        "postgresql_type": "INTEGER",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "INTEGER"
+      },
+      {
+        "default": null,
+        "name": "rekey_operation_id",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(36)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(36)"
+      },
+      {
+        "default": null,
+        "name": "rekey_operation_digest",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(64)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(64)"
+      },
+      {
+        "default": null,
+        "name": "rekey_operation_epoch",
+        "nullable": true,
+        "postgresql_type": "INTEGER",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "INTEGER"
+      },
+      {
+        "default": null,
+        "name": "rekey_operation_result",
+        "nullable": true,
+        "postgresql_type": "TEXT",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "TEXT"
+      },
+      {
+        "default": {
+          "value": 1
+        },
+        "name": "token_epoch",
+        "nullable": false,
+        "postgresql_type": "INTEGER",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "INTEGER"
+      },
+      {
+        "default": {
+          "value": 0
+        },
+        "name": "entries_revision",
+        "nullable": false,
+        "postgresql_type": "BIGINT",
+        "primary_key": false,
+        "server_default": "0",
+        "sqlite_type": "BIGINT"
+      },
+      {
+        "default": {
+          "value": 0
+        },
+        "name": "notes_revision",
+        "nullable": false,
+        "postgresql_type": "BIGINT",
+        "primary_key": false,
+        "server_default": "0",
+        "sqlite_type": "BIGINT"
+      },
+      {
+        "default": {
+          "value": 0
+        },
+        "name": "measures_revision",
+        "nullable": false,
+        "postgresql_type": "BIGINT",
+        "primary_key": false,
+        "server_default": "0",
+        "sqlite_type": "BIGINT"
+      },
+      {
+        "default": {
+          "value": 0
+        },
+        "name": "consents_revision",
+        "nullable": false,
+        "postgresql_type": "BIGINT",
+        "primary_key": false,
+        "server_default": "0",
+        "sqlite_type": "BIGINT"
+      },
+      {
+        "default": {
+          "value": 0
+        },
+        "name": "patients_revision",
+        "nullable": false,
+        "postgresql_type": "BIGINT",
+        "primary_key": false,
+        "server_default": "0",
+        "sqlite_type": "BIGINT"
+      },
+      {
+        "default": {
+          "value": false
+        },
+        "name": "llm_consent",
+        "nullable": false,
+        "postgresql_type": "BOOLEAN",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "BOOLEAN"
+      },
+      {
+        "default": null,
+        "name": "llm_consent_at",
+        "nullable": true,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      },
+      {
+        "default": null,
+        "name": "llm_consent_disclosure",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(64)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(64)"
+      },
+      {
+        "default": null,
+        "name": "llm_consent_policy",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(64)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(64)"
+      },
+      {
+        "default": {
+          "value": false
+        },
+        "name": "voice_consent",
+        "nullable": false,
+        "postgresql_type": "BOOLEAN",
+        "primary_key": false,
+        "server_default": "false",
+        "sqlite_type": "BOOLEAN"
+      },
+      {
+        "default": null,
+        "name": "voice_consent_at",
+        "nullable": true,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      },
+      {
+        "default": null,
+        "name": "voice_consent_disclosure",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(64)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(64)"
+      },
+      {
+        "default": null,
+        "name": "voice_consent_policy",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(64)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(64)"
+      },
+      {
+        "default": null,
+        "name": "totp_secret",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(256)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(256)"
+      },
+      {
+        "default": null,
+        "name": "totp_enabled",
+        "nullable": true,
+        "postgresql_type": "BOOLEAN",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "BOOLEAN"
+      },
+      {
+        "default": null,
+        "name": "totp_last_counter",
+        "nullable": true,
+        "postgresql_type": "INTEGER",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "INTEGER"
+      },
+      {
+        "default": {
+          "value": "v1"
+        },
+        "name": "key_scheme",
+        "nullable": false,
+        "postgresql_type": "VARCHAR(8)",
+        "primary_key": false,
+        "server_default": "'v1'",
+        "sqlite_type": "VARCHAR(8)"
+      },
+      {
+        "default": null,
+        "name": "wrapped_data_key",
+        "nullable": true,
+        "postgresql_type": "BYTEA",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "BLOB"
+      },
+      {
+        "default": null,
+        "name": "recovery_salt",
+        "nullable": true,
+        "postgresql_type": "BYTEA",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "BLOB"
+      },
+      {
+        "default": null,
+        "name": "recovery_verifier",
+        "nullable": true,
+        "postgresql_type": "BYTEA",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "BLOB"
+      },
+      {
+        "default": null,
+        "name": "recovery_wrapped_data_key",
+        "nullable": true,
+        "postgresql_type": "BYTEA",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "BLOB"
+      },
+      {
+        "default": null,
+        "name": "recovery_set_at",
+        "nullable": true,
+        "postgresql_type": "TIMESTAMP WITH TIME ZONE",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "DATETIME"
+      },
+      {
+        "default": null,
+        "name": "recovery_scheme",
+        "nullable": true,
+        "postgresql_type": "SMALLINT",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "SMALLINT"
+      },
+      {
+        "default": {
+          "value": 0
+        },
+        "name": "entry_count",
+        "nullable": false,
+        "postgresql_type": "INTEGER",
+        "primary_key": false,
+        "server_default": "0",
+        "sqlite_type": "INTEGER"
+      },
+      {
+        "default": {
+          "value": 0
+        },
+        "name": "entry_blob_bytes",
+        "nullable": false,
+        "postgresql_type": "BIGINT",
+        "primary_key": false,
+        "server_default": "0",
+        "sqlite_type": "BIGINT"
+      },
+      {
+        "default": {
+          "value": 0
+        },
+        "name": "measure_count",
+        "nullable": false,
+        "postgresql_type": "INTEGER",
+        "primary_key": false,
+        "server_default": "0",
+        "sqlite_type": "INTEGER"
+      },
+      {
+        "default": null,
+        "name": "kdf_params",
+        "nullable": true,
+        "postgresql_type": "VARCHAR(256)",
+        "primary_key": false,
+        "server_default": null,
+        "sqlite_type": "VARCHAR(256)"
+      }
+    ],
+    "constraints": [
+      {
+        "columns": [
+          "id"
+        ],
+        "kind": "PrimaryKeyConstraint",
+        "name": null
+      }
+    ],
+    "indexes": [
+      {
+        "columns": [
+          "username"
+        ],
+        "name": "ix_users_username",
+        "predicates": {
+          "postgresql": null,
+          "sqlite": null
+        },
+        "unique": true
+      }
+    ]
+  }
+}

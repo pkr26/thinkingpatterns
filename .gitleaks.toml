@@ -162,6 +162,9 @@ regexes = ['''^app\.api\.therapist": "a3b747d3c02e9468"$''']
 description = "exact frozen mutation-evidence file hashes"
 regexTarget = "match"
 regexes = [
+  # Current therapist source hash: verified against production bytes and
+  # restricted by test_repo_secret_scan to the four reviewed evidence files.
+  '''^therapist\.py": "4f2e6ec68674c2cfffb15ece89c5977cd6111725240e6ecf994721950c72342c"$''',
   '''^TherapistShareScreen\.tsx": "930b8c18e347ec648a3cdaa61891a4cd072879b26fb87159a4d7e824769599f1"$''',
   '''^a4e8c1f6b9d3_token_revocation\.py": "1fc7d4774290a9271cc6babfc9605b729d757a90011ad09b4c26de4c11cd59b3"$''',
   '''^android-authenticated-ui\.xml": "890caf4139f89c715396b1855170cd70b285c47d79b43855084f47b39196f353"$''',
@@ -263,4 +266,48 @@ regexes = [
   '''^therapist_id': '0df10e361bdc427ca6c65e3b53e2077e'$''',
   '''^therapist_id': '9a0cefd169d6463da9c5528e526d9c17'$''',
   '''^therapist_id': '9cfbec2f3fbf4e80a32dc5b29fe2bc63'$''',
+]
+
+[[allowlists]]
+# These 36 fields (24 distinct assignments) are public offline test vectors,
+# not credentials for any deployed account. crypto_vectors_small.json comes
+# from scripts.generate_vectors CASES/ENCRYPT_CASES/ENVELOPE_* inputs with
+# the oracle's PBKDF2 iteration count 2; the envelope data key is the literal
+# byte range 200..231 also published in shared/vectors.json. runtime_outputs
+# records automatic_backend_script_oracles.load_cli_case/seed_cli_case with
+# synthetic-password, deterministic mindpattern-loadtest:<username> or
+# mindpattern-seed-demo:demo SHA-256 salts and PBKDF2 iteration count 1000.
+# The CLI clients are offline stubs; no enrollment or live service is used.
+# Match each entire assignment exactly. Never add fixture paths or a general
+# key shape: v8.30.1 staged/no-git path shortcuts would conceal other secrets.
+# test_repo_secret_scan restricts every value (including its escaped regex
+# spelling) to its reviewed fixture, this policy and that guard; only the
+# published envelope byte-range value additionally appears in shared/vectors.
+description = "exact deterministic offline crypto and CLI vector assignments"
+regexTarget = "match"
+regexes = [
+  '''^master_key": "S51594wKma1bAMYvsz\+TZOtBMNNA7lVsuSyfxwJ1Qoo="$''',
+  '''^auth_key": "Q4ioovzM6rPmUxtNSG3omid64x75jvjx1ljPTKpV21Y="$''',
+  '''^data_key": "Ion8UHquCO320Z0jbpJVBt9NK8I\+MwY5wlkxiVd0bxk="$''',
+  '''^master_key": "AKNEn\+eC00cmMscReFZwN/ZvQi7NfZyZU2ltL1tzHXo="$''',
+  '''^auth_key": "gHzzdqkhvSOWFCyimTPcD6qlIOMYRgTKQK3ANEvqOqg="$''',
+  '''^data_key": "20Oahr5wd9gryOYg1uJFMbwW1bf/EETPCIppchL/NFo="$''',
+  '''^master_key": "YF1Gb964QHwCFOa5ux1rUnH2DnGbzDBc7L88OHzoqNM="$''',
+  '''^auth_key": "sCBtHwK9z0CE4xyQ7zD61rbAKydYIpRHlPrTTD7zwUA="$''',
+  '''^data_key": "LnlNrdzQpWjWXEQiQzBOgn9glArlEoY58bae4A4cAhc="$''',
+  '''^master_key": "QlJdCGZYXUSDu5811B7DsJihYBMsReiAsI\+TuWgzuao="$''',
+  '''^auth_key": "glPgs5CUtfncOWXNm2aMLkwzy/peNcn4FZnJLAR8pIE="$''',
+  '''^data_key": "ggE8tZhjNVn/aJ4MnLa9X23a\+s/eRuo2QcIMbU/eijI="$''',
+  '''^data_key": "NXC/7KCKT0KAOtjrJQQKaePsKsFKOqsNorJH6H4T1EQ="$''',
+  '''^data_key": "HjxGTtCcfC758otf3toRJcjwLv0QfqmS1Srkvrf15d8="$''',
+  '''^data_key": "At2ri082RlUhQJ9Ml6eGtYBiK2V71Aob1YMzR16lWgU="$''',
+  '''^data_key": "dgN4nuHlkRIg3yBHbUaNKuuM5oGouHDY7TTTViRI\+4c="$''',
+  '''^data_key": "1GDk4Uao5o/Bv10xPndiZ6Y0JV11\+9Grq8LaA31k/Rs="$''',
+  '''^data_key": "sc1B91Hvj\+67Z21On43a8\+ER9ty2KyCya9Ph3b9AOW4="$''',
+  '''^data_key": "nNB9ItmBepwzUcOhZaF\+y27\+sMuqx/I4Q0LZjYIgUSc="$''',
+  '''^master_key": "gPmfikJQwYXX7nEnmcdykuTVHCQ\+NDD2OkVtf3tlTL4="$''',
+  '''^data_key": "yMnKy8zNzs/Q0dLT1NXW19jZ2tvc3d7f4OHi4\+Tl5uc="$''',
+  '''^data_key": "p4PA\+VukfyRnYRL6lqmSG8TnqNgrGU1O37BxlgyM8lg="$''',
+  '''^data_key": "QgqO\+sMHoLmcI4CxTFj2KFOzJj0ewRS6fhPh7lG1Dug="$''',
+  '''^data_key": "ASZtTjPHv7iZEdVW3\+wI4H6AEHqbYJlFlKS3HsLSTHY="$''',
 ]

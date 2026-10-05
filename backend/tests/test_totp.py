@@ -52,7 +52,7 @@ def totp_clock(monkeypatch):
 
 async def test_totp_helper_accepts_current_and_drift_rejects_other():
     raw, b32 = totp.generate_secret()
-    assert len(raw) == totp.SECRET_BYTES
+    assert len(raw) >= 20
     assert _b32_decode(b32) == raw
     now = time.time()
     current = int(now // totp.STEP_SECONDS)

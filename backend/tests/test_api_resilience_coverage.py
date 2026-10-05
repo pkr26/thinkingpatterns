@@ -341,7 +341,11 @@ async def test_export_releases_admission_slot_when_account_disappears_before_sna
 async def _collect_export(
     account_api, *, fresh: User, pages: list[_PageSession], snapshot_ids=()
 ) -> dict:
-    pages = [*pages, _PageSession([])]  # final revocation/revision check
+    pages = [
+        *pages,
+        _PageSession([_Result(rows=[])]),  # empty durable audio metadata
+        _PageSession([]),  # final revocation/revision check
+    ]
     for page in pages:
         page.fresh = fresh
     request = SimpleNamespace(

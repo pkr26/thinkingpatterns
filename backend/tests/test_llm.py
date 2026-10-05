@@ -51,6 +51,45 @@ def test_get_enricher_requires_both_url_and_consent():
     assert enricher.last_error is None
 
 
+def test_narrative_rejects_suppression_only_crisis_language():
+    from app.services import crisis, llm
+
+    narrative = "the urge for cutting was loud"
+    assert not crisis.matches_dialog(narrative)
+    assert crisis.matches_suppress(narrative)
+    assert llm._clean_narrative(narrative) is None
+
+
+@pytest.mark.parametrize(
+    "narrative",
+    [
+        "I recorded prescriptions yesterday.",
+        "I recorded prescribe yesterday.",
+        "I recorded prescribed yesterday.",
+        "Stop dwelling on work.",
+        "Visit the garden.",
+        "Focus on work.",
+        "The work notes say: Focus on rest.",
+        "better off without you",
+        "no one cares",
+        "not worth it",
+        "the problem is you",
+        "push them away",
+    ],
+)
+def test_narrative_rejects_independent_clinical_advice_and_manipulation(narrative):
+    from app.services import crisis, llm
+
+    # Each guard must work without relying on the final crisis-language gate.
+    assert not crisis.matches_dialog(narrative)
+    assert not crisis.matches_suppress(narrative)
+    assert llm._clean_narrative(narrative) is None
+
+
+def test_label_rejects_contact_instructions_without_contact_details():
+    assert _clean_label("text me at lunch") is None
+
+
 def test_the_v1_analyzer_interface_is_gone():
     # 2026-09-17 audit remediation: RuleBasedAnalyzer/LLMAnalyzer.analyze
     # surfaced the pre-brain pooled statistics (the documented
@@ -474,7 +513,7 @@ def test_post_rejects_oversized_declared_response_before_reading(monkeypatch):
             return FakeResponse()
 
     monkeypatch.setattr("httpx.AsyncClient", FakeClient)
-    with pytest.raises(LLMResponseTooLarge):
+    with pytest.raises(LLMResponseTooLarge, match=r"^LLM response exceeds size limit$"):
         _make_analyzer()._post({"model": "mini"})
     assert not iterated
 
@@ -543,8 +582,64 @@ def test_post_rejects_oversized_chunked_response(monkeypatch):
             return FakeResponse()
 
     monkeypatch.setattr("httpx.AsyncClient", FakeClient)
-    with pytest.raises(LLMResponseTooLarge):
+    with pytest.raises(LLMResponseTooLarge, match=r"^LLM response exceeds size limit$"):
         _make_analyzer()._post({"model": "mini"})
+
+
+@pytest.mark.parametrize("headers", [{}, {"content-length": "2"}])
+@pytest.mark.parametrize("extra_byte", [False, True])
+def test_post_caps_accumulated_stream_and_closes_response(monkeypatch, headers, extra_byte):
+    """The decoded stream obeys the cap even without an honest length header."""
+    from app.services import llm
+
+    payload = b'{"ok":true} '
+    monkeypatch.setattr(llm, "LLM_MAX_RESPONSE_BYTES", len(payload))
+    chunks = [payload[:4], payload[4:8], payload[8:] + (b" " if extra_byte else b"")]
+    read_chunks = []
+    closed = []
+
+    class FakeResponse:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            closed.append("response")
+            return False
+
+        def raise_for_status(self):
+            return None
+
+        async def aiter_bytes(self, *, chunk_size):
+            for chunk in chunks:
+                read_chunks.append(chunk)
+                yield chunk
+            if extra_byte:
+                pytest.fail("an oversized stream must stop before requesting another chunk")
+
+    FakeResponse.headers = headers
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            closed.append("client")
+            return False
+
+        def stream(self, *_args, **_kwargs):
+            return FakeResponse()
+
+    monkeypatch.setattr("httpx.AsyncClient", FakeClient)
+    if extra_byte:
+        with pytest.raises(LLMResponseTooLarge, match=r"^LLM response exceeds size limit$"):
+            _make_analyzer()._post({"model": "mini"})
+    else:
+        assert _make_analyzer()._post({"model": "mini"}) == {"ok": True}
+    assert read_chunks == chunks
+    assert closed == ["response", "client"]
 
 
 def test_post_enforces_total_deadline_while_waiting_for_stream(monkeypatch):

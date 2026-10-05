@@ -625,8 +625,8 @@ campaign(
         ),
         (
             "Local upload does not advance generation",
-            "        state_seq = prior_seq + 1\n        await _replace_insight(",
-            "        state_seq = prior_seq\n        await _replace_insight(",
+            "        state_seq = prior_seq + 1\n        try:",
+            "        state_seq = prior_seq\n        try:",
         ),
         (
             "Local upload invents pattern count from claimed dates",

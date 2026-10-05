@@ -1,0 +1,107 @@
+{
+  "status": "INDEPENDENT_FINAL_CURRENT_BACKEND_AUDIT_PASS",
+  "ledger": "backend-current-ledger.json",
+  "ledger_sha256": "b18d7d6f7b28f227e8b435fe610fa91cff0b36840a0ffdd6d3ba158c96693524",
+  "total": 44089,
+  "counts": {
+    "KILLED": 42665,
+    "REVIEWED_EQUIVALENT": 1257,
+    "STATIC_TYPECHECK_CAUGHT": 142,
+    "INVALID_SYNTAX": 25
+  },
+  "production_files_verified": 95,
+  "operator_files_verified": 92,
+  "zero_operator_files": [
+    "app/__init__.py",
+    "app/security/__init__.py",
+    "app/services/__init__.py"
+  ],
+  "complete_changed_module_supersessions_verified": 9,
+  "unchanged_original_control_ids_retained": 37852,
+  "all_current_ids_uniquely_accounted_for": true,
+  "all_runtime_raw_and_stage_manifest_full_patch_identities_verified": true,
+  "all_static_and_equivalent_raw_and_stage_manifest_full_patch_identities_verified": true,
+  "all_accepted_mutated_target_bytes_match_current_production": true,
+  "all_runtime_credit_requires_real_call_failure_and_passing_pristine_selector_baseline": true,
+  "runtime_pristine_selector_baselines_verified": 1549,
+  "runtime_result_files_verified": 422,
+  "runtime_snapshot_target_pairs_verified": 388,
+  "static_typecheck_controls_with_actual_mutated_file_diagnostics_and_uncached_gate": 142,
+  "equivalent_controls_with_causal_proofs_and_current_target_successful_runtime_evidence": 1257,
+  "invalid_syntax_controls_independently_compile_verified": 25,
+  "unresolved_dispositions": 0,
+  "accepted_timeout_or_oracle_error_credit": 0,
+  "known_source_hash_or_ast_registry_kill_credit": 0,
+  "withdrawn_private_pins": [
+    "M008096",
+    "M010799",
+    "M010800",
+    "I000328",
+    "T000165"
+  ],
+  "M008096_historical_equivalence_withdrawn_and_entire_current_locks_replayed": true,
+  "fresh_current_lock_controls": 106,
+  "current_lock_equivalents_independently_reviewed": 9,
+  "pending_independent_challenges": [],
+  "current_insights1186_dispositions_and54_equivalents_reverified": true,
+  "restoration_evidence_verified": true,
+  "evidence_scope": "Accepted current target patches and recorded frozen oracle snapshots. Unchanged targets can retain earlier dependency snapshots; final dependency witnesses supplement these records rather than proving every control ran against one identical final dependency snapshot.",
+  "runner_artifacts": {
+    "retained_unique_runner_files_hash_verified": 138,
+    "stages_without_standalone_retained_runner_file": [
+      "behavior-fresh",
+      "boot-errors",
+      "boot-errors-v2",
+      "boot-errors-v3",
+      "core-broad-function",
+      "core-corrected",
+      "core-http-contracts",
+      "current-audit-full",
+      "schema-env-bootstrap",
+      "schema-full",
+      "schema-graph",
+      "schema-pagination",
+      "schema-populated",
+      "schema-portable",
+      "schema-runtime",
+      "scripts-full",
+      "scripts-remediation"
+    ]
+  },
+  "historical_pre_lock_fix_audit_archive": "independent-pre-lock-fix-a7/historical-status.json",
+  "reproduction_scripts": "independent-audit-scripts/scripts-sha256.json",
+  "artifacts": [
+    {
+      "artifact": "independent-final-runtime-audit.json",
+      "sha256": "3b2a3c054d4b214dfc995afaf9cbac20327b935c1b4569ea03e39c3b4395b6c1"
+    },
+    {
+      "artifact": "independent-final-reviewed-disposition-audit.json",
+      "sha256": "8a87b487891c69af2cdb00e3fbe47658642effbc8f12c596ba51aee7c51f7250"
+    },
+    {
+      "artifact": "independent-current-scope-audit.json",
+      "sha256": "9f17e7265aa34fdd9f3bdb6203addfca128aff212e0fac0b4b5378c42cb43be0"
+    },
+    {
+      "artifact": "independent-final-ledger-scope-audit.json",
+      "sha256": "2b7abdfb066ed03f2ff086f6d5ae7502f187c9a4aac9075f90a8559c1d561a84"
+    },
+    {
+      "artifact": "independent-final-runtime-pin-review.json",
+      "sha256": "b032fbfd7b4bcafb2b42dbec212b8c5a0622ba6fe7de478440d187408d0fa06a"
+    },
+    {
+      "artifact": "independent-current-account-root-equivalence-audit.json",
+      "sha256": "d42a4234e9d15b2e880de1161006f3ba91558833dfba903c39760a474b6df773"
+    },
+    {
+      "artifact": "independent-current-lock-equivalence-audit.json",
+      "sha256": "b7a11443bf5943cba61811cb647aa5f9c8d24ea9ac3f7de70c55348b5aba226c"
+    },
+    {
+      "artifact": "independent-current-insights-audit.json",
+      "sha256": "61a9128725148d9ae9e8c99e56d9d8fe1b300cd1bd399ea5c0ed6ffcf817d7e3"
+    }
+  ]
+}

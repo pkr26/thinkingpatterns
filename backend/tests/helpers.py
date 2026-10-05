@@ -696,7 +696,8 @@ class TherapistEmulator:
                 json={"verifier": self.auth_key_b64},
             )
             assert setup.status_code == 200, setup.text
-            secret = base64.b32decode(setup.json()["secret_base32"])
+            encoded_secret = setup.json()["secret_base32"]
+            secret = base64.b32decode(encoded_secret + "=" * (-len(encoded_secret) % 8))
             from app.security import totp
 
             # Tests may install a controlled TOTP clock. Generate the

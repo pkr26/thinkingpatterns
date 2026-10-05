@@ -1,0 +1,75 @@
+{
+  "id": "C000016",
+  "current_source_sha256": "fdba9de7d842fc1116ca5cb765b25b3006653b979f2b37cae44a558174875c5f",
+  "disposition": "KILLED",
+  "previous_equivalence_withdrawn": true,
+  "previous_newer_sqlite_postgres_samples_remain_valid_only_for_those_versions": true,
+  "native_version": "3.42.0 2023-05-16 12:36:15 831d0fb2836b71c9bc51067c49fee4b8f18047814f2ff22d817d25195cf350b0",
+  "binary": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/sqlite342-native/sqlite3",
+  "binary_sha256": "4e567704b212f27293d0c5695f7f619e3209e9be44d4f62b4f514366b32b2a2d",
+  "official_archive": "https://www.sqlite.org/2023/sqlite-autoconf-3420000.tar.gz",
+  "archive_sha256": "7abcfd161c6e2742ca5c6c0895d1f853c940f203304a0b49da4e1eca5d088ca6",
+  "build_command": "cc -O2 -DSQLITE_THREADSAFE=1 -DSQLITE_ENABLE_JSON1 sqlite3.c shell.c -lpthread -ldl -o ../sqlite3",
+  "public_project_floor": {
+    "backend/pyproject.toml": "requires-python = \">=3.12\"",
+    "sqlite_minimum_3_43_declared": false
+  },
+  "oracle": "/Users/pradeepreddy/Desktop/mental_health_application/tools/tests/test_backend_sqlite_compatibility_contracts.py",
+  "oracle_sha256": "b5e5be4fd866e1d4706261360971450045187f55bfd5147eb9e30dd4b3fde7c8",
+  "executions": [
+    {
+      "source": "pristine",
+      "column": "Entry.blob",
+      "outcome": "actual_native_query_passed",
+      "encrypted_binary_fixture_count": 3
+    },
+    {
+      "source": "pristine",
+      "column": "Insight.blob",
+      "outcome": "actual_native_query_passed",
+      "encrypted_binary_fixture_count": 3
+    },
+    {
+      "source": "pristine",
+      "column": "Measure.blob",
+      "outcome": "actual_native_query_passed",
+      "encrypted_binary_fixture_count": 3
+    },
+    {
+      "source": "C000016",
+      "column": "Entry.blob",
+      "outcome": "actual_native_query_failed",
+      "oracle_assertion": "Parse error near line 6: no such function: octet_length\n  SELECT entries.id, octet_length(entries.blob) AS octet_length_1  FROM entries \n                     ^--- error here\n"
+    },
+    {
+      "source": "C000016",
+      "column": "Insight.blob",
+      "outcome": "actual_native_query_failed",
+      "oracle_assertion": "Parse error near line 6: no such function: octet_length\n  SELECT insights.id, octet_length(insights.blob) AS octet_length_1  FROM insigh\n                      ^--- error here\n"
+    },
+    {
+      "source": "C000016",
+      "column": "Measure.blob",
+      "outcome": "actual_native_query_failed",
+      "oracle_assertion": "Parse error near line 6: no such function: octet_length\n  SELECT measures.id, octet_length(measures.blob) AS octet_length_1  FROM measur\n                      ^--- error here\n"
+    }
+  ],
+  "pristine_native_cases_passed": 3,
+  "mutated_native_cases_failed": 3,
+  "production_and_test_files_unchanged": true,
+  "C000017": "Prior native PostgreSQL BYTEA alias certificate remains valid; SQLite branch unchanged.",
+  "release_provenance": "https://www.sqlite.org/releaselog/3_43_0.html",
+  "canonical_actual_call_evidence": {
+    "result_file": "current-sqlite-compatibility/results-01.jsonl",
+    "result_line": 2,
+    "baseline_file": "current-sqlite-compatibility/baselines-01.json",
+    "baseline_id": "01-00000",
+    "failing_call_nodes": [
+      "tools/tests/test_backend_sqlite_compatibility_contracts.py::test_native_binary_size_queries_support_older_sqlite[account-_export_blob_length-Entry]"
+    ],
+    "source_snapshot": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/current-sqlite-compatibility-ready",
+    "source_restored": true,
+    "temporary_restored": true
+  },
+  "final_global_ledger_sha256": "b18d7d6f7b28f227e8b435fe610fa91cff0b36840a0ffdd6d3ba158c96693524"
+}

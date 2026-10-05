@@ -300,7 +300,8 @@ async def test_therapist_must_enroll_mfa_before_patient_surfaces_and_backup_reco
         json={"verifier": therapist.auth_key_b64},
     )
     assert setup.status_code == 200, setup.text
-    secret = base64.b32decode(setup.json()["secret_base32"])
+    encoded_secret = setup.json()["secret_base32"]
+    secret = base64.b32decode(encoded_secret + "=" * (-len(encoded_secret) % 8))
     code = totp._code_for_counter(secret, int(time.time() // totp.STEP_SECONDS))
     enabled = await client.post(
         "/api/account/totp/enable",

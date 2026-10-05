@@ -152,9 +152,3 @@ class TestUploadEdgeBranches:
             },
         )
         assert bad_dur.status_code == 422
-
-    async def test_replace_delete_failure_maps_to_502(self, client, settings, monkeypatch):
-        """SKIPPED-SCOPE NOTE: the delete-before-put replace arm is the S3
-        store's path (LocalAudioStore overwrites in place); it is exercised
-        by the fake-boto3 harness in test_voice_remediation_2026_09_29."""
-        pytest.skip("S3-store arm: covered by the fake-boto3 M4 suite")

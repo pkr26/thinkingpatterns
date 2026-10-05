@@ -1183,15 +1183,12 @@ async def export_account(
             # listing and fetch is skipped, honestly.
             yield '],"audio":['
             first = True
-            # getattr: the export's own test doubles carry partial app
-            # state (the require_sharing_enabled idiom, line ~184) — no
-            # settings means no audio store, and the section is empty.
+            # Inspect durable metadata even when a live Settings swap has
+            # removed the provider. Existing recordings must fail visibly
+            # rather than disappear from an otherwise successful export.
             export_settings = getattr(request.app.state, "settings", None)
-            audio_store = (
-                get_audio_store_cached(export_settings) if export_settings is not None else None
-            )
             audio_cursor: tuple | None = None
-            if audio_store is not None and export_settings is not None:
+            if export_settings is not None:
                 while True:
                     page_meta: list[dict] = []
                     async with lifecycle_locks.hold(f"llm-lifecycle:{fresh.id}"):

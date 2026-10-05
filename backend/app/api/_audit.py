@@ -728,16 +728,18 @@ def reusable_journal_evidence_index(journal_path: str) -> JournalEvidenceIndex:
             final_fingerprint = _journal_source_fingerprint(source)
         except OSError:
             final_fingerprint = None
-        if final_fingerprint != initial_fingerprint:
+        if final_fingerprint is None or final_fingerprint != initial_fingerprint:
             # An external writer does not participate in our journal lock.
             # Never cache a scan that may describe only part of the source
             # generation. Return a fail-closed result once and force the next
             # pass to rebuild after the file settles.
             index.corrupt = True
-            _set_journal_health(False, "source_changed_during_index")
+            _set_journal_health(
+                False,
+                "io_failure" if final_fingerprint is None else "source_changed_during_index",
+            )
             cached_fingerprint = (-1, -1, -1, -1, -1)
         else:
-            assert final_fingerprint is not None
             cached_fingerprint = final_fingerprint
         _journal_index_cache = index
         _journal_index_cache_source = source

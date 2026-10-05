@@ -1,0 +1,503 @@
+{
+  "schema": 1,
+  "ledger_sha256": "5b15c22b99bbfbecd611718f71b3d11474a53ac3665eae8358dddf4502c31525",
+  "total": 44089,
+  "counts": {
+    "KILLED": 42663,
+    "REVIEWED_EQUIVALENT": 1259,
+    "STATIC_TYPECHECK_CAUGHT": 142,
+    "INVALID_SYNTAX": 25
+  },
+  "files": {
+    "accepted-evidence.jsonl.gz": {
+      "sha256": "bb9d0b347cf47b6521481fa82b2cb104e9f0e50e9be5aa189fd95098f6a4296b",
+      "bytes": 7019237,
+      "accepted_controls": 44064,
+      "accepted_counts": {
+        "KILLED": 42663,
+        "REVIEWED_EQUIVALENT": 1259,
+        "STATIC_TYPECHECK_CAUGHT": 142
+      },
+      "pristine_groups": 1616,
+      "redaction_boundary": "free-form runtime traceback and captured response payloads omitted; original file/line/field hashes retained"
+    },
+    "reviewed-dispositions.json.gz": {
+      "sha256": "ec374ade45ee52a0ab75d11451cc0b016a73cd17e1f25df696316c21c0d101c7",
+      "bytes": 302377,
+      "decompressed_sha256": "ad2fc717a05e93dd6163ab70bf057161462288f9c35179059fb9c7050d93bb1b",
+      "decompressed_bytes": 3733558
+    },
+    "ledger.json.gz": {
+      "sha256": "cd5d22e16db210ce08260c9215671e3bb3e0ed8402a2cc0a0fed07a98286dfe6",
+      "bytes": 1724399,
+      "decompressed_sha256": "5b15c22b99bbfbecd611718f71b3d11474a53ac3665eae8358dddf4502c31525",
+      "decompressed_bytes": 53311328,
+      "original_sha256": "5b15c22b99bbfbecd611718f71b3d11474a53ac3665eae8358dddf4502c31525",
+      "redactions": []
+    },
+    "summary.json": {
+      "sha256": "a778dfe174e64b84a3bdd166b2e34ab67cf87536a4a30746c99fb5b5c0060225",
+      "bytes": 37631,
+      "decompressed_sha256": "a778dfe174e64b84a3bdd166b2e34ab67cf87536a4a30746c99fb5b5c0060225",
+      "decompressed_bytes": 37631,
+      "original_sha256": "a778dfe174e64b84a3bdd166b2e34ab67cf87536a4a30746c99fb5b5c0060225",
+      "redactions": []
+    },
+    "independent-audit.json": {
+      "sha256": "0f432a064aadb37ed78266429e22df01dcb136300ae513cd722aab89cbdc534f",
+      "bytes": 7734,
+      "decompressed_sha256": "0f432a064aadb37ed78266429e22df01dcb136300ae513cd722aab89cbdc534f",
+      "decompressed_bytes": 7734,
+      "original_sha256": "0f432a064aadb37ed78266429e22df01dcb136300ae513cd722aab89cbdc534f",
+      "redactions": []
+    },
+    "validation.json": {
+      "sha256": "7e3bd024d4ae36bbc789ee85b51966fc377045e91b24ea40ec73ee6a42cd80e8",
+      "bytes": 4876,
+      "decompressed_sha256": "7e3bd024d4ae36bbc789ee85b51966fc377045e91b24ea40ec73ee6a42cd80e8",
+      "decompressed_bytes": 4876,
+      "original_sha256": "7e3bd024d4ae36bbc789ee85b51966fc377045e91b24ea40ec73ee6a42cd80e8",
+      "redactions": []
+    },
+    "historical-audit-before-token-pin-correction.json": {
+      "sha256": "ce8a0f783d467ccfb85f60389e43ce7d04c10addd1e5dd29e58a82027c2cc88f",
+      "bytes": 4343,
+      "decompressed_sha256": "ce8a0f783d467ccfb85f60389e43ce7d04c10addd1e5dd29e58a82027c2cc88f",
+      "decompressed_bytes": 4343,
+      "original_sha256": "ce8a0f783d467ccfb85f60389e43ce7d04c10addd1e5dd29e58a82027c2cc88f",
+      "redactions": []
+    },
+    "audits/independent-final-runtime-audit.json.gz": {
+      "sha256": "d3c29a106ac1975f801f328ec064b4d6427bac996eac2d972f571fa421f3ad8b",
+      "bytes": 6022,
+      "decompressed_sha256": "645a40dd13c9e8c1de09ae0ac5705b4e6575e23262b153431b2deb33e08098ba",
+      "decompressed_bytes": 29149,
+      "original_sha256": "645a40dd13c9e8c1de09ae0ac5705b4e6575e23262b153431b2deb33e08098ba",
+      "redactions": []
+    },
+    "audits/independent-final-reviewed-disposition-audit.json.gz": {
+      "sha256": "c4356de87ca8cbe30ee1bab6afba03209c2e798946458ddb417be87020be45c9",
+      "bytes": 17360,
+      "decompressed_sha256": "c4725de4640ce7518c15b8301be68ba6875afa89c0e3261f6440bc94aaa67ef7",
+      "decompressed_bytes": 1165252,
+      "original_sha256": "c4725de4640ce7518c15b8301be68ba6875afa89c0e3261f6440bc94aaa67ef7",
+      "redactions": []
+    },
+    "audits/independent-current-scope-audit.json.gz": {
+      "sha256": "9804de0e37ae7955e7ff869d502e2d5f2b37bd6ba9836f5f634e7e125af36e21",
+      "bytes": 6044,
+      "decompressed_sha256": "c003028e12c02d7f7693b616609a02d05fa2a5691eb280af214a34ca8fef7202",
+      "decompressed_bytes": 20180,
+      "original_sha256": "c003028e12c02d7f7693b616609a02d05fa2a5691eb280af214a34ca8fef7202",
+      "redactions": []
+    },
+    "audits/independent-final-ledger-scope-audit.json.gz": {
+      "sha256": "30d654d124df67f54e73b835cdf6ce50c575ea5629db71885d1f2e6ae3292837",
+      "bytes": 818,
+      "decompressed_sha256": "6bb8fec19790f22b0d3243bc86ffc5ce2ef01f2191219218e216840d93196815",
+      "decompressed_bytes": 4197,
+      "original_sha256": "6bb8fec19790f22b0d3243bc86ffc5ce2ef01f2191219218e216840d93196815",
+      "redactions": []
+    },
+    "audits/independent-final-runtime-pin-review.json.gz": {
+      "sha256": "9a693d12ea3f6f9a687b3ea4af22d9af8450c3f00b0bcdffe9d970dc68043fa4",
+      "bytes": 4862,
+      "decompressed_sha256": "1096fb2ba5516fccf218c5f704aec9f35b31fcb198970555f5dc083e9e73979a",
+      "decompressed_bytes": 38112,
+      "original_sha256": "1096fb2ba5516fccf218c5f704aec9f35b31fcb198970555f5dc083e9e73979a",
+      "redactions": []
+    },
+    "audits/independent-current-account-root-equivalence-audit.json.gz": {
+      "sha256": "e48aac355ab18397a4604e9c38a094f1e50b6f19b7b66804b7f310470fb101a6",
+      "bytes": 1206,
+      "decompressed_sha256": "731bae4fb2e56396329206f485f1a0872377e4afaa5d5954d492cda488b5b8bb",
+      "decompressed_bytes": 2723,
+      "original_sha256": "731bae4fb2e56396329206f485f1a0872377e4afaa5d5954d492cda488b5b8bb",
+      "redactions": []
+    },
+    "audits/independent-current-lock-equivalence-audit.json.gz": {
+      "sha256": "f3986254a3376b548bb17d1358ae663ccbd898956809bf3e9dae7b856c701f4f",
+      "bytes": 3096,
+      "decompressed_sha256": "e18fed623e8d55c01c9699a778098381b8c156fe7ac3fe91439ef376b809dcea",
+      "decompressed_bytes": 13236,
+      "original_sha256": "e18fed623e8d55c01c9699a778098381b8c156fe7ac3fe91439ef376b809dcea",
+      "redactions": []
+    },
+    "audits/independent-current-insights-audit.json.gz": {
+      "sha256": "72de3d1d34fc772853b74334e7be87fef79cb05bac9556dac7211c5175bcf8d4",
+      "bytes": 7903,
+      "decompressed_sha256": "28410a44b2d5a9df112a0f047f35d3724c2863d07c3694fd44ca874ab73dcea7",
+      "decompressed_bytes": 34808,
+      "original_sha256": "28410a44b2d5a9df112a0f047f35d3724c2863d07c3694fd44ca874ab73dcea7",
+      "redactions": []
+    },
+    "audits/static-disposition-independent-audit.json.gz": {
+      "sha256": "36ca011c8ce44e784ad3b0a79c852a207d6591b4da3857234ff88271a53bef81",
+      "bytes": 6528,
+      "decompressed_sha256": "355018e5d19d8ca33ccb5ed2021cb9a02112c70dfee8a84ca8f8977d04cb59f7",
+      "decompressed_bytes": 149703,
+      "original_sha256": "355018e5d19d8ca33ccb5ed2021cb9a02112c70dfee8a84ca8f8977d04cb59f7",
+      "redactions": []
+    },
+    "audits/runner-archival-candidates.json.gz": {
+      "sha256": "5edcbbd80be4860397c903dbd0000c6be90dc8ea0df1441cf2a973817b4a6405",
+      "bytes": 2496,
+      "decompressed_sha256": "a22fd3f44360c31c88d74ee8d30882d1cb1eeee6a5249dd4f798046b5dc80eaf",
+      "decompressed_bytes": 69838,
+      "original_sha256": "a22fd3f44360c31c88d74ee8d30882d1cb1eeee6a5249dd4f798046b5dc80eaf",
+      "redactions": []
+    },
+    "certificates/opaque-capability-entropy-current-certificate.json": {
+      "sha256": "7d2390637deda58cfc27a0d65ea934040e801e312721462bb97486e643803e0b",
+      "bytes": 13208,
+      "decompressed_sha256": "7d2390637deda58cfc27a0d65ea934040e801e312721462bb97486e643803e0b",
+      "decompressed_bytes": 13208,
+      "original_sha256": "7d2390637deda58cfc27a0d65ea934040e801e312721462bb97486e643803e0b",
+      "redactions": []
+    },
+    "certificates/totp-entropy-current-certificate.json": {
+      "sha256": "79b8ff49c39942294e8b5c62cbf6ec5daa9f7f15b76b297159701b2908300a5e",
+      "bytes": 18170,
+      "decompressed_sha256": "79b8ff49c39942294e8b5c62cbf6ec5daa9f7f15b76b297159701b2908300a5e",
+      "decompressed_bytes": 18170,
+      "original_sha256": "79b8ff49c39942294e8b5c62cbf6ec5daa9f7f15b76b297159701b2908300a5e",
+      "redactions": []
+    },
+    "certificates/current-locks-reviewed-equivalents.json": {
+      "sha256": "4225b021033efffa2e05ba4cc3d2d764d6e580a6bbba3ecdab34f2e7dc90ca8a",
+      "bytes": 32844,
+      "decompressed_sha256": "4225b021033efffa2e05ba4cc3d2d764d6e580a6bbba3ecdab34f2e7dc90ca8a",
+      "decompressed_bytes": 32844,
+      "original_sha256": "84f5b1568ddb2eb18346e6bf6140f69de8a36d437d176926adc3ad3ddde0d5f8",
+      "redactions": [
+        {
+          "field": "/0/execution_history",
+          "reason": "unaccepted attempt history omitted",
+          "sha256": "eba24d2573ea80363571133a0a4eca0338b0f36336184facaaceacb5c42dca4f"
+        },
+        {
+          "field": "/1/execution_history",
+          "reason": "unaccepted attempt history omitted",
+          "sha256": "d86f04bab20870dacbc7bbf9bc5acbcfac945ea036725b9043d7fd2c9a8cc905"
+        },
+        {
+          "field": "/2/execution_history",
+          "reason": "unaccepted attempt history omitted",
+          "sha256": "452d757bbe3b242dd5f551c93eda0dd6738d26d01b01eb557750db6da8f4c5ee"
+        },
+        {
+          "field": "/3/execution_history",
+          "reason": "unaccepted attempt history omitted",
+          "sha256": "9b66fe06805be8a289969cd6ad61f7a84e9d089bfe563978c33cbc51dda39f83"
+        },
+        {
+          "field": "/4/execution_history",
+          "reason": "unaccepted attempt history omitted",
+          "sha256": "84f5015fc7b4b1d3a33e52564cbfeb5b35660b0be6d2721cb3d2336c236cd0bf"
+        },
+        {
+          "field": "/5/execution_history",
+          "reason": "unaccepted attempt history omitted",
+          "sha256": "e039e46daf81ee2de663a53deb158856df6a546564e3dd0cd17481d57db9d0bd"
+        },
+        {
+          "field": "/6/execution_history",
+          "reason": "unaccepted attempt history omitted",
+          "sha256": "49609521b5c163c4ac4c52e9f7612cc9f81900eb0939d66e7c2a09e717185813"
+        },
+        {
+          "field": "/7/execution_history",
+          "reason": "unaccepted attempt history omitted",
+          "sha256": "eddcd960fbcf7e5426a5d8f937e934370d4b98d4f3a5e9d5fe6d383e8c97ad59"
+        },
+        {
+          "field": "/8/execution_history",
+          "reason": "unaccepted attempt history omitted",
+          "sha256": "4718e6efc68070e4ee8e7ff7195151fbca23b446612d5ee9406d730ecc1fc9b5"
+        }
+      ]
+    },
+    "certificates/current-account-sqlite342-certificate.json": {
+      "sha256": "b5f0ba16d7fe1046e7170aa5fc6bccca25f11e4cdf064d8d76f918b28059520f",
+      "bytes": 3766,
+      "decompressed_sha256": "b5f0ba16d7fe1046e7170aa5fc6bccca25f11e4cdf064d8d76f918b28059520f",
+      "decompressed_bytes": 3766,
+      "original_sha256": "b5f0ba16d7fe1046e7170aa5fc6bccca25f11e4cdf064d8d76f918b28059520f",
+      "redactions": []
+    },
+    "certificates/independent-final-runtime-pin-review.json": {
+      "sha256": "1096fb2ba5516fccf218c5f704aec9f35b31fcb198970555f5dc083e9e73979a",
+      "bytes": 38112,
+      "decompressed_sha256": "1096fb2ba5516fccf218c5f704aec9f35b31fcb198970555f5dc083e9e73979a",
+      "decompressed_bytes": 38112,
+      "original_sha256": "1096fb2ba5516fccf218c5f704aec9f35b31fcb198970555f5dc083e9e73979a",
+      "redactions": []
+    },
+    "certificates/independent-current-lock-equivalence-audit.json": {
+      "sha256": "e18fed623e8d55c01c9699a778098381b8c156fe7ac3fe91439ef376b809dcea",
+      "bytes": 13236,
+      "decompressed_sha256": "e18fed623e8d55c01c9699a778098381b8c156fe7ac3fe91439ef376b809dcea",
+      "decompressed_bytes": 13236,
+      "original_sha256": "e18fed623e8d55c01c9699a778098381b8c156fe7ac3fe91439ef376b809dcea",
+      "redactions": []
+    },
+    "certificates/current-lock-scheduling-review-causal-review.json": {
+      "sha256": "a672021fa958ad90775858143e40ea28c8d3de1374cf5458d47429935aca610a",
+      "bytes": 2853,
+      "decompressed_sha256": "a672021fa958ad90775858143e40ea28c8d3de1374cf5458d47429935aca610a",
+      "decompressed_bytes": 2853,
+      "original_sha256": "a672021fa958ad90775858143e40ea28c8d3de1374cf5458d47429935aca610a",
+      "redactions": []
+    },
+    "certificates/historical-nested-sharing-lock-proof-provenance.json": {
+      "sha256": "25de8069ef2997c4466714ef1578551b6f585afea07cfad41673cf230b54db06",
+      "bytes": 2463,
+      "decompressed_sha256": "25de8069ef2997c4466714ef1578551b6f585afea07cfad41673cf230b54db06",
+      "decompressed_bytes": 2463,
+      "original_sha256": "25de8069ef2997c4466714ef1578551b6f585afea07cfad41673cf230b54db06",
+      "redactions": []
+    },
+    "certificates/historical-nested-sharing-lock-proof-native_nested_sharing_pool_probe.json": {
+      "sha256": "23ae6af93f182589935df0e26f879287497a1b55c5e2b07cc3a69de45baa6897",
+      "bytes": 2860,
+      "decompressed_sha256": "23ae6af93f182589935df0e26f879287497a1b55c5e2b07cc3a69de45baa6897",
+      "decompressed_bytes": 2860,
+      "original_sha256": "23ae6af93f182589935df0e26f879287497a1b55c5e2b07cc3a69de45baa6897",
+      "redactions": []
+    },
+    "portable-reference-index.json.gz": {
+      "sha256": "42b6e51ab380219ff3cd29223d6d2d6c09bdffb87b13dad12d3c45dfdbab78e1",
+      "bytes": 320504,
+      "decompressed_sha256": "e74637ca3cd677e7de4b5690e5d4cb70dabb74832628027802b636dbdb871a15",
+      "decompressed_bytes": 3506813
+    },
+    "README.md": {
+      "sha256": "ed15288250b60c65391ee0d0c0b3eb1173a1255129f6ea8413c18ab5cc0f1a4e",
+      "bytes": 2722
+    }
+  },
+  "local_archive": {
+    "path": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/backend-publish-2026-10-05/accepted-campaign-evidence.tar.gz",
+    "sha256": "d248ded68933bfe1c75be40439dc08529bb159c1449d8086fb3af1fc2c95abe6",
+    "bytes": 88955324,
+    "file_entries": 213560,
+    "unique_objects": 45618,
+    "unique_uncompressed_bytes": 1083251364,
+    "all_object_hashes_verified": true,
+    "boundary": "local inspection and reconstruction inputs; historical replay is not certified",
+    "excluded_directory_names": [
+      ".git",
+      ".hypothesis",
+      ".mypy_cache",
+      ".pytest_cache",
+      ".ruff_cache",
+      ".venv",
+      "__pycache__",
+      "copies",
+      "locks",
+      "logs",
+      "node_modules",
+      "results"
+    ],
+    "omissions": {
+      "runtime database, ciphertext, environment or generated file": 30527
+    }
+  },
+  "retained_cleanup_source_files": [
+    {
+      "recorded_path": "/Users/pradeepreddy/Desktop/mental_health_application/redteam/attach_backend_reviewed_evidence.py",
+      "sha256": "1793a8e58cbabf882b1144061bd2fbd6705dd96a368ea5c702128444b24cbcbe",
+      "bytes": 7769
+    },
+    {
+      "recorded_path": "/Users/pradeepreddy/Desktop/mental_health_application/redteam/close_backend_account_campaign.py",
+      "sha256": "95b34aabd101f67264014ebac8283839717a6313648abfb821d29d30ab38d3ef",
+      "bytes": 10010
+    },
+    {
+      "recorded_path": "/Users/pradeepreddy/Desktop/mental_health_application/redteam/close_backend_auxiliary_campaign.py",
+      "sha256": "6c9546fae4516e4bc9d9ccc13c5176b0a937ac83552f92edbba6ca70a63d90bf",
+      "bytes": 10059
+    },
+    {
+      "recorded_path": "/Users/pradeepreddy/Desktop/mental_health_application/redteam/close_backend_insights_campaign.py",
+      "sha256": "9cd882ad1c0ee5cc1be6d7c1af486bd94a8264086e4b052be67f810cfb2bb658",
+      "bytes": 8613
+    },
+    {
+      "recorded_path": "/Users/pradeepreddy/Desktop/mental_health_application/redteam/close_backend_locks_campaign.py",
+      "sha256": "dbd115a78ae50dda853bb237951af4932800d2b6ae330d0a4f87a1db978781e9",
+      "bytes": 11302
+    },
+    {
+      "recorded_path": "/Users/pradeepreddy/Desktop/mental_health_application/redteam/close_backend_provider_campaign.py",
+      "sha256": "4527e333e4aa587bc7bfa4775f4b49a02254ddb84d3dde61a7d881dadffba4b4",
+      "bytes": 6694
+    },
+    {
+      "recorded_path": "/Users/pradeepreddy/Desktop/mental_health_application/redteam/close_backend_statistics_campaign.py",
+      "sha256": "cef189e9caa4011a73b55fe33f2754e7ea7919a9408aa14fd735a959ae966908",
+      "bytes": 3838
+    },
+    {
+      "recorded_path": "/Users/pradeepreddy/Desktop/mental_health_application/redteam/close_current_backend_account_export.py",
+      "sha256": "6645b740867d3dd9075d8ec83531db6e79d5de1e3235ea7563e3ad41b1f09d13",
+      "bytes": 5477
+    },
+    {
+      "recorded_path": "/Users/pradeepreddy/Desktop/mental_health_application/redteam/close_current_backend_account_root.py",
+      "sha256": "3866648755b9bb10c836a5d89b440f3c39265d633c05b425c683d54aee894f5b",
+      "bytes": 6186
+    },
+    {
+      "recorded_path": "/Users/pradeepreddy/Desktop/mental_health_application/redteam/consolidate_backend_mutation.py",
+      "sha256": "2aef1c005fb147c3a33c2482bfae4bf35f900dc20a02a57368ef19a7e3a292a8",
+      "bytes": 14724
+    },
+    {
+      "recorded_path": "/Users/pradeepreddy/Desktop/mental_health_application/redteam/review_backend_language_equivalents.py",
+      "sha256": "d08e6ad3501f1a7e2e6d29710a732a988c366d81856b3aab777f72faf0e823b6",
+      "bytes": 6428
+    },
+    {
+      "recorded_path": "/Users/pradeepreddy/Desktop/mental_health_application/redteam/review_backend_lock_pool.py",
+      "sha256": "bae6fd257c76c9692363b798932c78bc45805d81800922007ef301a9367d66f1",
+      "bytes": 3674
+    },
+    {
+      "recorded_path": "/Users/pradeepreddy/Desktop/mental_health_application/redteam/review_backend_totp_entropy.py",
+      "sha256": "e9c9418622e90636ebe6e51d6a43fac7a8a5a9f418fdbb4ca8feecae7c27000d",
+      "bytes": 7456
+    },
+    {
+      "recorded_path": "/Users/pradeepreddy/Desktop/mental_health_application/redteam/upgrade_backend_audit_reviewed_typing.py",
+      "sha256": "47205324b4db57e2b04a86dd2a37f724755f9faa9a3be6fde93e7c3a84825d51",
+      "bytes": 2943
+    },
+    {
+      "recorded_path": "/Users/pradeepreddy/Desktop/mental_health_application/redteam/automatic_backend_data_oracles.py",
+      "sha256": "46046faa9d64177b39b5d85692e3db78189bcdd9a1d2b9e868905d518f8d5ef3",
+      "bytes": 2026
+    }
+  ],
+  "original_paths_rewritten": false,
+  "historical_replay_certified": false,
+  "published_traceback_text_redacted": true,
+  "missing_historical_runner_versions": [
+    "behavior-fresh",
+    "boot-errors",
+    "boot-errors-v2",
+    "boot-errors-v3",
+    "core-broad-function",
+    "core-corrected",
+    "core-http-contracts",
+    "current-audit-full",
+    "schema-env-bootstrap",
+    "schema-full",
+    "schema-graph",
+    "schema-pagination",
+    "schema-populated",
+    "schema-portable",
+    "schema-runtime",
+    "scripts-full",
+    "scripts-remediation"
+  ],
+  "all_current_production_sha256": {
+    "alembic/env.py": "84cd178f135dfdcbf49c40076e8b7929707cea4ab1183977d0ca2ae1b0cb0177",
+    "alembic/versions/73031d06d71b_initial_schema.py": "d50e0628e0aed8967fed88990a123ca1f69eea448d526facb4d3a9bcd5796b2e",
+    "alembic/versions/a3e7c9d5f1b2_drop_prefix_notes_index.py": "4aa755b480ca8cfea17ff68f79cebb1bcf1b317805ebcbc50de7b2b16b59951f",
+    "alembic/versions/a3f7c1d9b5e2_recovery_set_at_timestamptz.py": "c57a3b1b60a9e6defa2cc4090ac943b39e37d980edc10692786d33e8fdad4eab",
+    "alembic/versions/a3f8d1e6c942_insight_state_seq.py": "5589335c30d11f90e668486ce1e0ae245f1d7dd2c07c103eb18d43dbcce722b4",
+    "alembic/versions/a4e8c1f6b9d3_token_revocation.py": "1fc7d4774290a9271cc6babfc9605b729d757a90011ad09b4c26de4c11cd59b3",
+    "alembic/versions/a7c91e4b2d03_llm_consent_record.py": "47585c401e317d6e55f787b3ce43f297b6730827fe950f9baa1ba4f0d46ae855",
+    "alembic/versions/b1c7f2e9a4d6_measures_mbc.py": "45bd01935e487db7250de5318bf9b1dc4179151d78e95e9c88913f79fc1774ff",
+    "alembic/versions/b4e8a2c6f091_clinician_custody.py": "4a1d355485d822aaa9500ee7fbed14a2a25b575dfcaeeb6ced7f679f382397b1",
+    "alembic/versions/b5d9a3e7f1c8_note_version.py": "af04d2caf626ee182a77f80950efc751142c11bf6406a6f78e679d6360f0a1ff",
+    "alembic/versions/b7c4e2f9a1d5_recovery_envelope.py": "463d16e338ea055c97cd9b04d40eaac19bcb8cde13fb479dd3fa7973e968caa4",
+    "alembic/versions/b7f2d8a4e6c1_access_log_mac.py": "36b320253d2d2e6f188a3316ed09f6641747db289f84dad983caaff73e037269",
+    "alembic/versions/b8f4e2a7c9d1_note_edit_history.py": "3ea9acb5201f40afaf32397d51946bb91d79612ad3ff758525ca1668ee76e20b",
+    "alembic/versions/b9e6c4a7d812_entries_export_cursor.py": "3be8a304f6f72848715131d2dfb83bdfb06e9de3bb23fed52b905f9cf51c31e5",
+    "alembic/versions/c3e7f1a9d2b4_voice_consent_columns.py": "a26ce4fa19be6da663a78bd5e8c63eaecb9d880eecd1a3192ffb54644d83e646",
+    "alembic/versions/c41f8a92d5e7_therapist_sharing.py": "85a2161177dd83ddd51eb59346e64ca6adf13d77d80dcc26e1680247838bbe3a",
+    "alembic/versions/c5f9b3d7a102_audio_deletion_outbox.py": "bf154a62cfe5c784dda73a6203a916974be4ad96c8fe83cfeceb63307e88d6e5",
+    "alembic/versions/c6e0b4f8a2d9_access_log_chain.py": "cc51051f6033a158730417eef8806585839324703d9dead70d2289612a340120",
+    "alembic/versions/c8d2f6b1a9e4_measures_revision.py": "06d0821043d802bcdc40b5c9d12424c0230fa4f1e8a37a24a2676f8e784217cf",
+    "alembic/versions/c8d5f2b6a4e7_quota_counters.py": "86a32f4078e9dc6fa48e9be6d16f6b764772f2dad5b42692643fb87489a890f9",
+    "alembic/versions/d4e5f6a7b8c9_therapist_totp_columns.py": "681b275fe32d6777c939e2d6dc275b4e262fdde5ef831311bd8dc9a05686179d",
+    "alembic/versions/d52c4e8f14a0_backend_hardening.py": "5d050af52e7399c9538cd9a63defd761e48a4fa4f64d253c1fbe8795cdba6cd1",
+    "alembic/versions/d6a0c4e8b213_atomic_corpus_credentials.py": "00b0a4c8fc7381ce07540e54fe98ee11e7c7f9e8ac32f771482a1b82981e8e36",
+    "alembic/versions/d7c1f4a8e2b9_entry_content_version.py": "7871c0711d0ec71d4a4897f3b82b1274fc5a58f870b00b512f4f8c4d37e13c3d",
+    "alembic/versions/d7f1c5a9b3e0_rekey_journal.py": "3299b6e4d5e0298339283a526470d6724fede62dc4ff87fcf90111acf0cd08ed",
+    "alembic/versions/e1b7c9d3a5f2_independent_audit_controls.py": "96966a5cee2b367adfba4afd5e2da2ca6ab75dc233bd63e11595ec43b98c5650",
+    "alembic/versions/e5a9c3d7f421_collection_snapshot_revisions.py": "e66a88a88f091808f07177e240ff9fe537af2208dd18a2dee15a69f8d82a65b2",
+    "alembic/versions/e8a4c2f7b1d6_audio_attachments.py": "ef01e619dfb8cd637b562751b17a9bdccfc7d11d9864b8aaee588fbacc314f4e",
+    "alembic/versions/e8b2d6f4a1c7_totp_backup_codes.py": "de0ce8444afdfa000be203a5c8b408281c1dc4d983534f0a406a19ca5badb927",
+    "alembic/versions/e930dbc4f001_insights_unique_user_kind_date.py": "2692ed810895025d656477e2e6e0cd78496e5192ed3009011af6fa0c368f4958",
+    "alembic/versions/f0b3d8e5a7c2_caseload_summary_consent.py": "e8a65acc322a06b5e0acf479b520b1d616e8667e63b1934707eefbb18e0d8da1",
+    "alembic/versions/f2a8c6d4e9b1_key_envelope_v2.py": "3699cd617e00709d9108d8fcf269d6dbd06012961447e21aac7c9ef2d313a4d9",
+    "alembic/versions/f4a2d8c6b901_entry_aad_guards.py": "f99268f5c07007f00fc0ecc6cc243a880e6801f5abc7c17e1baaec467d550b7d",
+    "alembic/versions/f6a9b4d1e203_insights_undated_unique.py": "7fcaf124ab49ce44f43ce312b82bf82f1fd8d84a3440177b0ba915392f674a42",
+    "app/__init__.py": "ceb5be01afc6b8a71e7ce29a00265f5ee114265cde8aafdfb651a168552d74ef",
+    "app/api/__init__.py": "27f1cbee20c865a83ebe7490e29330f3d76881cce2f1c25692e2d99574b19691",
+    "app/api/_audit.py": "b37ac9b7afa86e8bb1fdf766ea2bc1510e731ab5936a6d46f01af15f40d1fc5c",
+    "app/api/_custody.py": "137d26c220ba55b303e826df6bf35aebbccba69c2ae73cfdf152bdf47311a05a",
+    "app/api/_paging.py": "8831585988b530c62206a1b7d67a76951acd52938ce66f67c67aa773b1475d2e",
+    "app/api/_sharing_state.py": "b7ea0540c0d1e3ec0f68e7de1b149f2f33c9f18b402a04cf7a8244484fac675a",
+    "app/api/account.py": "fdba9de7d842fc1116ca5cb765b25b3006653b979f2b37cae44a558174875c5f",
+    "app/api/audio.py": "e8ea44bf7fc0d44560f9567e2a206b4c7e21a5304b0004853d105173b0282763",
+    "app/api/auth.py": "f30e2e388e2b3873ae54c5de216bc2852cc8731f43edc91ccafc53b37095fc9f",
+    "app/api/consents.py": "78df4e1c5894dc2a566f47d3721d9a253b6519c599c740be847f4270ba9bb2fe",
+    "app/api/entries.py": "22a4ad44ca1039f018c14abab1a27ecc79bc0c434f8a378643a13b8c25217f5e",
+    "app/api/insights.py": "255f21305a1b1f0cab748eecc0ecda96dd7316bc2d8de9966d99e57b8fd6a4f6",
+    "app/api/measures.py": "8508e29b5fb7da9fb2032a0b6f1114570f4103122bc8f81b35d2d00542f6eafd",
+    "app/api/meta.py": "e0f383c0f5df92a07e05c21280aac0c6790624ed85dbf3dc6082545ac41910e5",
+    "app/api/therapist.py": "4f2e6ec68674c2cfffb15ece89c5977cd6111725240e6ecf994721950c72342c",
+    "app/cache.py": "3a8e13986e2924c2247ee73ed390472609fd09a642b382df591359881ba84ef0",
+    "app/config.py": "c1e6923deef7ca1c891a98207b345774e0e5b617460e7d2e4b81ce9cb49c300d",
+    "app/db.py": "1174045176481d4cc4706e257ec81fedabd06b420129f3d3197e0677d35dac50",
+    "app/deps.py": "25f859eef3b712e180cf4a848fa9e95452da839f9b25885c22efd48e61f32245",
+    "app/locks.py": "607c30b36276522a3f6ee0db031a4dd7a21d9faab63950f738ae34636c594230",
+    "app/main.py": "57152cc3d709f9587dd507608d1ddffe89c8a4349c3e3aeec0d2a6dc7737759b",
+    "app/metrics.py": "17fb0e38e3ac37be2f47194cc9c61afb534de94c8a7e7b75ce5b1e39ebc25790",
+    "app/middleware.py": "2cc9d4aa8017d369eca31a674bb45ddbc7f68740e61fc5156ecd93dc524455a6",
+    "app/models.py": "12f6c5fbf8f112ab7b03626e6abddf1eb31191f7dda8a2a6bf0df43db486679f",
+    "app/schemas.py": "2bbfa5a176fb78c6d4cea70bf56a028bd737ac27b5729582acd63b9d9ce9da7d",
+    "app/security/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "app/security/crypto.py": "6622b2e1e08aa16954d4b19976f21b1fa05e1ed348fc325e12497668393638ba",
+    "app/security/deletion_tombstone.py": "6b871b88fc9a7950386052f4cf4e4ec61614c9d3c9a303632487504f2f4f2d4c",
+    "app/security/enclave.py": "b7440b0dc1906d14f8d91927d69308445cdb730dff1de7ed69b8ee8ea77e442d",
+    "app/security/entry_guard.py": "b1fd856eb8c397d8f7d96f3f7b906ea8864bd66d6c219caf6982577044f005ff",
+    "app/security/envelope.py": "e92052d621e6ff448930e8ec57305484efb463198b48f9d56901e0fdc72f80f0",
+    "app/security/export_ticket.py": "4f8b069d9decd661248b4768e6a5aec741c793b7ac9901d7b8d6998436eed23c",
+    "app/security/kdf.py": "5cde59ec1dd1728da6c4ae745018155ce67608cd05e0d3c6c5877030be287133",
+    "app/security/sharing.py": "c69185be4d0bad1aeb7819341240c00771231713028d6735f0ea91848405cd4a",
+    "app/security/step_up.py": "d3d7fce6fc289258c37e95084e51cd6ec61225b95812a224b0822f6a336b46c3",
+    "app/security/tokens.py": "e0db05017d34929bcca62c409d8b15e61fb18611cb85aaaffa79691014d29d85",
+    "app/security/totp.py": "1f3a5b2d02593e6f435ed5e8ee74e88402f9ad16edec78b2b7662ad5c7a2a938",
+    "app/services/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "app/services/account_deletion.py": "752d1821c6ef456e7aae25ce8f5bcc084ef6a2bcc66471493a863990639deb72",
+    "app/services/audio_store.py": "f0a7288f0e910a7d2c74ef1889d14d574b2d847460925e69e6d4dbc132b7ecec",
+    "app/services/brain.py": "be12a6111eb7be592f0ea51757fa046d3be918917a0957d3db481c543c55aade",
+    "app/services/crisis.py": "f44b7a1c6bb95a402dec07368a2f787a430dce41175fc38c9fda9d71659aab98",
+    "app/services/llm.py": "8dfe35c6d25e471405974101d3442b359e0fb38f810627e6477d99b3c9b521fd",
+    "app/services/patterns.py": "c6b753ae86521de0ca66ba4e0abb5b2eaeb81753440128ad11e83be0d7ab6678",
+    "app/services/phrases.py": "b774b86078bf90abcf5550c3cd500a7b2df668681df2b8706b1181d4d29c44c2",
+    "app/services/questions.py": "0cc0b31675b6dbb376fee8f851a31487ee04012ca564951cdf7603804c577e63",
+    "app/services/sentiment_lexicon.py": "ed0403d797cc8fb0e13e75d21ce00a3a6bc7077137f0856ebc3b01121dd6d627",
+    "app/services/sentiment_lexicon_es.py": "f6127d9da80f6e887d71975e47f5dc7bf89ca00898f6de42210ea5c529ff054e",
+    "app/services/statsig.py": "2eaefa27d59be82752d406d03d23ff9c5a1a48bfee5ba6489e8142a3cea6196b",
+    "app/services/stt.py": "ab9032a135ef4216b35013fbc004c471f87b3fa8a9960b1cf1346f80a4d5f5a9",
+    "app/services/threshold.py": "496365eba8c8998790778431653e486eb0db6190c1c166b11cf7c4c18ba11ea8",
+    "app/singleprocess.py": "b417e194170b22ccbac0620a391ca0c94878802a280ad61f83e5b37fc8cfedac",
+    "bootstrap_entry_guards.py": "f8b6fde09d2f01cce91862a09684df2ab638ae7eb8b36ceb4fd345407a0cd87d",
+    "probe_brain.py": "a930ddb894bbeb2971e9fa566b794d9dbbf98da002241e64e1fa1a91e3d0660d",
+    "scripts/dump_brain_lexicon.py": "980267c337820eb5a017981b3e8403e84f81a71375d8cae2041eaec0c35921f0",
+    "scripts/gen_brain_vectors.py": "79994e91adba8d10217f542ba4e4ee63fafe25c78cbbdb48067dbaee6b078c80",
+    "scripts/generate_vectors.py": "4da0b1673593f8f86d0edf84414bda7182ad4149789f0b375156ff9146df975a",
+    "scripts/loadtest.py": "78e1491b5ef28a1623d5085377522e8f58fc4720643a8a052a76d322fd2b25f9",
+    "scripts/mc_phi_eff.py": "6c58b337b685039d9aace500cb80a33dfcaf4c9af14025a6936ae5360033463a",
+    "scripts/seal_legacy_audit.py": "251e2ce747d36a8f5fe2288c76f7604710cf13e640de8ef7a71278a5e84c9729",
+    "scripts/seed_demo.py": "7195382cc1be2e3e9305432a7771ad6004c412063627ec1ed063dcb45f3bf083"
+  },
+  "evidence_scope": "Accepted current target patches and recorded frozen oracle snapshots. Unchanged targets can retain earlier dependency snapshots; final dependency witnesses supplement these records rather than proving every control ran against one identical final dependency snapshot."
+}

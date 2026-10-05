@@ -12,6 +12,8 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 
+from .deps import ApiError
+
 
 @dataclass
 class _LockEntry:
@@ -28,6 +30,22 @@ OVERFLOW_SHARDS = 16
 class _OverflowShard:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     refs: int = 0
+    owner: asyncio.Task | None = None
+
+
+@dataclass
+class _HeldLocks:
+    dedicated: int = 0
+    overflow: int = 0
+
+
+def _capacity_busy() -> ApiError:
+    return ApiError(
+        status_code=503,
+        detail="lock capacity busy; retry shortly",
+        code="service_unavailable",
+        headers={"Retry-After": "1"},
+    )
 
 
 class UserLocks:
@@ -61,6 +79,9 @@ class UserLocks:
         # serialization within one shard under an adversarial unique-key
         # flood (see OVERFLOW_SHARDS).
         self._overflow_shards = tuple(_OverflowShard() for _ in range(OVERFLOW_SHARDS))
+        # Only successful acquisitions retain task state; waiting and cancelled
+        # callers cannot leave an idle task in this registry.
+        self._held: dict[asyncio.Task, _HeldLocks] = {}
 
     def _shard_for(self, key: str) -> _OverflowShard:
         # crc32: a stable, process-independent mapping (str hash() is
@@ -75,6 +96,9 @@ class UserLocks:
 
     @asynccontextmanager
     async def hold(self, key: str) -> AsyncIterator[asyncio.Lock]:
+        task = asyncio.current_task()
+        assert task is not None
+        held = self._held.get(task)
         entry = self._locks.get(key)
         use_overflow = False
         shard: _OverflowShard | None = None
@@ -101,20 +125,55 @@ class UserLocks:
                 self._locks[key] = entry
         if use_overflow:
             assert shard is not None
+            # Logical therapist/patient ordering does not order hash shards.
+            # A nested wait on a foreign shard could close a physical lock
+            # cycle. Refuse before waiting, including the queued-handoff window
+            # where lock.locked() is false but live references remain.
+            if held is not None and shard.refs and shard.owner is not task:
+                raise _capacity_busy()
             shard.refs += 1
             try:
-                async with shard.lock:
+                if shard.owner is task:
+                    # Different logical keys may share this physical lock.
+                    # The outer context retains custody for the entire nest.
                     yield shard.lock
+                    return
+                async with shard.lock:
+                    shard.owner = task
+                    if held is None:
+                        held = _HeldLocks()
+                        self._held[task] = held
+                    held.overflow += 1
+                    try:
+                        yield shard.lock
+                    finally:
+                        held.overflow -= 1
+                        if not held.dedicated and not held.overflow:
+                            del self._held[task]
+                        shard.owner = None
             finally:
                 shard.refs -= 1
             return
         # `entry` is non-None here: an absent key either became a dedicated
         # entry above or returned through the overflow branch.
         assert entry is not None
+        # Mixed dedicated/overflow cycles are possible too. An overflow owner
+        # may take an idle dedicated lock, but cannot wait behind its holder.
+        if held is not None and held.overflow and entry.refs:
+            raise _capacity_busy()
         entry.refs += 1
         try:
             async with entry.lock:
-                yield entry.lock
+                if held is None:
+                    held = _HeldLocks()
+                    self._held[task] = held
+                held.dedicated += 1
+                try:
+                    yield entry.lock
+                finally:
+                    held.dedicated -= 1
+                    if not held.dedicated and not held.overflow:
+                        del self._held[task]
         finally:
             entry.refs -= 1
 

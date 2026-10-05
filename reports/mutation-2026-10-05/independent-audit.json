@@ -1,0 +1,174 @@
+{
+  "status": "INDEPENDENT_FINAL_CURRENT_BACKEND_AUDIT_PASS",
+  "ledger": "backend-current-ledger.json",
+  "ledger_sha256": "5b15c22b99bbfbecd611718f71b3d11474a53ac3665eae8358dddf4502c31525",
+  "total": 44089,
+  "counts": {
+    "KILLED": 42663,
+    "REVIEWED_EQUIVALENT": 1259,
+    "STATIC_TYPECHECK_CAUGHT": 142,
+    "INVALID_SYNTAX": 25
+  },
+  "production_files_verified": 95,
+  "operator_files_verified": 92,
+  "zero_operator_files": [
+    "app/__init__.py",
+    "app/security/__init__.py",
+    "app/services/__init__.py"
+  ],
+  "complete_changed_module_supersessions_verified": 9,
+  "unchanged_original_control_ids_retained": 37852,
+  "all_current_ids_uniquely_accounted_for": true,
+  "all_runtime_raw_and_stage_manifest_full_patch_identities_verified": true,
+  "all_static_and_equivalent_raw_and_stage_manifest_full_patch_identities_verified": true,
+  "all_accepted_mutated_target_bytes_match_current_production": true,
+  "all_runtime_credit_requires_real_call_failure_and_passing_pristine_selector_baseline": true,
+  "runtime_pristine_selector_baselines_verified": 1549,
+  "runtime_result_files_verified": 422,
+  "runtime_snapshot_target_pairs_verified": 388,
+  "static_typecheck_controls_with_actual_mutated_file_diagnostics_and_uncached_gate": 142,
+  "equivalent_controls_with_causal_proofs_and_current_target_successful_runtime_evidence": 1259,
+  "invalid_syntax_controls_independently_compile_verified": 25,
+  "unresolved_dispositions": 0,
+  "accepted_timeout_or_oracle_error_credit": 0,
+  "known_source_hash_or_ast_registry_kill_credit": 0,
+  "withdrawn_private_pins": [
+    "M008096",
+    "M010799",
+    "M010800",
+    "M010117",
+    "M010648",
+    "I000328",
+    "T000165"
+  ],
+  "M008096_historical_equivalence_withdrawn_and_entire_current_locks_replayed": true,
+  "fresh_current_lock_controls": 106,
+  "current_lock_equivalents_independently_reviewed": 9,
+  "pending_independent_challenges": [],
+  "current_insights1186_dispositions_and54_equivalents_reverified": true,
+  "restoration_evidence_verified": true,
+  "evidence_scope": "Accepted current target patches and recorded frozen oracle snapshots. Unchanged targets can retain earlier dependency snapshots; final dependency witnesses supplement these records rather than proving every control ran against one identical final dependency snapshot.",
+  "runner_artifacts": {
+    "retained_unique_runner_files_hash_verified": 138,
+    "stages_without_standalone_retained_runner_file": [
+      "behavior-fresh",
+      "boot-errors",
+      "boot-errors-v2",
+      "boot-errors-v3",
+      "core-broad-function",
+      "core-corrected",
+      "core-http-contracts",
+      "current-audit-full",
+      "schema-env-bootstrap",
+      "schema-full",
+      "schema-graph",
+      "schema-pagination",
+      "schema-populated",
+      "schema-portable",
+      "schema-runtime",
+      "scripts-full",
+      "scripts-remediation"
+    ]
+  },
+  "historical_pre_lock_fix_audit_archive": "independent-pre-lock-fix-a7/historical-status.json",
+  "reproduction_scripts": "independent-audit-scripts/scripts-sha256.json",
+  "artifacts": [
+    {
+      "artifact": "independent-final-runtime-audit.json",
+      "sha256": "645a40dd13c9e8c1de09ae0ac5705b4e6575e23262b153431b2deb33e08098ba"
+    },
+    {
+      "artifact": "independent-final-reviewed-disposition-audit.json",
+      "sha256": "c4725de4640ce7518c15b8301be68ba6875afa89c0e3261f6440bc94aaa67ef7"
+    },
+    {
+      "artifact": "independent-current-scope-audit.json",
+      "sha256": "c003028e12c02d7f7693b616609a02d05fa2a5691eb280af214a34ca8fef7202"
+    },
+    {
+      "artifact": "independent-final-ledger-scope-audit.json",
+      "sha256": "6bb8fec19790f22b0d3243bc86ffc5ce2ef01f2191219218e216840d93196815"
+    },
+    {
+      "artifact": "independent-final-runtime-pin-review.json",
+      "sha256": "1096fb2ba5516fccf218c5f704aec9f35b31fcb198970555f5dc083e9e73979a"
+    },
+    {
+      "artifact": "independent-current-account-root-equivalence-audit.json",
+      "sha256": "731bae4fb2e56396329206f485f1a0872377e4afaa5d5954d492cda488b5b8bb"
+    },
+    {
+      "artifact": "independent-current-lock-equivalence-audit.json",
+      "sha256": "e18fed623e8d55c01c9699a778098381b8c156fe7ac3fe91439ef376b809dcea"
+    },
+    {
+      "artifact": "independent-current-insights-audit.json",
+      "sha256": "28410a44b2d5a9df112a0f047f35d3724c2863d07c3694fd44ca874ab73dcea7"
+    }
+  ],
+  "explicit_token_size_pin_correction": {
+    "historical_ledger_sha256": "b18d7d6f7b28f227e8b435fe610fa91cff0b36840a0ffdd6d3ba158c96693524",
+    "historical_independent_audit_sha256": "ce8a0f783d467ccfb85f60389e43ce7d04c10addd1e5dd29e58a82027c2cc88f",
+    "historical_counts": {
+      "KILLED": 42665,
+      "REVIEWED_EQUIVALENT": 1257,
+      "STATIC_TYPECHECK_CAUGHT": 142,
+      "INVALID_SYNTAX": 25
+    },
+    "corrected_ledger_sha256": "5b15c22b99bbfbecd611718f71b3d11474a53ac3665eae8358dddf4502c31525",
+    "corrected_counts": {
+      "KILLED": 42663,
+      "REVIEWED_EQUIVALENT": 1259,
+      "STATIC_TYPECHECK_CAUGHT": 142,
+      "INVALID_SYNTAX": 25
+    },
+    "changed_dispositions": {
+      "M010117": {
+        "from": "KILLED",
+        "to": "REVIEWED_EQUIVALENT",
+        "fresh_current_runtime_and_pristine_evidence": [
+          {
+            "runtime_result": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/security-opaque-entropy-current/results-00.jsonl",
+            "result_line": 1,
+            "baseline_id": "00-00000",
+            "passed": 68,
+            "selectors": [
+              "../tools/tests/test_backend_security_contracts.py",
+              "../tools/tests/test_backend_capability_contracts.py",
+              "../tools/tests/test_backend_export_auth_contracts.py",
+              "tests/test_adversarial.py::test_processing_token_is_bound_to_its_owner_at_api_level",
+              "tests/test_insights_api.py::test_processing_session_is_single_use",
+              "tests/test_insights_api.py::test_processing_session_key_lifecycle",
+              "../tools/tests/test_full_backend_schema_mutation.py::test_models_pass_the_existing_backend_static_typecheck_gate"
+            ]
+          }
+        ]
+      },
+      "M010648": {
+        "from": "KILLED",
+        "to": "REVIEWED_EQUIVALENT",
+        "fresh_current_runtime_and_pristine_evidence": [
+          {
+            "runtime_result": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/security-opaque-entropy-current/results-01.jsonl",
+            "result_line": 1,
+            "baseline_id": "01-00000",
+            "passed": 68,
+            "selectors": [
+              "../tools/tests/test_backend_security_contracts.py",
+              "../tools/tests/test_backend_capability_contracts.py",
+              "../tools/tests/test_backend_export_auth_contracts.py",
+              "tests/test_adversarial.py::test_processing_token_is_bound_to_its_owner_at_api_level",
+              "tests/test_insights_api.py::test_processing_session_is_single_use",
+              "tests/test_insights_api.py::test_processing_session_key_lifecycle",
+              "../tools/tests/test_full_backend_schema_mutation.py::test_models_pass_the_existing_backend_static_typecheck_gate"
+            ]
+          }
+        ]
+      }
+    },
+    "all_other_canonical_patches_and_dispositions_unchanged": true,
+    "all_current_production_sources_unchanged": true,
+    "historical_archive": "independent-pre-token-pin-correction-b18/historical-status.json",
+    "reason": "Private token_urlsafe argument-width assertions were withdrawn; native minimum entropy, authorization, lifecycle and consumption contracts pass on both current patches. Original audit bytes are retained without rewriting the prior claim."
+  }
+}

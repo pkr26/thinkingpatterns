@@ -1,0 +1,218 @@
+{
+  "controls": [
+    "M010117",
+    "M010648"
+  ],
+  "classifications": {
+    "M010117": "REVIEWED_EQUIVALENT",
+    "M010648": "REVIEWED_EQUIVALENT"
+  },
+  "proofs": {
+    "M010117": {
+      "causal_reason": "The private CSPRNG input changes from 32 to 33 bytes, retaining at least 256 bits and increasing entropy to 264 bits. The URL-safe Base64 bearer length changes from 43 to 44 characters; output bytes, length and distribution are not claimed identical. Both variants use the same native secrets.token_urlsafe CSPRNG, remain ASCII and URL-safe, and are accepted as opaque strings by public schemas and shipped clients. There is no released fixed 32-byte capability width. A fresh replay against the current source passes 68 native, HTTP and type checks, including owner isolation, native entropy, single-use processing, key lifecycle, step-up binding, replay and expiry, and the uncached full 52-module checker. Prior assertions requiring the exact token_urlsafe(32) argument are withdrawn. The processing registry keys entries by the entire opaque token. Custody, account binding, key material, TTL, admission counts, expiry and zeroization do not depend on its width. Already issued tokens are unchanged and lookups never assume 43 characters. The finite session cap bounds the number of records; a one-character identifier increase is private allocation tuning.",
+      "successful_current_target_execution": {
+        "runtime_result": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/security-opaque-entropy-current/results-00.jsonl",
+        "result_line": 1,
+        "attempt": {
+          "file": "app/security/enclave.py",
+          "line": 128,
+          "index": 0,
+          "position": 5201,
+          "before": "2",
+          "after": "3",
+          "source_line": "        token = secrets.token_urlsafe(32)",
+          "id": "M010117",
+          "selectors": [
+            "../tools/tests/test_backend_security_contracts.py",
+            "../tools/tests/test_backend_capability_contracts.py",
+            "../tools/tests/test_backend_export_auth_contracts.py",
+            "tests/test_adversarial.py::test_processing_token_is_bound_to_its_owner_at_api_level",
+            "tests/test_insights_api.py::test_processing_session_is_single_use",
+            "tests/test_insights_api.py::test_processing_session_key_lifecycle",
+            "../tools/tests/test_full_backend_schema_mutation.py::test_models_pass_the_existing_backend_static_typecheck_gate"
+          ],
+          "baseline_id": "00-00000",
+          "public_response_values": false,
+          "timeout_seconds": 60.0,
+          "returncode": 0,
+          "failures": [],
+          "errors": [],
+          "passed": 68,
+          "skipped": 0,
+          "contracts": {},
+          "seconds": 21.3979,
+          "log": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/security-opaque-entropy-current/logs/worker-00/M010117.log",
+          "timed_out": false,
+          "temporary_directory": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/security-opaque-entropy-current/logs/worker-00/M010117-tmp-1uh9g3e9",
+          "temporary_restored": true,
+          "status": "SURVIVED",
+          "restored": true
+        },
+        "pristine_baseline_file": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/security-opaque-entropy-current/baselines-00.json",
+        "pristine_baseline": {
+          "returncode": 0,
+          "failures": [],
+          "errors": [],
+          "passed": 68,
+          "skipped": 0,
+          "contracts": {},
+          "seconds": 20.8029,
+          "log": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/security-opaque-entropy-current/logs/worker-00/baseline-00000.log",
+          "timed_out": false,
+          "temporary_directory": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/security-opaque-entropy-current/logs/worker-00/baseline-00000-tmp-_sljcl6x",
+          "temporary_restored": true,
+          "status": "SURVIVED",
+          "restored": true,
+          "selectors": [
+            "../tools/tests/test_backend_security_contracts.py",
+            "../tools/tests/test_backend_capability_contracts.py",
+            "../tools/tests/test_backend_export_auth_contracts.py",
+            "tests/test_adversarial.py::test_processing_token_is_bound_to_its_owner_at_api_level",
+            "tests/test_insights_api.py::test_processing_session_is_single_use",
+            "tests/test_insights_api.py::test_processing_session_key_lifecycle",
+            "../tools/tests/test_full_backend_schema_mutation.py::test_models_pass_the_existing_backend_static_typecheck_gate"
+          ],
+          "baseline_id": "00-00000"
+        },
+        "current_target_sha256": "b7440b0dc1906d14f8d91927d69308445cdb730dff1de7ed69b8ee8ea77e442d",
+        "current_target_snapshot": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/security-opaque-entropy-current-ready",
+        "source_restored": true,
+        "mutation_manifest": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/security-opaque-entropy-current/mutants.json",
+        "canonical_patch_identity_verified": true
+      },
+      "uncached_full_backend_static_gate_passed": true,
+      "contract_boundary": "Fresh native CSPRNG opaque capabilities with at least 256 bits, authorization, custody, single use and expiry; no fixed generation width",
+      "references": [
+        "https://docs.python.org/3/library/secrets.html#secrets.token_urlsafe",
+        "backend/app/schemas.py::ProcessingSessionResponse",
+        "backend/app/schemas.py::StepUpResponse",
+        "web/src/api/client.ts",
+        "mobile/src/envelopeUpgrade.ts",
+        "web/src/reauth.ts"
+      ]
+    },
+    "M010648": {
+      "causal_reason": "The private CSPRNG input changes from 32 to 33 bytes, retaining at least 256 bits and increasing entropy to 264 bits. The URL-safe Base64 bearer length changes from 43 to 44 characters; output bytes, length and distribution are not claimed identical. Both variants use the same native secrets.token_urlsafe CSPRNG, remain ASCII and URL-safe, and are accepted as opaque strings by public schemas and shipped clients. There is no released fixed 32-byte capability width. A fresh replay against the current source passes 68 native, HTTP and type checks, including owner isolation, native entropy, single-use processing, key lifecycle, step-up binding, replay and expiry, and the uncached full 52-module checker. Prior assertions requiring the exact token_urlsafe(32) argument are withdrawn. The one-use store hashes the complete ASCII bearer with SHA-256 and retains only that fixed digest and immutable user, action, JTI, epoch and expiry bindings. Both native input widths yield the same digest width and lookup and retirement behavior; the raw token has no stored-key length contract. The per-owner capacity of 8, global capacity of 10,000, oldest-first eviction, and inclusive 120-second expiry are unchanged.",
+      "successful_current_target_execution": {
+        "runtime_result": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/security-opaque-entropy-current/results-01.jsonl",
+        "result_line": 1,
+        "attempt": {
+          "file": "app/security/step_up.py",
+          "line": 63,
+          "index": 0,
+          "position": 1892,
+          "before": "2",
+          "after": "3",
+          "source_line": "            token = secrets.token_urlsafe(32)",
+          "id": "M010648",
+          "selectors": [
+            "../tools/tests/test_backend_security_contracts.py",
+            "../tools/tests/test_backend_capability_contracts.py",
+            "../tools/tests/test_backend_export_auth_contracts.py",
+            "tests/test_adversarial.py::test_processing_token_is_bound_to_its_owner_at_api_level",
+            "tests/test_insights_api.py::test_processing_session_is_single_use",
+            "tests/test_insights_api.py::test_processing_session_key_lifecycle",
+            "../tools/tests/test_full_backend_schema_mutation.py::test_models_pass_the_existing_backend_static_typecheck_gate"
+          ],
+          "baseline_id": "01-00000",
+          "public_response_values": false,
+          "timeout_seconds": 60.0,
+          "returncode": 0,
+          "failures": [],
+          "errors": [],
+          "passed": 68,
+          "skipped": 0,
+          "contracts": {},
+          "seconds": 21.3769,
+          "log": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/security-opaque-entropy-current/logs/worker-01/M010648.log",
+          "timed_out": false,
+          "temporary_directory": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/security-opaque-entropy-current/logs/worker-01/M010648-tmp-hdhyntqw",
+          "temporary_restored": true,
+          "status": "SURVIVED",
+          "restored": true
+        },
+        "pristine_baseline_file": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/security-opaque-entropy-current/baselines-01.json",
+        "pristine_baseline": {
+          "returncode": 0,
+          "failures": [],
+          "errors": [],
+          "passed": 68,
+          "skipped": 0,
+          "contracts": {},
+          "seconds": 20.8513,
+          "log": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/security-opaque-entropy-current/logs/worker-01/baseline-00000.log",
+          "timed_out": false,
+          "temporary_directory": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/security-opaque-entropy-current/logs/worker-01/baseline-00000-tmp-72ytb1oe",
+          "temporary_restored": true,
+          "status": "SURVIVED",
+          "restored": true,
+          "selectors": [
+            "../tools/tests/test_backend_security_contracts.py",
+            "../tools/tests/test_backend_capability_contracts.py",
+            "../tools/tests/test_backend_export_auth_contracts.py",
+            "tests/test_adversarial.py::test_processing_token_is_bound_to_its_owner_at_api_level",
+            "tests/test_insights_api.py::test_processing_session_is_single_use",
+            "tests/test_insights_api.py::test_processing_session_key_lifecycle",
+            "../tools/tests/test_full_backend_schema_mutation.py::test_models_pass_the_existing_backend_static_typecheck_gate"
+          ],
+          "baseline_id": "01-00000"
+        },
+        "current_target_sha256": "d3d7fce6fc289258c37e95084e51cd6ec61225b95812a224b0822f6a336b46c3",
+        "current_target_snapshot": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/security-opaque-entropy-current-ready",
+        "source_restored": true,
+        "mutation_manifest": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/security-opaque-entropy-current/mutants.json",
+        "canonical_patch_identity_verified": true
+      },
+      "uncached_full_backend_static_gate_passed": true,
+      "contract_boundary": "Fresh native CSPRNG opaque capabilities with at least 256 bits, authorization, custody, single use and expiry; no fixed generation width",
+      "references": [
+        "https://docs.python.org/3/library/secrets.html#secrets.token_urlsafe",
+        "backend/app/schemas.py::ProcessingSessionResponse",
+        "backend/app/schemas.py::StepUpResponse",
+        "web/src/api/client.ts",
+        "mobile/src/envelopeUpgrade.ts",
+        "web/src/reauth.ts"
+      ]
+    }
+  },
+  "negative_control_actual_call_kills": [
+    {
+      "id": "M010118",
+      "result_file": "security-opaque-entropy-current/results-00.jsonl",
+      "result_line": 2,
+      "baseline_file": "security-opaque-entropy-current/baselines-00.json",
+      "baseline_id": "00-00000",
+      "actual_call_failures": [
+        "::test_session_defaults_admit_four_per_owner_and_1024_total"
+      ],
+      "source_restored": true,
+      "timeout_credit": false
+    },
+    {
+      "id": "M010649",
+      "result_file": "security-opaque-entropy-current/results-01.jsonl",
+      "result_line": 2,
+      "baseline_file": "security-opaque-entropy-current/baselines-01.json",
+      "baseline_id": "01-00000",
+      "actual_call_failures": [
+        "::test_step_up_retention_capacity_frozen_bindings_and_single_use"
+      ],
+      "source_restored": true,
+      "timeout_credit": false
+    }
+  ],
+  "private_entropy_pin_credit_withdrawn": true,
+  "security_counts_before": {
+    "KILLED": 828,
+    "REVIEWED_EQUIVALENT": 25,
+    "STATIC_TYPECHECK_CAUGHT": 7
+  },
+  "security_counts_after": {
+    "KILLED": 826,
+    "REVIEWED_EQUIVALENT": 27,
+    "STATIC_TYPECHECK_CAUGHT": 7
+  },
+  "authoritative_owned_ledger": "security-owned-ledger.json",
+  "authoritative_owned_ledger_sha256": "46b51e7e5c30b8a0552620dd384077c66420da09f73568972584532fb8dfc362",
+  "production_changes": false
+}

@@ -144,10 +144,109 @@ def test_gitleaks_false_positive_exceptions_stay_at_reviewed_locations():
     }
     approved[b"a3b747d3c02e9468"] = {
         Path(".gitleaks.toml"),
-        Path("backend/tests/test_mutation_pins_2026_09_30.py"),
         Path("backend/tests/test_repo_secret_scan.py"),
         Path("tools/verify_secret_scan.py"),
     }
+    # Exact SHA-256 of the current therapist source, emitted by the portable
+    # evidence publisher; this is public provenance rather than a credential.
+    approved[b"4f2e6ec68674c2cfffb15ece89c5977cd6111725240e6ecf994721950c72342c"] = {
+        Path(".gitleaks.toml"),
+        Path("backend/tests/test_repo_secret_scan.py"),
+        Path(
+            "reports/mutation-2026-10-05/certificates/current-lock-scheduling-review-causal-review.json"
+        ),
+        Path(
+            "reports/mutation-2026-10-05/certificates/historical-nested-sharing-lock-proof-provenance.json"
+        ),
+        Path("reports/mutation-2026-10-05/manifest.json"),
+        Path("reports/mutation-2026-10-05/summary.json"),
+    }
+    # Public, deterministic offline vectors reviewed with the exact-match
+    # scanner policy. Each key is the value itself so an unauthorized copy
+    # is rejected even when its assignment or surrounding prose changes.
+    # The producers and fixed public inputs are documented in .gitleaks.toml.
+    policy_and_guard = {
+        Path(".gitleaks.toml"),
+        Path("backend/tests/test_repo_secret_scan.py"),
+    }
+    vector_locations = {
+        b"S51594wKma1bAMYvsz+TZOtBMNNA7lVsuSyfxwJ1Qoo=": {
+            Path("redteam/automatic_backend_contracts/crypto_vectors_small.json"),
+        },
+        b"Q4ioovzM6rPmUxtNSG3omid64x75jvjx1ljPTKpV21Y=": {
+            Path("redteam/automatic_backend_contracts/crypto_vectors_small.json"),
+        },
+        b"Ion8UHquCO320Z0jbpJVBt9NK8I+MwY5wlkxiVd0bxk=": {
+            Path("redteam/automatic_backend_contracts/crypto_vectors_small.json"),
+        },
+        b"AKNEn+eC00cmMscReFZwN/ZvQi7NfZyZU2ltL1tzHXo=": {
+            Path("redteam/automatic_backend_contracts/crypto_vectors_small.json"),
+        },
+        b"gHzzdqkhvSOWFCyimTPcD6qlIOMYRgTKQK3ANEvqOqg=": {
+            Path("redteam/automatic_backend_contracts/crypto_vectors_small.json"),
+        },
+        b"20Oahr5wd9gryOYg1uJFMbwW1bf/EETPCIppchL/NFo=": {
+            Path("redteam/automatic_backend_contracts/crypto_vectors_small.json"),
+        },
+        b"YF1Gb964QHwCFOa5ux1rUnH2DnGbzDBc7L88OHzoqNM=": {
+            Path("redteam/automatic_backend_contracts/crypto_vectors_small.json"),
+        },
+        b"sCBtHwK9z0CE4xyQ7zD61rbAKydYIpRHlPrTTD7zwUA=": {
+            Path("redteam/automatic_backend_contracts/crypto_vectors_small.json"),
+        },
+        b"LnlNrdzQpWjWXEQiQzBOgn9glArlEoY58bae4A4cAhc=": {
+            Path("redteam/automatic_backend_contracts/crypto_vectors_small.json"),
+        },
+        b"QlJdCGZYXUSDu5811B7DsJihYBMsReiAsI+TuWgzuao=": {
+            Path("redteam/automatic_backend_contracts/crypto_vectors_small.json"),
+        },
+        b"glPgs5CUtfncOWXNm2aMLkwzy/peNcn4FZnJLAR8pIE=": {
+            Path("redteam/automatic_backend_contracts/crypto_vectors_small.json"),
+        },
+        b"ggE8tZhjNVn/aJ4MnLa9X23a+s/eRuo2QcIMbU/eijI=": {
+            Path("redteam/automatic_backend_contracts/crypto_vectors_small.json"),
+        },
+        b"NXC/7KCKT0KAOtjrJQQKaePsKsFKOqsNorJH6H4T1EQ=": {
+            Path("redteam/automatic_backend_contracts/crypto_vectors_small.json"),
+        },
+        b"HjxGTtCcfC758otf3toRJcjwLv0QfqmS1Srkvrf15d8=": {
+            Path("redteam/automatic_backend_contracts/crypto_vectors_small.json"),
+        },
+        b"At2ri082RlUhQJ9Ml6eGtYBiK2V71Aob1YMzR16lWgU=": {
+            Path("redteam/automatic_backend_contracts/crypto_vectors_small.json"),
+        },
+        b"dgN4nuHlkRIg3yBHbUaNKuuM5oGouHDY7TTTViRI+4c=": {
+            Path("redteam/automatic_backend_contracts/crypto_vectors_small.json"),
+        },
+        b"1GDk4Uao5o/Bv10xPndiZ6Y0JV11+9Grq8LaA31k/Rs=": {
+            Path("redteam/automatic_backend_contracts/crypto_vectors_small.json"),
+        },
+        b"sc1B91Hvj+67Z21On43a8+ER9ty2KyCya9Ph3b9AOW4=": {
+            Path("redteam/automatic_backend_contracts/crypto_vectors_small.json"),
+        },
+        b"nNB9ItmBepwzUcOhZaF+y27+sMuqx/I4Q0LZjYIgUSc=": {
+            Path("redteam/automatic_backend_contracts/crypto_vectors_small.json"),
+        },
+        b"gPmfikJQwYXX7nEnmcdykuTVHCQ+NDD2OkVtf3tlTL4=": {
+            Path("redteam/automatic_backend_contracts/crypto_vectors_small.json"),
+        },
+        b"yMnKy8zNzs/Q0dLT1NXW19jZ2tvc3d7f4OHi4+Tl5uc=": {
+            Path("redteam/automatic_backend_contracts/crypto_vectors_small.json"),
+            Path("shared/vectors.json"),
+        },
+        b"p4PA+VukfyRnYRL6lqmSG8TnqNgrGU1O37BxlgyM8lg=": {
+            Path("redteam/automatic_backend_contracts/runtime_outputs.json"),
+        },
+        b"QgqO+sMHoLmcI4CxTFj2KFOzJj0ewRS6fhPh7lG1Dug=": {
+            Path("redteam/automatic_backend_contracts/runtime_outputs.json"),
+        },
+        b"ASZtTjPHv7iZEdVW3+wI4H6AEHqbYJlFlKS3HsLSTHY=": {
+            Path("redteam/automatic_backend_contracts/runtime_outputs.json"),
+        },
+    }
+    approved.update(
+        {needle: locations | policy_and_guard for needle, locations in vector_locations.items()}
+    )
     found = {needle: set() for needle in approved}
     source_files = _working_tree_source_files()
     if not source_files:
@@ -161,6 +260,9 @@ def test_gitleaks_false_positive_exceptions_stay_at_reviewed_locations():
             continue
         relative = path.relative_to(REPO_ROOT)
         for needle in approved:
-            if needle in blob:
+            # Anchored scanner regexes escape punctuation such as '+'.
+            # Review both exact spellings without widening approved locations.
+            regex_spelling = re.escape(needle).replace(rb"\ ", b" ")
+            if needle in blob or regex_spelling in blob:
                 found[needle].add(relative)
     assert found == approved

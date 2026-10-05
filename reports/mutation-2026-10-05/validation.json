@@ -1,0 +1,111 @@
+{
+  "status": "FINAL_ENTIRE_BACKEND_PUBLICATION_VALIDATION_PASS",
+  "canonical_ledger_sha256": "5b15c22b99bbfbecd611718f71b3d11474a53ac3665eae8358dddf4502c31525",
+  "production_files": 95,
+  "canonical_controls": 44089,
+  "counts": {
+    "KILLED": 42663,
+    "REVIEWED_EQUIVALENT": 1259,
+    "STATIC_TYPECHECK_CAUGHT": 142,
+    "INVALID_SYNTAX": 25
+  },
+  "independent_audits": {
+    "independent-final-backend-audit.json": "0f432a064aadb37ed78266429e22df01dcb136300ae513cd722aab89cbdc534f",
+    "independent-final-reviewed-disposition-audit.json": "c4725de4640ce7518c15b8301be68ba6875afa89c0e3261f6440bc94aaa67ef7",
+    "independent-current-scope-audit.json": "c003028e12c02d7f7693b616609a02d05fa2a5691eb280af214a34ca8fef7202"
+  },
+  "historical_static_certificate": {
+    "sha256": "355018e5d19d8ca33ccb5ed2021cb9a02112c70dfee8a84ca8f8977d04cb59f7",
+    "original_ledger_binding": "b18d7d6f7b28f227e8b435fe610fa91cff0b36840a0ffdd6d3ba158c96693524",
+    "all_142_static_and_25_invalid_patch_status_records_verified_unchanged": true,
+    "fresh_current_diagnostics_and_compilation_verification": "independent-final-reviewed-disposition-audit.json and independent-current-scope-audit.json"
+  },
+  "all_current_production_hashes_unchanged": true,
+  "backend": {
+    "recorded_artifact": ".tools/backend-publish-2026-10-05/backend-full.xml",
+    "sha256": "c4671ae4891c015ac7a0dc9fa9135f1afb4fdf2e6d4519e465d215478c779e5a",
+    "cases": 3305,
+    "passed": 3298,
+    "skipped": 7,
+    "failures": 0,
+    "errors": 0
+  },
+  "backend_postgresql_replay": {
+    "recorded_artifact": ".tools/backend-publish-2026-10-05/backend-postgres.xml",
+    "sha256": "10d12dc8b0d004cd476e7cbb14464473744e0aa54aa84cc7779f48ec394f1502",
+    "cases": 6,
+    "passed": 6,
+    "skipped": 0,
+    "failures": 0,
+    "errors": 0
+  },
+  "backend_post_collection_cleanup_supplement": {
+    "recorded_artifact": ".tools/backend-publish-2026-10-05/backend-cleanup-supplement.xml",
+    "sha256": "d40d50d09e1b441582fae6fdf6b2d57cbd3d179972b064126d8de1066166891b",
+    "cases": 4,
+    "passed": 4,
+    "skipped": 0,
+    "failures": 0,
+    "errors": 0
+  },
+  "unique_current_retained_backend_cases_all_passed": 3304,
+  "post_collection_boundary": "The full SQLite run collected one obsolete unconditional S3 skip and the earlier exact private lock helper test before deletion/replacement. The six PostgreSQL skips were executed separately; the retained helper and three secret guards passed in the supplement. Only the retained 3,304 cases count as current, all passing.",
+  "tooling": {
+    "recorded_artifact": ".tools/backend-publish-2026-10-05/tooling-final.xml",
+    "sha256": "8e877d2c09722e950a15b40abc67e69f17552d3f838570380c6e552d443f0ba4",
+    "cases": 662,
+    "passed": 662,
+    "skipped": 0,
+    "failures": 0,
+    "errors": 0
+  },
+  "isolated_runner": {
+    "recorded_artifact": ".tools/backend-publish-2026-10-05/runner.xml",
+    "sha256": "7a48fdcc69236fc504297d4ce3101328c5e3166d8a1b777f5ddf050a2a20a8a3",
+    "cases": 21,
+    "passed": 21,
+    "skipped": 0,
+    "failures": 0,
+    "errors": 0
+  },
+  "script_oracles": {
+    "recorded_artifact": ".tools/backend-publish-2026-10-05/script-oracles.xml",
+    "sha256": "218befb7aee7658bce1ad6e4242fe732165b709b1ed126531e2e6e991466a6c5",
+    "cases": 82,
+    "passed": 82,
+    "skipped": 0,
+    "failures": 0,
+    "errors": 0
+  },
+  "coverage": {
+    "artifact": ".tools/backend-publish-2026-10-05/backend-coverage.xml",
+    "sha256": "3df3ff19fa495984c60d39b0cd7c72a739fd5d51007e1f0e4a30f2a6e22c5b5e",
+    "line_rate": 0.9815,
+    "lines_valid": 11755,
+    "lines_covered": 11537,
+    "unchanged_floor": 0.95
+  },
+  "backend_ruff_format_and_uncached_52_module_mypy": "PASS",
+  "tooling_ruff_default_check_and_format_31_files": "PASS",
+  "workflow_yaml": "PASS",
+  "pr_mutation_preflight": "220/220 PASS",
+  "supplemental_preflight": "284/284 PASS",
+  "corrected_A15_03_replay": {
+    "summary_sha256": "9905fd988ccbbc8dfb9f6874367ed0132bb5b1f9941223d9eb0fc3cd9b4caaa0",
+    "passing_pristine_baseline_and_actual_call_kill": true,
+    "source_restored": true
+  },
+  "owned_postgresql_cleanup": {
+    "owned_container": "mindpattern-backend-publish-20261005-pg",
+    "exit_code": 0,
+    "output": "mindpattern-backend-publish-20261005-pg",
+    "stderr": "",
+    "unrelated_resources_touched": false
+  },
+  "prior_validation": {
+    "original_sha256": "60ddbadb01ffddaf83d88be9572841c2bfb127a743c5606dd5d3d092d12a9e8f",
+    "boundary": "Earlier dated regression gate retained verbatim locally; two private token-width kills in its old b18 ledger were subsequently withdrawn. Current counts and independent audit above supersede those dispositions."
+  },
+  "runtime_source_pin_or_timeout_kill_credit": false,
+  "tooling_integration_profiles": "All PostgreSQL tooling cases and all seven real SQLite 3.42 compatibility cases ran; no tooling skips."
+}

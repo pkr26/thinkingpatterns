@@ -35,9 +35,12 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 
-_BETACF_MAX_ITER = 200
+_BETACF_MAX_ITER = 10_000
 _BETACF_EPS = 3e-12
-_BETACF_FPMIN = 1e-300
+
+
+class BetaConvergenceError(ArithmeticError):
+    """The bounded beta continued fraction could not produce a probability."""
 
 
 def binomial_sf(k: int, n: int, p: float) -> float:
@@ -123,40 +126,50 @@ def benjamini_hochberg(pvalues: list[float], q: float = 0.05) -> list[bool]:
 
 
 def _betacf(a: float, b: float, x: float) -> float:
-    """Continued fraction for the incomplete beta function (Lentz's method)."""
+    """Continued fraction; refuse singular or unconverged native arithmetic.
+
+    Replacing an exactly cancelled limb with an arbitrary tiny number can
+    falsely converge to a finite result many orders of magnitude too large.
+    The caller selects the stable symmetry branch; singular direct inputs
+    must report numerical failure rather than fabricate a probability.
+    """
     qab = a + b
     qap = a + 1.0
     qam = a - 1.0
     c = 1.0
     d = 1.0 - qab * x / qap
-    if abs(d) < _BETACF_FPMIN:
-        d = _BETACF_FPMIN
+    if d == 0.0:
+        raise BetaConvergenceError("incomplete beta continued fraction is singular")
     d = 1.0 / d
     h = d
     for m in range(1, _BETACF_MAX_ITER + 1):
         m2 = 2 * m
         aa = m * (b - m) * x / ((qam + m2) * (a + m2))
         d = 1.0 + aa * d
-        if abs(d) < _BETACF_FPMIN:
-            d = _BETACF_FPMIN
+        if d == 0.0:
+            raise BetaConvergenceError("incomplete beta continued fraction is singular")
         c = 1.0 + aa / c
-        if abs(c) < _BETACF_FPMIN:
-            c = _BETACF_FPMIN
+        if c == 0.0:
+            raise BetaConvergenceError("incomplete beta continued fraction is singular")
         d = 1.0 / d
         h *= d * c
         aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2))
         d = 1.0 + aa * d
-        if abs(d) < _BETACF_FPMIN:
-            d = _BETACF_FPMIN
+        if d == 0.0:
+            raise BetaConvergenceError("incomplete beta continued fraction is singular")
         c = 1.0 + aa / c
-        if abs(c) < _BETACF_FPMIN:
-            c = _BETACF_FPMIN
+        if c == 0.0:
+            raise BetaConvergenceError("incomplete beta continued fraction is singular")
         d = 1.0 / d
         delta = d * c
         h *= delta
         if abs(delta - 1.0) < _BETACF_EPS:
-            break
-    return h
+            # For positive shapes and 0<x<1, the defining beta integral
+            # gives this fraction >=1. A smaller value is numerical failure.
+            if not math.isfinite(h) or h < 1.0:
+                raise BetaConvergenceError("incomplete beta continued fraction is invalid")
+            return h
+    raise BetaConvergenceError("incomplete beta continued fraction did not converge")
 
 
 def _betainc(a: float, b: float, x: float) -> float:
@@ -165,13 +178,21 @@ def _betainc(a: float, b: float, x: float) -> float:
         return 0.0
     if x >= 1.0:
         return 1.0
+    # Symmetry gives this value exactly, including large equal shapes where
+    # subtracting lgamma terms otherwise loses significant precision.
+    if a == b and x == 0.5:
+        return 0.5
     log_bt = (
         math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b) + a * math.log(x) + b * math.log1p(-x)
     )
     bt = math.exp(log_bt)
     if x < (a + 1.0) / (a + b + 2.0):
-        return bt * _betacf(a, b, x) / a
-    return 1.0 - bt * _betacf(b, a, 1.0 - x) / b
+        result = bt * _betacf(a, b, x) / a
+    else:
+        result = 1.0 - bt * _betacf(b, a, 1.0 - x) / b
+    if not math.isfinite(result) or not 0.0 <= result <= 1.0:
+        raise BetaConvergenceError("incomplete beta result is not a probability")
+    return result
 
 
 def student_t_sf_two_sided(t: float, dof: float) -> float:
@@ -185,7 +206,7 @@ def student_t_sf_two_sided(t: float, dof: float) -> float:
 
 
 def f_sf(f: float, df1: int, df2: int) -> float:
-    """Upper tail P(F >= f) for F ~ F(df1, df2), via the incomplete beta."""
+    """Upper tail P(F >= f), or BetaConvergenceError on numerical failure."""
     if df1 < 1 or df2 < 1:
         return 1.0
     if f <= 0.0:

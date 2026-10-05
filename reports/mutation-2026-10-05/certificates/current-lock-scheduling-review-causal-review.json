@@ -1,0 +1,25 @@
+{
+  "source_sha256": "607c30b36276522a3f6ee0db031a4dd7a21d9faab63950f738ae34636c594230",
+  "findings": [
+    "No new leak or cycle found in six independent native-capacity scheduling probes.",
+    "All choosing/guard/ref-increment operations are synchronous before physical acquire; same registry cannot change selection during that segment.",
+    "shard.owner is assigned after successful acquire and cleared inside try/finally before release. refs include owners and queued callers, so owner=None/locked=False during handoff does not bypass refusal.",
+    "Same-task shard reentry increments only refs: outer successful acquire retains task held.overflow and ownership until the whole nested body ends. A foreign task remains excluded across inner exit.",
+    "Cancellation before successful physical acquire decrements refs without creating task state; cancellation inside nested reentry unwinds inner refs then outer held count/owner and releases physical lock.",
+    "Any task already holding this registry refuses a foreign live overflow queue. A task holding overflow also refuses a live dedicated queue. Thus a new wait edge while holding locks can only be pure-dedicated; physical shard coarsening cannot close a cycle.",
+    "Pure-dedicated sharing callers use therapist-before-patient; multiple therapist IDs use sorted unique IDs in rekey, and multiple patient IDs in rotation are sorted. Other patient loops release each patient guard before the next. No same dedicated-key recursion found in production callers."
+  ],
+  "review_boundary": "Generic same-key dedicated reentry and arbitrary caller inversions are not added promises; current consumers obey logical ordering. Cross-registry consumer order is reviewed separately: lifecycle precedes sharing/notes and collection locks; audit append fences are innermost and do not acquire lifecycle/sharing.",
+  "caller_source_sha256": {
+    "backend/app/api/insights.py": "255f21305a1b1f0cab748eecc0ecda96dd7316bc2d8de9966d99e57b8fd6a4f6",
+    "backend/app/api/therapist.py": "4f2e6ec68674c2cfffb15ece89c5977cd6111725240e6ecf994721950c72342c",
+    "backend/app/api/consents.py": "78df4e1c5894dc2a566f47d3721d9a253b6519c599c740be847f4270ba9bb2fe",
+    "backend/app/api/account.py": "fdba9de7d842fc1116ca5cb765b25b3006653b979f2b37cae44a558174875c5f",
+    "backend/app/api/_custody.py": "137d26c220ba55b303e826df6bf35aebbccba69c2ae73cfdf152bdf47311a05a",
+    "backend/app/api/_audit.py": "b37ac9b7afa86e8bb1fdf766ea2bc1510e731ab5936a6d46f01af15f40d1fc5c"
+  },
+  "read_only_review": true,
+  "prior_M008096_equivalence_withdrawn": true,
+  "historical_counterexample": "../historical-nested-sharing-lock-proof/native_nested_sharing_pool_probe.json",
+  "pending_scope": "Entire changed locks module must be re-enumerated and replayed. No old locks kill/equivalence credit transfers automatically."
+}

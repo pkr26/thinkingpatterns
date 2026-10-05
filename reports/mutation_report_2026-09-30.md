@@ -15,6 +15,13 @@
 > The 2026-09-30 campaign's 12 client-dir Python copies (never collectable
 > by any runner) were deleted 2026-10-01.
 
+> **Correction (2026-10-05).** The crisis-gate equivalence argument in
+> residual item 5 is false: a suppression-only input distinguishes `or`
+> from `and`. The streaming message gap in item 6 is now covered by an
+> independent streaming test. The current entire-backend campaign includes
+> models, migrations, bootstrap and utilities; see
+> [the October 5 report](mutation_report_2026-10-05.md).
+
 # MindPattern — Deep Mutation Testing Report (backend, 2026-09-30)
 
 **Scope:** the pyproject deep scope (`app/security/`, `app/services/`, `app/api/`,

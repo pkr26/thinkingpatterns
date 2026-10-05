@@ -141,10 +141,24 @@ For each of `web/`, `portal/`, and `mobile/`, run `npm run typecheck` and
 `npm run verify:vectors`, `npm run verify:native-release`, and
 `npm run verify:dependency-patches`.
 
-From the repository root:
+Run the repository tooling with the locked backend dependencies. Keep the
+automatic mutation runner tests in a separate interpreter so their fork parent
+does not inherit application modules imported by other tooling tests:
 
 ```sh
-backend/.venv/bin/python -m unittest discover -s tools/tests -v
+cd backend
+.venv/bin/python -m pytest ../tools/tests/test_automatic_backend_mutation.py \
+  ../tools/tests/test_automatic_http_contracts.py -q
+.venv/bin/python -m pytest ../tools/tests \
+  --ignore=../tools/tests/test_automatic_backend_mutation.py \
+  --ignore=../tools/tests/test_automatic_http_contracts.py -q
+MINDPATTERN_ENV=development .venv/bin/python -m pytest \
+  ../redteam/automatic_backend_script_oracles.py -q
+```
+
+From the repository root, check documentation and API-reference links:
+
+```sh
 python3 tools/check-docs.py
 ```
 

@@ -90,10 +90,17 @@ async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
                 return
             committed_audit.extend(session.info.pop(audit_pending, []))
             committed_audio.extend(session.info.pop(audio_pending, []))
+            savepoints.clear()
 
         def _mark_rollback(_session, transaction) -> None:
-            if transaction.nested:
-                audit_count, audio_count = savepoints.pop(transaction, (0, 0))
+            # A failed flush rolls back a non-nested SQLAlchemy subtransaction
+            # whose parent is the savepoint. Its context may then close without
+            # a second rollback event for the savepoint itself.
+            savepoint = transaction if transaction.nested else transaction.parent
+            if savepoint is not None and savepoint.nested:
+                # Retain the marker until outer completion: an explicit
+                # rollback after a failed flush can report this savepoint again.
+                audit_count, audio_count = savepoints.get(savepoint, (0, 0))
                 for name, length in ((audit_pending, audit_count), (audio_pending, audio_count)):
                     if name in session.info:
                         session.info[name] = session.info[name][:length]

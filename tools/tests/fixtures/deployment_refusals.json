@@ -1,0 +1,977 @@
+[
+  {
+    "name": "trusted_proxy_ips=['broken']",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "trusted_proxy_ips": [
+        "broken"
+      ]
+    },
+    "diagnostic": "trusted_proxy_ips contains invalid IP/CIDR 'broken'"
+  },
+  {
+    "name": "trusted_proxy_ips=['0.0.0.0/0']",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "trusted_proxy_ips": [
+        "0.0.0.0/0"
+      ]
+    },
+    "diagnostic": "trusted_proxy_ips entry '0.0.0.0/0' matches every address; it would collapse all rate limiting into one global bucket. List the proxy's actual address(es) or CIDR."
+  },
+  {
+    "name": "trust_proxy_headers=True",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "trust_proxy_headers": true
+    },
+    "diagnostic": "MINDPATTERN_TRUST_PROXY_HEADERS requires a non-empty MINDPATTERN_TRUSTED_PROXY_IPS allowlist"
+  },
+  {
+    "name": "cors_origins=['http://example.invalid']",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "cors_origins": [
+        "http://example.invalid"
+      ]
+    },
+    "diagnostic": "cors_origins must contain exact https:// origins (or exact http://localhost/127.0.0.1/[::1] origins in development)"
+  },
+  {
+    "name": "cors_origins=['https://example.invalid:broken']",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "cors_origins": [
+        "https://example.invalid:broken"
+      ]
+    },
+    "diagnostic": "cors_origins contains invalid origin 'https://example.invalid:broken'"
+  },
+  {
+    "name": "scrypt_n=32769",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "scrypt_n": 32769
+    },
+    "diagnostic": "scrypt_n must be a power of two between 32768 and 1048576 (got 32769)"
+  },
+  {
+    "name": "db_max_overflow=-1",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "db_max_overflow": -1
+    },
+    "diagnostic": "db_max_overflow must be >= 0"
+  },
+  {
+    "name": "token_ttl_seconds=2592001",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "token_ttl_seconds": 2592001
+    },
+    "diagnostic": "token_ttl_seconds must be <= 2592000"
+  },
+  {
+    "name": "processing_session_ttl=301",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "processing_session_ttl": 301
+    },
+    "diagnostic": "processing_session_ttl must be <= 300"
+  },
+  {
+    "name": "body_read_timeout_seconds=121",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "body_read_timeout_seconds": 121
+    },
+    "diagnostic": "body_read_timeout_seconds must be <= 120"
+  },
+  {
+    "name": "auth_rate_limit=100001",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "auth_rate_limit": 100001
+    },
+    "diagnostic": "auth_rate_limit must be <= 100000"
+  },
+  {
+    "name": "auth_rate_window=3601",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "auth_rate_window": 3601
+    },
+    "diagnostic": "auth_rate_window must be <= 3600"
+  },
+  {
+    "name": "audio_max_duration_seconds=3601",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "audio_max_duration_seconds": 3601
+    },
+    "diagnostic": "audio_max_duration_seconds must be <= 3600"
+  },
+  {
+    "name": "audio_retention_days=3651",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "audio_retention_days": 3651
+    },
+    "diagnostic": "audio_retention_days must be between 1 and 3650"
+  },
+  {
+    "name": "audio_lifecycle_ceiling_days=3652",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "audio_lifecycle_ceiling_days": 3652
+    },
+    "diagnostic": "audio_lifecycle_ceiling_days must exceed audio_retention_days and be <= 3651"
+  },
+  {
+    "name": "audio_max_user_bytes=8589934593",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "audio_max_user_bytes": 8589934593
+    },
+    "diagnostic": "audio_max_user_bytes must be <= 8 GiB"
+  },
+  {
+    "name": "audio_max_body_bytes=67108865",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 67108865,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1
+    },
+    "diagnostic": "audio_max_body_bytes must be <= 67108864"
+  },
+  {
+    "name": "audio_sweep_interval_seconds=86401",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "audio_sweep_interval_seconds": 86401
+    },
+    "diagnostic": "audio_sweep_interval_seconds must be <= 86400"
+  },
+  {
+    "name": "stt_timeout_seconds=601",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "stt_timeout_seconds": 601
+    },
+    "diagnostic": "stt_timeout_seconds must be between 1 and 600 seconds"
+  },
+  {
+    "name": "analysis_blob_budget=67108865",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 67108865,
+      "body_buffer_concurrency": 1
+    },
+    "diagnostic": "analysis_blob_budget must be <= 64 MiB"
+  },
+  {
+    "name": "analysis_blob_budget=1023",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1023,
+      "body_buffer_concurrency": 1
+    },
+    "diagnostic": "analysis_blob_budget must be >= 1024"
+  },
+  {
+    "name": "unlock_threshold_days=3651",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "unlock_threshold_days": 3651
+    },
+    "diagnostic": "unlock_threshold_days must be <= 3650"
+  },
+  {
+    "name": "max_entries_per_user=1000001",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "max_entries_per_user": 1000001
+    },
+    "diagnostic": "max_entries_per_user must be <= 1000000"
+  },
+  {
+    "name": "max_user_blob_bytes=8589934593",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "max_user_blob_bytes": 8589934593
+    },
+    "diagnostic": "max_user_blob_bytes must be <= 8 GiB"
+  },
+  {
+    "name": "max_body_bytes=67108865",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 67108865,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1
+    },
+    "diagnostic": "analysis_blob_budget must be >= max_body_bytes (the budget must fit at least one max-size entry)"
+  },
+  {
+    "name": "audit_mac_key_version=0",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "audit_mac_key_version": 0
+    },
+    "diagnostic": "MINDPATTERN_AUDIT_MAC_KEY_VERSION must be between 1 and 2147483647"
+  },
+  {
+    "name": "audit_mac_secret_explicit='gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg'",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "audit_mac_secret_explicit": "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg"
+    },
+    "diagnostic": "MINDPATTERN_AUDIT_MAC_SECRET must be 32 bytes of hex (64 chars)"
+  },
+  {
+    "name": "body_buffer_concurrency=100001",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 100001
+    },
+    "diagnostic": "body_buffer_concurrency must be between 1 and 100000"
+  },
+  {
+    "name": "db_pool_timeout=601",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "db_pool_timeout": 601
+    },
+    "diagnostic": "db_pool_timeout must be <= 600"
+  },
+  {
+    "name": "db_statement_timeout_ms=600001",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "db_statement_timeout_ms": 600001
+    },
+    "diagnostic": "db_statement_timeout_ms must be between 1000 and 600000"
+  },
+  {
+    "name": "db_idle_in_transaction_timeout_ms=3600001",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "db_idle_in_transaction_timeout_ms": 3600001
+    },
+    "diagnostic": "db_idle_in_transaction_timeout_ms must be between 1000 and 3600000"
+  },
+  {
+    "name": "access_log_retention_days=3651",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "access_log_retention_days": 3651
+    },
+    "diagnostic": "access_log_retention_days must be between 1 and 3650"
+  },
+  {
+    "name": "memory product over budget",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 67108864,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 9
+    },
+    "diagnostic": "max(max_body_bytes, audio_max_body_bytes) * body_buffer_concurrency exceeds the edge body-buffer memory budget (536870912 bytes): 67108864 * 9. Lower one of them (or raise the budget with eyes open) — a body-size flood otherwise buffers past the container's memory."
+  },
+  {
+    "name": "llm_url=https://provider.invalid:bad/v1",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "llm_url": "https://provider.invalid:bad/v1"
+    },
+    "diagnostic": "MINDPATTERN_LLM_URL contains an invalid authority"
+  },
+  {
+    "name": "llm_url=http://provider.invalid/v1",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "llm_url": "http://provider.invalid/v1"
+    },
+    "diagnostic": "MINDPATTERN_LLM_URL must use https:// — decrypted journal plaintext is POSTed to it. Plain http:// is only accepted for exact loopback hosts with MINDPATTERN_ENV=development exactly."
+  },
+  {
+    "name": "llm_url=https://provider.invalid/v1#fragment",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "llm_url": "https://provider.invalid/v1#fragment"
+    },
+    "diagnostic": "MINDPATTERN_LLM_URL must use https:// — decrypted journal plaintext is POSTed to it. Plain http:// is only accepted for exact loopback hosts with MINDPATTERN_ENV=development exactly."
+  },
+  {
+    "name": "stt_url=https://provider.invalid:bad/v1",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "stt_url": "https://provider.invalid:bad/v1"
+    },
+    "diagnostic": "MINDPATTERN_STT_URL contains an invalid authority"
+  },
+  {
+    "name": "stt_url=http://provider.invalid/v1",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "stt_url": "http://provider.invalid/v1"
+    },
+    "diagnostic": "MINDPATTERN_STT_URL must use https:// — recorded audio is POSTed to it. Plain http:// is only accepted for exact loopback hosts with MINDPATTERN_ENV=development exactly."
+  },
+  {
+    "name": "stt_url=https://provider.invalid/v1#fragment",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "stt_url": "https://provider.invalid/v1#fragment"
+    },
+    "diagnostic": "MINDPATTERN_STT_URL must use https:// — recorded audio is POSTed to it. Plain http:// is only accepted for exact loopback hosts with MINDPATTERN_ENV=development exactly."
+  },
+  {
+    "name": "llm production missing all policy",
+    "settings": {
+      "environment": "production",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "database_url": "postgresql+asyncpg://fixture/mutation",
+      "token_secret": "tttttttttttttttttttttttttttttttt",
+      "auth_token_secret_explicit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "totp_wrap_secret_explicit": "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww",
+      "pairing_secret_explicit": "pppppppppppppppppppppppppppppppp",
+      "decoy_secret": "dddddddddddddddddddddddddddddddd",
+      "audit_mac_secret_explicit": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "audit_journal_path": "/synthetic/mutation-journal",
+      "llm_url": "https://provider.invalid/v1"
+    },
+    "diagnostic": "an enabled production LLM requires explicit provider, retention, and policy version declarations (set MINDPATTERN_LLM_PROVIDER_NAME, MINDPATTERN_LLM_DATA_RETENTION)"
+  },
+  {
+    "name": "llm_policy_version over cap",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "llm_policy_version": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    "diagnostic": "llm_policy_version must be at most 64 characters"
+  },
+  {
+    "name": "llm_provider_name over cap",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "llm_provider_name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    "diagnostic": "llm_provider_name must be at most 120 characters"
+  },
+  {
+    "name": "llm_data_retention over cap",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "llm_data_retention": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    "diagnostic": "llm_data_retention must be at most 500 characters"
+  },
+  {
+    "name": "stt production missing all policy",
+    "settings": {
+      "environment": "production",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "database_url": "postgresql+asyncpg://fixture/mutation",
+      "token_secret": "tttttttttttttttttttttttttttttttt",
+      "auth_token_secret_explicit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "totp_wrap_secret_explicit": "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww",
+      "pairing_secret_explicit": "pppppppppppppppppppppppppppppppp",
+      "decoy_secret": "dddddddddddddddddddddddddddddddd",
+      "audit_mac_secret_explicit": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "audit_journal_path": "/synthetic/mutation-journal",
+      "stt_url": "https://provider.invalid/v1"
+    },
+    "diagnostic": "a configured production STT requires explicit provider, retention, and policy version declarations (set MINDPATTERN_STT_PROVIDER_NAME, MINDPATTERN_STT_DATA_RETENTION)"
+  },
+  {
+    "name": "stt_policy_version over cap",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "stt_policy_version": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    "diagnostic": "stt_policy_version must be at most 64 characters"
+  },
+  {
+    "name": "stt_provider_name over cap",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "stt_provider_name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    "diagnostic": "stt_provider_name must be at most 120 characters"
+  },
+  {
+    "name": "stt_data_retention over cap",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "stt_data_retention": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    "diagnostic": "stt_data_retention must be at most 500 characters"
+  },
+  {
+    "name": "production token_secret short",
+    "settings": {
+      "environment": "production",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "database_url": "postgresql+asyncpg://fixture/mutation",
+      "token_secret": "short",
+      "auth_token_secret_explicit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "totp_wrap_secret_explicit": "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww",
+      "pairing_secret_explicit": "pppppppppppppppppppppppppppppppp",
+      "decoy_secret": "dddddddddddddddddddddddddddddddd",
+      "audit_mac_secret_explicit": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "audit_journal_path": "/synthetic/mutation-journal"
+    },
+    "diagnostic": "MINDPATTERN_TOKEN_SECRET must be at least 32 characters in environment 'production'"
+  },
+  {
+    "name": "production auth_token_secret_explicit short",
+    "settings": {
+      "environment": "production",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "database_url": "postgresql+asyncpg://fixture/mutation",
+      "token_secret": "tttttttttttttttttttttttttttttttt",
+      "auth_token_secret_explicit": "short",
+      "totp_wrap_secret_explicit": "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww",
+      "pairing_secret_explicit": "pppppppppppppppppppppppppppppppp",
+      "decoy_secret": "dddddddddddddddddddddddddddddddd",
+      "audit_mac_secret_explicit": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "audit_journal_path": "/synthetic/mutation-journal"
+    },
+    "diagnostic": "MINDPATTERN_AUTH_TOKEN_SECRET must be at least 32 characters"
+  },
+  {
+    "name": "production auth_token_secret_explicit missing",
+    "settings": {
+      "environment": "production",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "database_url": "postgresql+asyncpg://fixture/mutation",
+      "token_secret": "tttttttttttttttttttttttttttttttt",
+      "auth_token_secret_explicit": "",
+      "totp_wrap_secret_explicit": "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww",
+      "pairing_secret_explicit": "pppppppppppppppppppppppppppppppp",
+      "decoy_secret": "dddddddddddddddddddddddddddddddd",
+      "audit_mac_secret_explicit": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "audit_journal_path": "/synthetic/mutation-journal"
+    },
+    "diagnostic": "MINDPATTERN_AUTH_TOKEN_SECRET is required outside development"
+  },
+  {
+    "name": "production totp_wrap_secret_explicit short",
+    "settings": {
+      "environment": "production",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "database_url": "postgresql+asyncpg://fixture/mutation",
+      "token_secret": "tttttttttttttttttttttttttttttttt",
+      "auth_token_secret_explicit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "totp_wrap_secret_explicit": "short",
+      "pairing_secret_explicit": "pppppppppppppppppppppppppppppppp",
+      "decoy_secret": "dddddddddddddddddddddddddddddddd",
+      "audit_mac_secret_explicit": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "audit_journal_path": "/synthetic/mutation-journal"
+    },
+    "diagnostic": "MINDPATTERN_TOTP_WRAP_SECRET must be at least 32 characters"
+  },
+  {
+    "name": "production totp_wrap_secret_explicit missing",
+    "settings": {
+      "environment": "production",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "database_url": "postgresql+asyncpg://fixture/mutation",
+      "token_secret": "tttttttttttttttttttttttttttttttt",
+      "auth_token_secret_explicit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "totp_wrap_secret_explicit": "",
+      "pairing_secret_explicit": "pppppppppppppppppppppppppppppppp",
+      "decoy_secret": "dddddddddddddddddddddddddddddddd",
+      "audit_mac_secret_explicit": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "audit_journal_path": "/synthetic/mutation-journal"
+    },
+    "diagnostic": "MINDPATTERN_TOTP_WRAP_SECRET is required outside development"
+  },
+  {
+    "name": "production pairing_secret_explicit short",
+    "settings": {
+      "environment": "production",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "database_url": "postgresql+asyncpg://fixture/mutation",
+      "token_secret": "tttttttttttttttttttttttttttttttt",
+      "auth_token_secret_explicit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "totp_wrap_secret_explicit": "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww",
+      "pairing_secret_explicit": "short",
+      "decoy_secret": "dddddddddddddddddddddddddddddddd",
+      "audit_mac_secret_explicit": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "audit_journal_path": "/synthetic/mutation-journal"
+    },
+    "diagnostic": "MINDPATTERN_PAIRING_SECRET must be at least 32 characters"
+  },
+  {
+    "name": "production pairing_secret_explicit missing",
+    "settings": {
+      "environment": "production",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "database_url": "postgresql+asyncpg://fixture/mutation",
+      "token_secret": "tttttttttttttttttttttttttttttttt",
+      "auth_token_secret_explicit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "totp_wrap_secret_explicit": "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww",
+      "pairing_secret_explicit": "",
+      "decoy_secret": "dddddddddddddddddddddddddddddddd",
+      "audit_mac_secret_explicit": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "audit_journal_path": "/synthetic/mutation-journal"
+    },
+    "diagnostic": "MINDPATTERN_PAIRING_SECRET is required outside development"
+  },
+  {
+    "name": "production decoy_secret short",
+    "settings": {
+      "environment": "production",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "database_url": "postgresql+asyncpg://fixture/mutation",
+      "token_secret": "tttttttttttttttttttttttttttttttt",
+      "auth_token_secret_explicit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "totp_wrap_secret_explicit": "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww",
+      "pairing_secret_explicit": "pppppppppppppppppppppppppppppppp",
+      "decoy_secret": "short",
+      "audit_mac_secret_explicit": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "audit_journal_path": "/synthetic/mutation-journal"
+    },
+    "diagnostic": "MINDPATTERN_DECOY_SECRET must be at least 32 characters"
+  },
+  {
+    "name": "production decoy_secret missing",
+    "settings": {
+      "environment": "production",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "database_url": "postgresql+asyncpg://fixture/mutation",
+      "token_secret": "tttttttttttttttttttttttttttttttt",
+      "auth_token_secret_explicit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "totp_wrap_secret_explicit": "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww",
+      "pairing_secret_explicit": "pppppppppppppppppppppppppppppppp",
+      "decoy_secret": "",
+      "audit_mac_secret_explicit": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "audit_journal_path": "/synthetic/mutation-journal"
+    },
+    "diagnostic": "MINDPATTERN_DECOY_SECRET is required outside development"
+  },
+  {
+    "name": "production metrics_token short",
+    "settings": {
+      "environment": "production",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "database_url": "postgresql+asyncpg://fixture/mutation",
+      "token_secret": "tttttttttttttttttttttttttttttttt",
+      "auth_token_secret_explicit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "totp_wrap_secret_explicit": "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww",
+      "pairing_secret_explicit": "pppppppppppppppppppppppppppppppp",
+      "decoy_secret": "dddddddddddddddddddddddddddddddd",
+      "audit_mac_secret_explicit": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "audit_journal_path": "/synthetic/mutation-journal",
+      "metrics_token": "short"
+    },
+    "diagnostic": "MINDPATTERN_METRICS_TOKEN must be at least 32 characters in environment 'production'"
+  },
+  {
+    "name": "production default token",
+    "settings": {
+      "environment": "production",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "database_url": "postgresql+asyncpg://fixture/mutation",
+      "token_secret": "",
+      "auth_token_secret_explicit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "totp_wrap_secret_explicit": "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww",
+      "pairing_secret_explicit": "pppppppppppppppppppppppppppppppp",
+      "decoy_secret": "dddddddddddddddddddddddddddddddd",
+      "audit_mac_secret_explicit": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "audit_journal_path": "/synthetic/mutation-journal"
+    },
+    "diagnostic": "MINDPATTERN_TOKEN_SECRET is unset/insecure: refuse to start. Set a strong random value (e.g. openssl rand -hex 32). (The built-in dev secret is only allowed with MINDPATTERN_ENV=development exactly.)"
+  },
+  {
+    "name": "production one database connection",
+    "settings": {
+      "environment": "production",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "database_url": "postgresql+asyncpg://fixture/mutation",
+      "token_secret": "tttttttttttttttttttttttttttttttt",
+      "auth_token_secret_explicit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "totp_wrap_secret_explicit": "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww",
+      "pairing_secret_explicit": "pppppppppppppppppppppppppppppppp",
+      "decoy_secret": "dddddddddddddddddddddddddddddddd",
+      "audit_mac_secret_explicit": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "audit_journal_path": "/synthetic/mutation-journal",
+      "db_pool_size": 1,
+      "db_max_overflow": 0
+    },
+    "diagnostic": "db_pool_size + db_max_overflow must be >= 2 outside development (one connection is reserved for the cross-host guard)"
+  },
+  {
+    "name": "production SQLite",
+    "settings": {
+      "environment": "production",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "database_url": "sqlite+aiosqlite:///synthetic.db",
+      "token_secret": "tttttttttttttttttttttttttttttttt",
+      "auth_token_secret_explicit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "totp_wrap_secret_explicit": "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww",
+      "pairing_secret_explicit": "pppppppppppppppppppppppppppppppp",
+      "decoy_secret": "dddddddddddddddddddddddddddddddd",
+      "audit_mac_secret_explicit": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "audit_journal_path": "/synthetic/mutation-journal"
+    },
+    "diagnostic": "MINDPATTERN_DB_URL must point at PostgreSQL (or another shared database) outside development; SQLite is dev/test only"
+  },
+  {
+    "name": "production missing audit MAC",
+    "settings": {
+      "environment": "production",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "database_url": "postgresql+asyncpg://fixture/mutation",
+      "token_secret": "tttttttttttttttttttttttttttttttt",
+      "auth_token_secret_explicit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "totp_wrap_secret_explicit": "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww",
+      "pairing_secret_explicit": "pppppppppppppppppppppppppppppppp",
+      "decoy_secret": "dddddddddddddddddddddddddddddddd",
+      "audit_mac_secret_explicit": "",
+      "audit_journal_path": "/synthetic/mutation-journal"
+    },
+    "diagnostic": "MINDPATTERN_AUDIT_MAC_SECRET is required outside development and must be rotated with a new MINDPATTERN_AUDIT_MAC_KEY_VERSION"
+  },
+  {
+    "name": "production missing journal",
+    "settings": {
+      "environment": "production",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "database_url": "postgresql+asyncpg://fixture/mutation",
+      "token_secret": "tttttttttttttttttttttttttttttttt",
+      "auth_token_secret_explicit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "totp_wrap_secret_explicit": "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww",
+      "pairing_secret_explicit": "pppppppppppppppppppppppppppppppp",
+      "decoy_secret": "dddddddddddddddddddddddddddddddd",
+      "audit_mac_secret_explicit": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "audit_journal_path": ""
+    },
+    "diagnostic": "MINDPATTERN_AUDIT_JOURNAL is required outside development; database state alone cannot reveal deletion of the entire audit chain"
+  },
+  {
+    "name": "production sharing missing enrollment",
+    "settings": {
+      "environment": "production",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "database_url": "postgresql+asyncpg://fixture/mutation",
+      "token_secret": "tttttttttttttttttttttttttttttttt",
+      "auth_token_secret_explicit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "totp_wrap_secret_explicit": "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww",
+      "pairing_secret_explicit": "pppppppppppppppppppppppppppppppp",
+      "decoy_secret": "dddddddddddddddddddddddddddddddd",
+      "audit_mac_secret_explicit": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "audit_journal_path": "/synthetic/mutation-journal",
+      "therapist_sharing_enabled": true,
+      "therapist_enrollment_token": ""
+    },
+    "diagnostic": "production therapist sharing requires a controlled MINDPATTERN_THERAPIST_ENROLLMENT_TOKEN of at least 32 characters"
+  },
+  {
+    "name": "historical audit keys malformed",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "audit_mac_key_version": 2,
+      "audit_mac_secret_explicit": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "audit_mac_previous_secrets_explicit": "malformed"
+    },
+    "diagnostic": "MINDPATTERN_AUDIT_MAC_PREVIOUS_SECRETS must contain version:64-hex-key entries"
+  },
+  {
+    "name": "historical audit keys 1:gg",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "audit_mac_key_version": 2,
+      "audit_mac_secret_explicit": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "audit_mac_previous_secrets_explicit": "1:gg"
+    },
+    "diagnostic": "MINDPATTERN_AUDIT_MAC_PREVIOUS_SECRETS must contain version:64-hex-key entries"
+  },
+  {
+    "name": "historical audit keys 0:abababababababababababababababababababababababababababababababab",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "audit_mac_key_version": 2,
+      "audit_mac_secret_explicit": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "audit_mac_previous_secrets_explicit": "0:abababababababababababababababababababababababababababababababab"
+    },
+    "diagnostic": "MINDPATTERN_AUDIT_MAC_PREVIOUS_SECRETS must contain version(1..2147483647):64-hex-key entries"
+  },
+  {
+    "name": "historical audit keys 1:ababababababababababababababababababababababababababababababab",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "audit_mac_key_version": 2,
+      "audit_mac_secret_explicit": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "audit_mac_previous_secrets_explicit": "1:ababababababababababababababababababababababababababababababab"
+    },
+    "diagnostic": "MINDPATTERN_AUDIT_MAC_PREVIOUS_SECRETS must contain version(1..2147483647):64-hex-key entries"
+  },
+  {
+    "name": "historical duplicate current version",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "audit_mac_key_version": 2,
+      "audit_mac_secret_explicit": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "audit_mac_previous_secrets_explicit": "2:abababababababababababababababababababababababababababababababab"
+    },
+    "diagnostic": "audit MAC key versions must be unique"
+  },
+  {
+    "name": "historical key reuses current secret",
+    "settings": {
+      "environment": "development",
+      "max_body_bytes": 1024,
+      "audio_max_body_bytes": 1024,
+      "analysis_blob_budget": 1024,
+      "body_buffer_concurrency": 1,
+      "audit_mac_key_version": 2,
+      "audit_mac_secret_explicit": "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "audit_mac_previous_secrets_explicit": "1:efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef"
+    },
+    "diagnostic": "audit MAC key versions must use distinct secrets"
+  }
+]

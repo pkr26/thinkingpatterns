@@ -48,3 +48,65 @@ bootstrap). Never regenerate corpus fixtures while the engine is mutated,
 and never let a campaign run write `.pyc` (the round-2 harness sets
 `PYTHONDONTWRITEBYTECODE=1` — same-size mutants reverted inside one clock
 second otherwise leave poisoned bytecode behind).
+
+## Whole-backend automatic mutation runner
+
+`run_automatic_backend_mutation.py` enumerates the locked mutmut operators
+across every tracked production Python file under `backend/`, including
+migrations, models, utility scripts and the analysis probe. Tests, installed
+dependencies and caches are outside its target scope. Run it with the
+hash-locked backend development dependencies.
+
+Use an immutable snapshot containing the backend, `tools/`, `redteam/` and
+shared contract fixtures. Keep its output directory outside that snapshot.
+The runner creates isolated worker copies, restores source and fixtures after
+each control, disables application bytecode caches, and gives each pytest
+child owned temporary storage. A retained output must not be reused for a
+new source/test snapshot or overwritten with a second execution.
+
+From the repository root, enumerate a prepared snapshot:
+
+```sh
+backend/.venv/bin/python redteam/run_automatic_backend_mutation.py \
+  --snapshot /absolute/path/to/frozen-checkout \
+  --output /absolute/path/to/fresh-campaign --enumerate-only
+```
+
+Prepare an oracle plan mapping canonical IDs in `mutants.json` to nonempty
+lists of pytest selectors. Selectors run from the copied backend directory;
+for example, `tests/test_account_api.py` or
+`../tools/tests/test_backend_export_contracts.py`. Cover actual behavior with
+passing pristine selectors before assessing each control:
+
+```sh
+backend/.venv/bin/python redteam/run_automatic_backend_mutation.py \
+  --snapshot /absolute/path/to/frozen-checkout \
+  --output /absolute/path/to/fresh-campaign \
+  --plan /absolute/path/to/oracle-plan.json --workers 4 --timeout 60
+```
+
+Without a plan, the default boot contract is a narrow import/entrypoint check;
+it does not establish full behavioral coverage. The runner records pristine
+baselines, canonical patches, provenance, raw results and child logs. Runtime
+kill credit requires a real test-call assertion; source hashes, AST inventories
+and value digests identify evidence or inventory rather than runtime behavior.
+Syntax errors, collection/setup failures and timeouts stay separate. A raw
+stage exits nonzero if any control remains outside runtime `KILLED`; typed
+findings and causal equivalent reviews require separate accepted evidence.
+
+The reusable utility/probe contracts live in
+`automatic_backend_script_oracles.py`, with published runtime fixtures under
+`automatic_backend_contracts/`. They exercise actual CLI protocols,
+cryptographic generation, corpus behavior and bounded work. Run them directly:
+
+```sh
+cd backend
+MINDPATTERN_ENV=development .venv/bin/python -m pytest \
+  ../redteam/automatic_backend_script_oracles.py -q
+```
+
+The deployment, public-schema and statistics fixtures under
+`tools/tests/fixtures/` are consumed by the regular tooling suite. Follow the
+[development guide](../docs/development.md#validation) for its two isolated
+pytest invocations. Campaign-specific disposition postprocessors and raw
+attempts belong in the local evidence archive, rather than the reusable runner.

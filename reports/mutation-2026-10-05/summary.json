@@ -1,0 +1,958 @@
+{
+  "total": 44089,
+  "counts": {
+    "KILLED": 42663,
+    "REVIEWED_EQUIVALENT": 1259,
+    "STATIC_TYPECHECK_CAUGHT": 142,
+    "INVALID_SYNTAX": 25
+  },
+  "scope_production_python_files": 95,
+  "files_with_operators": 92,
+  "zero_operator_production_files": [
+    "app/__init__.py",
+    "app/security/__init__.py",
+    "app/services/__init__.py"
+  ],
+  "replaced_modules": [
+    {
+      "file": "app/api/_audit.py",
+      "original_operators": 1321,
+      "current_operators": 1324,
+      "source_sha256": "b37ac9b7afa86e8bb1fdf766ea2bc1510e731ab5936a6d46f01af15f40d1fc5c"
+    },
+    {
+      "file": "app/deps.py",
+      "original_operators": 180,
+      "current_operators": 183,
+      "source_sha256": "25f859eef3b712e180cf4a848fa9e95452da839f9b25885c22efd48e61f32245"
+    },
+    {
+      "file": "app/api/therapist.py",
+      "original_operators": 1072,
+      "current_operators": 1073,
+      "source_sha256": "4f2e6ec68674c2cfffb15ece89c5977cd6111725240e6ecf994721950c72342c"
+    },
+    {
+      "file": "app/singleprocess.py",
+      "original_operators": 86,
+      "current_operators": 89,
+      "source_sha256": "b417e194170b22ccbac0620a391ca0c94878802a280ad61f83e5b37fc8cfedac"
+    },
+    {
+      "file": "app/middleware.py",
+      "original_operators": 419,
+      "current_operators": 419,
+      "source_sha256": "2cc9d4aa8017d369eca31a674bb45ddbc7f68740e61fc5156ecd93dc524455a6"
+    },
+    {
+      "file": "app/services/statsig.py",
+      "original_operators": 510,
+      "current_operators": 533,
+      "source_sha256": "2eaefa27d59be82752d406d03d23ff9c5a1a48bfee5ba6489e8142a3cea6196b"
+    },
+    {
+      "file": "app/api/insights.py",
+      "original_operators": 1186,
+      "current_operators": 1186,
+      "source_sha256": "255f21305a1b1f0cab748eecc0ecda96dd7316bc2d8de9966d99e57b8fd6a4f6"
+    },
+    {
+      "file": "app/api/account.py",
+      "original_operators": 1328,
+      "current_operators": 1324,
+      "source_sha256": "fdba9de7d842fc1116ca5cb765b25b3006653b979f2b37cae44a558174875c5f"
+    },
+    {
+      "file": "app/locks.py",
+      "original_operators": 58,
+      "current_operators": 106,
+      "source_sha256": "607c30b36276522a3f6ee0db031a4dd7a21d9faab63950f738ae34636c594230"
+    }
+  ],
+  "current_production_sha256": {
+    "alembic/env.py": "84cd178f135dfdcbf49c40076e8b7929707cea4ab1183977d0ca2ae1b0cb0177",
+    "alembic/versions/73031d06d71b_initial_schema.py": "d50e0628e0aed8967fed88990a123ca1f69eea448d526facb4d3a9bcd5796b2e",
+    "alembic/versions/a3e7c9d5f1b2_drop_prefix_notes_index.py": "4aa755b480ca8cfea17ff68f79cebb1bcf1b317805ebcbc50de7b2b16b59951f",
+    "alembic/versions/a3f7c1d9b5e2_recovery_set_at_timestamptz.py": "c57a3b1b60a9e6defa2cc4090ac943b39e37d980edc10692786d33e8fdad4eab",
+    "alembic/versions/a3f8d1e6c942_insight_state_seq.py": "5589335c30d11f90e668486ce1e0ae245f1d7dd2c07c103eb18d43dbcce722b4",
+    "alembic/versions/a4e8c1f6b9d3_token_revocation.py": "1fc7d4774290a9271cc6babfc9605b729d757a90011ad09b4c26de4c11cd59b3",
+    "alembic/versions/a7c91e4b2d03_llm_consent_record.py": "47585c401e317d6e55f787b3ce43f297b6730827fe950f9baa1ba4f0d46ae855",
+    "alembic/versions/b1c7f2e9a4d6_measures_mbc.py": "45bd01935e487db7250de5318bf9b1dc4179151d78e95e9c88913f79fc1774ff",
+    "alembic/versions/b4e8a2c6f091_clinician_custody.py": "4a1d355485d822aaa9500ee7fbed14a2a25b575dfcaeeb6ced7f679f382397b1",
+    "alembic/versions/b5d9a3e7f1c8_note_version.py": "af04d2caf626ee182a77f80950efc751142c11bf6406a6f78e679d6360f0a1ff",
+    "alembic/versions/b7c4e2f9a1d5_recovery_envelope.py": "463d16e338ea055c97cd9b04d40eaac19bcb8cde13fb479dd3fa7973e968caa4",
+    "alembic/versions/b7f2d8a4e6c1_access_log_mac.py": "36b320253d2d2e6f188a3316ed09f6641747db289f84dad983caaff73e037269",
+    "alembic/versions/b8f4e2a7c9d1_note_edit_history.py": "3ea9acb5201f40afaf32397d51946bb91d79612ad3ff758525ca1668ee76e20b",
+    "alembic/versions/b9e6c4a7d812_entries_export_cursor.py": "3be8a304f6f72848715131d2dfb83bdfb06e9de3bb23fed52b905f9cf51c31e5",
+    "alembic/versions/c3e7f1a9d2b4_voice_consent_columns.py": "a26ce4fa19be6da663a78bd5e8c63eaecb9d880eecd1a3192ffb54644d83e646",
+    "alembic/versions/c41f8a92d5e7_therapist_sharing.py": "85a2161177dd83ddd51eb59346e64ca6adf13d77d80dcc26e1680247838bbe3a",
+    "alembic/versions/c5f9b3d7a102_audio_deletion_outbox.py": "bf154a62cfe5c784dda73a6203a916974be4ad96c8fe83cfeceb63307e88d6e5",
+    "alembic/versions/c6e0b4f8a2d9_access_log_chain.py": "cc51051f6033a158730417eef8806585839324703d9dead70d2289612a340120",
+    "alembic/versions/c8d2f6b1a9e4_measures_revision.py": "06d0821043d802bcdc40b5c9d12424c0230fa4f1e8a37a24a2676f8e784217cf",
+    "alembic/versions/c8d5f2b6a4e7_quota_counters.py": "86a32f4078e9dc6fa48e9be6d16f6b764772f2dad5b42692643fb87489a890f9",
+    "alembic/versions/d4e5f6a7b8c9_therapist_totp_columns.py": "681b275fe32d6777c939e2d6dc275b4e262fdde5ef831311bd8dc9a05686179d",
+    "alembic/versions/d52c4e8f14a0_backend_hardening.py": "5d050af52e7399c9538cd9a63defd761e48a4fa4f64d253c1fbe8795cdba6cd1",
+    "alembic/versions/d6a0c4e8b213_atomic_corpus_credentials.py": "00b0a4c8fc7381ce07540e54fe98ee11e7c7f9e8ac32f771482a1b82981e8e36",
+    "alembic/versions/d7c1f4a8e2b9_entry_content_version.py": "7871c0711d0ec71d4a4897f3b82b1274fc5a58f870b00b512f4f8c4d37e13c3d",
+    "alembic/versions/d7f1c5a9b3e0_rekey_journal.py": "3299b6e4d5e0298339283a526470d6724fede62dc4ff87fcf90111acf0cd08ed",
+    "alembic/versions/e1b7c9d3a5f2_independent_audit_controls.py": "96966a5cee2b367adfba4afd5e2da2ca6ab75dc233bd63e11595ec43b98c5650",
+    "alembic/versions/e5a9c3d7f421_collection_snapshot_revisions.py": "e66a88a88f091808f07177e240ff9fe537af2208dd18a2dee15a69f8d82a65b2",
+    "alembic/versions/e8a4c2f7b1d6_audio_attachments.py": "ef01e619dfb8cd637b562751b17a9bdccfc7d11d9864b8aaee588fbacc314f4e",
+    "alembic/versions/e8b2d6f4a1c7_totp_backup_codes.py": "de0ce8444afdfa000be203a5c8b408281c1dc4d983534f0a406a19ca5badb927",
+    "alembic/versions/e930dbc4f001_insights_unique_user_kind_date.py": "2692ed810895025d656477e2e6e0cd78496e5192ed3009011af6fa0c368f4958",
+    "alembic/versions/f0b3d8e5a7c2_caseload_summary_consent.py": "e8a65acc322a06b5e0acf479b520b1d616e8667e63b1934707eefbb18e0d8da1",
+    "alembic/versions/f2a8c6d4e9b1_key_envelope_v2.py": "3699cd617e00709d9108d8fcf269d6dbd06012961447e21aac7c9ef2d313a4d9",
+    "alembic/versions/f4a2d8c6b901_entry_aad_guards.py": "f99268f5c07007f00fc0ecc6cc243a880e6801f5abc7c17e1baaec467d550b7d",
+    "alembic/versions/f6a9b4d1e203_insights_undated_unique.py": "7fcaf124ab49ce44f43ce312b82bf82f1fd8d84a3440177b0ba915392f674a42",
+    "app/__init__.py": "ceb5be01afc6b8a71e7ce29a00265f5ee114265cde8aafdfb651a168552d74ef",
+    "app/api/__init__.py": "27f1cbee20c865a83ebe7490e29330f3d76881cce2f1c25692e2d99574b19691",
+    "app/api/_audit.py": "b37ac9b7afa86e8bb1fdf766ea2bc1510e731ab5936a6d46f01af15f40d1fc5c",
+    "app/api/_custody.py": "137d26c220ba55b303e826df6bf35aebbccba69c2ae73cfdf152bdf47311a05a",
+    "app/api/_paging.py": "8831585988b530c62206a1b7d67a76951acd52938ce66f67c67aa773b1475d2e",
+    "app/api/_sharing_state.py": "b7ea0540c0d1e3ec0f68e7de1b149f2f33c9f18b402a04cf7a8244484fac675a",
+    "app/api/account.py": "fdba9de7d842fc1116ca5cb765b25b3006653b979f2b37cae44a558174875c5f",
+    "app/api/audio.py": "e8ea44bf7fc0d44560f9567e2a206b4c7e21a5304b0004853d105173b0282763",
+    "app/api/auth.py": "f30e2e388e2b3873ae54c5de216bc2852cc8731f43edc91ccafc53b37095fc9f",
+    "app/api/consents.py": "78df4e1c5894dc2a566f47d3721d9a253b6519c599c740be847f4270ba9bb2fe",
+    "app/api/entries.py": "22a4ad44ca1039f018c14abab1a27ecc79bc0c434f8a378643a13b8c25217f5e",
+    "app/api/insights.py": "255f21305a1b1f0cab748eecc0ecda96dd7316bc2d8de9966d99e57b8fd6a4f6",
+    "app/api/measures.py": "8508e29b5fb7da9fb2032a0b6f1114570f4103122bc8f81b35d2d00542f6eafd",
+    "app/api/meta.py": "e0f383c0f5df92a07e05c21280aac0c6790624ed85dbf3dc6082545ac41910e5",
+    "app/api/therapist.py": "4f2e6ec68674c2cfffb15ece89c5977cd6111725240e6ecf994721950c72342c",
+    "app/cache.py": "3a8e13986e2924c2247ee73ed390472609fd09a642b382df591359881ba84ef0",
+    "app/config.py": "c1e6923deef7ca1c891a98207b345774e0e5b617460e7d2e4b81ce9cb49c300d",
+    "app/db.py": "1174045176481d4cc4706e257ec81fedabd06b420129f3d3197e0677d35dac50",
+    "app/deps.py": "25f859eef3b712e180cf4a848fa9e95452da839f9b25885c22efd48e61f32245",
+    "app/locks.py": "607c30b36276522a3f6ee0db031a4dd7a21d9faab63950f738ae34636c594230",
+    "app/main.py": "57152cc3d709f9587dd507608d1ddffe89c8a4349c3e3aeec0d2a6dc7737759b",
+    "app/metrics.py": "17fb0e38e3ac37be2f47194cc9c61afb534de94c8a7e7b75ce5b1e39ebc25790",
+    "app/middleware.py": "2cc9d4aa8017d369eca31a674bb45ddbc7f68740e61fc5156ecd93dc524455a6",
+    "app/models.py": "12f6c5fbf8f112ab7b03626e6abddf1eb31191f7dda8a2a6bf0df43db486679f",
+    "app/schemas.py": "2bbfa5a176fb78c6d4cea70bf56a028bd737ac27b5729582acd63b9d9ce9da7d",
+    "app/security/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "app/security/crypto.py": "6622b2e1e08aa16954d4b19976f21b1fa05e1ed348fc325e12497668393638ba",
+    "app/security/deletion_tombstone.py": "6b871b88fc9a7950386052f4cf4e4ec61614c9d3c9a303632487504f2f4f2d4c",
+    "app/security/enclave.py": "b7440b0dc1906d14f8d91927d69308445cdb730dff1de7ed69b8ee8ea77e442d",
+    "app/security/entry_guard.py": "b1fd856eb8c397d8f7d96f3f7b906ea8864bd66d6c219caf6982577044f005ff",
+    "app/security/envelope.py": "e92052d621e6ff448930e8ec57305484efb463198b48f9d56901e0fdc72f80f0",
+    "app/security/export_ticket.py": "4f8b069d9decd661248b4768e6a5aec741c793b7ac9901d7b8d6998436eed23c",
+    "app/security/kdf.py": "5cde59ec1dd1728da6c4ae745018155ce67608cd05e0d3c6c5877030be287133",
+    "app/security/sharing.py": "c69185be4d0bad1aeb7819341240c00771231713028d6735f0ea91848405cd4a",
+    "app/security/step_up.py": "d3d7fce6fc289258c37e95084e51cd6ec61225b95812a224b0822f6a336b46c3",
+    "app/security/tokens.py": "e0db05017d34929bcca62c409d8b15e61fb18611cb85aaaffa79691014d29d85",
+    "app/security/totp.py": "1f3a5b2d02593e6f435ed5e8ee74e88402f9ad16edec78b2b7662ad5c7a2a938",
+    "app/services/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "app/services/account_deletion.py": "752d1821c6ef456e7aae25ce8f5bcc084ef6a2bcc66471493a863990639deb72",
+    "app/services/audio_store.py": "f0a7288f0e910a7d2c74ef1889d14d574b2d847460925e69e6d4dbc132b7ecec",
+    "app/services/brain.py": "be12a6111eb7be592f0ea51757fa046d3be918917a0957d3db481c543c55aade",
+    "app/services/crisis.py": "f44b7a1c6bb95a402dec07368a2f787a430dce41175fc38c9fda9d71659aab98",
+    "app/services/llm.py": "8dfe35c6d25e471405974101d3442b359e0fb38f810627e6477d99b3c9b521fd",
+    "app/services/patterns.py": "c6b753ae86521de0ca66ba4e0abb5b2eaeb81753440128ad11e83be0d7ab6678",
+    "app/services/phrases.py": "b774b86078bf90abcf5550c3cd500a7b2df668681df2b8706b1181d4d29c44c2",
+    "app/services/questions.py": "0cc0b31675b6dbb376fee8f851a31487ee04012ca564951cdf7603804c577e63",
+    "app/services/sentiment_lexicon.py": "ed0403d797cc8fb0e13e75d21ce00a3a6bc7077137f0856ebc3b01121dd6d627",
+    "app/services/sentiment_lexicon_es.py": "f6127d9da80f6e887d71975e47f5dc7bf89ca00898f6de42210ea5c529ff054e",
+    "app/services/statsig.py": "2eaefa27d59be82752d406d03d23ff9c5a1a48bfee5ba6489e8142a3cea6196b",
+    "app/services/stt.py": "ab9032a135ef4216b35013fbc004c471f87b3fa8a9960b1cf1346f80a4d5f5a9",
+    "app/services/threshold.py": "496365eba8c8998790778431653e486eb0db6190c1c166b11cf7c4c18ba11ea8",
+    "app/singleprocess.py": "b417e194170b22ccbac0620a391ca0c94878802a280ad61f83e5b37fc8cfedac",
+    "bootstrap_entry_guards.py": "f8b6fde09d2f01cce91862a09684df2ab638ae7eb8b36ceb4fd345407a0cd87d",
+    "probe_brain.py": "a930ddb894bbeb2971e9fa566b794d9dbbf98da002241e64e1fa1a91e3d0660d",
+    "scripts/dump_brain_lexicon.py": "980267c337820eb5a017981b3e8403e84f81a71375d8cae2041eaec0c35921f0",
+    "scripts/gen_brain_vectors.py": "79994e91adba8d10217f542ba4e4ee63fafe25c78cbbdb48067dbaee6b078c80",
+    "scripts/generate_vectors.py": "4da0b1673593f8f86d0edf84414bda7182ad4149789f0b375156ff9146df975a",
+    "scripts/loadtest.py": "78e1491b5ef28a1623d5085377522e8f58fc4720643a8a052a76d322fd2b25f9",
+    "scripts/mc_phi_eff.py": "6c58b337b685039d9aace500cb80a33dfcaf4c9af14025a6936ae5360033463a",
+    "scripts/seal_legacy_audit.py": "251e2ce747d36a8f5fe2288c76f7604710cf13e640de8ef7a71278a5e84c9729",
+    "scripts/seed_demo.py": "7195382cc1be2e3e9305432a7771ad6004c412063627ec1ed063dcb45f3bf083"
+  },
+  "all_current_ids_have_dispositions": true,
+  "runtime_evidence_rows_independently_verified": 42663,
+  "source_only_or_digest_kill_credit": false,
+  "production_file_groups": {
+    "app": 52,
+    "alembic": 34,
+    "scripts": 7,
+    "bootstrap_entry_guards.py": 1,
+    "probe_brain.py": 1
+  },
+  "remaining_unresolved_survivors": 0,
+  "remaining_unresolved_timeouts": 0,
+  "remaining_unresolved_oracle_errors": 0,
+  "per_file_inventory": {
+    "alembic/env.py": {
+      "operators": 29,
+      "dispositions": {
+        "KILLED": 28,
+        "REVIEWED_EQUIVALENT": 1
+      },
+      "source_sha256": "84cd178f135dfdcbf49c40076e8b7929707cea4ab1183977d0ca2ae1b0cb0177"
+    },
+    "alembic/versions/73031d06d71b_initial_schema.py": {
+      "operators": 104,
+      "dispositions": {
+        "KILLED": 95,
+        "REVIEWED_EQUIVALENT": 9
+      },
+      "source_sha256": "d50e0628e0aed8967fed88990a123ca1f69eea448d526facb4d3a9bcd5796b2e"
+    },
+    "alembic/versions/a3e7c9d5f1b2_drop_prefix_notes_index.py": {
+      "operators": 18,
+      "dispositions": {
+        "KILLED": 10,
+        "REVIEWED_EQUIVALENT": 8
+      },
+      "source_sha256": "4aa755b480ca8cfea17ff68f79cebb1bcf1b317805ebcbc50de7b2b16b59951f"
+    },
+    "alembic/versions/a3f7c1d9b5e2_recovery_set_at_timestamptz.py": {
+      "operators": 23,
+      "dispositions": {
+        "KILLED": 13,
+        "REVIEWED_EQUIVALENT": 10
+      },
+      "source_sha256": "c57a3b1b60a9e6defa2cc4090ac943b39e37d980edc10692786d33e8fdad4eab"
+    },
+    "alembic/versions/a3f8d1e6c942_insight_state_seq.py": {
+      "operators": 18,
+      "dispositions": {
+        "KILLED": 11,
+        "REVIEWED_EQUIVALENT": 7
+      },
+      "source_sha256": "5589335c30d11f90e668486ce1e0ae245f1d7dd2c07c103eb18d43dbcce722b4"
+    },
+    "alembic/versions/a4e8c1f6b9d3_token_revocation.py": {
+      "operators": 29,
+      "dispositions": {
+        "KILLED": 21,
+        "REVIEWED_EQUIVALENT": 8
+      },
+      "source_sha256": "1fc7d4774290a9271cc6babfc9605b729d757a90011ad09b4c26de4c11cd59b3"
+    },
+    "alembic/versions/a7c91e4b2d03_llm_consent_record.py": {
+      "operators": 22,
+      "dispositions": {
+        "KILLED": 15,
+        "REVIEWED_EQUIVALENT": 7
+      },
+      "source_sha256": "47585c401e317d6e55f787b3ce43f297b6730827fe950f9baa1ba4f0d46ae855"
+    },
+    "alembic/versions/b1c7f2e9a4d6_measures_mbc.py": {
+      "operators": 42,
+      "dispositions": {
+        "KILLED": 34,
+        "REVIEWED_EQUIVALENT": 8
+      },
+      "source_sha256": "45bd01935e487db7250de5318bf9b1dc4179151d78e95e9c88913f79fc1774ff"
+    },
+    "alembic/versions/b4e8a2c6f091_clinician_custody.py": {
+      "operators": 30,
+      "dispositions": {
+        "KILLED": 29,
+        "REVIEWED_EQUIVALENT": 1
+      },
+      "source_sha256": "4a1d355485d822aaa9500ee7fbed14a2a25b575dfcaeeb6ced7f679f382397b1"
+    },
+    "alembic/versions/b5d9a3e7f1c8_note_version.py": {
+      "operators": 18,
+      "dispositions": {
+        "KILLED": 11,
+        "REVIEWED_EQUIVALENT": 7
+      },
+      "source_sha256": "af04d2caf626ee182a77f80950efc751142c11bf6406a6f78e679d6360f0a1ff"
+    },
+    "alembic/versions/b7c4e2f9a1d5_recovery_envelope.py": {
+      "operators": 26,
+      "dispositions": {
+        "KILLED": 19,
+        "REVIEWED_EQUIVALENT": 7
+      },
+      "source_sha256": "463d16e338ea055c97cd9b04d40eaac19bcb8cde13fb479dd3fa7973e968caa4"
+    },
+    "alembic/versions/b7f2d8a4e6c1_access_log_mac.py": {
+      "operators": 18,
+      "dispositions": {
+        "KILLED": 11,
+        "REVIEWED_EQUIVALENT": 7
+      },
+      "source_sha256": "36b320253d2d2e6f188a3316ed09f6641747db289f84dad983caaff73e037269"
+    },
+    "alembic/versions/b8f4e2a7c9d1_note_edit_history.py": {
+      "operators": 38,
+      "dispositions": {
+        "KILLED": 30,
+        "REVIEWED_EQUIVALENT": 8
+      },
+      "source_sha256": "3ea9acb5201f40afaf32397d51946bb91d79612ad3ff758525ca1668ee76e20b"
+    },
+    "alembic/versions/b9e6c4a7d812_entries_export_cursor.py": {
+      "operators": 20,
+      "dispositions": {
+        "KILLED": 12,
+        "REVIEWED_EQUIVALENT": 8
+      },
+      "source_sha256": "3be8a304f6f72848715131d2dfb83bdfb06e9de3bb23fed52b905f9cf51c31e5"
+    },
+    "alembic/versions/c3e7f1a9d2b4_voice_consent_columns.py": {
+      "operators": 36,
+      "dispositions": {
+        "KILLED": 29,
+        "REVIEWED_EQUIVALENT": 7
+      },
+      "source_sha256": "a26ce4fa19be6da663a78bd5e8c63eaecb9d880eecd1a3192ffb54644d83e646"
+    },
+    "alembic/versions/c41f8a92d5e7_therapist_sharing.py": {
+      "operators": 173,
+      "dispositions": {
+        "KILLED": 161,
+        "REVIEWED_EQUIVALENT": 12
+      },
+      "source_sha256": "85a2161177dd83ddd51eb59346e64ca6adf13d77d80dcc26e1680247838bbe3a"
+    },
+    "alembic/versions/c5f9b3d7a102_audio_deletion_outbox.py": {
+      "operators": 35,
+      "dispositions": {
+        "KILLED": 34,
+        "REVIEWED_EQUIVALENT": 1
+      },
+      "source_sha256": "bf154a62cfe5c784dda73a6203a916974be4ad96c8fe83cfeceb63307e88d6e5"
+    },
+    "alembic/versions/c6e0b4f8a2d9_access_log_chain.py": {
+      "operators": 74,
+      "dispositions": {
+        "KILLED": 57,
+        "REVIEWED_EQUIVALENT": 17
+      },
+      "source_sha256": "cc51051f6033a158730417eef8806585839324703d9dead70d2289612a340120"
+    },
+    "alembic/versions/c8d2f6b1a9e4_measures_revision.py": {
+      "operators": 18,
+      "dispositions": {
+        "KILLED": 11,
+        "REVIEWED_EQUIVALENT": 7
+      },
+      "source_sha256": "06d0821043d802bcdc40b5c9d12424c0230fa4f1e8a37a24a2676f8e784217cf"
+    },
+    "alembic/versions/c8d5f2b6a4e7_quota_counters.py": {
+      "operators": 33,
+      "dispositions": {
+        "KILLED": 25,
+        "REVIEWED_EQUIVALENT": 8
+      },
+      "source_sha256": "86a32f4078e9dc6fa48e9be6d16f6b764772f2dad5b42692643fb87489a890f9"
+    },
+    "alembic/versions/d4e5f6a7b8c9_therapist_totp_columns.py": {
+      "operators": 28,
+      "dispositions": {
+        "KILLED": 21,
+        "REVIEWED_EQUIVALENT": 7
+      },
+      "source_sha256": "681b275fe32d6777c939e2d6dc275b4e262fdde5ef831311bd8dc9a05686179d"
+    },
+    "alembic/versions/d52c4e8f14a0_backend_hardening.py": {
+      "operators": 48,
+      "dispositions": {
+        "KILLED": 38,
+        "REVIEWED_EQUIVALENT": 10
+      },
+      "source_sha256": "5d050af52e7399c9538cd9a63defd761e48a4fa4f64d253c1fbe8795cdba6cd1"
+    },
+    "alembic/versions/d6a0c4e8b213_atomic_corpus_credentials.py": {
+      "operators": 34,
+      "dispositions": {
+        "KILLED": 33,
+        "REVIEWED_EQUIVALENT": 1
+      },
+      "source_sha256": "00b0a4c8fc7381ce07540e54fe98ee11e7c7f9e8ac32f771482a1b82981e8e36"
+    },
+    "alembic/versions/d7c1f4a8e2b9_entry_content_version.py": {
+      "operators": 18,
+      "dispositions": {
+        "KILLED": 11,
+        "REVIEWED_EQUIVALENT": 7
+      },
+      "source_sha256": "7871c0711d0ec71d4a4897f3b82b1274fc5a58f870b00b512f4f8c4d37e13c3d"
+    },
+    "alembic/versions/d7f1c5a9b3e0_rekey_journal.py": {
+      "operators": 49,
+      "dispositions": {
+        "KILLED": 41,
+        "REVIEWED_EQUIVALENT": 8
+      },
+      "source_sha256": "3299b6e4d5e0298339283a526470d6724fede62dc4ff87fcf90111acf0cd08ed"
+    },
+    "alembic/versions/e1b7c9d3a5f2_independent_audit_controls.py": {
+      "operators": 368,
+      "dispositions": {
+        "KILLED": 342,
+        "REVIEWED_EQUIVALENT": 26
+      },
+      "source_sha256": "96966a5cee2b367adfba4afd5e2da2ca6ab75dc233bd63e11595ec43b98c5650"
+    },
+    "alembic/versions/e5a9c3d7f421_collection_snapshot_revisions.py": {
+      "operators": 22,
+      "dispositions": {
+        "KILLED": 15,
+        "REVIEWED_EQUIVALENT": 7
+      },
+      "source_sha256": "e66a88a88f091808f07177e240ff9fe537af2208dd18a2dee15a69f8d82a65b2"
+    },
+    "alembic/versions/e8a4c2f7b1d6_audio_attachments.py": {
+      "operators": 62,
+      "dispositions": {
+        "KILLED": 54,
+        "REVIEWED_EQUIVALENT": 8
+      },
+      "source_sha256": "ef01e619dfb8cd637b562751b17a9bdccfc7d11d9864b8aaee588fbacc314f4e"
+    },
+    "alembic/versions/e8b2d6f4a1c7_totp_backup_codes.py": {
+      "operators": 37,
+      "dispositions": {
+        "KILLED": 29,
+        "REVIEWED_EQUIVALENT": 8
+      },
+      "source_sha256": "de0ce8444afdfa000be203a5c8b408281c1dc4d983534f0a406a19ca5badb927"
+    },
+    "alembic/versions/e930dbc4f001_insights_unique_user_kind_date.py": {
+      "operators": 20,
+      "dispositions": {
+        "KILLED": 13,
+        "REVIEWED_EQUIVALENT": 7
+      },
+      "source_sha256": "2692ed810895025d656477e2e6e0cd78496e5192ed3009011af6fa0c368f4958"
+    },
+    "alembic/versions/f0b3d8e5a7c2_caseload_summary_consent.py": {
+      "operators": 25,
+      "dispositions": {
+        "KILLED": 18,
+        "REVIEWED_EQUIVALENT": 7
+      },
+      "source_sha256": "e8a65acc322a06b5e0acf479b520b1d616e8667e63b1934707eefbb18e0d8da1"
+    },
+    "alembic/versions/f2a8c6d4e9b1_key_envelope_v2.py": {
+      "operators": 30,
+      "dispositions": {
+        "KILLED": 23,
+        "REVIEWED_EQUIVALENT": 7
+      },
+      "source_sha256": "3699cd617e00709d9108d8fcf269d6dbd06012961447e21aac7c9ef2d313a4d9"
+    },
+    "alembic/versions/f4a2d8c6b901_entry_aad_guards.py": {
+      "operators": 29,
+      "dispositions": {
+        "KILLED": 28,
+        "REVIEWED_EQUIVALENT": 1
+      },
+      "source_sha256": "f99268f5c07007f00fc0ecc6cc243a880e6801f5abc7c17e1baaec467d550b7d"
+    },
+    "alembic/versions/f6a9b4d1e203_insights_undated_unique.py": {
+      "operators": 21,
+      "dispositions": {
+        "KILLED": 13,
+        "REVIEWED_EQUIVALENT": 8
+      },
+      "source_sha256": "7fcaf124ab49ce44f43ce312b82bf82f1fd8d84a3440177b0ba915392f674a42"
+    },
+    "app/__init__.py": {
+      "operators": 0,
+      "dispositions": {},
+      "source_sha256": "ceb5be01afc6b8a71e7ce29a00265f5ee114265cde8aafdfb651a168552d74ef"
+    },
+    "app/api/__init__.py": {
+      "operators": 5,
+      "dispositions": {
+        "KILLED": 5
+      },
+      "source_sha256": "27f1cbee20c865a83ebe7490e29330f3d76881cce2f1c25692e2d99574b19691"
+    },
+    "app/api/_audit.py": {
+      "operators": 1324,
+      "dispositions": {
+        "KILLED": 1254,
+        "STATIC_TYPECHECK_CAUGHT": 32,
+        "REVIEWED_EQUIVALENT": 38
+      },
+      "source_sha256": "b37ac9b7afa86e8bb1fdf766ea2bc1510e731ab5936a6d46f01af15f40d1fc5c"
+    },
+    "app/api/_custody.py": {
+      "operators": 178,
+      "dispositions": {
+        "REVIEWED_EQUIVALENT": 6,
+        "KILLED": 172
+      },
+      "source_sha256": "137d26c220ba55b303e826df6bf35aebbccba69c2ae73cfdf152bdf47311a05a"
+    },
+    "app/api/_paging.py": {
+      "operators": 71,
+      "dispositions": {
+        "KILLED": 71
+      },
+      "source_sha256": "8831585988b530c62206a1b7d67a76951acd52938ce66f67c67aa773b1475d2e"
+    },
+    "app/api/_sharing_state.py": {
+      "operators": 42,
+      "dispositions": {
+        "KILLED": 41,
+        "REVIEWED_EQUIVALENT": 1
+      },
+      "source_sha256": "b7ea0540c0d1e3ec0f68e7de1b149f2f33c9f18b402a04cf7a8244484fac675a"
+    },
+    "app/api/account.py": {
+      "operators": 1324,
+      "dispositions": {
+        "KILLED": 1239,
+        "REVIEWED_EQUIVALENT": 67,
+        "STATIC_TYPECHECK_CAUGHT": 17,
+        "INVALID_SYNTAX": 1
+      },
+      "source_sha256": "fdba9de7d842fc1116ca5cb765b25b3006653b979f2b37cae44a558174875c5f"
+    },
+    "app/api/audio.py": {
+      "operators": 276,
+      "dispositions": {
+        "KILLED": 265,
+        "REVIEWED_EQUIVALENT": 11
+      },
+      "source_sha256": "e8ea44bf7fc0d44560f9567e2a206b4c7e21a5304b0004853d105173b0282763"
+    },
+    "app/api/auth.py": {
+      "operators": 344,
+      "dispositions": {
+        "KILLED": 319,
+        "REVIEWED_EQUIVALENT": 23,
+        "STATIC_TYPECHECK_CAUGHT": 2
+      },
+      "source_sha256": "f30e2e388e2b3873ae54c5de216bc2852cc8731f43edc91ccafc53b37095fc9f"
+    },
+    "app/api/consents.py": {
+      "operators": 443,
+      "dispositions": {
+        "KILLED": 426,
+        "REVIEWED_EQUIVALENT": 16,
+        "STATIC_TYPECHECK_CAUGHT": 1
+      },
+      "source_sha256": "78df4e1c5894dc2a566f47d3721d9a253b6519c599c740be847f4270ba9bb2fe"
+    },
+    "app/api/entries.py": {
+      "operators": 297,
+      "dispositions": {
+        "KILLED": 283,
+        "REVIEWED_EQUIVALENT": 14
+      },
+      "source_sha256": "22a4ad44ca1039f018c14abab1a27ecc79bc0c434f8a378643a13b8c25217f5e"
+    },
+    "app/api/insights.py": {
+      "operators": 1186,
+      "dispositions": {
+        "KILLED": 1123,
+        "REVIEWED_EQUIVALENT": 54,
+        "STATIC_TYPECHECK_CAUGHT": 5,
+        "INVALID_SYNTAX": 4
+      },
+      "source_sha256": "255f21305a1b1f0cab748eecc0ecda96dd7316bc2d8de9966d99e57b8fd6a4f6"
+    },
+    "app/api/measures.py": {
+      "operators": 187,
+      "dispositions": {
+        "KILLED": 178,
+        "REVIEWED_EQUIVALENT": 9
+      },
+      "source_sha256": "8508e29b5fb7da9fb2032a0b6f1114570f4103122bc8f81b35d2d00542f6eafd"
+    },
+    "app/api/meta.py": {
+      "operators": 21,
+      "dispositions": {
+        "KILLED": 21
+      },
+      "source_sha256": "e0f383c0f5df92a07e05c21280aac0c6790624ed85dbf3dc6082545ac41910e5"
+    },
+    "app/api/therapist.py": {
+      "operators": 1073,
+      "dispositions": {
+        "KILLED": 1002,
+        "REVIEWED_EQUIVALENT": 69,
+        "STATIC_TYPECHECK_CAUGHT": 2
+      },
+      "source_sha256": "4f2e6ec68674c2cfffb15ece89c5977cd6111725240e6ecf994721950c72342c"
+    },
+    "app/cache.py": {
+      "operators": 206,
+      "dispositions": {
+        "KILLED": 203,
+        "REVIEWED_EQUIVALENT": 1,
+        "STATIC_TYPECHECK_CAUGHT": 2
+      },
+      "source_sha256": "3a8e13986e2924c2247ee73ed390472609fd09a642b382df591359881ba84ef0"
+    },
+    "app/config.py": {
+      "operators": 902,
+      "dispositions": {
+        "KILLED": 895,
+        "REVIEWED_EQUIVALENT": 5,
+        "STATIC_TYPECHECK_CAUGHT": 2
+      },
+      "source_sha256": "c1e6923deef7ca1c891a98207b345774e0e5b617460e7d2e4b81ce9cb49c300d"
+    },
+    "app/db.py": {
+      "operators": 33,
+      "dispositions": {
+        "KILLED": 33
+      },
+      "source_sha256": "1174045176481d4cc4706e257ec81fedabd06b420129f3d3197e0677d35dac50"
+    },
+    "app/deps.py": {
+      "operators": 183,
+      "dispositions": {
+        "KILLED": 175,
+        "REVIEWED_EQUIVALENT": 7,
+        "STATIC_TYPECHECK_CAUGHT": 1
+      },
+      "source_sha256": "25f859eef3b712e180cf4a848fa9e95452da839f9b25885c22efd48e61f32245"
+    },
+    "app/locks.py": {
+      "operators": 106,
+      "dispositions": {
+        "KILLED": 92,
+        "REVIEWED_EQUIVALENT": 9,
+        "STATIC_TYPECHECK_CAUGHT": 5
+      },
+      "source_sha256": "607c30b36276522a3f6ee0db031a4dd7a21d9faab63950f738ae34636c594230"
+    },
+    "app/main.py": {
+      "operators": 624,
+      "dispositions": {
+        "KILLED": 567,
+        "REVIEWED_EQUIVALENT": 53,
+        "STATIC_TYPECHECK_CAUGHT": 4
+      },
+      "source_sha256": "57152cc3d709f9587dd507608d1ddffe89c8a4349c3e3aeec0d2a6dc7737759b"
+    },
+    "app/metrics.py": {
+      "operators": 278,
+      "dispositions": {
+        "KILLED": 278
+      },
+      "source_sha256": "17fb0e38e3ac37be2f47194cc9c61afb534de94c8a7e7b75ce5b1e39ebc25790"
+    },
+    "app/middleware.py": {
+      "operators": 419,
+      "dispositions": {
+        "KILLED": 399,
+        "STATIC_TYPECHECK_CAUGHT": 8,
+        "REVIEWED_EQUIVALENT": 11,
+        "INVALID_SYNTAX": 1
+      },
+      "source_sha256": "2cc9d4aa8017d369eca31a674bb45ddbc7f68740e61fc5156ecd93dc524455a6"
+    },
+    "app/models.py": {
+      "operators": 782,
+      "dispositions": {
+        "KILLED": 754,
+        "STATIC_TYPECHECK_CAUGHT": 28
+      },
+      "source_sha256": "12f6c5fbf8f112ab7b03626e6abddf1eb31191f7dda8a2a6bf0df43db486679f"
+    },
+    "app/schemas.py": {
+      "operators": 555,
+      "dispositions": {
+        "KILLED": 555
+      },
+      "source_sha256": "2bbfa5a176fb78c6d4cea70bf56a028bd737ac27b5729582acd63b9d9ce9da7d"
+    },
+    "app/security/__init__.py": {
+      "operators": 0,
+      "dispositions": {},
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "app/security/crypto.py": {
+      "operators": 34,
+      "dispositions": {
+        "KILLED": 33,
+        "REVIEWED_EQUIVALENT": 1
+      },
+      "source_sha256": "6622b2e1e08aa16954d4b19976f21b1fa05e1ed348fc325e12497668393638ba"
+    },
+    "app/security/deletion_tombstone.py": {
+      "operators": 19,
+      "dispositions": {
+        "KILLED": 18,
+        "REVIEWED_EQUIVALENT": 1
+      },
+      "source_sha256": "6b871b88fc9a7950386052f4cf4e4ec61614c9d3c9a303632487504f2f4f2d4c"
+    },
+    "app/security/enclave.py": {
+      "operators": 118,
+      "dispositions": {
+        "KILLED": 112,
+        "STATIC_TYPECHECK_CAUGHT": 5,
+        "REVIEWED_EQUIVALENT": 1
+      },
+      "source_sha256": "b7440b0dc1906d14f8d91927d69308445cdb730dff1de7ed69b8ee8ea77e442d"
+    },
+    "app/security/entry_guard.py": {
+      "operators": 87,
+      "dispositions": {
+        "KILLED": 86,
+        "REVIEWED_EQUIVALENT": 1
+      },
+      "source_sha256": "b1fd856eb8c397d8f7d96f3f7b906ea8864bd66d6c219caf6982577044f005ff"
+    },
+    "app/security/envelope.py": {
+      "operators": 28,
+      "dispositions": {
+        "KILLED": 28
+      },
+      "source_sha256": "e92052d621e6ff448930e8ec57305484efb463198b48f9d56901e0fdc72f80f0"
+    },
+    "app/security/export_ticket.py": {
+      "operators": 32,
+      "dispositions": {
+        "KILLED": 32
+      },
+      "source_sha256": "4f8b069d9decd661248b4768e6a5aec741c793b7ac9901d7b8d6998436eed23c"
+    },
+    "app/security/kdf.py": {
+      "operators": 161,
+      "dispositions": {
+        "KILLED": 158,
+        "STATIC_TYPECHECK_CAUGHT": 2,
+        "REVIEWED_EQUIVALENT": 1
+      },
+      "source_sha256": "5cde59ec1dd1728da6c4ae745018155ce67608cd05e0d3c6c5877030be287133"
+    },
+    "app/security/sharing.py": {
+      "operators": 117,
+      "dispositions": {
+        "KILLED": 105,
+        "REVIEWED_EQUIVALENT": 12
+      },
+      "source_sha256": "c69185be4d0bad1aeb7819341240c00771231713028d6735f0ea91848405cd4a"
+    },
+    "app/security/step_up.py": {
+      "operators": 41,
+      "dispositions": {
+        "KILLED": 40,
+        "REVIEWED_EQUIVALENT": 1
+      },
+      "source_sha256": "d3d7fce6fc289258c37e95084e51cd6ec61225b95812a224b0822f6a336b46c3"
+    },
+    "app/security/tokens.py": {
+      "operators": 131,
+      "dispositions": {
+        "KILLED": 130,
+        "REVIEWED_EQUIVALENT": 1
+      },
+      "source_sha256": "e0db05017d34929bcca62c409d8b15e61fb18611cb85aaaffa79691014d29d85"
+    },
+    "app/security/totp.py": {
+      "operators": 92,
+      "dispositions": {
+        "KILLED": 84,
+        "REVIEWED_EQUIVALENT": 8
+      },
+      "source_sha256": "1f3a5b2d02593e6f435ed5e8ee74e88402f9ad16edec78b2b7662ad5c7a2a938"
+    },
+    "app/services/__init__.py": {
+      "operators": 0,
+      "dispositions": {},
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "app/services/account_deletion.py": {
+      "operators": 317,
+      "dispositions": {
+        "KILLED": 299,
+        "STATIC_TYPECHECK_CAUGHT": 2,
+        "REVIEWED_EQUIVALENT": 16
+      },
+      "source_sha256": "752d1821c6ef456e7aae25ce8f5bcc084ef6a2bcc66471493a863990639deb72"
+    },
+    "app/services/audio_store.py": {
+      "operators": 455,
+      "dispositions": {
+        "KILLED": 447,
+        "REVIEWED_EQUIVALENT": 6,
+        "STATIC_TYPECHECK_CAUGHT": 2
+      },
+      "source_sha256": "f0a7288f0e910a7d2c74ef1889d14d574b2d847460925e69e6d4dbc132b7ecec"
+    },
+    "app/services/brain.py": {
+      "operators": 4443,
+      "dispositions": {
+        "KILLED": 4323,
+        "REVIEWED_EQUIVALENT": 89,
+        "INVALID_SYNTAX": 16,
+        "STATIC_TYPECHECK_CAUGHT": 15
+      },
+      "source_sha256": "be12a6111eb7be592f0ea51757fa046d3be918917a0957d3db481c543c55aade"
+    },
+    "app/services/crisis.py": {
+      "operators": 666,
+      "dispositions": {
+        "KILLED": 653,
+        "REVIEWED_EQUIVALENT": 12,
+        "STATIC_TYPECHECK_CAUGHT": 1
+      },
+      "source_sha256": "f44b7a1c6bb95a402dec07368a2f787a430dce41175fc38c9fda9d71659aab98"
+    },
+    "app/services/llm.py": {
+      "operators": 400,
+      "dispositions": {
+        "KILLED": 387,
+        "REVIEWED_EQUIVALENT": 11,
+        "STATIC_TYPECHECK_CAUGHT": 1,
+        "INVALID_SYNTAX": 1
+      },
+      "source_sha256": "8dfe35c6d25e471405974101d3442b359e0fb38f810627e6477d99b3c9b521fd"
+    },
+    "app/services/patterns.py": {
+      "operators": 485,
+      "dispositions": {
+        "KILLED": 478,
+        "STATIC_TYPECHECK_CAUGHT": 4,
+        "REVIEWED_EQUIVALENT": 3
+      },
+      "source_sha256": "c6b753ae86521de0ca66ba4e0abb5b2eaeb81753440128ad11e83be0d7ab6678"
+    },
+    "app/services/phrases.py": {
+      "operators": 188,
+      "dispositions": {
+        "KILLED": 184,
+        "REVIEWED_EQUIVALENT": 3,
+        "STATIC_TYPECHECK_CAUGHT": 1
+      },
+      "source_sha256": "b774b86078bf90abcf5550c3cd500a7b2df668681df2b8706b1181d4d29c44c2"
+    },
+    "app/services/questions.py": {
+      "operators": 428,
+      "dispositions": {
+        "KILLED": 424,
+        "REVIEWED_EQUIVALENT": 4
+      },
+      "source_sha256": "0cc0b31675b6dbb376fee8f851a31487ee04012ca564951cdf7603804c577e63"
+    },
+    "app/services/sentiment_lexicon.py": {
+      "operators": 18530,
+      "dispositions": {
+        "KILLED": 18239,
+        "REVIEWED_EQUIVALENT": 291
+      },
+      "source_sha256": "ed0403d797cc8fb0e13e75d21ce00a3a6bc7077137f0856ebc3b01121dd6d627"
+    },
+    "app/services/sentiment_lexicon_es.py": {
+      "operators": 1552,
+      "dispositions": {
+        "KILLED": 1451,
+        "REVIEWED_EQUIVALENT": 101
+      },
+      "source_sha256": "f6127d9da80f6e887d71975e47f5dc7bf89ca00898f6de42210ea5c529ff054e"
+    },
+    "app/services/statsig.py": {
+      "operators": 533,
+      "dispositions": {
+        "KILLED": 517,
+        "REVIEWED_EQUIVALENT": 16
+      },
+      "source_sha256": "2eaefa27d59be82752d406d03d23ff9c5a1a48bfee5ba6489e8142a3cea6196b"
+    },
+    "app/services/stt.py": {
+      "operators": 353,
+      "dispositions": {
+        "KILLED": 349,
+        "REVIEWED_EQUIVALENT": 4
+      },
+      "source_sha256": "ab9032a135ef4216b35013fbc004c471f87b3fa8a9960b1cf1346f80a4d5f5a9"
+    },
+    "app/services/threshold.py": {
+      "operators": 60,
+      "dispositions": {
+        "KILLED": 58,
+        "REVIEWED_EQUIVALENT": 2
+      },
+      "source_sha256": "496365eba8c8998790778431653e486eb0db6190c1c166b11cf7c4c18ba11ea8"
+    },
+    "app/singleprocess.py": {
+      "operators": 89,
+      "dispositions": {
+        "KILLED": 88,
+        "REVIEWED_EQUIVALENT": 1
+      },
+      "source_sha256": "b417e194170b22ccbac0620a391ca0c94878802a280ad61f83e5b37fc8cfedac"
+    },
+    "bootstrap_entry_guards.py": {
+      "operators": 12,
+      "dispositions": {
+        "KILLED": 12
+      },
+      "source_sha256": "f8b6fde09d2f01cce91862a09684df2ab638ae7eb8b36ceb4fd345407a0cd87d"
+    },
+    "probe_brain.py": {
+      "operators": 569,
+      "dispositions": {
+        "KILLED": 564,
+        "REVIEWED_EQUIVALENT": 5
+      },
+      "source_sha256": "a930ddb894bbeb2971e9fa566b794d9dbbf98da002241e64e1fa1a91e3d0660d"
+    },
+    "scripts/dump_brain_lexicon.py": {
+      "operators": 71,
+      "dispositions": {
+        "KILLED": 71
+      },
+      "source_sha256": "980267c337820eb5a017981b3e8403e84f81a71375d8cae2041eaec0c35921f0"
+    },
+    "scripts/gen_brain_vectors.py": {
+      "operators": 242,
+      "dispositions": {
+        "KILLED": 241,
+        "INVALID_SYNTAX": 1
+      },
+      "source_sha256": "79994e91adba8d10217f542ba4e4ee63fafe25c78cbbdb48067dbaee6b078c80"
+    },
+    "scripts/generate_vectors.py": {
+      "operators": 372,
+      "dispositions": {
+        "KILLED": 371,
+        "REVIEWED_EQUIVALENT": 1
+      },
+      "source_sha256": "4da0b1673593f8f86d0edf84414bda7182ad4149789f0b375156ff9146df975a"
+    },
+    "scripts/loadtest.py": {
+      "operators": 285,
+      "dispositions": {
+        "KILLED": 277,
+        "REVIEWED_EQUIVALENT": 8
+      },
+      "source_sha256": "78e1491b5ef28a1623d5085377522e8f58fc4720643a8a052a76d322fd2b25f9"
+    },
+    "scripts/mc_phi_eff.py": {
+      "operators": 119,
+      "dispositions": {
+        "KILLED": 119
+      },
+      "source_sha256": "6c58b337b685039d9aace500cb80a33dfcaf4c9af14025a6936ae5360033463a"
+    },
+    "scripts/seal_legacy_audit.py": {
+      "operators": 170,
+      "dispositions": {
+        "KILLED": 170
+      },
+      "source_sha256": "251e2ce747d36a8f5fe2288c76f7604710cf13e640de8ef7a71278a5e84c9729"
+    },
+    "scripts/seed_demo.py": {
+      "operators": 436,
+      "dispositions": {
+        "KILLED": 430,
+        "REVIEWED_EQUIVALENT": 5,
+        "INVALID_SYNTAX": 1
+      },
+      "source_sha256": "7195382cc1be2e3e9305432a7771ad6004c412063627ec1ed063dcb45f3bf083"
+    }
+  },
+  "sampled_final_dependency_replay": {
+    "artifact": "final-dependency-witness-audit.json",
+    "artifact_sha256": "d175bce5f5f9ec3c1851bb984bca68d87eb1d38e76bed4b91438490bfe1e3c4c",
+    "sampled_unchanged_app_modules": 40,
+    "genuine_runtime_kills": 40,
+    "additional_canonical_ids": 0,
+    "scope": "one previously accepted runtime witness per unchanged mutable app module on all-nine-fixes dependencies; sampled supplemental check, not exhaustive rerun of every unchanged mutant"
+  }
+}

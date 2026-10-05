@@ -1,0 +1,81 @@
+# TYPE mindpattern_requests_total counter
+# TYPE mindpattern_recompute_seconds histogram
+mindpattern_recompute_seconds_bucket{le="0.25"} 0
+mindpattern_recompute_seconds_bucket{le="0.5"} 0
+mindpattern_recompute_seconds_bucket{le="1.0"} 0
+mindpattern_recompute_seconds_bucket{le="2.0"} 0
+mindpattern_recompute_seconds_bucket{le="5.0"} 0
+mindpattern_recompute_seconds_bucket{le="15.0"} 0
+mindpattern_recompute_seconds_bucket{le="60.0"} 0
+mindpattern_recompute_seconds_bucket{le="+Inf"} 0
+mindpattern_recompute_seconds_count 0
+mindpattern_recompute_seconds_sum 0.000000
+# TYPE mindpattern_llm_calls_total counter
+mindpattern_llm_calls_total{outcome="failure"} 0
+mindpattern_llm_calls_total{outcome="success"} 0
+# TYPE mindpattern_keystore_sessions gauge
+mindpattern_keystore_sessions 0
+# TYPE mindpattern_audit_chain_failures counter
+mindpattern_audit_chain_failures 0
+# TYPE mindpattern_audit_journal_failures_total counter
+mindpattern_audit_journal_failures_total 0
+# TYPE mindpattern_audit_maintenance_failures_total counter
+mindpattern_audit_maintenance_failures_total 0
+# TYPE mindpattern_audit_prune_backlog gauge
+mindpattern_audit_prune_backlog 0
+# TYPE mindpattern_audit_verification_backlog gauge
+mindpattern_audit_verification_backlog 0
+# TYPE mindpattern_audit_prune_pending_rows_probe gauge
+mindpattern_audit_prune_pending_rows_probe 0
+# TYPE mindpattern_audit_prune_oldest_overdue_seconds gauge
+mindpattern_audit_prune_oldest_overdue_seconds 0.000
+# TYPE mindpattern_audit_verification_pending_owners_probe gauge
+mindpattern_audit_verification_pending_owners_probe 0
+# TYPE mindpattern_audit_verification_cycle_age_seconds gauge
+mindpattern_audit_verification_cycle_age_seconds 0.000
+# TYPE mindpattern_audit_rows_pruned_total counter
+mindpattern_audit_rows_pruned_total 0
+# TYPE mindpattern_audit_owners_verified_total counter
+mindpattern_audit_owners_verified_total 0
+# TYPE mindpattern_auxiliary_retention_backlog gauge
+# TYPE mindpattern_auxiliary_retention_oldest_seconds gauge
+# TYPE mindpattern_auxiliary_retention_deleted_total counter
+mindpattern_auxiliary_retention_backlog{class="deletions"} 0
+mindpattern_auxiliary_retention_oldest_seconds{class="deletions"} 0.000
+mindpattern_auxiliary_retention_deleted_total{class="deletions"} 0
+mindpattern_auxiliary_retention_backlog{class="pairing"} 0
+mindpattern_auxiliary_retention_oldest_seconds{class="pairing"} 0.000
+mindpattern_auxiliary_retention_deleted_total{class="pairing"} 0
+mindpattern_auxiliary_retention_backlog{class="rekeys"} 0
+mindpattern_auxiliary_retention_oldest_seconds{class="rekeys"} 0.000
+mindpattern_auxiliary_retention_deleted_total{class="rekeys"} 0
+mindpattern_auxiliary_retention_backlog{class="revocations"} 0
+mindpattern_auxiliary_retention_oldest_seconds{class="revocations"} 0.000
+mindpattern_auxiliary_retention_deleted_total{class="revocations"} 0
+# TYPE mindpattern_question_insights_pruned_total counter
+mindpattern_question_insights_pruned_total 0
+# TYPE mindpattern_question_retention_backlog gauge
+mindpattern_question_retention_backlog 0
+# TYPE mindpattern_audio_deletion_backlog gauge
+mindpattern_audio_deletion_backlog 0
+# TYPE mindpattern_audio_deletion_oldest_seconds gauge
+mindpattern_audio_deletion_oldest_seconds 0.000
+# TYPE mindpattern_audio_orphans_reconciled_total counter
+mindpattern_audio_orphans_reconciled_total 0
+# TYPE mindpattern_audio_inventory_scanned_total counter
+mindpattern_audio_inventory_scanned_total 0
+# TYPE mindpattern_audio_inventory_backlog gauge
+mindpattern_audio_inventory_backlog 0
+# TYPE mindpattern_audio_inventory_cycles_total counter
+mindpattern_audio_inventory_cycles_total 0
+# TYPE mindpattern_audio_storage_failures_total counter
+mindpattern_audio_storage_failures_total 0
+# TYPE mindpattern_account_deletion_pending_probe gauge
+mindpattern_account_deletion_pending_probe 0
+# TYPE mindpattern_account_deletion_oldest_seconds gauge
+mindpattern_account_deletion_oldest_seconds 0.000
+# TYPE mindpattern_account_deletion_failures_total counter
+mindpattern_account_deletion_failures_total{category="database"} 0
+mindpattern_account_deletion_failures_total{category="object_store"} 0
+mindpattern_account_deletion_failures_total{category="state"} 0
+mindpattern_account_deletion_failures_total{category="unexpected"} 0

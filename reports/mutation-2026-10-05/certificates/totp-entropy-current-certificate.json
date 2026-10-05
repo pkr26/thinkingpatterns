@@ -1,0 +1,286 @@
+{
+  "controls": [
+    "M010799",
+    "M010800"
+  ],
+  "source_sha256": "1f3a5b2d02593e6f435ed5e8ee74e88402f9ad16edec78b2b7662ad5c7a2a938",
+  "classifications": {
+    "M010800": "REVIEWED_EQUIVALENT",
+    "M010799": "REVIEWED_EQUIVALENT"
+  },
+  "proofs": {
+    "M010799": {
+      "causal_reason": "The generator changes from 20 random bytes (160 bits) to 21 random bytes (168 bits). The amount of entropy, raw-key length, Base32 enrollment string length and wrapped-ciphertext length therefore change; these outputs are not claimed bit-identical. The released contract is a fresh strong shared secret provisioned as opaque unpadded Base32, with the same HMAC-SHA1, six digits, 30-second step, past/current verification and authenticated at-rest wrapping. Neither the public TotpSetupResponse schema, portal enrollment/QR flow, User storage nor the verifier imposes a 20-byte secret width. Both variants retain at least the 160-bit recommended entropy and interoperate through actual HTTP setup, enable, login, recovery and replacement as well as independent HMAC and native AES-GCM checks. RFC4226 requires at least 128 bits and recommends 160; RFC6238 recommends HMAC-output-length keys for interoperability, rather than declaring other key lengths invalid. The None variant uses the documented default-length secrets API, with fresh native CSPRNG and full uncached backend mypy checks passing. This review is bound to the recorded interpreter and supported enrollment contract; it does not promise an arbitrary future stdlib default or unchanged manual-entry length. Prior exact20 mock assertions, and the mock TypeError on the supported None argument, are withdrawn.",
+      "successful_current_target_execution": {
+        "runtime_result": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/totp-enrollment-current/results-00.jsonl",
+        "result_line": 1,
+        "attempt": {
+          "file": "app/security/totp.py",
+          "line": 42,
+          "index": 0,
+          "position": 1589,
+          "before": "0",
+          "after": "1",
+          "source_line": "SECRET_BYTES = 20  # 160 bits, the RFC-recommended size",
+          "id": "M010799",
+          "selectors": [
+            "../tools/tests/test_backend_capability_contracts.py",
+            "tests/test_totp.py::test_totp_full_lifecycle",
+            "tests/test_totp.py::test_totp_setup_refuses_while_enabled_and_replaces_pending",
+            "tests/test_independent_security_controls_2026_10_04.py::test_therapist_must_enroll_mfa_before_patient_surfaces_and_backup_recovers",
+            "tests/test_full_backend_account_mutation.py::test_account_totp_lifecycle_preserves_other_accounts_and_retains_exact_audits",
+            "../tools/tests/test_full_backend_schema_mutation.py::test_models_pass_the_existing_backend_static_typecheck_gate"
+          ],
+          "baseline_id": "00-00000",
+          "public_response_values": false,
+          "timeout_seconds": 60.0,
+          "returncode": 0,
+          "failures": [],
+          "errors": [],
+          "passed": 14,
+          "skipped": 0,
+          "contracts": {},
+          "seconds": 11.7029,
+          "log": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/totp-enrollment-current/logs/worker-00/M010799.log",
+          "timed_out": false,
+          "temporary_directory": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/totp-enrollment-current/logs/worker-00/M010799-tmp-mc47t_9u",
+          "temporary_restored": true,
+          "status": "SURVIVED",
+          "restored": true
+        },
+        "pristine_baseline_file": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/totp-enrollment-current/baselines-00.json",
+        "pristine_baseline": {
+          "returncode": 0,
+          "failures": [],
+          "errors": [],
+          "passed": 14,
+          "skipped": 0,
+          "contracts": {},
+          "seconds": 10.9219,
+          "log": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/totp-enrollment-current/logs/worker-00/baseline-00000.log",
+          "timed_out": false,
+          "temporary_directory": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/totp-enrollment-current/logs/worker-00/baseline-00000-tmp-79pqc40p",
+          "temporary_restored": true,
+          "status": "SURVIVED",
+          "restored": true,
+          "selectors": [
+            "../tools/tests/test_backend_capability_contracts.py",
+            "tests/test_totp.py::test_totp_full_lifecycle",
+            "tests/test_totp.py::test_totp_setup_refuses_while_enabled_and_replaces_pending",
+            "tests/test_independent_security_controls_2026_10_04.py::test_therapist_must_enroll_mfa_before_patient_surfaces_and_backup_recovers",
+            "tests/test_full_backend_account_mutation.py::test_account_totp_lifecycle_preserves_other_accounts_and_retains_exact_audits",
+            "../tools/tests/test_full_backend_schema_mutation.py::test_models_pass_the_existing_backend_static_typecheck_gate"
+          ],
+          "baseline_id": "00-00000"
+        },
+        "current_target_sha256": "1f3a5b2d02593e6f435ed5e8ee74e88402f9ad16edec78b2b7662ad5c7a2a938",
+        "current_target_snapshot": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/totp-enrollment-current-ready",
+        "source_restored": true,
+        "mutation_manifest": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/totp-enrollment-current/mutants.json",
+        "canonical_patch_identity_verified": true
+      },
+      "independent_native_and_deterministic_enrollment_execution": {
+        "runtime_result": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/totp-entropy-current/results-00.jsonl",
+        "result_line": 1,
+        "attempt": {
+          "file": "app/security/totp.py",
+          "line": 42,
+          "index": 0,
+          "position": 1589,
+          "before": "0",
+          "after": "1",
+          "source_line": "SECRET_BYTES = 20  # 160 bits, the RFC-recommended size",
+          "id": "M010799",
+          "selectors": [
+            "../tools/tests/test_backend_capability_contracts.py"
+          ],
+          "baseline_id": "00-00000",
+          "public_response_values": false,
+          "timeout_seconds": 30.0,
+          "returncode": 0,
+          "failures": [],
+          "errors": [],
+          "passed": 9,
+          "skipped": 0,
+          "contracts": {},
+          "seconds": 0.361,
+          "log": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/totp-entropy-current/logs/worker-00/M010799.log",
+          "timed_out": false,
+          "temporary_directory": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/totp-entropy-current/logs/worker-00/M010799-tmp-6ommubpa",
+          "temporary_restored": true,
+          "status": "SURVIVED",
+          "restored": true
+        },
+        "pristine_baseline_file": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/totp-entropy-current/baselines-00.json",
+        "pristine_baseline": {
+          "returncode": 0,
+          "failures": [],
+          "errors": [],
+          "passed": 9,
+          "skipped": 0,
+          "contracts": {},
+          "seconds": 0.3445,
+          "log": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/totp-entropy-current/logs/worker-00/baseline-00000.log",
+          "timed_out": false,
+          "temporary_directory": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/totp-entropy-current/logs/worker-00/baseline-00000-tmp-6oe9rilf",
+          "temporary_restored": true,
+          "status": "SURVIVED",
+          "restored": true,
+          "selectors": [
+            "../tools/tests/test_backend_capability_contracts.py"
+          ],
+          "baseline_id": "00-00000"
+        },
+        "current_target_sha256": "1f3a5b2d02593e6f435ed5e8ee74e88402f9ad16edec78b2b7662ad5c7a2a938",
+        "current_target_snapshot": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/totp-entropy-current-ready",
+        "source_restored": true,
+        "mutation_manifest": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/totp-entropy-current/mutants.json",
+        "canonical_patch_identity_verified": true
+      },
+      "contract_boundary": "strong random-secret provisioning and interoperable TOTP lifecycle; no fixed enrollment-secret width",
+      "primary_references": [
+        "https://www.rfc-editor.org/rfc/rfc4226#section-4",
+        "https://www.rfc-editor.org/rfc/rfc6238#section-5.1",
+        "https://docs.python.org/3/library/secrets.html#secrets.token_bytes"
+      ],
+      "uncached_full_backend_static_gate_passed": true
+    },
+    "M010800": {
+      "causal_reason": "The generator changes from 20 random bytes (160 bits) to the native secrets.token_bytes(None) default, 32 random bytes (256 bits) in the locked campaign interpreter. The amount of entropy, raw-key length, Base32 enrollment string length and wrapped-ciphertext length therefore change; these outputs are not claimed bit-identical. The released contract is a fresh strong shared secret provisioned as opaque unpadded Base32, with the same HMAC-SHA1, six digits, 30-second step, past/current verification and authenticated at-rest wrapping. Neither the public TotpSetupResponse schema, portal enrollment/QR flow, User storage nor the verifier imposes a 20-byte secret width. Both variants retain at least the 160-bit recommended entropy and interoperate through actual HTTP setup, enable, login, recovery and replacement as well as independent HMAC and native AES-GCM checks. RFC4226 requires at least 128 bits and recommends 160; RFC6238 recommends HMAC-output-length keys for interoperability, rather than declaring other key lengths invalid. The None variant uses the documented default-length secrets API, with fresh native CSPRNG and full uncached backend mypy checks passing. This review is bound to the recorded interpreter and supported enrollment contract; it does not promise an arbitrary future stdlib default or unchanged manual-entry length. Prior exact20 mock assertions, and the mock TypeError on the supported None argument, are withdrawn.",
+      "successful_current_target_execution": {
+        "runtime_result": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/totp-enrollment-current/results-01.jsonl",
+        "result_line": 1,
+        "attempt": {
+          "file": "app/security/totp.py",
+          "line": 42,
+          "index": 1,
+          "position": 1588,
+          "before": "20",
+          "after": "None",
+          "source_line": "SECRET_BYTES = 20  # 160 bits, the RFC-recommended size",
+          "id": "M010800",
+          "selectors": [
+            "../tools/tests/test_backend_capability_contracts.py",
+            "tests/test_totp.py::test_totp_full_lifecycle",
+            "tests/test_totp.py::test_totp_setup_refuses_while_enabled_and_replaces_pending",
+            "tests/test_independent_security_controls_2026_10_04.py::test_therapist_must_enroll_mfa_before_patient_surfaces_and_backup_recovers",
+            "tests/test_full_backend_account_mutation.py::test_account_totp_lifecycle_preserves_other_accounts_and_retains_exact_audits",
+            "../tools/tests/test_full_backend_schema_mutation.py::test_models_pass_the_existing_backend_static_typecheck_gate"
+          ],
+          "baseline_id": "01-00000",
+          "public_response_values": false,
+          "timeout_seconds": 60.0,
+          "returncode": 0,
+          "failures": [],
+          "errors": [],
+          "passed": 14,
+          "skipped": 0,
+          "contracts": {},
+          "seconds": 11.7058,
+          "log": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/totp-enrollment-current/logs/worker-01/M010800.log",
+          "timed_out": false,
+          "temporary_directory": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/totp-enrollment-current/logs/worker-01/M010800-tmp-swm25vrt",
+          "temporary_restored": true,
+          "status": "SURVIVED",
+          "restored": true
+        },
+        "pristine_baseline_file": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/totp-enrollment-current/baselines-01.json",
+        "pristine_baseline": {
+          "returncode": 0,
+          "failures": [],
+          "errors": [],
+          "passed": 14,
+          "skipped": 0,
+          "contracts": {},
+          "seconds": 10.9203,
+          "log": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/totp-enrollment-current/logs/worker-01/baseline-00000.log",
+          "timed_out": false,
+          "temporary_directory": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/totp-enrollment-current/logs/worker-01/baseline-00000-tmp-2672t6v9",
+          "temporary_restored": true,
+          "status": "SURVIVED",
+          "restored": true,
+          "selectors": [
+            "../tools/tests/test_backend_capability_contracts.py",
+            "tests/test_totp.py::test_totp_full_lifecycle",
+            "tests/test_totp.py::test_totp_setup_refuses_while_enabled_and_replaces_pending",
+            "tests/test_independent_security_controls_2026_10_04.py::test_therapist_must_enroll_mfa_before_patient_surfaces_and_backup_recovers",
+            "tests/test_full_backend_account_mutation.py::test_account_totp_lifecycle_preserves_other_accounts_and_retains_exact_audits",
+            "../tools/tests/test_full_backend_schema_mutation.py::test_models_pass_the_existing_backend_static_typecheck_gate"
+          ],
+          "baseline_id": "01-00000"
+        },
+        "current_target_sha256": "1f3a5b2d02593e6f435ed5e8ee74e88402f9ad16edec78b2b7662ad5c7a2a938",
+        "current_target_snapshot": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/totp-enrollment-current-ready",
+        "source_restored": true,
+        "mutation_manifest": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/totp-enrollment-current/mutants.json",
+        "canonical_patch_identity_verified": true
+      },
+      "independent_native_and_deterministic_enrollment_execution": {
+        "runtime_result": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/totp-entropy-current/results-01.jsonl",
+        "result_line": 1,
+        "attempt": {
+          "file": "app/security/totp.py",
+          "line": 42,
+          "index": 1,
+          "position": 1588,
+          "before": "20",
+          "after": "None",
+          "source_line": "SECRET_BYTES = 20  # 160 bits, the RFC-recommended size",
+          "id": "M010800",
+          "selectors": [
+            "../tools/tests/test_backend_capability_contracts.py"
+          ],
+          "baseline_id": "01-00000",
+          "public_response_values": false,
+          "timeout_seconds": 30.0,
+          "returncode": 0,
+          "failures": [],
+          "errors": [],
+          "passed": 9,
+          "skipped": 0,
+          "contracts": {},
+          "seconds": 0.3589,
+          "log": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/totp-entropy-current/logs/worker-01/M010800.log",
+          "timed_out": false,
+          "temporary_directory": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/totp-entropy-current/logs/worker-01/M010800-tmp-eypyr44m",
+          "temporary_restored": true,
+          "status": "SURVIVED",
+          "restored": true
+        },
+        "pristine_baseline_file": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/totp-entropy-current/baselines-01.json",
+        "pristine_baseline": {
+          "returncode": 0,
+          "failures": [],
+          "errors": [],
+          "passed": 9,
+          "skipped": 0,
+          "contracts": {},
+          "seconds": 0.342,
+          "log": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/totp-entropy-current/logs/worker-01/baseline-00000.log",
+          "timed_out": false,
+          "temporary_directory": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/totp-entropy-current/logs/worker-01/baseline-00000-tmp-bw320mtk",
+          "temporary_restored": true,
+          "status": "SURVIVED",
+          "restored": true,
+          "selectors": [
+            "../tools/tests/test_backend_capability_contracts.py"
+          ],
+          "baseline_id": "01-00000"
+        },
+        "current_target_sha256": "1f3a5b2d02593e6f435ed5e8ee74e88402f9ad16edec78b2b7662ad5c7a2a938",
+        "current_target_snapshot": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/totp-entropy-current-ready",
+        "source_restored": true,
+        "mutation_manifest": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/totp-entropy-current/mutants.json",
+        "canonical_patch_identity_verified": true
+      },
+      "contract_boundary": "strong random-secret provisioning and interoperable TOTP lifecycle; no fixed enrollment-secret width",
+      "primary_references": [
+        "https://www.rfc-editor.org/rfc/rfc4226#section-4",
+        "https://www.rfc-editor.org/rfc/rfc6238#section-5.1",
+        "https://docs.python.org/3/library/secrets.html#secrets.token_bytes"
+      ],
+      "uncached_full_backend_static_gate_passed": true
+    }
+  },
+  "old_private_size_and_invalid_mock_credit_withdrawn": true
+}

@@ -84,6 +84,33 @@ async def client(app):
         yield c
 
 
+@pytest.fixture(autouse=True)
+def _restore_audit_process_configuration():
+    """Standalone audit tests must not inherit another test's journal target."""
+    from app.api import _audit
+
+    names = (
+        "_configured_mac_keys",
+        "_configured_current_mac_key_version",
+        "_configured_journal_path",
+        "_journal_healthy",
+        "_journal_last_error",
+    )
+    original = {
+        name: dict(value) if isinstance(value := getattr(_audit, name), dict) else value
+        for name in names
+    }
+    close_index = _audit.close_reusable_journal_evidence_index
+    try:
+        yield
+    finally:
+        try:
+            close_index()
+        finally:
+            for name, value in original.items():
+                setattr(_audit, name, value)
+
+
 # ---------------------------------------------------------------------------
 # MINDPATTERN_TEST_DB_URL support (added 2026-09-07; default path unchanged)
 # ---------------------------------------------------------------------------

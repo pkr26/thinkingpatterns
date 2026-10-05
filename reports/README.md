@@ -13,7 +13,8 @@ of current release readiness.
 | [e2e_live](e2e_live/README.md) | Live API and client evidence |
 | [simulation1y](simulation1y/SIMULATION_REPORT.md) | Reproducible one-year synthetic simulation |
 | [simulation60](simulation60/SIMULATION_REPORT.md) | Reproducible 60-day simulation |
-| [Mutation report](mutation_report_2026-09-30.md) | Dated mutation-testing results |
+| [Entire backend mutation campaign](mutation_report_2026-10-05.md) | All 95 production Python files, corrected dispositions and compact evidence |
+| [September mutation report](mutation_report_2026-09-30.md) | Historical scoped mutation-testing results |
 
 See [current remediation status](../docs/remediation-status.md) for open release
 work and the [audit archive](../docs/archive/README.md) for earlier reviews.

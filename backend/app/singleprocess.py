@@ -200,8 +200,16 @@ def acquire_single_process_lock(token_secret: str, database_url: str) -> str:
             )
     except OSError:
         pass
-    os.ftruncate(fd, 0)
-    os.write(fd, f"pid={os.getpid()}\n".encode())
+    try:
+        os.ftruncate(fd, 0)
+        identity = f"pid={os.getpid()}\n".encode()
+        if os.write(fd, identity) != len(identity):
+            raise OSError("could not write complete single-process lock identity")
+    except BaseException:
+        # The registry takes custody only after the identity is complete.
+        # A failed boot must release the kernel lock so a retry can acquire it.
+        os.close(fd)
+        raise
     _held[path] = (fd, 1)
     return path
 

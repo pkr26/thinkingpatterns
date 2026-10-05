@@ -1,5 +1,4 @@
-"""Semantic pins from the 2026-09-30 deep mutation campaign: behaviors,
-not data (data-table digests live in test_mutation_pins_2026_09_30.py).
+"""Behavioral regressions from the 2026-09-30 deep mutation campaign.
 
 Every test here kills mutants that survived the FULL suite during the
 campaign. The first class: ``app/config.py``'s environment parsing

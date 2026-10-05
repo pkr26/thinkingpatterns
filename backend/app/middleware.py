@@ -669,7 +669,7 @@ class HardeningMiddleware:
                 # Deprecation header, so a client can notice
                 # programmatically (alongside /api/meta's api_version,
                 # which points at the canonical /api/v1 base).
-                if "deprecation" not in existing and _is_legacy_api_path(scope.get("path", "")):
+                if b"deprecation" not in existing and _is_legacy_api_path(scope.get("path", "")):
                     message["headers"].append((b"deprecation", b"true"))
                 # M-1: the validation handler flagged this 422 as a BODY-PARSE
                 # failure (error type json_invalid — schema failures flow

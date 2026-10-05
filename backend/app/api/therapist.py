@@ -863,13 +863,14 @@ async def create_pairing_code(
     session: AsyncSession = Depends(get_session),
 ):
     now = utcnow()
+    therapist_id = user.id
     # Retention is intentionally NOT request-path housekeeping.  Pairing
     # issuance performs only its bounded insert/retry work; scheduled
     # maintenance owns deterministic cleanup batches.
     for _ in range(MAX_PAIRING_CODE_ATTEMPTS):
         code = sharing.generate_pairing_code()
         row = PairingCode(
-            therapist_id=user.id,
+            therapist_id=therapist_id,
             # Purpose-split secret (2026-09-26): pairing-code digests key off
             # MINDPATTERN_PAIRING_SECRET (else the legacy token secret via
             # the documented identity derivation — existing live code rows

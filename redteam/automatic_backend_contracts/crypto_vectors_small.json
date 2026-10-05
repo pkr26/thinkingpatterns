@@ -1,0 +1,200 @@
+{
+  "vectors": [
+    {
+      "password": "correct horse battery staple",
+      "salt": "AAECAwQFBgcICQoLDA0ODw==",
+      "iterations": 2,
+      "master_key": "S51594wKma1bAMYvsz+TZOtBMNNA7lVsuSyfxwJ1Qoo=",
+      "auth_key": "Q4ioovzM6rPmUxtNSG3omid64x75jvjx1ljPTKpV21Y=",
+      "data_key": "Ion8UHquCO320Z0jbpJVBt9NK8I+MwY5wlkxiVd0bxk=",
+      "plaintext": "U3VuZGF5IG5pZ2h0IGFnYWluLiBUaGUgZGVhZGxpbmUgZHJlYWQgaXMgYmFjay4=",
+      "aad": "WyJlbnRyeSIsInVzZXItMTIzNCIsImVudHJ5LTIwMjYtMDktMDEtYSJd",
+      "nonce": "AAECAwQFBgcICQoL",
+      "blob": "AAECAwQFBgcICQoLyJMhO/oZewkpkIMaPd605ZcNMUDrI3cBVHGTi5nJJlVHdW4mhuVsTZHkecyLx6gmpvdhL8c4lCtAbXB1IcfZ"
+    },
+    {
+      "password": "p@ssw0rd-\u00ef\u00f1-unicode",
+      "salt": "EBESExQVFhcYGRobHB0eHw==",
+      "iterations": 2,
+      "master_key": "AKNEn+eC00cmMscReFZwN/ZvQi7NfZyZU2ltL1tzHXo=",
+      "auth_key": "gHzzdqkhvSOWFCyimTPcD6qlIOMYRgTKQK3ANEvqOqg=",
+      "data_key": "20Oahr5wd9gryOYg1uJFMbwW1bf/EETPCIppchL/NFo=",
+      "plaintext": "eyJ2IjoxLCJ0ZXh0IjoiZ29vZCBtb3JuaW5nIiwic2VudGltZW50IjowLjUsImNyZWF0ZWRfYXQiOiIyMDI2LTA5LTAyIn0=",
+      "aad": "WyJpbnNpZ2h0cyIsInVzZXItYWJjZCIsInBhdHRlcm5zIl0=",
+      "nonce": "AAECAwQFBgcICQoL",
+      "blob": "AAECAwQFBgcICQoL4hFl6Fd621C8PXI94PAq8NrnFbpaQ/fGpHAaWH+OE6MgBEDaOhaWJR6nxDWHdbUuHzjn7tUD4ucoZp48AwMngmHigtiQ/8Q2wl3ARitIqT7T8B6G6qjs"
+    },
+    {
+      "password": "unicode-aad-case",
+      "salt": "ICEiIyQlJicoKSorLC0uLw==",
+      "iterations": 2,
+      "master_key": "YF1Gb964QHwCFOa5ux1rUnH2DnGbzDBc7L88OHzoqNM=",
+      "auth_key": "sCBtHwK9z0CE4xyQ7zD61rbAKydYIpRHlPrTTD7zwUA=",
+      "data_key": "LnlNrdzQpWjWXEQiQzBOgn9glArlEoY58bae4A4cAhc=",
+      "plaintext": "bm9uLWFzY2lpIEFBRCBiaW5kaW5nIGNoZWNr",
+      "aad": "WyJlbnRyeSIsIlx1MDBmY25cdTAwZWZjb2RlLXVzZXIiLCJlbnRyXHUwMGU5ZS1cdWQ4M2VcdWRkZTAtMSJd",
+      "nonce": "AAECAwQFBgcICQoL",
+      "blob": "AAECAwQFBgcICQoL04/QZS1tBJ6EStE9DC2EfT+3ohDPXGJqgRNvbCxH6+CpyDFFXKORWXoGWQ=="
+    },
+    {
+      "password": "astral-aad-case",
+      "salt": "MDEyMzQ1Njc4OTo7PD0+Pw==",
+      "iterations": 2,
+      "master_key": "QlJdCGZYXUSDu5811B7DsJihYBMsReiAsI+TuWgzuao=",
+      "auth_key": "glPgs5CUtfncOWXNm2aMLkwzy/peNcn4FZnJLAR8pIE=",
+      "data_key": "ggE8tZhjNVn/aJ4MnLa9X23a+s/eRuo2QcIMbU/eijI=",
+      "plaintext": "YXN0cmFsIEFBRCBiaW5kaW5nIGNoZWNr",
+      "aad": "WyJpbnNpZ2h0cyIsInVzZXItXHVkODNlXHVkZGUwLWJyYWluIiwicGF0dGVybnMiXQ==",
+      "nonce": "AAECAwQFBgcICQoL",
+      "blob": "AAECAwQFBgcICQoLOASD5c/olej6mQl/ES8e9DM+rOXhJgXKZtkdCG0FpO4xmfmU38LJpQ=="
+    }
+  ],
+  "encrypt_vectors": [
+    {
+      "password": "encrypt-pin-ascii",
+      "salt": "QEFCQ0RFRkdISUpLTE1OTw==",
+      "iterations": 2,
+      "data_key": "NXC/7KCKT0KAOtjrJQQKaePsKsFKOqsNorJH6H4T1EQ=",
+      "plaintext": "RmVlbGluZyBjYWxtZXIgYWZ0ZXIgdGhlIG1vcm5pbmcgd2Fsay4=",
+      "aad_parts": [
+        "entry",
+        "user-777",
+        "entry-2026-09-07-morning"
+      ],
+      "nonce": "DA0ODxAREhMUFRYX",
+      "blob": "DA0ODxAREhMUFRYXbHTkfN2OweHcw9oocSFbXTC+ENdCkPrbDxYYs5yDkOw7HParlERvxf007wjLC/nMNtm6duVM"
+    },
+    {
+      "password": "encrypt-pin-\u00fcn\u00efcode",
+      "salt": "UFFSU1RVVldYWVpbXF1eXw==",
+      "iterations": 2,
+      "data_key": "HjxGTtCcfC758otf3toRJcjwLv0QfqmS1Srkvrf15d8=",
+      "plaintext": "Zml4ZWQtbm9uY2UgZW5jcnlwdCBwaW4gd2l0aCBhc3RyYWwgQUFEIGJpbmRpbmc=",
+      "aad_parts": [
+        "entry",
+        "\u00fcs\u00e9r-\ud83e\udde0",
+        "entr\u00e9e-\ud83c\udf19-42"
+      ],
+      "nonce": "FxYVFBMSERAPDg0M",
+      "blob": "FxYVFBMSERAPDg0M+OJjuJKRRn4LtDYCOFxtrUaadXL3jq9YyEOJL1g734+7zK6HIxRnFGNDgjG4qtyWXY6MexBAyy2Vw7/55N1o"
+    },
+    {
+      "password": "encrypt-pin-moodlog",
+      "salt": "YGFiY2RlZmdoaWprbG1ubw==",
+      "iterations": 2,
+      "data_key": "At2ri082RlUhQJ9Ml6eGtYBiK2V71Aob1YMzR16lWgU=",
+      "plaintext": "W3siZGF0ZSI6IjIwMjYtMDktMDciLCJ2YWx1ZSI6MC43NX1d",
+      "aad_parts": [
+        "moodlog",
+        "user-555"
+      ],
+      "nonce": "GBkaGxwdHh8gISIj",
+      "blob": "GBkaGxwdHh8gISIjkY5BVdacDb9yVgUTsWhgEt/jTm31K8AVJVEOeGK1p4LCfq7DxgEkwonklvWgdjsiynr03w=="
+    },
+    {
+      "password": "encrypt-pin-unlockproof",
+      "salt": "cHFyc3R1dnd4eXp7fH1+fw==",
+      "iterations": 2,
+      "data_key": "dgN4nuHlkRIg3yBHbUaNKuuM5oGouHDY7TTTViRI+4c=",
+      "plaintext": "bWluZHBhdHRlcm4tdW5sb2NrLXByb29mL3Yx",
+      "aad_parts": [
+        "unlockproof",
+        "user-888"
+      ],
+      "nonce": "IyIhIB8eHRwbGhkY",
+      "blob": "IyIhIB8eHRwbGhkYeMRwq/UohU4IJ5vag4bAYlsyZWrMrojVW+doKkxenRlZyvY5JgmI4Fgv3g=="
+    },
+    {
+      "password": "encrypt-pin-empty",
+      "salt": "gIGCg4SFhoeIiYqLjI2Ojw==",
+      "iterations": 2,
+      "data_key": "1GDk4Uao5o/Bv10xPndiZ6Y0JV11+9Grq8LaA31k/Rs=",
+      "plaintext": "",
+      "aad_parts": [
+        "entry",
+        "user-000",
+        "entry-empty"
+      ],
+      "nonce": "JCUmJygpKissLS4v",
+      "blob": "JCUmJygpKissLS4vNMoaGgqdmAbAazoFXgBjPw=="
+    },
+    {
+      "password": "encrypt-pin-no-aad",
+      "salt": "kJGSk5SVlpeYmZqbnJ2enw==",
+      "iterations": 2,
+      "data_key": "sc1B91Hvj+67Z21On43a8+ER9ty2KyCya9Ph3b9AOW4=",
+      "plaintext": "ZGV2aWNlLWxvY2FsIHNlY3JldCB3aXRob3V0IGFhZCBiaW5kaW5n",
+      "aad_parts": null,
+      "nonce": "Ly4tLCsqKSgnJiUk",
+      "blob": "Ly4tLCsqKSgnJiUkXn2kKXn8tzRYTWlPcUkiGjLnoRBoE2PKhxU2x8Ju4SOCWdxBREgZ4acFpsg/7T1iH52hO4Werw=="
+    }
+  ],
+  "envelope_vectors": [
+    {
+      "kind": "entry-aad-v2",
+      "password": "envelope-entry-v2-pin",
+      "salt": "oKGio6SlpqeoqaqrrK2urw==",
+      "iterations": 2,
+      "data_key": "nNB9ItmBepwzUcOhZaF+y27+sMuqx/I4Q0LZjYIgUSc=",
+      "plaintext": "eyJ2IjoxLCJ0ZXh0IjoidmVyc2lvbi1ib3VuZCBBQUQgcGluIiwic2VudGltZW50IjowLjEsImNyZWF0ZWRfYXQiOiIyMDI2LTA5LTI2In0=",
+      "aad_parts": [
+        "entry",
+        "user-909",
+        "entry-2026-09-26-v2",
+        "3"
+      ],
+      "nonce": "MDEyMzQ1Njc4OTo7",
+      "blob": "MDEyMzQ1Njc4OTo7pYwiLyiegRSoKpDjT3knXk1xTS7Y9TcAjuasZI6EeG8Maea5yBXYEW+3mMZW5wNY23RovvuqIXBpI5xsVGp0JNTCDw8W0fDOJd40RWt5eZz2CR/s9/MY2btDoEVoGMu/"
+    },
+    {
+      "kind": "entry-aad-v2-tampered",
+      "password": "envelope-entry-v2-pin",
+      "salt": "oKGio6SlpqeoqaqrrK2urw==",
+      "iterations": 2,
+      "data_key": "nNB9ItmBepwzUcOhZaF+y27+sMuqx/I4Q0LZjYIgUSc=",
+      "aad_parts": [
+        "entry",
+        "user-909",
+        "entry-2026-09-26-v2",
+        "3"
+      ],
+      "blob": "MDEyMzQ1Njc4OTo7pYwiLyiegRSoKpDjT3knXk1xTS7Y9TcAjuasZI6EeG8Maea5yBXYEW+3mcZW5wNY23RovvuqIXBpI5xsVGp0JNTCDw8W0fDOJd40RWt5eZz2CR/s9/MY2btDoEVoGMu/",
+      "expect": "tamper"
+    },
+    {
+      "kind": "key-envelope-wrap",
+      "password": "envelope-wrap-pin",
+      "salt": "sLGys7S1tre4ubq7vL2+vw==",
+      "iterations": 2,
+      "master_key": "gPmfikJQwYXX7nEnmcdykuTVHCQ+NDD2OkVtf3tlTL4=",
+      "kdf_params": {
+        "algorithm": "pbkdf2-sha256",
+        "version": 1,
+        "iterations": 600000
+      },
+      "kek": "/2lo8eh/imBQZmeU21NNajDE8vDkkcC/e8Zjj7D7zVk=",
+      "username": "envelope-wrap-user",
+      "data_key": "yMnKy8zNzs/Q0dLT1NXW19jZ2tvc3d7f4OHi4+Tl5uc=",
+      "aad": "eyJjb250ZXh0IjoiZW52ZWxvcGUiLCJrZGZfcGFyYW1zIjp7ImFsZ29yaXRobSI6InBia2RmMi1zaGEyNTYiLCJ2ZXJzaW9uIjoxLCJpdGVyYXRpb25zIjo2MDAwMDB9LCJ1c2VybmFtZSI6ImVudmVsb3BlLXdyYXAtdXNlciJ9",
+      "nonce": "PD0+P0BBQkNERUZH",
+      "wrapped": "PD0+P0BBQkNERUZH6MsLHhIF1myIk9DYaYe9WfASOsIJ+grcjxXpdGhI75hoWjxp5dYca8uxvRn+gH/T"
+    },
+    {
+      "kind": "key-envelope-wrap-tampered",
+      "password": "envelope-wrap-pin",
+      "salt": "sLGys7S1tre4ubq7vL2+vw==",
+      "iterations": 2,
+      "master_key": "gPmfikJQwYXX7nEnmcdykuTVHCQ+NDD2OkVtf3tlTL4=",
+      "kdf_params": {
+        "algorithm": "pbkdf2-sha256",
+        "version": 1,
+        "iterations": 600000
+      },
+      "kek": "/2lo8eh/imBQZmeU21NNajDE8vDkkcC/e8Zjj7D7zVk=",
+      "username": "envelope-wrap-user",
+      "aad": "eyJjb250ZXh0IjoiZW52ZWxvcGUiLCJrZGZfcGFyYW1zIjp7ImFsZ29yaXRobSI6InBia2RmMi1zaGEyNTYiLCJ2ZXJzaW9uIjoxLCJpdGVyYXRpb25zIjo2MDAwMDB9LCJ1c2VybmFtZSI6ImVudmVsb3BlLXdyYXAtdXNlciJ9",
+      "wrapped": "PD0+P0BBQkNERUZH6MsLHhIF1myIk9DYaYe9WfASO8IJ+grcjxXpdGhI75hoWjxp5dYca8uxvRn+gH/T",
+      "expect": "tamper"
+    }
+  ]
+}

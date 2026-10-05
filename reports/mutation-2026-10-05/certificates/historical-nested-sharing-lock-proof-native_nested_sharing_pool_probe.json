@@ -1,0 +1,104 @@
+{
+  "current_source_sha256": "8e9ff1ee4f00ffb605fb3bb402cf59a612d517f291c47a5dab2805c5b7e08797",
+  "canonical_mutant": "M008096",
+  "canonical_patch": {
+    "position": 633,
+    "before": "6",
+    "after": "7"
+  },
+  "native_default_dedicated_capacity": 10000,
+  "settings_validated_by_real_Settings_constructor": {
+    "body_buffer_concurrency": 128,
+    "max_body_bytes": 2097152,
+    "audio_max_body_bytes": 4194304,
+    "native_default_db_pool_capacity": 15
+  },
+  "producer_graph": {
+    "99_rekeys_each100_unique_therapists_plus_patient": 9999,
+    "one_patient_only_revocation": 1,
+    "one_new_grant_with_nested_therapist_and_patient": 2,
+    "simultaneous_requests": 101,
+    "maximum_pending_processing_keys_for99_rekeys": 198,
+    "native_processing_key_store_capacity": 1024
+  },
+  "all_id_shapes_are_version4_UUID_hex": true,
+  "pairs": [
+    {
+      "collision_pool": 17,
+      "therapist_key": "sharing-therapist:000000000000400080000000000493e0",
+      "patient_key": "sharing-patient:00000000000040008000000000061a87",
+      "shards16": [
+        6,
+        4
+      ],
+      "shards17": [
+        6,
+        6
+      ]
+    },
+    {
+      "collision_pool": 16,
+      "therapist_key": "sharing-therapist:000000000000400080000000000493e0",
+      "patient_key": "sharing-patient:000000000000400080000000000927c7",
+      "shards16": [
+        6,
+        6
+      ],
+      "shards17": [
+        6,
+        8
+      ]
+    }
+  ],
+  "finite_lock_trace": [
+    {
+      "pool": 16,
+      "pair_collides_under": 17,
+      "entered": [
+        "therapist",
+        "patient"
+      ],
+      "completed": true,
+      "live_overflow_refs": 0,
+      "same_native_fallback_lock": false,
+      "all_refs_released_after_finite_cancel_or_completion": true
+    },
+    {
+      "pool": 17,
+      "pair_collides_under": 17,
+      "entered": [
+        "therapist"
+      ],
+      "completed": false,
+      "live_overflow_refs": 2,
+      "same_native_fallback_lock": true,
+      "all_refs_released_after_finite_cancel_or_completion": true
+    },
+    {
+      "pool": 16,
+      "pair_collides_under": 16,
+      "entered": [
+        "therapist"
+      ],
+      "completed": false,
+      "live_overflow_refs": 2,
+      "same_native_fallback_lock": true,
+      "all_refs_released_after_finite_cancel_or_completion": true
+    },
+    {
+      "pool": 17,
+      "pair_collides_under": 16,
+      "entered": [
+        "therapist",
+        "patient"
+      ],
+      "completed": true,
+      "live_overflow_refs": 0,
+      "same_native_fallback_lock": false,
+      "all_refs_released_after_finite_cancel_or_completion": true
+    }
+  ],
+  "scope": "Native UserLocks primitive trace plus current producer/admission source proof; no99-handler HTTP orchestration or runtime-kill credit is claimed by this inspection.",
+  "source_files_edited": false,
+  "timeouts_used_as_kill_credit": false
+}

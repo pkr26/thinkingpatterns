@@ -2542,13 +2542,15 @@ async def local_recompute(
         # DATES the old response invented (len(grounded)).
         patterns_stored = body.patterns_count if body.patterns_count is not None else 0
         state_seq = prior_seq + 1
-        await _replace_insight(
-            session, fresh_user.id, "patterns", None, patterns_blob, state_seq=state_seq
-        )
-        await _replace_insight(
-            session, fresh_user.id, "brain", None, state_blob, state_seq=state_seq
-        )
         try:
+            # The second replacement can autoflush the first insert. Keep
+            # every SQL write inside the account-retirement error boundary.
+            await _replace_insight(
+                session, fresh_user.id, "patterns", None, patterns_blob, state_seq=state_seq
+            )
+            await _replace_insight(
+                session, fresh_user.id, "brain", None, state_blob, state_seq=state_seq
+            )
             await session.commit()
         except IntegrityError as exc:
             if _is_fk_violation(exc):

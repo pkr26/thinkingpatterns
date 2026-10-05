@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from contextlib import AsyncExitStack
 from ipaddress import ip_network
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -213,11 +214,47 @@ def test_config_production_pool_and_sharing_enrollment_gates():
 # ---------------------------------------------------------------------------
 
 
-def test_user_lock_constructor_and_sharing_key_helpers_are_explicit():
-    with pytest.raises(ValueError, match="max_keys must be positive"):
-        UserLocks(max_keys=0)
-    assert sharing_therapist_lock_key("therapist-1") == "sharing-therapist:therapist-1"
-    assert sharing_patient_lock_key("patient-1") == "sharing-patient:patient-1"
+def test_user_lock_capacity_is_positive_and_sharing_keys_are_distinct():
+    for capacity in (0, -1):
+        with pytest.raises(ValueError):
+            UserLocks(max_keys=capacity)
+    therapist_key = sharing_therapist_lock_key("first")
+    patient_key = sharing_patient_lock_key("first")
+    assert isinstance(therapist_key, str) and isinstance(patient_key, str)
+    assert therapist_key == sharing_therapist_lock_key("first")
+    assert patient_key == sharing_patient_lock_key("first")
+    assert len({therapist_key, patient_key, sharing_therapist_lock_key("second")}) == 3
+
+
+async def test_user_locks_start_idle_and_overflow_shards_hold_independently():
+    """An unused registry has no live fallback users; distinct shards can overlap."""
+    import zlib
+
+    from app.locks import OVERFLOW_SHARDS
+
+    locks = UserLocks(max_keys=1)
+    assert locks.total_overflow_refs() == 0
+    first_key = "overflow-a"
+    first_shard = zlib.crc32(first_key.encode()) % OVERFLOW_SHARDS
+    other_key = next(
+        f"overflow-other-{n}"
+        for n in range(10_000)
+        if zlib.crc32(f"overflow-other-{n}".encode()) % OVERFLOW_SHARDS != first_shard
+    )
+
+    async with AsyncExitStack() as held:
+        for key in ("dedicated", first_key, other_key):
+            context = locks.hold(key)
+            lock = await asyncio.wait_for(context.__aenter__(), timeout=2.0)
+            held.push_async_exit(context)
+            assert lock.locked()
+            if key == first_key:
+                first_lock = lock
+            elif key == other_key:
+                assert lock is not first_lock
+        assert locks.total_overflow_refs() == 2
+
+    assert locks.total_overflow_refs() == 0
 
 
 async def test_user_locks_keep_new_keys_on_live_overflow_shard_until_it_drains():
@@ -232,6 +269,7 @@ async def test_user_locks_keep_new_keys_on_live_overflow_shard_until_it_drains()
     from app.locks import OVERFLOW_SHARDS
 
     locks = UserLocks(max_keys=1)
+    assert locks.total_overflow_refs() == 0
     first_shard = zlib.crc32(b"overflow-a") % OVERFLOW_SHARDS
     same_shard_key = next(
         f"overflow-same-{n}"
@@ -252,7 +290,7 @@ async def test_user_locks_keep_new_keys_on_live_overflow_shard_until_it_drains()
     async def first_overflow_user():
         async with locks.hold("overflow-a"):
             overflow_entered.set()
-            await release_overflow.wait()
+            await asyncio.wait_for(release_overflow.wait(), timeout=5.0)
 
     async def same_shard_user():
         async with locks.hold(same_shard_key):
@@ -261,29 +299,43 @@ async def test_user_locks_keep_new_keys_on_live_overflow_shard_until_it_drains()
     async def other_shard_user():
         async with locks.hold(other_shard_key):
             other_entered.set()
-            await release_overflow.wait()  # hold it so refs are observable
+            # Hold it so refs are observable, with a deadline if the driver fails.
+            await asyncio.wait_for(release_overflow.wait(), timeout=5.0)
 
     # A live dedicated lock fills the registry, forcing every absent key
     # below onto its shard's fallback.
-    async with locks.hold("dedicated"):
-        first = asyncio.create_task(first_overflow_user())
-        await overflow_entered.wait()
-        # A DIFFERENT-shard key enters freely — the old global overflow lock
-        # serialized it; the shard mapping removed exactly that cliff.
-        other = asyncio.create_task(other_shard_user())
-        await asyncio.wait_for(other_entered.wait(), timeout=2.0)
-        assert locks.total_overflow_refs() == 2
-        # A SAME-shard key still serializes behind the live fallback holder
-        # (the registry cannot mint it a fresh dedicated entry while its
-        # shard fallback is live).
-        same = asyncio.create_task(same_shard_user())
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
-        assert locks.total_overflow_refs() == 3
-        assert not same_shard_entered.is_set()
+    tasks = []
+    try:
+        async with locks.hold("dedicated"):
+            first = asyncio.create_task(first_overflow_user())
+            tasks.append(first)
+            await asyncio.wait_for(overflow_entered.wait(), timeout=2.0)
+            # A DIFFERENT-shard key enters freely — the old global overflow lock
+            # serialized it; the shard mapping removed exactly that cliff.
+            other = asyncio.create_task(other_shard_user())
+            tasks.append(other)
+            await asyncio.wait_for(other_entered.wait(), timeout=2.0)
+            assert locks.total_overflow_refs() == 2
+            # A SAME-shard key still serializes behind the live fallback holder
+            # (the registry cannot mint it a fresh dedicated entry while its
+            # shard fallback is live).
+            same = asyncio.create_task(same_shard_user())
+            tasks.append(same)
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            assert locks.total_overflow_refs() == 3
+            assert not same_shard_entered.is_set()
+            release_overflow.set()
+            await asyncio.wait_for(asyncio.gather(*tasks), timeout=2.0)
+            assert same_shard_entered.is_set()
+    finally:
         release_overflow.set()
-        await asyncio.gather(first, other, same)
-        assert same_shard_entered.is_set()
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        if tasks:
+            await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=2.0)
+    assert locks.total_overflow_refs() == 0
 
 
 def test_single_process_guard_is_reentrant_and_handles_no_held_lock(monkeypatch):

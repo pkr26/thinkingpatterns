@@ -107,12 +107,16 @@ def test_statsig_boundary_and_degenerate_inputs_fail_closed():
     assert statsig.fisher_z_difference_p(0.2, math.inf, 0.1, math.inf) == 1.0
 
 
-def test_statsig_continued_fraction_underflow_guards_are_finite(monkeypatch):
-    """The Lentz denominator floors prevent numerical zero divisions."""
-    # A deliberately enlarged floor reaches each defensive branch without
-    # relying on platform-specific subnormal floating-point behavior.
-    monkeypatch.setattr(statsig, "_BETACF_FPMIN", 2.0)
-    assert math.isfinite(statsig._betacf(1.0, 1.0, 0.5))
+def test_statsig_continued_fraction_singular_inputs_fail_closed():
+    """Native cancellation must refuse a fabricated continued fraction."""
+    for a, b, x in [(1.0, 3.0, 0.5), (1e14, 3.0, math.nextafter(1.0, 0.0))]:
+        with pytest.raises(statsig.BetaConvergenceError, match="is singular"):
+            statsig._betacf(a, b, x)
+    assert statsig._betainc(1.0, 1.0, 0.5) == 0.5
+    x = 0.75
+    q = 1.0 - x
+    expected = x**5 * (1.0 + 5 * q + 15 * q * q)
+    assert statsig._betainc(5.0, 3.0, x) == pytest.approx(expected, rel=1e-12)
 
 
 def test_statsig_welch_fails_closed_if_effective_count_is_nonfinite(monkeypatch):

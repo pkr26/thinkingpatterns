@@ -1,0 +1,199 @@
+{
+  "ledger_sha256": "5b15c22b99bbfbecd611718f71b3d11474a53ac3665eae8358dddf4502c31525",
+  "current_lock_source_sha256": "607c30b36276522a3f6ee0db031a4dd7a21d9faab63950f738ae34636c594230",
+  "current_owned_ledger_sha256": "374ac7a738e0448f4d1ab4b413e3d32b1c8c6a42781714ed0f312ac8467ae2ad",
+  "reviewed_equivalents": 9,
+  "all_current_patch_and_raw_survival_and_pristine_baselines_verified": true,
+  "causal_scope": "Released bounded registry, actual caller exclusion and progress contracts. Private cache/shard tuning and transient503 scheduling need not be bitwise identical. Old M008096 certificate is expressly withdrawn because its source allowed a real consumer self-deadlock.",
+  "no_private_fixed_pool_capacity_or_owner_none_marker_kill_credit": true,
+  "rows": [
+    {
+      "id": "L000004",
+      "canonical_patch": {
+        "file": "app/locks.py",
+        "line": 26,
+        "index": 0,
+        "position": 661,
+        "before": "6",
+        "after": "7",
+        "source_line": "OVERFLOW_SHARDS = 16"
+      },
+      "causal_reason_independently_reviewed": "After the ownership fix, every same-task shard alias reenters without waiting, and any nested foreign live shard is refused before acquire using refs. The same scalar17 is used both to construct the positive finite tuple and for stable modulo selection. Moving16 to17 cannot change same-key exclusion or add a nested physical wait edge. It changes fixed allocation, collision pairs and transient503 schedules; no fixed16 or identical scheduling contract is documented. This causal argument did not hold on old source, where supported sharing aliases self-blocked.",
+      "observable_differences_admitted": [
+        "allocation size",
+        "collision pairs",
+        "transient contention/refusal schedule"
+      ],
+      "runtime_result": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/current-locks-full/results-00.jsonl",
+      "result_line": 4,
+      "passing_pristine_baseline": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/current-locks-full/baselines-00.json",
+      "current_source_snapshot": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/current-locks-ready"
+    },
+    {
+      "id": "L000012",
+      "canonical_patch": {
+        "file": "app/locks.py",
+        "line": 36,
+        "index": 0,
+        "position": 816,
+        "before": "\n@dataclass\n",
+        "after": "",
+        "source_line": "@dataclass"
+      },
+      "causal_reason_independently_reviewed": "_HeldLocks() is called only without arguments. Removing dataclass leaves immutable integer0 class defaults, and each +=/-= creates/updates an instance attribute; no mutable count is shared. The same per-task dedicated and overflow values are read by guards and cleanup. Generated argument-taking constructor, equality, repr and dataclass metadata have no production consumer.",
+      "observable_differences_admitted": [
+        "unused generated class introspection/repr/equality"
+      ],
+      "runtime_result": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/current-locks-full/results-00.jsonl",
+      "result_line": 12,
+      "passing_pristine_baseline": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/current-locks-full/baselines-00.json",
+      "current_source_snapshot": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/current-locks-ready"
+    },
+    {
+      "id": "L000022",
+      "canonical_patch": {
+        "file": "app/locks.py",
+        "line": 69,
+        "index": 0,
+        "position": 2050,
+        "before": "_000",
+        "after": "001",
+        "source_line": "    def __init__(self, max_keys: int = 10_000) -> None:"
+      },
+      "causal_reason_independently_reviewed": "The private default positive dedicated-cache capacity becomes10001 instead of10000. Explicit max_keys arguments and the bound checks against the chosen value remain unchanged. Exact default10000 is not a documented released ceiling; storage remains finitely bounded, live/waiting entries cannot be evicted, and every overflow/nested ownership guard is intact.",
+      "observable_differences_admitted": [
+        "default allocation bound",
+        "capacity-pressure threshold"
+      ],
+      "runtime_result": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/current-locks-full/results-00.jsonl",
+      "result_line": 22,
+      "passing_pristine_baseline": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/current-locks-full/baselines-00.json",
+      "current_source_snapshot": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/current-locks-ready"
+    },
+    {
+      "id": "L000025",
+      "canonical_patch": {
+        "file": "app/locks.py",
+        "line": 71,
+        "index": 0,
+        "position": 2120,
+        "before": "max_keys must be positive",
+        "after": "XXmax_keys must be positiveXX",
+        "source_line": "            raise ValueError(\"max_keys must be positive\")"
+      },
+      "causal_reason_independently_reviewed": "The invalid-capacity branch still raises ValueError before allocating registry state. It changes only constructor prose, keeps the diagnostic explanation, and every production construction passes the valid default. No API response or declared exact constructor message is consumed. HTTP503 envelope fields are unaffected.",
+      "observable_differences_admitted": [
+        "developer-facing invalid-argument message"
+      ],
+      "runtime_result": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/current-locks-full/results-00.jsonl",
+      "result_line": 25,
+      "passing_pristine_baseline": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/current-locks-full/baselines-00.json",
+      "current_source_snapshot": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/current-locks-ready"
+    },
+    {
+      "id": "L000038",
+      "canonical_patch": {
+        "file": "app/locks.py",
+        "line": 103,
+        "index": 1,
+        "position": 3822,
+        "before": "Fals",
+        "after": "Non",
+        "source_line": "        use_overflow = False"
+      },
+      "causal_reason_independently_reviewed": "The local initial False becomes None; both are false in the only consumed Boolean predicates. Exactly the original branches assign True, so the path and the eventual acquired physical lock are unchanged. This value is not returned, persisted, compared by identity or passed to another contract. Fresh uncached full-app mypy also accepts the variant.",
+      "observable_differences_admitted": [
+        "unexported initial local value"
+      ],
+      "runtime_result": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/current-locks-full/results-01.jsonl",
+      "result_line": 11,
+      "passing_pristine_baseline": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/current-locks-full/baselines-01.json",
+      "current_source_snapshot": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/current-locks-ready"
+    },
+    {
+      "id": "L000048",
+      "canonical_patch": {
+        "file": "app/locks.py",
+        "line": 118,
+        "index": 0,
+        "position": 4675,
+        "before": "-",
+        "after": "+",
+        "source_line": "                    : len(self._locks) - self._max_keys + 1"
+      },
+      "causal_reason_independently_reviewed": "At capacity the changed slice can delete more zero-ref idle slots. Its unchanged refs==0 filter excludes every holder and queued waiter, while a nonempty idle list still frees at least one slot. Thus it preserves recycling progress, maximum bound and live physical custody. Additional idle cache retention is not promised, and later allocation/mapping/refusal schedules may differ. The one-idle failure L49 is separately a genuine kill.",
+      "observable_differences_admitted": [
+        "idle-cache retention",
+        "later physical mapping/refusal schedule"
+      ],
+      "runtime_result": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/current-locks-full/results-01.jsonl",
+      "result_line": 21,
+      "passing_pristine_baseline": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/current-locks-full/baselines-01.json",
+      "current_source_snapshot": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/current-locks-ready"
+    },
+    {
+      "id": "L000050",
+      "canonical_patch": {
+        "file": "app/locks.py",
+        "line": 118,
+        "index": 2,
+        "position": 4694,
+        "before": "1",
+        "after": "2",
+        "source_line": "                    : len(self._locks) - self._max_keys + 1"
+      },
+      "causal_reason_independently_reviewed": "Changing the eviction prefix from one eligible idle slot to up to two still deletes only refs==0 slots and recycles at least one available idle entry. Active owners/waiters retain physical custody and the chosen maximum remains a hard upper bound. Keeping every extra idle entry is not released behavior; future allocation/refusal schedules may differ.",
+      "observable_differences_admitted": [
+        "idle-cache retention",
+        "later physical mapping/refusal schedule"
+      ],
+      "runtime_result": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/current-locks-full/results-01.jsonl",
+      "result_line": 23,
+      "passing_pristine_baseline": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/current-locks-full/baselines-01.json",
+      "current_source_snapshot": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/current-locks-ready"
+    },
+    {
+      "id": "L000105",
+      "canonical_patch": {
+        "file": "app/locks.py",
+        "line": 206,
+        "index": 0,
+        "position": 8669,
+        "before": "sharing-therapist:{therapist_id}",
+        "after": "XXsharing-therapist:{therapist_id}XX",
+        "source_line": "    return f\"sharing-therapist:{therapist_id}\""
+      },
+      "causal_reason_independently_reviewed": "All actual production therapist-sharing acquisitions call this shared key helper; no independent literal-prefix reader/writer or persisted/wire key consumer was found. The wrapped prefix remains injective over therapist IDs and distinct from patient prefixes. Consumer therapist-before-patient order and sorted ID order do not sort these opaque strings. CRC collision patterns can change, but fixed guards prevent nested wait cycles and preserve same-key custody.",
+      "observable_differences_admitted": [
+        "opaque internal key bytes",
+        "hash collision/refusal schedule"
+      ],
+      "runtime_result": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/current-locks-full/results-03.jsonl",
+      "result_line": 22,
+      "passing_pristine_baseline": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/current-locks-full/baselines-03.json",
+      "current_source_snapshot": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/current-locks-ready"
+    },
+    {
+      "id": "L000106",
+      "canonical_patch": {
+        "file": "app/locks.py",
+        "line": 211,
+        "index": 0,
+        "position": 8844,
+        "before": "sharing-patient:{user_id}",
+        "after": "XXsharing-patient:{user_id}XX",
+        "source_line": "    return f\"sharing-patient:{user_id}\""
+      },
+      "causal_reason_independently_reviewed": "All actual production patient-sharing acquisitions call this shared key helper; no independent literal-prefix reader/writer or persisted/wire key consumer was found. Its wrapped prefix remains injective over patient IDs and distinct from therapist prefixes. Logical acquisition order stays unchanged. CRC collision patterns can change, while fixed ownership and refusal guards retain same-key custody and nested progress.",
+      "observable_differences_admitted": [
+        "opaque internal key bytes",
+        "hash collision/refusal schedule"
+      ],
+      "runtime_result": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/current-locks-full/results-03.jsonl",
+      "result_line": 23,
+      "passing_pristine_baseline": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/current-locks-full/baselines-03.json",
+      "current_source_snapshot": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/current-locks-ready"
+    }
+  ],
+  "rebound_after_exact_106_lock_rows_and_current_accepted_evidence_reverification": true
+}

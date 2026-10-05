@@ -1,0 +1,32 @@
+{
+  "old_source_sha256": "8e9ff1ee4f00ffb605fb3bb402cf59a612d517f291c47a5dab2805c5b7e08797",
+  "old_source_exact_retained_path": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/historical-nested-sharing-lock-proof/locks-before-fix.py",
+  "original_source_snapshot": "/Users/pradeepreddy/Desktop/mental_health_application/.tools/mutation-2026-10-05/automatic/overflow-shards-current-ready/backend/app/locks.py",
+  "read_only_primitive_proof": true,
+  "historical_mutant": "M008096",
+  "historical_patch": {
+    "file": "app/locks.py",
+    "line": 24,
+    "position": 633,
+    "before": "6",
+    "after": "7"
+  },
+  "caller_sources_sha256": {
+    "backend/app/deps.py": "25f859eef3b712e180cf4a848fa9e95452da839f9b25885c22efd48e61f32245",
+    "backend/app/api/consents.py": "78df4e1c5894dc2a566f47d3721d9a253b6519c599c740be847f4270ba9bb2fe",
+    "backend/app/api/therapist.py": "4f2e6ec68674c2cfffb15ece89c5977cd6111725240e6ecf994721950c72342c",
+    "backend/app/api/insights.py": "255f21305a1b1f0cab748eecc0ecda96dd7316bc2d8de9966d99e57b8fd6a4f6",
+    "backend/app/config.py": "c1e6923deef7ca1c891a98207b345774e0e5b617460e7d2e4b81ce9cb49c300d",
+    "backend/app/middleware.py": "2cc9d4aa8017d369eca31a674bb45ddbc7f68740e61fc5156ecd93dc524455a6",
+    "backend/app/security/enclave.py": "b7440b0dc1906d14f8d91927d69308445cdb730dff1de7ed69b8ee8ea77e442d"
+  },
+  "reachability": [
+    "API admission body_buffer_concurrency=128 is accepted by real Settings with default4MiB audio/max512MiB buffer budget;101 requests fit.",
+    "99 valid rekeys can each retain100 unique therapist locks plus their patient lock after separate grant-read session closes:9999 dedicated keys. One patient-only revoke fills native10000 capacity.",
+    "Authentication commits/releases its DB lease before route handling; verifier work slot ends before sharing fences. Native DB pool15 is a transient lease capacity, not a fence-owner admission cap.",
+    "Two processing tokens per99 rekeys require198 keys, below native1024 enclave capacity; pop removes them before fences.",
+    "New grant acquires therapist thenpatient after preflight session.commit. Proper version4UUID keys selected by real sharing key functions."
+  ],
+  "scope": "Finite native registry scheduling witness plus reviewed producer reachability. Does not claim99 actualHTTP requests were orchestrated or use timeout as kill evidence.",
+  "production_edits_by_probe": false
+}
