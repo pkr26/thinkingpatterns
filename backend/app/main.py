@@ -25,6 +25,7 @@ from .deps import DEFAULT_ERROR_CODES
 from .metrics import MetricsMiddleware, MetricsRegistry
 from .middleware import HardeningMiddleware, RateLimitRule
 from .security.enclave import InMemoryKeyStore
+from .security.export_ticket import ExportTicketStore
 from .security.step_up import StepUpProofStore
 
 # Distinct from alembic/env.py's migration lock (727272): this one is held
@@ -1012,6 +1013,7 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
                 # every key before disposing DB/network resources or returning
                 # control to a process manager that may retain memory briefly.
                 app.state.key_store.destroy_all()
+                app.state.export_tickets.clear()
                 from .api._audit import close_reusable_journal_evidence_index
 
                 close_reusable_journal_evidence_index()
@@ -1052,6 +1054,7 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
     # counter and the keystore (one host per database, enforced at boot).
     app.state.token_revocations = TokenRevocationStore()
     app.state.step_up_store = StepUpProofStore()
+    app.state.export_tickets = ExportTicketStore()
     app.state.metrics = MetricsRegistry()
     app.state.audit_maintenance_healthy = True
     app.state.audit_maintenance_retry_needed = False

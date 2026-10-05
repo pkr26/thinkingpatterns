@@ -228,3 +228,78 @@ async def test_wrap_key_rotation_rejects_patient_tokens_and_bad_keys(client):
     )
     assert invalid.status_code == 422
     assert invalid.json()["code"] == "validation_error"
+
+
+async def test_wrap_key_rotation_rechecks_account_after_concurrent_deletion(
+    client, app, monkeypatch
+):
+    """A valid request can finish proof before another request erases its owner."""
+    import asyncio
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.api import therapist as therapist_api
+    from app.models import User
+
+    therapist = TherapistEmulator("wrap-delete-race", "deep-password")
+    await therapist.register(client)
+    successor = TherapistEmulator(therapist.username, "deep-password")
+    custody = await client.put(
+        "/api/therapist/custody",
+        headers=therapist.headers,
+        json={
+            "verifier": therapist.auth_key_b64,
+            "operation_id": str(uuid.uuid4()),
+            "expected_custody_version": 0,
+            "custody_version": 1,
+            "notes_keyring_blob": base64.b64encode(os.urandom(60)).decode(),
+        },
+    )
+    assert custody.status_code == 204
+    proved = asyncio.Event()
+    resume = asyncio.Event()
+    original_proof = therapist_api._require_verifier
+
+    async def pause_rotation_after_real_proof(user, verifier, request, session):
+        await original_proof(user, verifier, request, session)
+        if request.url.path.endswith("/therapist/wrap-key"):
+            # Release the read transaction while the competing request owns
+            # the real lifecycle fence and commits logical deletion.
+            await session.commit()
+            proved.set()
+            await resume.wait()
+
+    monkeypatch.setattr(therapist_api, "_require_verifier", pause_rotation_after_real_proof)
+    headers = {**therapist.headers, "X-Account-Verifier": therapist.auth_key_b64}
+    async with AsyncClient(
+        transport=ASGITransport(app=app, raise_app_exceptions=False), base_url="http://testserver"
+    ) as http:
+        pending = asyncio.create_task(
+            http.put(
+                "/api/therapist/wrap-key",
+                headers=headers,
+                json={
+                    "wrap_pub_key": successor.wrap_pub_key,
+                    "wrap_key_blob": successor.wrap_key_blob_b64(),
+                    "expected_custody_version": 1,
+                },
+            )
+        )
+        try:
+            await asyncio.wait_for(proved.wait(), timeout=10)
+            deleted = await client.delete("/api/therapist/account", headers=headers)
+            assert deleted.status_code == 204, deleted.text
+        finally:
+            resume.set()
+        result = await pending
+    assert result.status_code == 404, result.text
+    assert result.json()["code"] == "not_found"
+    async with app.state.sessionmaker() as session:
+        owner = await session.get(User, therapist.user_id)
+        assert owner is None or (not owner.is_active and owner.wrap_pub_key is None)
+        rotations = await session.scalar(
+            select(AccessLog.id).where(
+                AccessLog.actor_id == therapist.user_id, AccessLog.action == "wrap_key_rotate"
+            )
+        )
+        assert rotations is None

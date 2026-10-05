@@ -20,6 +20,7 @@ import hmac
 import json
 import logging
 import os
+import re
 from datetime import date as date_type, datetime, timezone
 
 import anyio
@@ -81,9 +82,10 @@ from ..schemas import (
     VoiceConsentResponse,
     entry_out,
 )
-from ..security import crypto, envelope, kdf
+from ..security import crypto, envelope, kdf, tokens
 from ..security.deletion_tombstone import new_deletion_tombstone
 from ..security.enclave import zeroize
+from ..security.export_ticket import EXPORT_TICKET_TTL, secret_fingerprint
 from ..security.kdf import (
     KDF_PARAMS_MIN_PBKDF2_ITERATIONS,
     KdfParamsError,
@@ -325,6 +327,98 @@ def _epoch_fence_failed(fresh: User, expected_epoch: int) -> bool:
     bearer+verifier pair may not finish widening disclosure or destroying
     the account, exactly like the M-2 recompute/rekey fences."""
     return fresh.token_epoch != expected_epoch
+
+
+@router.post(
+    "/export-ticket",
+    dependencies=[
+        Depends(
+            make_rate_limiter("account-export-ticket", "export_rate_limit", "export_rate_window")
+        )
+    ],
+)
+async def issue_export_ticket(
+    request: Request,
+    response: Response,
+    user: User = Depends(require_regular_user),
+):
+    """Authorize one browser download without putting the bearer in a URL."""
+    settings = request.app.state.settings
+    bearer = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+    try:
+        claims = tokens.verify_token(bearer, settings.auth_token_secret)
+        ticket = request.app.state.export_tickets.issue(
+            user_id=user.id,
+            token_epoch=user.token_epoch,
+            token_jti=claims.get("jti"),
+            token_expires=claims["exp"],
+            secret_fingerprint=secret_fingerprint(
+                settings.auth_token_secret, settings.auth_secret_version
+            ),
+        )
+    except tokens.TokenError:
+        raise ApiError(status_code=401, detail="invalid token", code="unauthorized") from None
+    except RuntimeError:
+        raise ApiError(
+            status_code=503, detail="export service busy; retry shortly", code="service_unavailable"
+        ) from None
+    response.headers["Cache-Control"] = "no-store"
+    return {"ticket": ticket, "expires_in": EXPORT_TICKET_TTL}
+
+
+@router.post(
+    "/export-download",
+    dependencies=[
+        Depends(make_rate_limiter("account-export", "export_rate_limit", "export_rate_window"))
+    ],
+)
+async def download_export(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """Consume a narrow capability from a bounded native form POST."""
+    if (
+        request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+        != "application/x-www-form-urlencoded"
+    ):
+        raise ApiError(status_code=422, detail="invalid export form", code="validation_error")
+    # The ticket alphabet needs no URL escaping. Accept exactly one field;
+    # avoid generic multipart/form parsers and ambiguous repeated parameters.
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > 128:
+            raise ApiError(
+                status_code=413, detail="export form too large", code="payload_too_large"
+            )
+        body.extend(chunk)
+    if request.url.query or re.fullmatch(rb"ticket=[A-Za-z0-9_-]{43}", body) is None:
+        raise ApiError(status_code=422, detail="invalid export form", code="validation_error")
+    grant = request.app.state.export_tickets.consume(bytes(body[7:]).decode("ascii"))
+    settings = request.app.state.settings
+    failure = ApiError(status_code=401, detail="invalid export ticket", code="unauthorized")
+    if grant is None or not hmac.compare_digest(
+        grant.secret_fingerprint,
+        secret_fingerprint(settings.auth_token_secret, settings.auth_secret_version),
+    ):
+        raise failure
+    user = await session.get(User, grant.user_id)
+    if (
+        user is None
+        or not user.is_active
+        or user.role != "user"
+        or user.token_epoch != grant.token_epoch
+    ):
+        raise failure
+    if grant.token_jti is not None and await request.app.state.token_revocations.is_revoked_checked(
+        session, grant.token_jti
+    ):
+        raise failure
+    request.state.mindpattern_token_jti = grant.token_jti
+    request.state.mindpattern_token_epoch = grant.token_epoch
+    response = await export_account(request, user, session)
+    response.headers["Content-Disposition"] = 'attachment; filename="fathom-export.json"'
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @router.get(
@@ -1846,21 +1940,20 @@ async def _prove_current_data_key(
             detail="complete the pending key rotation first",
             code="rekey_in_progress",
         )
-    entry = (
-        await session.execute(
-            select(Entry.client_entry_id, Entry.content_version, Entry.blob)
-            .where(Entry.user_id == user.id)
-            .order_by(Entry.received_at.desc(), Entry.id.desc())
-            .limit(1)
-        )
-    ).first()
+    from ..security.entry_guard import guarded_entry_aads
+
+    entry = await session.scalar(
+        select(Entry)
+        .where(Entry.user_id == user.id)
+        .order_by(Entry.received_at.desc(), Entry.id.desc())
+        .limit(1)
+    )
     if entry is not None:
-        return await anyio.to_thread.run_sync(
-            _authenticate_blob_only,
-            key,
-            bytes(entry[2]),
-            crypto.entry_aad_candidates(user.id, entry[0], int(entry[1])),
-        )
+        try:
+            aads = guarded_entry_aads(entry, settings)
+        except crypto.TamperError:
+            return False
+        return await anyio.to_thread.run_sync(_authenticate_blob_only, key, bytes(entry.blob), aads)
     insight = (
         await session.execute(
             select(Insight.kind, Insight.for_date, Insight.blob)

@@ -8,6 +8,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, auth, ApiError, sessionUsername } from "../api/client";
+import { usePatientOperation } from "../patientOperation";
 import { deriveMasterKey, toBase64, fromBase64, zeroize, type Bytes } from "../crypto/core";
 import { KDF_PARAMS_DEFAULT, rewrapDataKey, validateKdfParams, type KdfParams } from "../crypto/envelope";
 import { wrapDataKeyForTherapist } from "../crypto/sharing";
@@ -16,7 +17,7 @@ import { CADENCE_INTERVALS, readMeasureCadence, writeMeasureCadence, type Measur
 import { passwordPolicyError } from "./LoginView";
 import { drainPendingQueueForRotation, queueEvictionSummary, requeueRejected, rejectedEntries, queueLength } from "../offlineQueue";
 import { broadcastTabLockdown } from "../tabLockdown";
-import { downloadTextFile, localStore, randomBytes } from "../platform";
+import { requestAccountDownload, localStore, randomBytes } from "../platform";
 import { applyLanguagePref, getLanguagePref, t, type LanguagePref } from "../strings";
 import { displayError } from "../errors";
 import { kv } from "../kvstore";
@@ -57,6 +58,7 @@ type PendingSensitiveAction =
   | { kind: "delete" };
 
 export function SettingsView(props: { onLockdown: (notice: string) => void; onOpenSafetyPlan?: () => void }): React.JSX.Element {
+  const beginOperation = usePatientOperation();
   const [themePref, setThemePref] = useState<ThemePref>(() => readThemePref());
   // Language (audit 2026-09-26 LOW): 'auto' | 'en' | 'es', applied live.
   const [languagePref, setLanguagePref] = useState<LanguagePref>(() => getLanguagePref());
@@ -289,18 +291,19 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
   };
 
   const exportData = async (): Promise<void> => {
+    const operation = beginOperation();
+    if (!operation) return;
     setBusy(true);
     setError("");
     try {
-      const response = await api.exportAccountRaw();
-      if (!response.ok) throw new Error(`export failed (${response.status})`);
-      const bundle = await response.text();
-      const ok = downloadTextFile(`mindpattern-export-${new Date().toISOString().slice(0, 10)}.json`, bundle, "application/json");
+      const { ticket } = await api.exportAccountTicket();
+      if (!operation.current()) return;
+      const ok = requestAccountDownload(ticket);
       setStatus(ok ? t("settings.exportOk") : t("settings.exportBlocked"));
     } catch (err) {
-      setError(displayError(err, t("settings.exportFailed")));
+      if (operation.current()) setError(displayError(err, t("settings.exportFailed")));
     } finally {
-      setBusy(false);
+      if (operation.current()) setBusy(false);
     }
   };
 

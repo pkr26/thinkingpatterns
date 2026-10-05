@@ -71,11 +71,11 @@ class TestAvgSentimentTruncation:
         )
         assert result.stats["avg_sentiment"] == 0.624  # (20*0.7 - 0.9) / 21
 
-    def test_all_blank_corpus_keeps_the_zero_default(self):
-        # No qualifying entry remains: the historical 0.0 stands.
+    def test_all_blank_corpus_reports_unavailable(self):
+        # ANL-01: no qualifying evidence is unavailable, not a neutral rating.
         blanks = [JournalEntry("", T0 + timedelta(days=k)) for k in range(5)]
         result = brain.update(brain.load_state(None), blanks, T0 + timedelta(days=4))
-        assert result.stats["avg_sentiment"] == 0.0
+        assert result.stats["avg_sentiment"] is None
 
 
 class TestAvgSentimentTruncationLegacyAnalyzer:

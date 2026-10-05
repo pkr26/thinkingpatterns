@@ -171,7 +171,7 @@ describe("SettingsView branches", () => {
       if (url.endsWith("/llm-consent") && init.method === "PUT") {
         return jsonResponse({ detail: "no provider configured", code: "llm_unavailable" }, { status: 409 });
       }
-      if (url.endsWith("/account/export")) return (extra?.export ?? (() => new Response("{}", { status: 200 })))();
+      if (url.endsWith("/account/export-ticket")) return (extra?.export ?? (() => new Response("{}", { status: 200 })))();
       // 2026-09-28 audit note: this used to be endsWith("/access-log"),
       // which silently MISSED the cursor'd page-2 URL (…/access-log?
       // cursor=cur-1) — every "Show more" press 404'd into the catch, so
@@ -325,14 +325,14 @@ describe("SettingsView rotation with an active grant (the rewrap loop)", () => {
       if (url.endsWith("/meta")) return jsonResponse({ version: "1", api_version: "v1", unlock_days: 30, llm_available: false, sharing_available: true, sharing_disclosure_version: "v3" });
       if (url.endsWith("/llm-consent")) return jsonResponse({ enabled: false });
       if (url.endsWith("/access-log")) return jsonResponse([]);
-      if (url.endsWith("/account/export")) return jsonResponse({ detail: "slow down", code: "rate_limited" }, { status: 429, headers: { "Retry-After": "5" } });
+      if (url.endsWith("/account/export-ticket")) return jsonResponse({ detail: "slow down", code: "rate_limited" }, { status: 429, headers: { "Retry-After": "5" } });
       return jsonResponse({}, { status: 404 });
     });
     const root = await render(<SettingsView onLockdown={() => undefined} />);
     await settle(40, 3);
     await press(root, "Download export (encrypted)");
     await settle(40, 3);
-    expect(textOf(root)).toContain("export failed (429)");
+    expect(textOf(root)).toContain("Too many attempts — wait a moment, then try again.");
   });
 });
 

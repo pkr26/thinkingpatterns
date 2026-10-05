@@ -454,3 +454,35 @@ class TestProbeCorpusRegression:
         assert pool, "the generic questions remain"
         assert all("cutting" not in q.lower() for q in pool)
         assert all(not crisis.matches_suppress(q) for q in pool)
+
+
+def test_carried_forward_label_alone_marks_the_public_card_sensitive():
+    """Older encrypted records may carry only a label, without variant bits."""
+    for label, expected in [("I want to die", True), ("watered the plants", False)]:
+        state = brain.fresh_state()
+        record = brain.StoredPattern(
+            pid="phrase:legacy-label-only",
+            kind="recurring_phrase",
+            label=label,
+            first_seen=(T0 - timedelta(days=5)).isoformat(),
+            last_seen=T0.isoformat(),
+            first_qualified=(T0 - timedelta(days=2)).isoformat(),
+            last_qualified=T0.isoformat(),
+            occurrences=4,
+            state="emerging",
+            qualification_days=[(T0 - timedelta(days=2)).isoformat(), T0.isoformat()],
+            evidence_dates=[(T0 - timedelta(days=2)).isoformat(), T0.isoformat()],
+            feedback={},
+            detail={},
+        )
+        state["patterns"][record.pid] = record
+
+        result = brain.update(
+            brain.load_state(brain.dump_state(state)),
+            [JournalEntry("I went for a walk today and felt calm.", T0)],
+            T0,
+        )
+
+        cards = [card for card in result.surfaced if card.detail["pattern_pid"] == record.pid]
+        assert len(cards) == 1, "the carried-forward card still surfaces during its grace period"
+        assert (cards[0].detail.get("sensitive") is True) is expected

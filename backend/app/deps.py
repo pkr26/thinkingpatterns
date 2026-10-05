@@ -65,35 +65,46 @@ async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
     from .api._audit import flush_audit_journal
 
     async with request.app.state.sessionmaker() as session:
-        # Flush only journal entries belonging to committed transactions.
-        # Authentication can commit before a handler stages its audit rows;
-        # session-close rollback does not fire after_rollback. Capture the
-        # committed prefix on each commit so an uncommitted tail never
-        # appears in the journal as evidence of database tampering.
+        # Keep committed evidence separate from the current transaction.
+        # Savepoint rollback must discard only its own staged tail; a later
+        # retry/commit still publishes. Conversely, savepoint COMMIT is not
+        # an outer commit, and an outer rollback must never publish its rows.
         # A post-commit I/O failure cannot undo the request, but keeps
         # readiness unhealthy until a successful flush.
-        committed = False
-        rolled_back = False
-        staged_at_commit = 0
+        audit_pending = "mindpattern_audit_journal_pending"
+        audio_pending = "mindpattern_audio_deletions_pending"
+        committed_audit: list = []
         committed_audio: list[str] = []
+        savepoints: dict[object, tuple[int, int]] = {}
 
-        def _pending_count() -> int:
-            info = getattr(session, "info", None)
-            pending = (info or {}).get("mindpattern_audit_journal_pending")
-            return len(pending) if pending else 0
+        def _savepoint_created(_session, transaction) -> None:
+            if transaction.nested:
+                savepoints[transaction] = (
+                    len(session.info.get(audit_pending, [])),
+                    len(session.info.get(audio_pending, [])),
+                )
 
-        def _mark_commit(_session=None) -> None:
-            nonlocal committed, staged_at_commit, committed_audio
-            committed = True
-            staged_at_commit = _pending_count()
-            committed_audio = list(session.info.get("mindpattern_audio_deletions_pending", []))
+        def _mark_commit(sync_session) -> None:
+            if sync_session.in_nested_transaction():
+                savepoints.pop(sync_session.get_nested_transaction(), None)
+                return
+            committed_audit.extend(session.info.pop(audit_pending, []))
+            committed_audio.extend(session.info.pop(audio_pending, []))
 
-        def _mark_rollback(_session=None) -> None:
-            nonlocal rolled_back
-            rolled_back = True
+        def _mark_rollback(_session, transaction) -> None:
+            if transaction.nested:
+                audit_count, audio_count = savepoints.pop(transaction, (0, 0))
+                for name, length in ((audit_pending, audit_count), (audio_pending, audio_count)):
+                    if name in session.info:
+                        session.info[name] = session.info[name][:length]
+            elif transaction.parent is None:
+                session.info.pop(audit_pending, None)
+                session.info.pop(audio_pending, None)
+                savepoints.clear()
 
+        event.listen(session.sync_session, "after_transaction_create", _savepoint_created)
         event.listen(session.sync_session, "after_commit", _mark_commit)
-        event.listen(session.sync_session, "after_rollback", _mark_rollback)
+        event.listen(session.sync_session, "after_soft_rollback", _mark_rollback)
         try:
             yield session
         except BaseException:
@@ -113,14 +124,10 @@ async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
                     import logging
 
                     logging.getLogger(__name__).exception("post-commit audio cleanup deferred")
-            if committed and not rolled_back:
-                info = getattr(session, "info", None)
-                pending = (info or {}).get("mindpattern_audit_journal_pending") if info else None
-                if info is not None and pending is not None and len(pending) > staged_at_commit:
-                    # Uncommitted tail (staged after the last commit, never
-                    # committed — the silent close-rollback path): keep only
-                    # the prefix that rode a committed transaction.
-                    info["mindpattern_audit_journal_pending"] = pending[:staged_at_commit]
+            if committed_audit:
+                # Discard any uncommitted tail, including the implicit
+                # rollback performed when the session context closes.
+                session.info[audit_pending] = committed_audit
                 try:
                     await flush_audit_journal(
                         session,

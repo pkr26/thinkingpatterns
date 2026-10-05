@@ -47,6 +47,7 @@ COPY app ./app
 COPY alembic.ini ./
 COPY alembic ./alembic
 COPY docker-entrypoint.sh ./
+COPY bootstrap_entry_guards.py ./
 
 # Run as an unprivileged user; the API never needs root.
 # /var/lib/mindpattern/audit is the audit journal's mount point: the named

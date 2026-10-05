@@ -86,7 +86,10 @@ async def test_access_log_is_scoped_per_patient(client):
     assert any(row["action"] == "read_entries" for row in beta_log.json())
 
 
-async def test_access_log_cursor_pagination_is_complete_and_unduplicated(client, app):
+@pytest.mark.parametrize("same_timestamp", [False, True], ids=["distinct-times", "equal-times"])
+async def test_access_log_cursor_pagination_is_complete_and_unduplicated(
+    client, app, same_timestamp
+):
     patient = ClientEmulator("alog-page", "deep-password")
     await patient.register(client)
     base = utcnow()
@@ -95,14 +98,24 @@ async def test_access_log_cursor_pagination_is_complete_and_unduplicated(client,
         # writer (tests included) must satisfy the per-patient chain_seq.
         from app.api._audit import append_access_log
 
-        for i in range(7):
+        for i, action in enumerate(
+            (
+                "grant",
+                "revoke",
+                "read_entries",
+                "read_insights",
+                "read_notes",
+                "write_note",
+                "rewrap",
+            )
+        ):
             await append_access_log(
                 session,
                 actor_id=patient.user_id,
                 actor_role="user",
                 user_id=patient.user_id,
-                action="grant",
-                at=base - timedelta(seconds=10 - i),
+                action=action,
+                at=base if same_timestamp else base - timedelta(seconds=10 - i),
             )
         await session.commit()
 
@@ -112,12 +125,13 @@ async def test_access_log_cursor_pagination_is_complete_and_unduplicated(client,
         params = {"limit": 2} | ({"cursor": cursor} if cursor else {})
         page = await client.get("/api/account/access-log", headers=patient.headers, params=params)
         assert page.status_code == 200
-        seen.extend(f"{row['at']}|grant" for row in page.json())
+        seen.extend(f"{row['at']}|{row['action']}" for row in page.json())
         cursor = page.headers.get("X-Next-Cursor")
         if not cursor:
             break
     # Registration genesis plus seven seeded grants, every row exactly once.
     assert len(seen) == 8
+    assert len(set(seen)) == 8
 
     bad = await client.get(
         "/api/account/access-log", headers=patient.headers, params={"cursor": "garbage"}
@@ -158,3 +172,29 @@ async def test_therapist_access_log_rejects_patient_tokens(client):
     denied = await client.get("/api/therapist/access-log", headers=patient.headers)
     assert denied.status_code == 403
     assert denied.json()["code"] == "forbidden"
+
+
+async def test_therapist_access_log_excludes_another_therapists_actions(client):
+    left = TherapistEmulator("alog-owner-left", "deep-password")
+    right = TherapistEmulator("alog-owner-right", "deep-password")
+    await left.register(client)
+    await right.register(client)
+    own_patient = ClientEmulator("alog-owner-patient", "deep-password")
+    other_patient = ClientEmulator("alog-other-patient", "deep-password")
+    await own_patient.register(client)
+    await other_patient.register(client)
+    await _grant(client, own_patient, left)
+    await _grant(client, other_patient, right)
+    for therapist, patient in ((left, own_patient), (right, other_patient)):
+        assert (
+            await client.get(
+                f"/api/therapist/patients/{patient.user_id}/entries", headers=therapist.headers
+            )
+        ).status_code == 200
+
+    response = await client.get("/api/therapist/access-log", headers=left.headers)
+    assert response.status_code == 200
+    rows = response.json()
+    reads = [row for row in rows if row["action"] == "read_entries"]
+    assert [row["patient_name"] for row in reads] == [own_patient.username]
+    assert all(row["patient_name"] != other_patient.username for row in rows)

@@ -1474,3 +1474,48 @@ async def test_revoke_clears_the_summary(client):
     assert row["summary_blob"] is None
     assert row["summary_eph_pub"] is None
     assert row["summary_updated_at"] is None
+
+
+@pytest.mark.parametrize("expires_before_burn", [False, True])
+async def test_pairing_expiry_crossing_after_live_lookup_is_enforced_at_atomic_burn(
+    client, app, monkeypatch, expires_before_burn
+):
+    """A slow grant can cross expiry after its valid pre-check, before UPDATE."""
+    from app.api import consents
+
+    therapist = TherapistEmulator("expiry-race-therapist", "synthetic password", "Synthetic")
+    await therapist.register(client)
+    patient = ClientEmulator("expiry-race-patient", "synthetic password")
+    await patient.register(client)
+    code = await therapist.create_pairing_code(client)
+    clock = utcnow()
+    original_live_code = consents._live_code
+    lookups = 0
+    code_id = None
+
+    async def lookup_then_time_passes(*args, **kwargs):
+        nonlocal clock, lookups, code_id
+        row = await original_live_code(*args, **kwargs)
+        assert row is not None
+        lookups += 1
+        code_id = row.id
+        if lookups == 2:
+            # Both lookups authenticated an unexpired code. Model elapsed
+            # time across the later grant queries without sleeping.
+            clock = (
+                row.expires_at
+                if expires_before_burn
+                else row.expires_at - timedelta(microseconds=1)
+            )
+        return row
+
+    monkeypatch.setattr(consents, "utcnow", lambda: clock)
+    monkeypatch.setattr(consents, "_live_code", lookup_then_time_passes)
+    response = await patient.grant_consent(client, code, therapist.wrap_pub_key, therapist.user_id)
+    assert lookups == 2
+    assert response["status"] == (404 if expires_before_burn else 201), response
+    async with app.state.sessionmaker() as session:
+        row = await session.get(PairingCode, code_id)
+        assert (row.consumed_at is None) is expires_before_burn
+        granted = await session.scalar(select(Consent.id).where(Consent.user_id == patient.user_id))
+        assert (granted is None) is expires_before_burn

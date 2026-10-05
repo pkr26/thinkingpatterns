@@ -39,6 +39,7 @@ export const recorderControls = {
   stop: vi.fn(async (): Promise<void> => {
     fakeRecorderStatus.isRecording = false;
   }),
+  release: vi.fn((): void => {}),
 };
 
 export type FakeRecorder = typeof recorderControls & {
@@ -62,6 +63,13 @@ export const useAudioRecorderState = vi.fn((recorder: FakeRecorder): FakeRecorde
 );
 
 export const AudioModule = {
+  AudioRecorder: vi.fn(function AudioRecorder(_options: unknown): FakeRecorder {
+    return {
+      ...recorderControls,
+      get uri(): string | null { return fakeRecorderStatus.url; },
+      getStatus: (): FakeRecorderStatus => ({ ...fakeRecorderStatus }),
+    };
+  }),
   requestRecordingPermissionsAsync: vi.fn(async () => ({ granted: true })),
   setAudioModeAsync: vi.fn(async () => undefined),
 };
@@ -89,6 +97,7 @@ export function __resetAudioMock(): void {
     useAudioRecorder,
     useAudioRecorderState,
     AudioModule.requestRecordingPermissionsAsync,
+    AudioModule.AudioRecorder,
     AudioModule.setAudioModeAsync,
     createAudioPlayer,
   ]) mock.mockClear();
@@ -101,6 +110,7 @@ export function __resetAudioMock(): void {
   recorderControls.stop.mockImplementation(async () => {
     fakeRecorderStatus.isRecording = false;
   });
+  recorderControls.release.mockImplementation(() => {});
   playerControls.play.mockImplementation(() => {});
   playerControls.release.mockImplementation(() => {});
   AudioModule.requestRecordingPermissionsAsync.mockImplementation(async () => ({ granted: true }));

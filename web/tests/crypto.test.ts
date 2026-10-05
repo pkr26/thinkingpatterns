@@ -410,3 +410,35 @@ describe("authenticated runtime payload schemas",()=>{
   const blob=await encryptWithFixedNonce(key,new TextEncoder().encode(JSON.stringify(payload)),new Uint8Array(12),buildAad("insights","schema-user","patterns"));await expect(decryptInsights(key,"schema-user",toBase64(blob))).rejects.toThrow("pattern label");
  });
 });
+
+
+describe("authenticated mood summary coverage", () => {
+  const cases = [
+    { avg_sentiment: null, mood_summary: { observations: 0, explicit_mood: 0, text_estimates: 0, excluded_entries: 35, source: "unavailable" } },
+    { avg_sentiment: 1, mood_summary: { observations: 1, explicit_mood: 1, text_estimates: 0, excluded_entries: 34, source: "explicit_mood" } },
+    { avg_sentiment: 0.5, mood_summary: { observations: 2, explicit_mood: 1, text_estimates: 1, excluded_entries: 33, source: "mixed" } },
+  ];
+  async function seal(stats: unknown): Promise<string> {
+    const key = new Uint8Array(32).fill(7);
+    const payload = new TextEncoder().encode(JSON.stringify({ v: 2, stats }));
+    return toBase64(await encryptWithFixedNonce(key, payload, new Uint8Array(12), buildAad("insights", "coverage-owner", "patterns")));
+  }
+  it.each(cases)("accepts honest coverage $mood_summary.source", async stats => {
+    const payload = { total_entries: 35, patterns: [], ...stats };
+    await expect(decryptInsights(new Uint8Array(32).fill(7), "coverage-owner", await seal(payload))).resolves.toMatchObject({ stats: payload });
+  });
+  it.each([
+    { ...cases[0], avg_sentiment: 0 },
+    { ...cases[1], mood_summary: { ...cases[1]!.mood_summary, observations: -1 } },
+    { ...cases[1], mood_summary: { ...cases[1]!.mood_summary, text_estimates: 1 } },
+    { ...cases[1], mood_summary: { ...cases[1]!.mood_summary, excluded_entries: 35 } },
+    { ...cases[1], mood_summary: { ...cases[1]!.mood_summary, source: "text_estimate" } },
+    { ...cases[1], mood_summary: { ...cases[1]!.mood_summary, explicit_mood: 0.5 } },
+    { ...cases[1], mood_summary: { ...cases[1]!.mood_summary, excluded_entries: 10000001 } },
+  ])("rejects contradictory or unbounded authenticated coverage %#", async stats => {
+    await expect(decryptInsights(new Uint8Array(32).fill(7), "coverage-owner", await seal({ total_entries: 35, patterns: [], ...stats }))).rejects.toThrow();
+  });
+  it("keeps older insights without coverage readable", async () => {
+    await expect(decryptInsights(new Uint8Array(32).fill(7), "coverage-owner", await seal({ avg_sentiment: 0.2, patterns: [] }))).resolves.toMatchObject({ stats: { avg_sentiment: 0.2 } });
+  });
+});

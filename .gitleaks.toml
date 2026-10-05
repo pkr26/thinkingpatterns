@@ -141,3 +141,13 @@ paths = [
 # content is `export NODE_BINARY=$(command -v node)` (verified 2026-09-26):
 # no secret, no machine-specific value. The redteam G3 probe and gitleaks
 # flag the FILENAME pattern (.env), not any finding inside it.
+
+[[allowlists]]
+# OPS-04: this exact historical public value hashes the app.api.therapist
+# constant table in MODULE_CONSTANTS_DIGESTS; it is not an authentication key.
+# Match the full public assignment, never a test-directory path or arbitrary
+# digest shape: pinned v8.30.1 path shortcuts would hide adjacent secrets in
+# no-git/staged scans. A changed digest needs separate review, not this rule.
+description = "exact public therapist-module constant-table digest assignment"
+regexTarget = "match"
+regexes = ['''^app\.api\.therapist": "a3b747d3c02e9468"$''']

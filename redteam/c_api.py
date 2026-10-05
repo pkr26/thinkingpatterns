@@ -275,14 +275,18 @@ async def c3_logic_abuse() -> None:
         from app.models import Entry
 
         async with app2.state.sessionmaker() as s:
-            s.add(Entry(user_id=u["user_id"], client_entry_id="e-evil",
+            from app.security.entry_guard import seal_entry_guard
+
+            row = Entry(user_id=u["user_id"], client_entry_id="e-evil",
                         blob=base64.b64decode(blob),
                         entry_date=d_.today(),
-                        received_at=datetime.now(tz=timezone.utc)))
+                        received_at=datetime.now(tz=timezone.utc))
+            seal_entry_guard(row, app2.state.settings, v2_bound=False)
+            s.add(row)
             await s.commit()
         t5 = await session_for(u["data_key"])
         r5 = await recompute(t5)
-        verdict("C3.hostile-inner-payload", "BLOCKED" if r5.status_code == 400 else "FINDING",
+        verdict("C3.hostile-inner-payload", "BLOCKED" if r5.status_code == 400 and r5.json().get("code") == "entry_payload_malformed" else "FINDING",
                 f"AEAD-valid payload with NaN-sentiment/year-3000 inner date -> "
                 f"{r5.status_code} {r5.json().get('code')} (rejected, not a 500, account "
                 f"not bricked)")

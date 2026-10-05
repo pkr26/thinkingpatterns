@@ -622,7 +622,7 @@ export const en: Record<string, string> = {
   "insights.ev.rhythmValue": "gap spread {recent} vs your earlier {earlier} days",
   "insights.ev.method": "Method",
   "insights.tech.significance": "Significance",
-  "insights.tech.significanceValue": "p = {value} (corrected for running many tests)",
+  "insights.tech.significanceValue": "p = {value} (unadjusted)",
   "insights.tech.cohensD": "Cohen's d",
   "insights.tech.negativity": "Negativity score",
   "insights.tech.absolutist": "Absolutist-word density",

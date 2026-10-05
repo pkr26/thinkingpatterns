@@ -94,6 +94,12 @@ from ..security.enclave import (
     SecureProcessingContext,
     zeroize,
 )
+from ..security.entry_guard import (
+    guard_values,
+    guarded_entry_aads,
+    seal_entry_guard,
+    validate_entry_guard,
+)
 from ..services import brain, questions, threshold
 from ..services.patterns import JournalEntry
 from ..services.threshold import Phase
@@ -386,7 +392,11 @@ class _RekeyMismatch(Exception):
 
 
 def _rekey_entry_batch(
-    old_key: bytearray, new_key: bytearray, rows: list[tuple[str, str, int, bytes]], user_id: str
+    old_key: bytearray,
+    new_key: bytearray,
+    rows: list[tuple[str, str, int, bytes]],
+    user_id: str,
+    v2_bound: dict[str, bool] | None = None,
 ) -> tuple[list[tuple[str, bytes]], int]:
     """Re-encrypt one batch of entry rows in a worker thread (pure values).
 
@@ -405,7 +415,12 @@ def _rekey_entry_batch(
     out: list[tuple[str, bytes]] = []
     already_new = 0
     for row_id, client_entry_id, version, blob in rows:
-        candidates = crypto.entry_aad_candidates(user_id, client_entry_id, version)
+        modern_aad = crypto.entry_aad_v2(user_id, client_entry_id, version)
+        candidates = (
+            (modern_aad,)
+            if v2_bound and v2_bound[row_id]
+            else crypto.entry_aad_candidates(user_id, client_entry_id, version)
+        )
         try:
             plain_buf = SecureBuffer(_rekey_decrypt(old_key, blob, candidates))
         except TamperError:
@@ -413,8 +428,17 @@ def _rekey_entry_batch(
                 probe = SecureBuffer(_rekey_decrypt(new_key, blob, candidates))
             except TamperError as exc:
                 raise _RekeyMismatch() from exc
-            probe.zeroize()
-            already_new += 1
+            try:
+                try:
+                    modern_probe = SecureBuffer(crypto.decrypt(new_key, blob, modern_aad))
+                except TamperError:
+                    # An interrupted legacy generation still needs its v2 upgrade.
+                    out.append((row_id, crypto.encrypt(new_key, bytes(probe.data), modern_aad)))
+                else:
+                    modern_probe.zeroize()
+                    already_new += 1
+            finally:
+                probe.zeroize()
             continue
         # Every rekeyed entry is upgraded to the v2 (version-bound) AAD.
         try:
@@ -501,9 +525,14 @@ async def _preflight_legacy_rotation(
             for row in rows:
                 aad: bytes | tuple[bytes, ...]
                 if isinstance(row, Entry):
-                    aad = crypto.entry_aad_candidates(
-                        user_id, row.client_entry_id, row.content_version
-                    )
+                    try:
+                        aad = guarded_entry_aads(row, settings)
+                    except TamperError:
+                        raise ApiError(
+                            status_code=400,
+                            detail="entry blob failed authentication",
+                            code="entry_blob_invalid",
+                        ) from None
                     blob = bytes(row.blob)
                 elif isinstance(row, Insight):
                     aad = (
@@ -984,28 +1013,35 @@ async def rekey(
                 while True:
                     async with sessionmaker() as session:
                         query = (
-                            select(
-                                Entry.id,
-                                Entry.client_entry_id,
-                                Entry.content_version,
-                                Entry.blob,
-                            )
+                            select(Entry)
                             .where(Entry.user_id == fresh_user.id)
                             .order_by(Entry.id.asc())
                             .limit(REKEY_BATCH_ROWS)
                         )
                         if entry_cursor is not None:
                             query = query.where(Entry.id > entry_cursor)
+                        guard_rows = list((await session.scalars(query)).all())
+                        try:
+                            bound = {
+                                row.id: validate_entry_guard(row, request.app.state.settings)
+                                for row in guard_rows
+                            }
+                        except TamperError:
+                            raise ApiError(
+                                status_code=400,
+                                detail="entry blob failed authentication",
+                                code="entry_blob_invalid",
+                            ) from None
                         rows = [
-                            (row_id, cid, int(version), bytes(blob))
-                            for row_id, cid, version, blob in (await session.execute(query)).all()
+                            (row.id, row.client_entry_id, row.content_version, bytes(row.blob))
+                            for row in guard_rows
                         ]
                     if not rows:
                         break
                     entry_cursor = rows[-1][0]
 
                     def _reencrypt(batch: list[tuple[str, str, int, bytes]] = rows):
-                        return _rekey_entry_batch(old_key, new_key, batch, fresh_user.id)
+                        return _rekey_entry_batch(old_key, new_key, batch, fresh_user.id, bound)
 
                     reencrypted, already_new = await anyio.to_thread.run_sync(_reencrypt)
                     entries_done += len(reencrypted) + already_new
@@ -1016,14 +1052,19 @@ async def rekey(
                     # never claim progress the blobs do not have, and a
                     # crash between batches resumes exactly here.
                     async with sessionmaker() as session:
-                        if reencrypted:
-                            await session.execute(
-                                update(Entry),
-                                [
-                                    {"id": row_id, "blob": new_blob}
-                                    for row_id, new_blob in reencrypted
-                                ],
+                        rewritten = dict(reencrypted)
+                        writes = []
+                        for row in guard_rows:
+                            row.blob = rewritten.get(row.id, bytes(row.blob))
+                            seal_entry_guard(row, request.app.state.settings, v2_bound=True)
+                            writes.append(
+                                {
+                                    "id": row.id,
+                                    "blob": bytes(row.blob),
+                                    **guard_values(row),
+                                }
                             )
+                        await session.execute(update(Entry), writes)
                         await session.execute(
                             update(RekeyJournal)
                             .where(RekeyJournal.id == journal_id)
@@ -1928,19 +1969,16 @@ async def recompute(
                         .limit(1)
                     )
                 ).scalar_one_or_none() is not None
-                entry_items = [
-                    (
-                        # M-2: fresh blobs bind content_version in their AAD
-                        # (v2); legacy rows keep the three-part binding. The
-                        # enclave tries v2 first and falls back to v1, so a
-                        # corpus of mixed generations decrypts unchanged.
-                        crypto.entry_aad_candidates(
-                            row.user_id, row.client_entry_id, row.content_version
-                        ),
-                        bytes(row.blob),
-                    )
-                    for row in rows
-                ]
+                try:
+                    entry_items = [
+                        (guarded_entry_aads(row, settings), bytes(row.blob)) for row in rows
+                    ]
+                except TamperError:
+                    raise ApiError(
+                        status_code=400,
+                        detail="entry blob failed authentication",
+                        code="entry_blob_invalid",
+                    ) from None
                 state_item = (
                     (crypto.build_aad("insights", user.id, KIND_BRAIN), bytes(prior.blob))
                     if prior
@@ -2019,6 +2057,8 @@ async def recompute(
             # worker) in the same FIFO pool. No DB session is open here.
             analyze_limiter = getattr(request.app.state, "analyze_limiter", None)
 
+            observed_v2: set[str] = set()
+
             def run_encrypted(items, analyze_fn):
                 # Construct the processing context INSIDE the worker callable
                 # (2026-09-20 audit fix L-10): SecureProcessingContext.__init__
@@ -2030,7 +2070,16 @@ async def recompute(
                 # running — stranding its copy until GC. As a worker-local
                 # construction, a queued-then-cancelled request never mints
                 # the copy at all.
-                return SecureProcessingContext(data_key).run(items, analyze_fn)
+                context = SecureProcessingContext(data_key)
+                answer = context.run(items, analyze_fn)
+                observed_v2.clear()
+                observed_v2.update(
+                    row.id
+                    for row, aad in zip(rows, context.authenticated_aads)
+                    if aad
+                    == crypto.entry_aad_v2(row.user_id, row.client_entry_id, row.content_version)
+                )
+                return answer
 
             try:
                 # Decryption + analysis is synchronous, potentially slow CPU (or an
@@ -2237,6 +2286,13 @@ async def recompute(
             # analysis and encryption are done. Nothing here decrypts.
             async with sessionmaker() as session:
                 try:
+                    guard_writes = []
+                    for row in rows:
+                        if row.id in observed_v2:
+                            seal_entry_guard(row, settings, v2_bound=True)
+                            guard_writes.append({"id": row.id, **guard_values(row)})
+                    if guard_writes:
+                        await session.execute(update(Entry), guard_writes)
                     await _replace_insight(
                         session, user.id, "patterns", None, blob, state_seq=state_seq
                     )

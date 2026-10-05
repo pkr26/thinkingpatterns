@@ -8,6 +8,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, listEntriesWalk } from "../api/client";
+import { usePatientOperation } from "../patientOperation";
 import { zeroize } from "../crypto/core";
 import { decryptEntry, encryptEntry, type EntryPayload, type VoiceFields } from "../crypto/patient";
 import { playAttachment, type PlayingAudio } from "../audio/player";
@@ -101,6 +102,7 @@ function recordingDaysLeft(expiresAt: string): number {
 }
 
 export function HistoryView(): React.JSX.Element {
+  const beginOperation = usePatientOperation();
   const [entries, setEntries] = useState<DecodedEntry[] | null>(null);
   const [rolledBack, setRolledBack] = useState<string[]>([]);
   const [error, setError] = useState("");
@@ -201,8 +203,9 @@ export function HistoryView(): React.JSX.Element {
   const load = useCallback(async (): Promise<void> => {
     const run = generation.current + 1;
     generation.current = run;
-    const owner = vault.ownerUserId();
-    if (!owner) {
+    const operation = beginOperation();
+    const owner = operation?.owner;
+    if (!owner || !operation) {
       setError(t("common.sessionLocked"));
       return;
     }
@@ -216,15 +219,16 @@ export function HistoryView(): React.JSX.Element {
       if (!vault.isUnlocked()) return;
       const keys = vault.get();
       const listed = await listEntriesWalk();
-      if (generation.current !== run) return;
+      if (generation.current !== run || !operation.current()) return;
       const bindings = await entryV2Bindings(owner, keys.dataKey);
+      if (!operation.current()) return;
       const newlyBound = new Set<string>();
       const decoded: DecodedEntry[] = [];
       const tampered: string[] = [];
       for (const row of listed) {
         if (decoded.length > 0 && decoded.length % DECRYPT_YIELD_EVERY === 0) {
           await yieldToHost();
-          if (generation.current !== run) return;
+          if (generation.current !== run || !operation.current()) return;
         }
         // 2026-09-28 audit (LOW): re-check the lock inside the per-row
         // loop — keys.dataKey is the vault's SHARED buffer, and a lock
@@ -232,11 +236,7 @@ export function HistoryView(): React.JSX.Element {
         // fail GCM and be COUNTED TAMPERED. A locked vault stops the
         // walk with the honest locked message instead; the rows already
         // decrypted still render.
-        if (!vault.isUnlocked()) {
-          setEntries(decoded);
-          setError(t("common.sessionLocked"));
-          return;
-        }
+        if (!operation.current()) return;
         try {
           const payload = await decryptEntry(
             keys.dataKey,
@@ -265,17 +265,19 @@ export function HistoryView(): React.JSX.Element {
           tampered.push(row.client_entry_id);
         }
       }
+      if (!operation.current()) return;
       await noteV2BoundBatch(owner,keys.dataKey,newlyBound);
+      if (!operation.current()) return;
       const observation = await observeEntryVersions(
         owner,
         keys.dataKey,
         decoded.map((entry) => ({ clientEntryId: entry.clientEntryId, contentVersion: entry.contentVersion })),
       );
-      if (generation.current !== run) return;
+      if (generation.current !== run || !operation.current()) return;
       // The mood-log fallback is disposable metadata: a failed read leaves
       // the calendar on payload picks alone, never blocks the list.
       const logDays = await recentMoods(keys.dataKey, owner, 400).catch(() => []);
-      if (generation.current !== run) return;
+      if (generation.current !== run || !operation.current()) return;
       const moods: Record<string, number> = {};
       for (const day of logDays) moods[day.date] = day.value;
       setLogMoods(moods);
@@ -286,7 +288,7 @@ export function HistoryView(): React.JSX.Element {
         setError(t(tampered.length + rolled.length === 1 ? "history.hiddenOne" : "history.hiddenMany", { count: tampered.length + rolled.length }));
       }
     } catch (err) {
-      if (generation.current !== run) return;
+      if (generation.current !== run || !operation.current()) return;
       // Every terminal failure leaves the screen honest — never a permanent
       // "Loading…" (audit 2026-09-25: only status-0 used to surface).
       setEntries([]);
@@ -298,7 +300,7 @@ export function HistoryView(): React.JSX.Element {
         setError(displayError(err, t("history.loadFailed")));
       }
     }
-  }, []);
+  }, [beginOperation]);
 
   useEffect(() => {
     if (vault.isUnlocked()) void load();
@@ -371,11 +373,12 @@ export function HistoryView(): React.JSX.Element {
       setError(t("entry.tooLongBody", { max: MAX_ENTRY_CHARS.toLocaleString(dateLocaleTag()) }));
       return;
     }
-    const owner = vault.ownerUserId();
+    const operation = beginOperation();
+    const owner = operation?.owner;
     // Guarded like load() (audit 2026-09-26 LOW): a lock that raced the
     // press is a quiet no-op, never vault.get()'s throw.
-    if (!owner || !vault.isUnlocked()) return;
-    const keys = vault.get();
+    if (!owner || !operation) return;
+    const keys = operation.keys;
     // 2026-10-01 audit L-4: snapshot the data key BEFORE the awaits below
     // (translate/encrypt/upload) — vault.get()'s buffers are SHARED, and a
     // lock landing mid-await zeroizes them (the M-3/P1/FE-4 idiom every
@@ -400,6 +403,7 @@ export function HistoryView(): React.JSX.Element {
         if (target.payload.english_text != null && editText.trim() !== target.payload.text.trim()) {
           try {
             const translated = await api.translateText(editText, target.payload.transcript_lang ?? null);
+            if (!operation.current()) return;
             englishForSave = translated.english_text;
           } catch {
             englishForSave = null;
@@ -411,6 +415,7 @@ export function HistoryView(): React.JSX.Element {
           englishText: englishForSave,
         };
       }
+      if (!operation.current()) return;
       const { blobB64 } = await encryptEntry(
         dataKey,
         owner,
@@ -428,10 +433,13 @@ export function HistoryView(): React.JSX.Element {
         voiceFields,
         target.payload,
       );
+      if (!operation.current()) return;
       await api.updateEntry(target.clientEntryId, blobB64, target.entryDate, nextVersion);
+      if (!operation.current()) return;
       setEditing(null);
       setConflict(null);
       await load();
+      if (!operation.current()) return;
       // H-6 (2026-09-28 audit, mobile HistoryScreen parity): the EDIT path
       // runs the same on-device crisis detection as a new entry. The server
       // only ever sees ciphertext, so this detector is the only net for a
@@ -443,18 +451,23 @@ export function HistoryView(): React.JSX.Element {
       if (detectCrisisLanguage(editText) && !crisisPrompt) {
         const today = localDateISO();
         const shownToday = await crisisDialogShownOn(owner, today).catch(() => false);
+        if (!operation.current()) return;
         if (!shownToday) {
           await recordCrisisDialogShown(owner, today).catch(() => undefined);
+          if (!operation.current()) return;
           setCrisisPrompt(true);
         }
       }
     } catch (err) {
+      if (!operation.current()) return;
       if (err instanceof ApiError && err.code === "version_conflict") {
         // Another device edited first. Refetch their version and show both
         // texts — the user decides; nothing is silently overwritten.
         try {
           const fresh = await api.getEntry(target.clientEntryId);
+          if (!operation.current()) return;
           const freshPayload = await decryptEntry(dataKey, owner, fresh.client_entry_id, fresh.blob, fresh.content_version ?? undefined);
+          if (!operation.current()) return;
           setConflict({
             theirs: {
               clientEntryId: fresh.client_entry_id,
@@ -466,7 +479,7 @@ export function HistoryView(): React.JSX.Element {
           });
           setEditing(null);
         } catch {
-          setError(t("history.conflictReloadFailed"));
+          if (operation.current()) setError(t("history.conflictReloadFailed"));
         }
       } else if (err instanceof ApiError && err.status === 404) {
         // Deleted on another device (S-4): the pending edit is quarantined
@@ -481,7 +494,7 @@ export function HistoryView(): React.JSX.Element {
       }
     } finally {
       zeroize(dataKey);
-      setBusy(false);
+      if (operation.current()) setBusy(false);
     }
   };
 
@@ -492,8 +505,9 @@ export function HistoryView(): React.JSX.Element {
   };
 
   const remove = async (entry: DecodedEntry): Promise<void> => {
-    const owner = vault.ownerUserId();
-    if (!owner || !vault.isUnlocked()) return; // guarded like submitEdit
+    const operation = beginOperation();
+    const owner = operation?.owner;
+    if (!owner || !operation) return; // guarded like submitEdit
     setBusy(true);
     // independent audit 2026-09-27 (P2): snapshot the data key BEFORE the
     // delete await — the old code reused the vault's SHARED buffer after
@@ -508,17 +522,19 @@ export function HistoryView(): React.JSX.Element {
       // hygiene (version mark, mood day) is disposable metadata — quietly
       // skipped, never an unhandled rejection, never a write under a dead
       // session.
-      if (vault.isUnlocked()) {
+      if (operation.current()) {
         await forgetEntryVersion(owner, dataKey, entry.clientEntryId);
+        if (!operation.current()) return;
         await removeMoodDay(dataKey, owner, entry.entryDate).catch(() => undefined);
       }
+      if (!operation.current()) return;
       setArmedDelete(null);
       await load();
     } catch (err) {
-      setError(displayError(err, t("history.deleteFailed")));
+      if (operation.current()) setError(displayError(err, t("history.deleteFailed")));
     } finally {
       zeroize(dataKey);
-      setBusy(false);
+      if (operation.current()) setBusy(false);
     }
   };
 

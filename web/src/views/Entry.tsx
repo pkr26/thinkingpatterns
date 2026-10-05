@@ -7,6 +7,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "../api/client";
+import { usePatientOperation, type PatientOperation } from "../patientOperation";
 import { displayError } from "../errors";
 import { encryptAudio, encryptEntry, timeOfDayBucket } from "../crypto/patient";
 import { toBase64, type Bytes } from "../crypto/core";
@@ -64,7 +65,11 @@ export function EntryView(props: {
    *  this — its copy promises "resources below" while nothing follows. */
   onCrisis?: () => void;
 }): React.JSX.Element {
-  const [text, setText] = useState("");
+  const beginOperation = usePatientOperation();
+  const [text, setTextState] = useState("");
+  const textRevision = useRef(0);
+  const setText = (value: string): void => { textRevision.current++; setTextState(value); };
+  const [pendingTranscript, setPendingTranscript] = useState<string | null>(null);
   const [moodPick, setMoodPick] = useState<number | null>(null);
   const [energyPick, setEnergyPick] = useState<number | null>(null);
   const [sleepPick, setSleepPick] = useState<number | null>(null);
@@ -101,12 +106,14 @@ export function EntryView(props: {
    *  consent pre-check runs BEFORE any take is recorded: a 403 after the
    *  take used to record the user's voice and then lose it. */
   const micPress = async (): Promise<void> => {
-    if (micBusy) return;
+    const operation = beginOperation();
+    if (micBusy || !operation) return;
     setMicBusy(true);
     try {
       if (audioAvailable === null) {
         try {
           const meta = await api.meta();
+          if (!operation.current()) return;
           setAudioAvailable(meta.audio_available === true);
           if (meta.audio_available !== true) {
             setVoiceError(t("entry.voiceUnavailable"));
@@ -115,6 +122,7 @@ export function EntryView(props: {
         } catch {
           // Transient failure — NOT a definitive answer: leave the state
           // unknown so the next press retries instead of hiding the mic.
+          if (!operation.current()) return;
           setVoiceError(t("entry.voiceCheckFailed"));
           return;
         }
@@ -126,17 +134,19 @@ export function EntryView(props: {
       // consent would only die to a 403 AFTER the take exists.
       try {
         const consent = await api.getVoiceConsent();
-        if (!consent.enabled) {
+        if (!operation.current()) return;
+        if (consent.enabled !== true || consent.active_for_current_policy !== true) {
           setVoiceError(t("entry.voiceConsentNeeded"));
           return;
         }
       } catch {
+        if (!operation.current()) return;
         setVoiceError(t("entry.voiceCheckFailed"));
         return;
       }
       await recorder.start();
     } finally {
-      setMicBusy(false);
+      if (operation.current()) setMicBusy(false);
     }
   };
 
@@ -159,8 +169,9 @@ export function EntryView(props: {
   const [draftStatus,setDraftStatus] = useState<string | null>(null);
   useEffect(() => {
     if (!draftHydrated.current || !userId || !vault.isUnlocked()) return;
+    const operation = beginOperation();
     const timer = setTimeout(() => {
-      if (!vault.isUnlocked()) return;
+      if (!operation?.current()) return;
       const key = new Uint8Array(vault.get().dataKey);
       void saveActiveDraft(key,userId,draftRef.current).then(() => setDraftStatus(t("entry.draftSaved"))).catch(err => setDraftStatus(displayError(err, t("entry.draftFailed")))).finally(() => key.fill(0));
     },300);
@@ -234,18 +245,22 @@ export function EntryView(props: {
     const take = recorder.recording;
     if (!take || lastTranscribedRef.current === take.blob) return;
     lastTranscribedRef.current = take.blob;
+    const operation = beginOperation();
+    if (!operation) return;
+    const revision = textRevision.current;
     const token = ++transcribeTokenRef.current;
+    const current = () => operation.current() && transcribeTokenRef.current === token;
     void (async () => {
       setTranscribing(true);
       setVoiceError("");
       try {
         const plain = new Uint8Array(await take.blob.arrayBuffer());
-        const result = await api.transcribeAudio(
-          toBase64(plain),
-          take.normalizedMime,
-          take.durationSeconds,
-        );
-        if (transcribeTokenRef.current !== token) return;
+        let result;
+        try {
+          if (!current()) return;
+          result = await api.transcribeAudio(toBase64(plain), take.normalizedMime, take.durationSeconds);
+        } finally { zeroize(plain); }
+        if (!current()) return;
         setVoice({
           audioBlob: take.blob,
           normalizedMime: take.normalizedMime,
@@ -260,9 +275,10 @@ export function EntryView(props: {
         });
         // The transcript lands in the ordinary editor: the user edits it
         // like any text, and the check-in channels apply as usual.
-        setText(result.original_text);
+        if (textRevision.current === revision) setText(result.original_text);
+        else setPendingTranscript(result.original_text);
       } catch (err) {
-        if (transcribeTokenRef.current !== token) return;
+        if (!current()) return;
         if (err instanceof ApiError && err.code === "voice_consent_required") {
           setVoiceError(t("entry.voiceConsentNeeded"));
         } else if (err instanceof ApiError && err.code === "stt_unconfigured") {
@@ -275,7 +291,7 @@ export function EntryView(props: {
           setVoiceError(t("entry.voiceTranscribeFailed"));
         }
       } finally {
-        if (transcribeTokenRef.current === token) setTranscribing(false);
+        if (current()) setTranscribing(false);
       }
     })();
   }, [recorder.recording]);
@@ -298,6 +314,9 @@ export function EntryView(props: {
   }, [voice?.audioBlob]);
 
   const discardVoice = (): void => {
+    transcribeTokenRef.current++;
+    setTranscribing(false);
+    setPendingTranscript(null);
     setVoice(null);
     setVoiceError("");
     recorder.reset();
@@ -311,13 +330,16 @@ export function EntryView(props: {
     owner: string,
     clientEntryId: string,
     session: VoiceSession,
+    operation: PatientOperation,
   ): Promise<boolean> => {
     if (!session.audioBlob || !session.keepAudio) return true;
     const plain = new Uint8Array(await session.audioBlob.arrayBuffer());
     try {
+      if (!operation.current()) return false;
       const { blobB64 } = await encryptAudio(dataKey, owner, clientEntryId, plain);
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
+          if (!operation.current()) return false;
           await api.uploadAudioAttachment(
             clientEntryId,
             blobB64,
@@ -338,6 +360,8 @@ export function EntryView(props: {
   };
 
   const save = async (): Promise<void> => {
+    if (pendingTranscript !== null) return;
+    const operation = beginOperation();
     if (!draftReady) { setError(t("entry.draftFailed")); return; }
     if (!text.trim() && moodPick === null && energyPick === null && sleepPick === null && tags.length === 0) {
       setError(t("entry.empty"));
@@ -352,7 +376,7 @@ export function EntryView(props: {
       return;
     }
     const owner = vault.ownerUserId();
-    if (!owner || !vault.isUnlocked()) {
+    if (!owner || !operation) {
       // The owner/isUnlocked re-check BEFORE the key fetch (audit 2026-09-26
       // LOW): a lock that landed between the last render and this press
       // used to hit vault.get()'s throw as an unhandled rejection — now it
@@ -371,8 +395,10 @@ export function EntryView(props: {
     // so a reload fails toward showing.
     if (detectCrisisLanguage(text) && !crisisPrompt) {
       const shownToday = await crisisDialogShownOn(owner, date).catch(() => false);
+      if (!operation.current()) return;
       if (!shownToday) {
         await recordCrisisDialogShown(owner, date).catch(() => undefined);
+        if (!operation.current()) return;
         setCrisisPrompt(true);
       }
       // Already acknowledged today (or the stamp is unreadable): the save
@@ -384,8 +410,8 @@ export function EntryView(props: {
       // Immediate re-check inside the try (audit 2026-09-26 LOW, the
       // Patterns guard pattern): a lock during the crisis-tier awaits must
       // not turn vault.get() into an unhandled rejection.
-      if (!vault.isUnlocked()) return;
-      const keys = vault.get();
+      if (!operation.current()) return;
+      const keys = operation.keys;
       const entryDate = date; // WEB_PLAN D-7: creation is today-only
       const clientEntryId = newClientEntryId(entryDate);
       const createdAt = new Date().toISOString();
@@ -401,6 +427,7 @@ export function EntryView(props: {
       dataKey.set(keys.dataKey);
       try {
         const writePermit=await kv.captureWritePermit(owner,dataKey);
+        if (!operation.current()) return;
         // Voice sessions keep english_text in sync with the SAVED text
         // (the v3 contract): an edited transcript re-translates before
         // encryption; a failed/offline re-translation degrades to null
@@ -409,6 +436,7 @@ export function EntryView(props: {
         if (voice && text.trim() !== voice.transcribedOriginal.trim()) {
           try {
             const translated = await api.translateText(text, voice.language);
+            if (!operation.current()) return;
             englishForSave = translated.english_text;
           } catch {
             englishForSave = null;
@@ -444,21 +472,20 @@ export function EntryView(props: {
         // but nothing more may be written this submit — abort honestly (the
         // draft is still on screen for a post-unlock re-save) instead of
         // recording the mood log under a dead key.
-        if (!vault.isUnlocked()) {
-          setError(t("common.sessionLocked"));
-          return;
-        }
+        if (!operation.current()) return;
         // The mood log is device-local metadata recorded on EVERY save
         // (mobile EntryScreen parity): the explicit pick wins, the quick
         // text estimate fills in when there is none.
         await recordMood(dataKey, owner, date, moodPick ?? sentimentScore(text, detectLanguage(text)), energyPick).catch(() => undefined);
 
+        if (!operation.current()) return;
         let result: SaveResult = "queued";
         if (isOnline()) {
           try {
             await api.createEntry(clientEntryId, blobB64, entryDate, 1);
             result = "sent";
           } catch {
+            if (!operation.current()) return;
             // EVERY failure while online parks the entry in the queue —
             // including a 409 (audit 2026-09-25): this id carries 72 random
             // bits, so a genuine duplicate is practically impossible, and an
@@ -471,6 +498,7 @@ export function EntryView(props: {
         } else {
           await enqueue({ userId: owner, clientEntryId, blobB64, entryDate },writePermit);
         }
+        if (!operation.current()) return;
         const unchanged = JSON.stringify(draftRef.current) === submitted;
         if (unchanged) {
           draftRef.current = { text: "",mood:null,energy:null,sleep:null,tags:[] };
@@ -488,7 +516,8 @@ export function EntryView(props: {
         // O-5); a dropped recording warns and never fails the save.
         if (voice) {
           const kept =
-            result === "sent" ? await uploadKeptAudio(dataKey, owner, clientEntryId, voice) : false;
+            result === "sent" ? await uploadKeptAudio(dataKey, owner, clientEntryId, voice, operation) : false;
+          if (!operation.current()) return;
           if (!kept && voice.keepAudio && voice.audioBlob) {
             setVoiceError(
               result === "queued" ? t("entry.voiceAudioQueuedNote") : t("entry.voiceAudioNotKept"),
@@ -500,14 +529,17 @@ export function EntryView(props: {
         // The entry is safe (server or ciphertext queue) — the sealed draft's
         // custody ends here (entryDraft.ts, audit 2026-09-26).
         if (unchanged && draftHydrated.current) await clearActiveDraft(owner,writePermit).catch(err => setDraftStatus(displayError(err, t("entry.draftFailed"))));
-        props.onSaved(result, date);
+        if (operation.current()) props.onSaved(result, date);
       } finally {
         zeroize(dataKey);
       }
     } catch (err) {
-      setError(displayError(err, t("entry.couldNotSave")));
+      if (operation.current()) setError(displayError(err, t("entry.couldNotSave")));
     } finally {
-      setBusy(false);
+      if (operation.viewCurrent()) {
+        setBusy(false);
+        if (!vault.isUnlocked()) setError(t("common.sessionLocked"));
+      }
     }
   };
 
@@ -648,6 +680,18 @@ export function EntryView(props: {
           </Card>
         )}
         {transcribing && <PillNote role="status" icon="info">{t("entry.voiceTranscribing")}</PillNote>}
+        {pendingTranscript !== null && (
+          <Card title={t("entry.transcriptChanged")} >
+            <Note>{pendingTranscript}</Note>
+            <Button label={t("entry.transcriptAdd")} onPress={() => {
+              const combined = `${text}${text ? "\n\n" : ""}${pendingTranscript}`;
+              if (combined.length > MAX_ENTRY_CHARS) { setVoiceError(t("entry.tooLongBody", { max: MAX_ENTRY_CHARS.toLocaleString(dateLocaleTag()) })); return; }
+              setText(combined); setPendingTranscript(null);
+            }} />
+            <Button label={t("entry.transcriptReplace")} onPress={() => { setText(pendingTranscript); setPendingTranscript(null); }} />
+            <Button label={t("entry.transcriptKeep")} onPress={discardVoice} />
+          </Card>
+        )}
         {voice && (
           <Card title={t("entry.voiceReviewTitle")}>
             {takeUrl && (
@@ -711,7 +755,7 @@ export function EntryView(props: {
             label={busy ? t("entry.saving") : t("entry.save")}
             icon="check"
             onPress={() => void save()}
-            disabled={busy || !draftReady || transcribing || recorder.state === "recording"}
+            disabled={busy || !draftReady || transcribing || pendingTranscript !== null || recorder.state === "recording"}
             block
           />
           <span className="row" style={{ justifyContent: "center" }}>

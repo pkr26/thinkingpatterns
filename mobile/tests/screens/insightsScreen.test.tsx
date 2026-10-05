@@ -638,6 +638,25 @@ describe("InsightsScreen evidence view", () => {
     expect(summary[0].props.accessibilityLabel).toMatch(/^Mood trend: (rising|falling|steady) over 3 days, latest (positive|negative|neutral)$/);
   });
 
+  it("labels the raw p-value as unadjusted in the Spanish technical panel", async () => {
+    const { __setLocaleForTests } = await import("../../src/strings");
+    const { pressLabel } = await import("../helpers/rtr");
+    __setLocaleForTests("es");
+    try {
+      vi.mocked(api.insights).mockResolvedValue({
+        phase: "insight", active_days: 60, days_remaining: 0,
+        blob: insightsBlob({ stats: { patterns: [pattern({ detail: { p_value: 0.001, day: "Sunday", day_fraction: 0.57 } })] } }),
+      } as never);
+      const root = await render(<InsightsScreen />);
+      await flush();
+      await pressLabel(root, "¿Por qué veo esto?");
+      await pressLabel(root, "Detalles técnicos");
+      expect(textOf(root)).toContain("p = 1.0e-3 (sin ajustar)");
+      expect(textOf(root)).not.toContain("corregido por ejecutar muchas pruebas");
+      await act(async () => { root.unmount(); });
+    } finally { __setLocaleForTests("en"); }
+  });
+
   it("the evidence panel renders plain-language rows, with raw stats behind Technical details", async () => {
     vi.mocked(api.insights).mockResolvedValue({
       phase: "insight",
@@ -725,7 +744,7 @@ describe("InsightsScreen evidence view", () => {
     await flush();
     text = textOf(root);
     expect(text).toContain("Significance");
-    expect(text).toContain("p = 1.0e-3 (corrected for running many tests)");
+    expect(text).toContain("p = 1.0e-3 (unadjusted)");
     expect(text).toContain("Cohen's d");
     expect(text).toContain("0.80");
     expect(text).toContain("Negativity score");

@@ -629,7 +629,7 @@ export const es: Record<string, string> = {
   "insights.ev.rhythmValue": "dispersión de intervalos {recent} frente a sus {earlier} días anteriores",
   "insights.ev.method": "Método",
   "insights.tech.significance": "Significancia",
-  "insights.tech.significanceValue": "p = {value} (corregido por ejecutar muchas pruebas)",
+  "insights.tech.significanceValue": "p = {value} (sin ajustar)",
   "insights.tech.cohensD": "d de Cohen",
   "insights.tech.negativity": "Puntaje de negatividad",
   "insights.tech.absolutist": "Densidad de palabras absolutistas",

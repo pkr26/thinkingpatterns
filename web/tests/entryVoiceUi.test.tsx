@@ -84,7 +84,7 @@ beforeEach(() => {
   // The mic flow's preflight: audio stack available + voice consent on.
   stubFetch((url) => {
     if (url.endsWith("/meta")) return jsonResponse({ audio_available: true });
-    if (url.endsWith("/account/voice-consent")) return jsonResponse({ enabled: true });
+    if (url.endsWith("/account/voice-consent")) return jsonResponse({ enabled: true, active_for_current_policy: true });
     if (url.endsWith("/audio/transcriptions")) {
       return jsonResponse({
         original_text: "spoken journal words",

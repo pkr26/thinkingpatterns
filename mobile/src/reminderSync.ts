@@ -20,7 +20,7 @@
  * (see its own header below).
  */
 import { getReminderPrefs } from "./reminders";
-import { assertAccountActive } from "./localRekey";
+import { assertNotificationOwner, beginNotificationUpdate } from "./notificationOwnership";
 import {
   getMeasureReminderPrefs,
   lastMeasureCompletedOn,
@@ -36,18 +36,19 @@ import {
 
 export async function syncReminderSchedule(userId: string): Promise<boolean> {
   try {
+    const owner = beginNotificationUpdate(userId, "daily");
     // L-9 (2026-09-28): the first resync on this version sweeps the
     // pre-stable-id era's orphaned random-id notifications (cancel-all +
     // reschedule from prefs), guarded by a persisted device flag so later
     // boots skip it. Idempotent, never throws, runs before the reconcile
     // below re-establishes the preference's own schedule.
-    await migrateOrphanedReminderNotifications(userId);
+    await migrateOrphanedReminderNotifications(userId, owner);
     const prefs = await getReminderPrefs(userId);
-    assertAccountActive(userId);
+    assertNotificationOwner(owner, "daily");
     // independent audit 2026-09-27 (P3): the userId rides the cancel so a
     // fallback cancel-all can re-schedule the surviving measure nudge.
-    if (!prefs.enabled) return await cancelDailyReminder(userId);
-    return await scheduleDailyReminder(prefs.hour, prefs.minute);
+    if (!prefs.enabled) return await cancelDailyReminder(userId, owner);
+    return await scheduleDailyReminder(prefs.hour, prefs.minute, owner);
   } catch {
     // A storage or native hiccup must never take a screen down; the next
     // sync point (next app start / next toggle) retries.
@@ -67,17 +68,18 @@ export async function syncReminderSchedule(userId: string): Promise<boolean> {
  */
 export async function syncMeasureReminderSchedule(userId: string): Promise<boolean> {
   try {
+    const owner = beginNotificationUpdate(userId, "measure");
     const prefs = await getMeasureReminderPrefs(userId);
-    assertAccountActive(userId);
+    assertNotificationOwner(owner, "measure");
     // independent audit 2026-09-27 (P3): the userId rides the cancels so a
     // fallback cancel-all can re-schedule the surviving daily reminder.
-    if (!prefs.enabled) return await cancelMeasureReminder(userId);
+    if (!prefs.enabled) return await cancelMeasureReminder(userId, owner);
     const last = await lastMeasureCompletedOn(userId);
-    assertAccountActive(userId);
+    assertNotificationOwner(owner, "measure");
     if (last === null) {
-      return await cancelMeasureReminder(userId);
+      return await cancelMeasureReminder(userId, owner);
     }
-    return await scheduleMeasureReminder(nextMeasureReminderFireTime(new Date(), last, prefs.intervalWeeks));
+    return await scheduleMeasureReminder(nextMeasureReminderFireTime(new Date(), last, prefs.intervalWeeks), owner);
   } catch {
     return false;
   }

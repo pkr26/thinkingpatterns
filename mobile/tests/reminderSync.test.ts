@@ -61,7 +61,7 @@ describe("syncReminderSchedule", () => {
     await setReminderTime("user-1", 9, 30);
     await setReminderEnabled("user-1", true);
     await expect(syncReminderSchedule("user-1")).resolves.toBe(true);
-    expect(scheduleDailyReminder).toHaveBeenCalledWith(9, 30);
+    expect(scheduleDailyReminder).toHaveBeenCalledWith(9, 30, expect.objectContaining({ permit: expect.objectContaining({ userId: "user-1" }) }));
     expect(cancelDailyReminder).not.toHaveBeenCalled();
   });
 
@@ -140,7 +140,7 @@ describe("syncMeasureReminderSchedule (2026-09-27: opt-in AND cadence)", () => {
     await recordMeasureCompleted("user-1", "2026-09-26");
     await expect(syncMeasureReminderSchedule("user-1")).resolves.toBe(true);
     expect(cancelMeasureReminder).not.toHaveBeenCalled();
-    expect(scheduleMeasureReminder).toHaveBeenCalledWith(new Date(2026, 9, 24, 20, 0, 0, 0));
+    expect(scheduleMeasureReminder).toHaveBeenCalledWith(new Date(2026, 9, 24, 20, 0, 0, 0), expect.objectContaining({ permit: expect.objectContaining({ userId: "user-1" }) }));
   });
 
   it("the interval choice moves the due boundary (2 weeks due, 4 not yet)", async () => {
@@ -157,7 +157,7 @@ describe("syncMeasureReminderSchedule (2026-09-27: opt-in AND cadence)", () => {
     await clearMeasureReminderPrefs("user-1");
     await setMeasureReminderEnabled("user-1", true); // back to the 4-week default
     await expect(syncMeasureReminderSchedule("user-1")).resolves.toBe(true);
-    expect(scheduleMeasureReminder).toHaveBeenCalledWith(new Date(2026, 9, 11, 20, 0, 0, 0));
+    expect(scheduleMeasureReminder).toHaveBeenCalledWith(new Date(2026, 9, 11, 20, 0, 0, 0), expect.objectContaining({ permit: expect.objectContaining({ userId: "user-1" }) }));
     expect(cancelMeasureReminder).not.toHaveBeenCalled();
   });
 

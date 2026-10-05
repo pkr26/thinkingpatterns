@@ -1452,8 +1452,13 @@ export const api = {
   questionToday: () =>
     request<{ for_date: string; blob: string }>("GET", "/questions/today"),
 
-  /** The streamed ciphertext export — returns the RAW response (P7 turns it
-   *  into a download); nothing about the request core is bypassed. */
+  /** Native downloads use a short-lived, single-use capability. The bearer
+   * remains in an authenticated request header, never a navigation URL. */
+  exportAccountTicket: () => request<{ ticket: string; expires_in: number }>("POST", "/account/export-ticket"),
+
+  /** Bounded programmatic export reader retained for compatibility. The
+   * Settings download uses exportAccountTicket and the browser download
+   * manager so supported account quotas need no JavaScript buffering. */
   exportAccountRaw: async (): Promise<Response> => {
     const activeSession = session;
     if (!activeSession) throw new ApiError(0, "not signed in");

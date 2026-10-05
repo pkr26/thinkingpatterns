@@ -57,19 +57,9 @@ jobs:
             exit 1
           fi
           version="${tag#v}"
-          # 2026-09-30 (first executed release): the changelog follows
-          # Keep-a-Changelog's bracketed headers (## [X.Y.Z] - date); the
-          # original bare-version pattern matched nothing and failed every
-          # tag — accept BOTH forms.
-          awk -v ver="$version" '
-            $0 ~ "^## \[?" ver "\]?" { capture = 1; next }
-            capture && /^## / { exit }
-            capture { print }
-          ' CHANGELOG.md > /tmp/notes.md
-          test -s /tmp/notes.md || {
-            echo "no CHANGELOG.md section for $version" >&2
-            exit 1
-          }
+          # Literal version comparison; bracketed/bare headings are accepted,
+          # while missing, duplicate and empty sections all fail closed.
+          python3 tools/extract_release_notes.py "$version" CHANGELOG.md > /tmp/notes.md
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           # 2026-09-21 audit G-7: the coverage gate runs on the SAME
@@ -641,15 +631,9 @@ jobs:
           cosign sign-blob --yes --bundle "$release_env.sha256.sigstore.json" "$release_env.sha256"
       - name: Extract the CHANGELOG section for this tag
         run: |
+          set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
-          awk -v ver="$VERSION" '
-            $0 ~ "^## \[?" ver "\]?" { capture = 1; next }
-            capture && /^## / { exit }
-            capture { print }
-          ' CHANGELOG.md > /tmp/notes.md
-          # Empty extraction is a release blocker: the notes ARE the
-          # contract (what shipped and why).
-          test -s /tmp/notes.md || { echo "no CHANGELOG.md section for $VERSION" >&2; exit 1; }
+          python3 tools/extract_release_notes.py "$VERSION" CHANGELOG.md > /tmp/notes.md
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ github.ref_name }}

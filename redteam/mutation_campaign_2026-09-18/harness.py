@@ -14,9 +14,10 @@ mutation, run the targeted test suite, restore the bytes exactly (the work
 tree carries uncommitted changes, so restoration is byte-wise — never git),
 and record killed/survived + the failing tests.
 
-A mutant is KILLED when the command exits non-zero (test failure, probe
-FAIL, or timeout — a hang is an observable behavior change). Survivors are
-re-verified against the full suite afterwards by the campaign driver.
+A mutant is KILLED when the oracle records an actual failing test or probe
+FAIL. Timeouts, collection failures and runner errors are SETUP-ERROR, never
+kills. Use run_pr_mutation_gate.py for applicability and unmodified-baseline
+validation before executing controls in an isolated checkout.
 
 Usage:
   python3 harness.py            # run all campaigns
@@ -34,8 +35,10 @@ import sys
 import time
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
+if str(ROOT / "redteam") not in sys.path:
+    sys.path.insert(0, str(ROOT / "redteam"))
+from mutation_oracles import oracle_setup_error
 OUT_DIR = pathlib.Path(__file__).resolve().parent / "results"
-OUT_DIR.mkdir(exist_ok=True)
 
 PY = ".venv/bin/python"
 
@@ -118,7 +121,7 @@ MUTANTS: list[dict] = [
         file="backend/app/services/brain.py",
         find="MOOD_MIN_EFFECT = 0.5  # Cohen's d",
         replace="MOOD_MIN_EFFECT = 0.0  # Cohen's d",
-        tests=backend_pytest("tests/test_brain.py"),
+        tests=backend_pytest("tests/test_brain.py", "tests/test_remediation_mutation_analysis.py"),
     ),
     dict(
         id="A6", campaign="A", name="effect gate AND -> OR (mood_correlation + link)",
@@ -159,16 +162,16 @@ MUTANTS: list[dict] = [
         id="B1", campaign="B", name="statistical kinds promote without replication",
         expectation="single lucky p-value must stay a candidate",
         file="backend/app/services/brain.py",
-        find="            if record.kind in STATISTICAL_KINDS:\n                if _replication_satisfied(record, signal, prior_evidence):\n                    record.state = \"emerging\"",
-        replace="            if record.kind in STATISTICAL_KINDS:\n                if True:\n                    record.state = \"emerging\"",
+        find='            if _is_statistical(record.kind, record.detail):\n                if _replication_satisfied(record, signal):\n                    promoted = True',
+        replace='            if _is_statistical(record.kind, record.detail):\n                if True:\n                    promoted = True',
         tests=backend_pytest("tests/test_brain.py"),
     ),
     dict(
         id="B2", campaign="B", name="replication spread requirement dropped (return True)",
         expectation="consecutive same-window recomputes must not count as independent",
         file="backend/app/services/brain.py",
-        find="    return spread >= REPLICATION_MIN_SPREAD_DAYS",
-        replace="    return True",
+        find='    return spread >= minimum',
+        replace='    return True',
         tests=backend_pytest("tests/test_brain.py"),
     ),
     dict(
@@ -267,14 +270,15 @@ MUTANTS: list[dict] = [
         file="backend/app/services/brain.py",
         find='                    "evidence_dates": list(record.evidence_dates),',
         replace='                    "evidence_dates": [],',
-        tests=backend_pytest("tests/test_brain.py", "tests/test_insights_api.py"),
+        tests=backend_pytest("tests/test_remediation_mutation_evidence.py",
+                             "tests/test_brain.py", "tests/test_insights_api.py"),
     ),
     # ---------------------------------------------------------------- E. crisis
     dict(
         id="E1", campaign="E", name="backend suppress tier always returns False",
         expectation="suppression contract tests + question interlock must fail",
         file="backend/app/services/crisis.py",
-        find="    variants = _match_variants(text)\n    return any(SUPPRESS_RE.search(v) for v in variants[:2]) or any(\n        SUPPRESS_CONCAT_RE.search(v) for v in (variants[2],)\n    )",
+        find="    if _tier_matches(SUPPRESS_RE, SUPPRESS_CONCAT_RE, _match_variants(text)):\n        return True\n    return _tier_matches(SUPPRESS_FOLDED_RE, SUPPRESS_FOLDED_CONCAT_RE, _folded_variants(text))",
         replace="    return False",
         tests=backend_pytest("tests/test_crisis.py", "tests/test_questions.py",
                              "tests/test_llm.py"),
@@ -283,32 +287,33 @@ MUTANTS: list[dict] = [
         id="E2", campaign="E", name="backend dialog tier always returns False",
         expectation="dialog-tier detection tests must fail",
         file="backend/app/services/crisis.py",
-        find="    variants = _match_variants(text)\n    return any(DIALOG_RE.search(v) for v in variants[:2]) or any(\n        DIALOG_CONCAT_RE.search(v) for v in (variants[2],)\n    )",
+        find="    if _tier_matches(DIALOG_RE, DIALOG_CONCAT_RE, _match_variants(text)):\n        return True\n    # H-7 letter-doubling channel: only reached when the canonical forms\n    # are clean, so it can only ever ADD a catch.\n    return _tier_matches(DIALOG_FOLDED_RE, DIALOG_FOLDED_CONCAT_RE, _folded_variants(text))",
         replace="    return False",
         tests=backend_pytest("tests/test_crisis.py"),
     ),
     dict(
-        id="E3", campaign="E", name="question interlock label tripwire disabled",
-        expectation="crisis-adjacent labels must never become questions",
+        id="E3", campaign="E", name="question suppress-tier interlocks disabled across label, variants and rendered output",
+        expectation="crisis-adjacent wording must never become reflective questions",
         file="backend/app/services/questions.py",
-        find="    if crisis.matches_suppress(pattern.label):\n        return True",
-        replace="    if False:\n        return True",
+        find="crisis.matches_suppress",
+        replace="(lambda _text: False)",
+        count=3,
         tests=backend_pytest("tests/test_questions.py", "tests/test_crisis.py"),
     ),
     dict(
         id="E4", campaign="E", name="mobile detectCrisisLanguage -> false (false negatives)",
         expectation="on-device dialog-tier corpus tests must fail",
         file="mobile/src/crisisDetect.ts",
-        find="  const [primary, orphan, concat] = matchVariants(text);\n  return (\n    DIALOG_PATTERNS.some((p) => p.test(primary) || p.test(orphan)) ||\n    DIALOG_CONCAT_PATTERNS.some((p) => p.test(concat))\n  );",
-        replace="  const [primary, orphan, concat] = matchVariants(text);\n  return false;",
+        find='export function detectCrisisLanguage(text: string): boolean {\n  if (tierMatches(DIALOG_PATTERNS, DIALOG_CONCAT_PATTERNS, matchVariants(text))) return true;\n  // H-7 letter-doubling channel: only reached when the canonical forms\n  // are clean, so it can only ever ADD a catch.\n  return tierMatches(DIALOG_FOLDED_PATTERNS, DIALOG_FOLDED_CONCAT_PATTERNS, foldedVariants(text));\n}',
+        replace='export function detectCrisisLanguage(text: string): boolean {\n  return false;\n}',
         tests=vitest("mobile", "tests/crisisDetect.test.ts", "tests/crisisDialog.test.ts"),
     ),
     dict(
         id="E5", campaign="E", name="mobile matchesCrisisSuppress -> false (quoting returns)",
         expectation="non-quoting card + question suppression tests must fail",
         file="mobile/src/crisisDetect.ts",
-        find="  const [primary, orphan, concat] = matchVariants(text);\n  return (\n    SUPPRESS_PATTERNS.some((p) => p.test(primary) || p.test(orphan)) ||\n    SUPPRESS_CONCAT_PATTERNS.some((p) => p.test(concat))\n  );",
-        replace="  const [primary, orphan, concat] = matchVariants(text);\n  return false;",
+        find='export function matchesCrisisSuppress(text: string): boolean {\n  if (tierMatches(SUPPRESS_PATTERNS, SUPPRESS_CONCAT_PATTERNS, matchVariants(text))) return true;\n  return tierMatches(\n    SUPPRESS_FOLDED_PATTERNS,\n    SUPPRESS_FOLDED_CONCAT_PATTERNS,\n    foldedVariants(text),\n  );\n}',
+        replace='export function matchesCrisisSuppress(text: string): boolean {\n  return false;\n}',
         tests=vitest("mobile", "tests/crisisPhrases.test.ts", "tests/securityFixes.test.ts"),
     ),
     # ---------------------------------------------------------------- F. sharing & clients
@@ -324,16 +329,17 @@ MUTANTS: list[dict] = [
         id="F2", campaign="F", name="portal fingerprint hashes base64 text, not the DER key",
         expectation="portal fingerprint pin must fail",
         file="portal/src/crypto.ts",
-        find='  const digest = new Uint8Array(await subtle().digest("SHA-256", unb64(spkiB64)));',
-        replace='  const digest = new Uint8Array(await subtle().digest("SHA-256", new TextEncoder().encode(spkiB64)));',
+        find='export async function keyFingerprint(spkiB64: string): Promise<string> {\n  const digest = new Uint8Array(await subtle().digest("SHA-256", fromBase64(spkiB64)));',
+        replace='export async function keyFingerprint(spkiB64: string): Promise<string> {\n  const digest = new Uint8Array(await subtle().digest("SHA-256", new TextEncoder().encode(spkiB64)));',
         tests=vitest("portal", "tests/crypto.test.ts"),
     ),
     dict(
         id="F3", campaign="F", name="journal role gate disabled (therapist token writes entries)",
         expectation="403 role-rejection tests must fail",
         file="backend/app/deps.py",
-        find='    if user.role != ROLE_USER:\n        raise ApiError(\n            status_code=403,\n            detail="therapist accounts cannot access journal endpoints",',
-        replace='    if False:\n        raise ApiError(\n            status_code=403,\n            detail="therapist accounts cannot access journal endpoints",',
+        find="    if user.role != ROLE_USER:",
+        replace="    if False:",
+        count=2,  # Journal and rekey-retry role walls share this control.
         tests=backend_pytest("tests/test_therapist_api.py", "tests/test_entries_api.py"),
     ),
     dict(
@@ -405,30 +411,19 @@ def parse_failures(kind: str, output: str) -> list[str]:
 PYTEST_SETUP_EXITS = {2, 3, 4, 5}
 
 
-def oracle_setup_error(kind: str, returncode: int, output: str) -> str | None:
-    """Why this non-zero exit is a broken oracle rather than a kill, or None."""
-    if kind != "pytest":
-        return None
-    if returncode in PYTEST_SETUP_EXITS:
-        return f"pytest exited {returncode} (oracle broken, not a kill)"
-    if "no tests ran" in output:
-        return "pytest collected no tests (oracle broken, not a kill)"
-    return None
-
-
 def run_mutant(m: dict) -> dict:
     target = ROOT / m["file"]
     original = target.read_bytes()
     text = original.decode("utf-8")
     n = text.count(m["find"])
     want = m.get("count", 1)
-    if n < want:
+    if n != want:
         return {**m, "killed": None, "status": "SETUP-ERROR",
                 "detail": f"find-string matched {n} times, expected {want}"}
     mutated = text.replace(m["find"], m["replace"], want)
-    target.write_text(mutated)
     t0 = time.monotonic()
     try:
+        target.write_text(mutated)
         env = dict(os.environ, CI="true")
         proc = subprocess.run(
             m["tests"]["cmd"], cwd=ROOT / m["tests"]["cwd"],
@@ -453,7 +448,8 @@ def run_mutant(m: dict) -> dict:
         elapsed = round(time.monotonic() - t0, 1)
         out = ((exc.stdout or b"").decode(errors="replace")
                + (exc.stderr or b"").decode(errors="replace"))
-        return {**m, "killed": True, "status": "KILLED (timeout — hang is observable)",
+        return {**m, "killed": None, "status": "SETUP-ERROR",
+                "detail": "oracle timed out; behavioral kill not established",
                 "failing_tests": [], "seconds": elapsed, "output_tail": out[-1500:]}
     finally:
         target.write_bytes(original)
@@ -462,25 +458,32 @@ def run_mutant(m: dict) -> dict:
 
 
 def main() -> None:
+    from run_pr_mutation_gate import prepare_direct_campaign, verdict_passes
+
     wanted = sys.argv[1:]
     todo = [m for m in MUTANTS if not wanted or m["campaign"] in wanted]
+    runner = prepare_direct_campaign(todo)
     print(f"{len(todo)} mutants queued\n", flush=True)
     results = []
     for m in todo:
         print(f"[{m['id']}] {m['name']} ...", flush=True)
-        r = run_mutant(m)
+        r = runner.run_mutant(m)
         results.append(r)
-        print(f"    -> {r['status']} ({r.get('seconds', '?')}s)"
-              + (f"  first fail: {r['failing_tests'][0]}" if r.get("failing_tests") else "")
+        elapsed = sum(command["seconds"] for command in r.get("commands", []))
+        failures = [failure for command in r.get("commands", []) for failure in command["failures"]]
+        print(f"    -> {r['status']} ({elapsed:.1f}s)"
+              + (f"  first fail: {failures[0]}" if failures else "")
               + ("\n    !! " + r.get("detail", "") if r["status"] == "SETUP-ERROR" else ""),
               flush=True)
-    killed = sum(1 for r in results if r["killed"])
-    done = [r for r in results if r["killed"] is not None]
-    print(f"\n{killed}/{len(done)} killed, {len(done) - killed} survived", flush=True)
+    killed = sum(verdict_passes(r) for r in results)
+    print(f"\n{killed}/{len(results)} genuinely killed/caught; {len(results) - killed} failed the gate", flush=True)
     stamp = time.strftime("%Y-%m-%dT%H%M%S")
     path = OUT_DIR / f"mutation_results_{stamp}.json"
+    OUT_DIR.mkdir(exist_ok=True)
     path.write_text(json.dumps(results, indent=2))
     print(f"results: {path}")
+    if killed != len(results):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

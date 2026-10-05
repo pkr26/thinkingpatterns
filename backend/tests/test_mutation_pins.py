@@ -698,7 +698,7 @@ async def test_rate_limiter_buckets_clients_independently(settings):
 async def test_app_metadata_and_healthz(app, client):
     assert app.title == "Fathom API"
     assert app.version == "1.0.0"
-    assert app.description == "Zero-knowledge personal pattern recognition for mental state."
+    assert app.description == "Encrypted journaling API and deterministic pattern analysis."
 
     response = await client.get("/healthz")
     assert response.status_code == 200
@@ -3241,11 +3241,11 @@ async def test_therapist_insights_read_phase_gates_the_blob(client, app):
     assert body["blob"] is None
 
 
-# --- S10 (recompute-lock keying) is NOT pinned: the per-user recompute lock
-# sits nested inside the per-user lifecycle fence the route takes first, so
-# two recomputes for one account serialize at the OUTER lock today and the
-# inner-lock mutant (S10) is API-unobservable. It guards a future refactor
-# that drops the fence, not the current shape — see the campaign report.
+# --- S10 now covers both current per-user serialization fences.
+# Real concurrent HTTP controls live in test_security_fixes.py and
+# test_remediation_recompute_serialization.py. Removing only the inner
+# redundant fence remains API-unobservable behind the lifecycle fence;
+# the refreshed mutation breaks the complete account-serialization control.
 
 
 # --- T6: a forwarded identity is only trusted for an allowlisted peer

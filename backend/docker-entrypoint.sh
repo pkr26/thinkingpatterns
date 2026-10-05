@@ -63,6 +63,13 @@ until alembic upgrade head; do
   attempt=$((attempt + 1))
 done
 
+# Explicit offline upgrade command only. This reuses the normal secret-file
+# URL assembly and migration path, then exits without serving requests.
+# Never automatically adopt missing entry guards during an ordinary boot.
+if [ "${1:-}" = "--trusted-entry-bootstrap" ]; then
+  exec python bootstrap_entry_guards.py --trusted-bootstrap
+fi
+
 # Do not rely on Uvicorn's default proxy-header behavior: it can rewrite
 # scope.client before HardeningMiddleware gets to verify the raw socket peer.
 # The app implements its own explicit MINDPATTERN_TRUSTED_PROXY_IPS boundary,

@@ -242,6 +242,11 @@ async def test_malformed_entry_during_amnesia_retry_is_a_400(client):
             b"{definitely not json",
             crypto.build_aad("entry", emu.user_id, entry_row.client_entry_id),
         )
+        # Model an authorized opaque upload: its server seal is valid, so
+        # this case reaches the malformed plaintext parser under amnesia.
+        from app.security.entry_guard import seal_entry_guard
+
+        seal_entry_guard(entry_row, app.state.settings, v2_bound=False)
         await session.commit()
 
     token = await emu.open_processing_session(client)

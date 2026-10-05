@@ -189,3 +189,35 @@ def _existing_sqlite_file_is_allowed(url: str) -> bool:
         return str(path).startswith(str(pathlib.Path(tempfile.gettempdir()).resolve()) + os.sep)
     except OSError:  # unresolvable path — do not guess it is scratch space
         return False
+
+
+@pytest.fixture(autouse=True)
+def _authenticate_authorized_entry_fixture_inserts():
+    """Direct ORM seeds model authorized historical imports, not hostile writes.
+
+    Production never seals missing guards automatically. Tests exercising a
+    genuinely unsealed insert opt out via `_skip_trusted_entry_fixture=True`;
+    updates/raw SQL always bypass this helper so tampering remains observable.
+    """
+    from types import SimpleNamespace
+
+    from sqlalchemy import event
+
+    from app.api._audit import _effective_mac_keys
+    from app.models import Entry
+    from app.security.entry_guard import seal_entry_guard
+
+    def seed_guard(mapper, connection, row):
+        if getattr(row, "_skip_trusted_entry_fixture", False):
+            return
+        if row.aad_guard_mac is None and row.aad_guard_key_version is None:
+            ring, version = _effective_mac_keys(None, None, None)
+            seal_entry_guard(
+                row,
+                SimpleNamespace(audit_mac_keyring=ring, audit_mac_key_version=version),
+                v2_bound=False,
+            )
+
+    event.listen(Entry, "before_insert", seed_guard)
+    yield
+    event.remove(Entry, "before_insert", seed_guard)

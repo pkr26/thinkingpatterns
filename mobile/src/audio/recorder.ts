@@ -11,9 +11,9 @@
  * erasure, and origin-retirement recovery scrub Expo Audio's cache roots.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Platform } from "react-native";
 import {
   AudioModule,
-  useAudioRecorder,
   useAudioRecorderState,
   type RecordingOptions,
 } from "expo-audio";
@@ -81,7 +81,17 @@ export function useVoiceRecorder(strings: {
   permissionDenied: string;
   failed: string;
 }): UseVoiceRecorder {
-  const recorder = useAudioRecorder(RECORDING_OPTIONS);
+  // Own the native object's release: Expo's convenience hook releases on
+  // unmount before an outstanding prepare/stop can reveal its file URI.
+  // Supply the platform-specific options expected by the native constructor.
+  const recorderRef = useRef<InstanceType<typeof AudioModule.AudioRecorder> | null>(null);
+  if (recorderRef.current === null) {
+    recorderRef.current = new AudioModule.AudioRecorder({
+      ...RECORDING_OPTIONS,
+      ...(Platform.OS === "ios" ? RECORDING_OPTIONS.ios : RECORDING_OPTIONS.android),
+    });
+  }
+  const recorder = recorderRef.current;
   // The real status hook: polls the recorder (duration, metering, url).
   // recorder.metering/duration do NOT exist on the recorder object itself.
   const recorderStatus = useAudioRecorderState(recorder);
@@ -92,10 +102,41 @@ export function useVoiceRecorder(strings: {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startedAtRef = useRef(0);
   // Latest-value refs: the auto-stop timer and a late stop() must see the
-  // CURRENT recorder status and take, not the first render's snapshot.
+  // CURRENT recorder status, not the first render's snapshot.
   const statusRef = useRef(recorderStatus);
   statusRef.current = recorderStatus;
-  const takeRef = useRef<VoiceTake | null>(null);
+  const mounted = useRef(true);
+  const generation = useRef(0);
+  const phase = useRef<"idle" | "starting" | "recording" | "stopping" | "finished">("idle");
+  const ownedUris = useRef(new Set<string>());
+  const lane = useRef<Promise<unknown>>(Promise.resolve());
+  const stopping = useRef<Promise<void> | null>(null);
+  const stringsRef = useRef(strings); stringsRef.current = strings;
+
+  // Native prepare/stop/read and disposal share one lane. A new take cannot
+  // start until cancellation has drained the previous native operation.
+  const enqueue = useCallback((run: () => Promise<void>): Promise<void> => {
+    const pending = lane.current.then(run, run);
+    lane.current = pending.catch(() => {});
+    return pending;
+  }, []);
+  const rememberUri = useCallback((): string | null => {
+    let uri: string | null = null;
+    try { uri = recorder.uri || recorder.getStatus().url || null; } catch { /* already released */ }
+    if (uri) ownedUris.current.add(uri);
+    return uri;
+  }, [recorder]);
+  const scrub = useCallback(async (): Promise<void> => {
+    for (const uri of [...ownedUris.current]) {
+      try { await FileSystem.deleteAsync(uri, { idempotent: true }); ownedUris.current.delete(uri); }
+      catch { /* Retain ownership for the next cleanup; cold start also scrubs. */ }
+    }
+  }, []);
+  const stopNative = useCallback(async (): Promise<void> => {
+    rememberUri();
+    try { await recorder.stop(); } catch { /* already stopped or not prepared */ }
+    rememberUri();
+  }, [recorder, rememberUri]);
 
   const clearTimer = useCallback((): void => {
     if (timerRef.current !== null) {
@@ -110,106 +151,138 @@ export function useVoiceRecorder(strings: {
       ? Math.min(1, Math.max(0, (recorderStatus.metering + 60) / 60))
       : 0;
 
-  const stop = useCallback(async (): Promise<void> => {
+  const stop = useCallback((): Promise<void> => {
+    if (phase.current === "stopping") return stopping.current ?? Promise.resolve();
+    if (!mounted.current || (phase.current !== "recording" && phase.current !== "starting")) return Promise.resolve();
+    const admitted = generation.current;
+    phase.current = "stopping";
     clearTimer();
-    try {
-      await recorder.stop();
-    } catch {
-      // stop on an already-stopped recorder is not fatal
-    }
-    const status = statusRef.current;
-    const uri = status.url ?? (recorder as { uri?: string | null }).uri ?? null;
-    setState("stopped");
-    // Honest duration first (the recorder's own durationMillis — a
-    // backgrounded wall clock keeps ticking and would 422 the take),
-    // wall clock only when the recorder never reported one, and the
-    // server's 310 s bound is never reachable: clamp to the cap.
-    const reportedMs = status.durationMillis;
-    const honestMs =
-      typeof reportedMs === "number" && Number.isFinite(reportedMs) && reportedMs > 0
-        ? reportedMs
-        : Date.now() - startedAtRef.current;
-    const durationSeconds = Math.min(
-      MAX_RECORDING_SECONDS,
-      Math.max(1, Math.round(honestMs / 1000)),
-    );
-    if (!uri) {
-      setError(strings.failed);
-      return;
-    }
-    try {
-      const base64 = await FileSystem.readAsStringAsync(uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      const finished: VoiceTake = { uri, base64, mime: "audio/m4a", durationSeconds };
-      takeRef.current = finished;
-      setTake(finished);
-    } catch {
-      // An unreadable take is unusable — its cache file must not survive
-      // either (unmount would not know the uri: no take was recorded).
-      try {
-        await FileSystem.deleteAsync(uri, { idempotent: true });
-      } catch {
-        // best-effort: the OS reclaims the cache dir regardless
-      }
-      setError(strings.failed);
-    }
-  }, [clearTimer, recorder, strings.failed]);
-
-  const start = useCallback(async (): Promise<void> => {
-    setError(null);
-    setTake(null);
-    takeRef.current = null;
-    try {
-      const permission = await AudioModule.requestRecordingPermissionsAsync();
-      if (!permission?.granted) {
-        setError(strings.permissionDenied);
+    const owns = () => mounted.current && admitted === generation.current;
+    const pending = enqueue(async () => {
+      if (!owns()) return;
+      clearTimer();
+      await stopNative();
+      if (!owns()) { await scrub(); return; }
+      const status = statusRef.current;
+      const uri = rememberUri();
+      setState("stopped");
+      // Honest duration first (the recorder's own durationMillis — a
+      // backgrounded wall clock keeps ticking and would 422 the take),
+      // wall clock only when the recorder never reported one, and the
+      // server's 310 s bound is never reachable: clamp to the cap.
+      const reportedMs = status.durationMillis;
+      const honestMs =
+        typeof reportedMs === "number" && Number.isFinite(reportedMs) && reportedMs > 0
+          ? reportedMs
+          : Date.now() - startedAtRef.current;
+      const durationSeconds = Math.min(
+        MAX_RECORDING_SECONDS,
+        Math.max(1, Math.round(honestMs / 1000)),
+      );
+      if (!uri) {
+        phase.current = "finished";
+        setError(stringsRef.current.failed);
         return;
       }
-      await AudioModule.setAudioModeAsync({
-        allowsRecording: true,
-        playsInSilentMode: true,
-        shouldPlayInBackground: false,
-      });
-      // iOS startRecording guards on .prepared and Android record()
-      // no-ops while unprepared — the native take only exists after this.
-      await recorder.prepareToRecordAsync();
-      startedAtRef.current = Date.now();
-      setElapsed(0);
-      recorder.record();
-      setState("recording");
-      clearTimer();
-      timerRef.current = setInterval(() => {
-        const seconds = Math.floor((Date.now() - startedAtRef.current) / 1000);
-        setElapsed(seconds);
-        if (seconds >= MAX_RECORDING_SECONDS) void stop();
-      }, 500);
-    } catch {
-      setError(strings.failed);
-      setState("idle");
-    }
-  }, [clearTimer, recorder, stop, strings]);
+      try {
+        const base64 = await FileSystem.readAsStringAsync(uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        if (!owns()) { await scrub(); return; }
+        const finished: VoiceTake = { uri, base64, mime: "audio/m4a", durationSeconds };
+        phase.current = "finished";
+        setTake(finished);
+      } catch {
+        // An unreadable take is unusable — its cache file must not survive
+        // either (unmount would not know the uri: no take was recorded).
+        await scrub();
+        if (owns()) { phase.current = "finished"; setError(stringsRef.current.failed); }
+      }
+    });
+    stopping.current = pending;
+    return pending;
+  }, [clearTimer, enqueue, rememberUri, scrub, stopNative]);
+
+  const start = useCallback(async (): Promise<void> => {
+    if (!mounted.current || phase.current === "starting" || phase.current === "recording" || phase.current === "stopping") return;
+    const admitted = ++generation.current;
+    const owns = () => mounted.current && admitted === generation.current;
+    phase.current = "starting";
+    setError(null);
+    setTake(null);
+    await enqueue(async () => {
+      if (!owns()) return;
+      // Starting over also owns deletion of the preceding finished take.
+      await scrub();
+      if (!owns()) return;
+      try {
+        const permission = await AudioModule.requestRecordingPermissionsAsync();
+        if (!owns()) return;
+        if (!permission?.granted) {
+          phase.current = "idle";
+          setError(stringsRef.current.permissionDenied);
+          return;
+        }
+        await AudioModule.setAudioModeAsync({
+          allowsRecording: true,
+          playsInSilentMode: true,
+          shouldPlayInBackground: false,
+        });
+        if (!owns()) return;
+        // iOS startRecording guards on .prepared and Android record()
+        // no-ops while unprepared — the native take only exists after this.
+        await recorder.prepareToRecordAsync();
+        rememberUri();
+        if (!owns()) { await stopNative(); await scrub(); return; }
+        startedAtRef.current = Date.now();
+        setElapsed(0);
+        recorder.record();
+        rememberUri();
+        phase.current = "recording";
+        setState("recording");
+        clearTimer();
+        timerRef.current = setInterval(() => {
+          const seconds = Math.floor((Date.now() - startedAtRef.current) / 1000);
+          setElapsed(seconds);
+          if (seconds >= MAX_RECORDING_SECONDS) void stop();
+        }, 500);
+      } catch {
+        rememberUri(); await stopNative(); await scrub();
+        if (owns()) { phase.current = "idle"; setError(stringsRef.current.failed); setState("idle"); }
+      }
+    });
+  }, [clearTimer, enqueue, recorder, rememberUri, scrub, stop, stopNative]);
 
   const reset = useCallback((): void => {
+    generation.current++;
+    phase.current = "idle";
     clearTimer();
-    void discardTakeFile(takeRef.current);
-    takeRef.current = null;
-    setTake(null);
-    setElapsed(0);
-    setError(null);
-    setState("idle");
-  }, [clearTimer]);
+    rememberUri();
+    void enqueue(async () => { await stopNative(); await scrub(); });
+    if (mounted.current) {
+      setTake(null);
+      setElapsed(0);
+      setError(null);
+      setState("idle");
+    }
+  }, [clearTimer, enqueue, rememberUri, scrub, stopNative]);
 
   useEffect(() => {
-    // Unmount discards the TAKE file itself (audit M1): the transcript
-    // review can outlive the screen (background lock, navigation) and a
-    // plaintext recording must not sit in the cache dir meanwhile. A take
-    // already consumed by reset()/save is null — nothing to delete.
+    mounted.current = true;
     return () => {
+      mounted.current = false;
+      generation.current++;
+      phase.current = "idle";
       clearTimer();
-      void discardTakeFile(takeRef.current);
+      // Capture now and after queued work settles, while the native object
+      // is still alive. Do not release it before a late prepare exposes URI.
+      rememberUri();
+      void enqueue(async () => {
+        await stopNative(); await scrub();
+        if (!mounted.current) recorder.release();
+      });
     };
-  }, [clearTimer]);
+  }, [clearTimer, enqueue, recorder, rememberUri, scrub, stopNative]);
 
   return { state, elapsedSeconds, level, error, take, start, stop, reset };
 }

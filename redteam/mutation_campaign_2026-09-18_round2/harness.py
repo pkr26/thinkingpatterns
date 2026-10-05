@@ -56,8 +56,10 @@ import sys
 import time
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
+if str(ROOT / "redteam") not in sys.path:
+    sys.path.insert(0, str(ROOT / "redteam"))
+from mutation_oracles import oracle_setup_error
 OUT_DIR = pathlib.Path(__file__).resolve().parent / "results"
-OUT_DIR.mkdir(exist_ok=True)
 
 PY = ".venv/bin/python"
 # The redteam-oracle commands run with cwd=redteam/, where the relative
@@ -121,11 +123,11 @@ MUTANTS: list[dict] = [
         tests=brain_suite(),
     ),
     dict(
-        id="G2", campaign="G", name="EWMA control limit 2.7sigma -> 1.0sigma (false alarms)",
+        id="G2", campaign="G", name="EWMA control limit 3.1sigma -> 1.0sigma (false alarms)",
         expectation="AR(1) false-alarm regression sim must fail",
         file="backend/app/services/brain.py",
-        find="MOOD_SHIFT_LIMIT = 2.7",
-        replace="MOOD_SHIFT_LIMIT = 1.0",
+        find='MOOD_SHIFT_LIMIT = 3.1',
+        replace='MOOD_SHIFT_LIMIT = 1.0',
         tests=brain_suite(),
     ),
     dict(
@@ -140,8 +142,8 @@ MUTANTS: list[dict] = [
         id="G4", campaign="G", name="EWMA autocorrelation limit inflation disabled",
         expectation="stationary AR(1) series must false-alarm <=2/12 (regression sim)",
         file="backend/app/services/brain.py",
-        find="    if phi is not None and phi >= 0.35:",
-        replace="    if False:",
+        find='    sigma_ewma *= math.sqrt(min(max(inflation, 1.0), 16.0))',
+        replace='    sigma_ewma *= 1.0',
         tests=brain_suite(),
     ),
     dict(
@@ -188,8 +190,8 @@ MUTANTS: list[dict] = [
         id="G10", campaign="G", name="link outcome day lag-1 -> lag-0 (same-day mood, not day-after)",
         expectation="the day-after claim must not become a same-day claim unnoticed",
         file="backend/app/services/brain.py",
-        find="        exposed = [day_residuals[cur] for _, cur in exposed_pairs]",
-        replace="        exposed = [day_residuals[prev] for prev, _ in exposed_pairs]",
+        find='        exposed = [day_residuals[cur] for _, cur in exposed_pairs if cur in day_residuals]',
+        replace='        exposed = [day_residuals[prev] for prev, cur in exposed_pairs if prev in day_residuals]',
         tests=brain_suite(),
     ),
     dict(
@@ -204,17 +206,17 @@ MUTANTS: list[dict] = [
         id="G12", campaign="G", name="evidence-date replication: new-evidence requirement -> True",
         expectation="consecutive same-corpus recomputes must not count as independent",
         file="backend/app/services/brain.py",
-        find="    if record.kind in EVIDENCE_DATE_KINDS:\n        return any(_iso(day) not in prior_evidence for day in signal.evidence_days)",
-        replace="    if record.kind in EVIDENCE_DATE_KINDS:\n        return True",
+        find='        return new_days >= 2',
+        replace='        return True',
         tests=brain_suite(),
     ),
     dict(
-        id="G13", campaign="G", name="REPLICATION_MIN_SPREAD_DAYS 2 -> 1 (consecutive days independent)",
+        id="G13", campaign="G", name="window-stat replication spread 7 -> 6 days",
         expectation="window-stat fluke re-qualification must be pinned",
         file="backend/app/services/brain.py",
-        find="REPLICATION_MIN_SPREAD_DAYS = 2",
-        replace="REPLICATION_MIN_SPREAD_DAYS = 1",
-        tests=brain_suite(),
+        find="WINDOW_STAT_REPLICATION_MIN_SPREAD_DAYS = 7",
+        replace="WINDOW_STAT_REPLICATION_MIN_SPREAD_DAYS = 6",
+        tests=[backend_pytest("tests/test_brain.py", "tests/test_patterns.py", "tests/test_remediation_mutation_analysis.py"), probe()],
     ),
     dict(
         id="G14", campaign="G", name="lifecycle boundary: GRACE_DAYS 7 -> 6",
@@ -222,7 +224,7 @@ MUTANTS: list[dict] = [
         file="backend/app/services/brain.py",
         find="GRACE_DAYS = 7  # unqualified days before active → fading",
         replace="GRACE_DAYS = 6  # unqualified days before active → fading",
-        tests=brain_suite(),
+        tests=[backend_pytest("tests/test_brain.py", "tests/test_patterns.py", "tests/test_remediation_mutation_analysis.py"), probe()],
     ),
     dict(
         id="G15", campaign="G", name="lifecycle boundary: ARCHIVE_DAYS 45 -> 44",
@@ -230,7 +232,7 @@ MUTANTS: list[dict] = [
         file="backend/app/services/brain.py",
         find="ARCHIVE_DAYS = 45  # unqualified days before fading → archived",
         replace="ARCHIVE_DAYS = 44  # unqualified days before fading → archived",
-        tests=brain_suite(),
+        tests=[backend_pytest("tests/test_brain.py", "tests/test_patterns.py", "tests/test_remediation_mutation_analysis.py"), probe()],
     ),
     dict(
         id="G16", campaign="G", name="lifecycle boundary: CONFIRM_AGE_DAYS 21 -> 0 (instant confirm)",
@@ -260,8 +262,8 @@ MUTANTS: list[dict] = [
         id="G19", campaign="G", name="residuals dropped: per-entry residuals = raw moods (v2 confound, entry level)",
         expectation="probe zero-false-associations gate — the oracle question",
         file="backend/app/services/brain.py",
-        find="        (entry, tokens, themes, sentiment - baselines.get(entry.entry_date, sentiment))",
-        replace="        (entry, tokens, themes, sentiment)",
+        find='            sentiment\n            - baselines.get(entry.entry_date, sentiment)\n            - weekday_adjustment.get(entry.entry_date, 0.0),',
+        replace='            sentiment,',
         tests=brain_suite(),
     ),
     dict(
@@ -442,8 +444,8 @@ MUTANTS: list[dict] = [
         id="J4", campaign="J", name="split-variant matching dropped (primary form only)",
         expectation="orphan-join/concat bypass corpus must fail (s u i c i d e)",
         file="backend/app/services/crisis.py",
-        find="    return (\n        _primary_join(tokens),\n        _orphan_glue(tokens),\n        _concat_join(tokens),\n    )",
-        replace="    return (\n        _primary_join(tokens),\n    )",
+        find="        if regex.search(variants[i]) or regex.search(variants[i + 1]):\n            return True\n        if concat_regex.search(variants[i + 2]):\n            return True",
+        replace="        if regex.search(variants[i]):\n            return True",
         tests=backend_pytest("tests/test_crisis.py", "tests/test_questions.py"),
     ),
     dict(
@@ -455,26 +457,26 @@ MUTANTS: list[dict] = [
         tests=backend_pytest("tests/test_crisis.py"),
     ),
     dict(
-        id="J6", campaign="J", name="mobile pre-encryption dialog tier skipped on save",
-        expectation="crisis-flagged saves must offer support before encryption",
+        id="J6", campaign="J", name='mobile on-device crisis flag disabled during save',
+        expectation='crisis detection computed before encryption must offer support after save or an eligible failure',
         file="mobile/src/screens/EntryScreen.tsx",
-        find="      const crisisLanguage = detectCrisisLanguage(trimmed);",
-        replace="      const crisisLanguage = false as ReturnType<typeof detectCrisisLanguage>;",
-        tests=vitest(),
+        find='    const crisisLanguage = detectCrisisLanguage(trimmed);',
+        replace='    const crisisLanguage = false as ReturnType<typeof detectCrisisLanguage>;',
+        tests=vitest("tests/screens/entryScreen.test.tsx"),
     ),
     dict(
         id="J7", campaign="J", name="mobile: Crisis screen unreachable from every stack",
-        expectation="one-tap-from-every-screen guarantee (login/locked/main)",
+        expectation='one-tap crisis resources remain reachable from every localized boot/login/locked/main stack',
         file="mobile/src/navigation.tsx",
-        find='          <Stack.Screen name="Crisis" component={CrisisScreen} options={{ title: "Get help" }} />',
-        replace="          ",
-        count=3,
+        find='          <Stack.Screen name="Crisis" component={CrisisScreen} options={{ title: tr("nav.getHelp") }} />',
+        replace='          ',
+        count=5,
         tests=vitest("tests/navigation.test.tsx"),
     ),
     # ---------------------------------------------------------------- K. fail-closed ops
     dict(
-        id="K1", campaign="K", name="environment normalization drops .lower() (PRODUCTION escapes gates)",
-        expectation="case typos must hit production gates",
+        id="K1", campaign="K", name="environment normalization drops its case fold",
+        expectation="mixed-case environments must preserve their documented boot contract and feature defaults",
         file="backend/app/config.py",
         find="        self.environment = self.environment.strip().lower()",
         replace="        self.environment = self.environment.strip()",
@@ -516,8 +518,8 @@ MUTANTS: list[dict] = [
         id="K6", campaign="K", name="request body cap effectively removed (x 1,000,000)",
         expectation="2 MiB cap must 413 before parsing",
         file="backend/app/middleware.py",
-        find="        self.max_body_bytes = max_body_bytes",
-        replace="        self.max_body_bytes = max_body_bytes * 1_000_000",
+        find="        cap = live.max_body_bytes",
+        replace="        cap = live.max_body_bytes * 1_000_000",
         tests=backend_pytest("tests/test_api_hardening.py", "tests/test_hardening.py"),
     ),
     dict(
@@ -543,7 +545,7 @@ MUTANTS: list[dict] = [
         file="backend/app/services/brain.py",
         find="        poor_sleep_days = {day for day, q in day_sleep_mean.items() if q < median}",
         replace="        poor_sleep_days = {day for day, q in day_sleep_mean.items() if q < 3.0}",
-        tests=backend_pytest("tests/test_structured_channels.py", "tests/test_brain.py"),
+        tests=backend_pytest("tests/test_structured_channels.py", "tests/test_brain.py", "tests/test_remediation_mutation_analysis.py"),
     ),
     dict(
         id="L3", campaign="L", name="threshold date query inverted (counts OTHER users' active days)",
@@ -597,11 +599,11 @@ MUTANTS: list[dict] = [
         tests=vitest("tests/offlineQueue.test.ts", "tests/offlineQueue.pins.test.ts"),
     ),
     dict(
-        id="M4", campaign="M", name="session-expired flush drops entries (no rejected-store custody)",
-        expectation="unsent entries must be preserved for recovery",
+        id="M4", campaign="M", name='session-expired flush drops pending entries instead of keeping retry custody',
+        expectation='attempted and unattempted ciphertext entries remain queued across session expiry',
         file="mobile/src/offlineQueue.ts",
-        find="        if (wipedSince(peek.generation)) return false;\n        await appendRejected(scope, queue, peek.generation);",
-        replace="        if (wipedSince(peek.generation)) return false;",
+        find='            notBefore: Date.now() + SESSION_EXPIRED_RETRY_MS,\n          };\n          await commitLocalWrite(permit, () => writeItems(scope.queue, queue));',
+        replace='            notBefore: Date.now() + SESSION_EXPIRED_RETRY_MS,\n          };\n          await commitLocalWrite(permit, () => writeItems(scope.queue, []));',
         tests=vitest("tests/offlineQueue.test.ts", "tests/offlineQueue.pins.test.ts"),
     ),
     dict(
@@ -616,8 +618,8 @@ MUTANTS: list[dict] = [
         id="M6", campaign="M", name="corrupt queue deleted without quarantine",
         expectation="unparseable bytes must be quarantined, not discarded",
         file="mobile/src/offlineQueue.ts",
-        find="  } catch {\n    await appendQuarantine(scope, raw, generation);\n    if (!wipedSince(generation)) await AsyncStorage.removeItem(key);\n    return [];\n  }",
-        replace="  } catch {\n    if (!wipedSince(generation)) await AsyncStorage.removeItem(key);\n    return [];\n  }",
+        find='      await appendQuarantine(\n        scope,\n        raw ?? JSON.stringify({ v: 1, unreadable: true, key }),\n        generation,\n      );',
+        replace='      // MUTANT: corrupt bytes removed without quarantine custody.',
         tests=vitest("tests/offlineQueue.test.ts", "tests/offlineQueue.pins.test.ts"),
     ),
     # ---------------------------------------------------------------- N. redteam-as-oracle
@@ -638,31 +640,31 @@ MUTANTS: list[dict] = [
         file="backend/app/security/kdf.py",
         find="MIN_ITERATIONS = 100_000",
         replace="MIN_ITERATIONS = 1",
-        tests=redteam("a_crypto.py", "kdf", "iteration"),
+        tests=redteam("a_crypto.py", "A4.library-floor"),
     ),
     dict(
         id="N3", campaign="N", name="oracle: suppress tier -> False vs e_crisis.py",
         expectation="e_crisis must flood FINDINGs on the bypass corpus",
         file="backend/app/services/crisis.py",
-        find="    variants = _match_variants(text)\n    return any(SUPPRESS_RE.search(v) for v in variants[:2]) or any(\n        SUPPRESS_CONCAT_RE.search(v) for v in (variants[2],)\n    )",
+        find="    if _tier_matches(SUPPRESS_RE, SUPPRESS_CONCAT_RE, _match_variants(text)):\n        return True\n    return _tier_matches(SUPPRESS_FOLDED_RE, SUPPRESS_FOLDED_CONCAT_RE, _folded_variants(text))",
         replace="    return False",
         tests=redteam("e_crisis.py", "suppress-bypass", "contract-drift"),
     ),
     dict(
         id="N4", campaign="N", name="oracle: engine ALPHA 0.05 -> 0.5 vs e2_brain.py",
-        expectation="e2 must flag pure-noise surfacing",
+        expectation="e2 must flag surfaced statistical raw p-values above the documented FDR ceiling",
         file="backend/app/services/brain.py",
         find="ALPHA = 0.05",
         replace="ALPHA = 0.5",
-        tests=redteam("e2_brain.py", "pure-noise", "trend-manufactured"),
+        tests=redteam("e2_brain.py", "E2.pure-noise-fdr-ceiling"),
     ),
     dict(
         id="N5", campaign="N", name="oracle: body cap removed vs c_api.py",
         expectation="c_api must flag oversized-body acceptance",
         file="backend/app/middleware.py",
-        find="        self.max_body_bytes = max_body_bytes",
-        replace="        self.max_body_bytes = max_body_bytes * 1_000_000",
-        tests=redteam("c_api.py", "oversized-body", "deep-json"),
+        find="        cap = live.max_body_bytes",
+        replace="        cap = live.max_body_bytes * 1_000_000",
+        tests=redteam("c_api.py", "C2.oversized-body"),
     ),
     dict(
         id="N6", campaign="N", name="oracle: entry quota off vs c_api.py",
@@ -682,18 +684,18 @@ MUTANTS: list[dict] = [
     ),
     dict(
         id="N8", campaign="N", name="oracle: account verifier check disabled vs b_auth.py",
-        expectation="b_auth must flag verifier replay",
+        expectation="b_auth must flag acceptance of a wrong verifier on destructive operations",
         file="backend/app/api/account.py",
-        find="    if not hmac.compare_digest(candidate, bytes(user.verifier)):",
-        replace="    if False:",
-        tests=redteam("b_auth.py", "verifier"),
+        find='    if not hmac.compare_digest(candidate, bytes(target.verifier)):',
+        replace='    if False:',
+        tests=redteam("b_auth.py", "B1." + "wrong-verifier-rejected"),
     ),
     dict(
         id="N9", campaign="N", name="oracle: account deletion keeps rows vs h_privacy.py",
         expectation="h_privacy must flag failed erasure",
-        file="backend/app/api/account.py",
-        find="            await session.execute(delete(Entry).where(Entry.user_id == user.id))",
-        replace="            pass",
+        file='backend/app/services/account_deletion.py',
+        find='                    Entry,\n                    Entry.user_id == owner,',
+        replace='                    Entry,\n                    Entry.user_id == "never-purge-this-account",',
         tests=redteam("h_privacy.py", "erasure"),
     ),
     dict(
@@ -702,7 +704,7 @@ MUTANTS: list[dict] = [
         file="backend/app/services/llm.py",
         find="    if any(ch.isdigit() for ch in text):\n        return None",
         replace="    if False:\n        return None",
-        tests=redteam("d_llm.py", ""),
+        tests=redteam("d_llm.py", "D1.narrative-number-guard"),
     ),
 ]
 
@@ -736,17 +738,6 @@ def parse_failures(kind: str, output: str) -> list[str]:
 PYTEST_SETUP_EXITS = {2, 3, 4, 5}
 
 
-def oracle_setup_error(kind: str, returncode: int, output: str) -> str | None:
-    """Why this non-zero exit is a broken oracle rather than a kill, or None."""
-    if kind != "pytest":
-        return None
-    if returncode in PYTEST_SETUP_EXITS:
-        return f"pytest exited {returncode} (oracle broken, not a kill)"
-    if "no tests ran" in output:
-        return "pytest collected no tests (oracle broken, not a kill)"
-    return None
-
-
 def run_command(spec: dict, mutant_id: str) -> tuple[bool, str | None, list[str], str, float]:
     """One command against the mutated tree.
 
@@ -772,22 +763,24 @@ def run_command(spec: dict, mutant_id: str) -> tuple[bool, str | None, list[str]
         )
         elapsed = round(time.monotonic() - t0, 1)
         out = (proc.stdout or "") + (proc.stderr or "")
-        keep = out if spec["kind"] == "redteam" else out[-1500:]
+        keep = out
         return (proc.returncode != 0,
                 oracle_setup_error(spec["kind"], proc.returncode, out),
                 parse_failures(spec["kind"], out), keep, elapsed)
+    except OSError as exc:
+        return True, f"oracle could not start: {exc}", [], "", round(time.monotonic() - t0, 1)
     except subprocess.TimeoutExpired as exc:
         elapsed = round(time.monotonic() - t0, 1)
         out = ((exc.stdout or b"").decode(errors="replace")
                + (exc.stderr or b"").decode(errors="replace"))
-        return True, None, [], out, elapsed
+        return True, "oracle timed out; behavioral kill not established", [], out, elapsed
 
 
 def oracle_verdict(spec: dict, output_tail: str) -> tuple[bool, str]:
     """For redteam-oracle mutants: CAUGHT when a targeted audit FINDING appears."""
     wanted = spec.get("oracle", [])
     lines = [ln for ln in output_tail.splitlines() if ln.startswith("AUDIT|")]
-    findings = [ln for ln in lines if "|FINDING|" in ln or "|ERROR|" in ln]
+    findings = [ln for ln in lines if "|FINDING|" in ln]
     hits = [ln for ln in findings if not wanted or any(w in ln for w in wanted)]
     if hits:
         return True, hits[0]
@@ -804,11 +797,10 @@ def run_mutant(m: dict) -> dict:
     text = original.decode("utf-8")
     n = text.count(m["find"])
     want = m.get("count", 1)
-    if n < want:
+    if n != want:
         return {**m, "killed": None, "status": "SETUP-ERROR",
                 "detail": f"find-string matched {n} times, expected {want}"}
     mutated = text.replace(m["find"], m["replace"], want)
-    target.write_text(mutated)
     specs = m["tests"] if isinstance(m["tests"], list) else [m["tests"]]
     # Corpus-regenerating harnesses poison their fixtures when run under a
     # mutant (found live: e_crisis re-exported every crisis sample as
@@ -824,6 +816,7 @@ def run_mutant(m: dict) -> dict:
     results_dir = ROOT / "redteam" / "results"
     results_backup = {p: p.read_bytes() for p in results_dir.glob("*.json")} if results_dir.is_dir() else {}
     try:
+        target.write_text(mutated)
         per_cmd: list[dict] = []
         killed = False
         for spec in specs:
@@ -831,7 +824,7 @@ def run_mutant(m: dict) -> dict:
             per_cmd.append({"kind": spec["kind"], "cmd": " ".join(spec["cmd"][:6]),
                             "failed": failed, "setup_error": setup_error,
                             "failures": failures, "seconds": seconds,
-                            "output": out if spec["kind"] == "redteam" else ""})
+                            "output": out})
             if setup_error:
                 # The oracle could not run (renamed test file, collection
                 # crash, bad flag): a KILLED verdict here would verify
@@ -850,14 +843,21 @@ def run_mutant(m: dict) -> dict:
         status = "KILLED" if killed else "SURVIVED"
         return {**m, "killed": killed, "status": status, "commands": per_cmd}
     finally:
-        for p, original_corpus in corpus_backup.items():
-            p.write_bytes(original_corpus)
-        for p, original_results in results_backup.items():
-            if p.read_bytes() != original_results:
-                p.write_bytes(original_results)
+        # Restore the mutated application target before ancillary artifacts:
+        # an oracle may remove a results file, and its cleanup must never
+        # strand mutated source. Cleanup failures still fail the gate.
         target.write_bytes(original)
         if target.read_bytes() != original:
             raise RuntimeError(f"RESTORE FAILED for {m['id']} — {m['file']}")
+        for p, original_corpus in corpus_backup.items():
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(original_corpus)
+        for p in results_dir.glob("*.json"):
+            if p not in results_backup:
+                p.unlink()
+        for p, original_results in results_backup.items():
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(original_results)
         # Belt and braces for the stale-bytecode hazard above: drop any
         # cached bytecode produced while the mutant was on disk.
         pkg = target.parent / "__pycache__"
@@ -868,13 +868,16 @@ def run_mutant(m: dict) -> dict:
 
 
 def main() -> None:
+    from run_pr_mutation_gate import prepare_direct_campaign, verdict_passes
+
     wanted = sys.argv[1:]
     todo = [m for m in MUTANTS if not wanted or m["campaign"] in wanted]
+    runner = prepare_direct_campaign(todo)
     print(f"{len(todo)} mutants queued\n", flush=True)
     results = []
     for m in todo:
         print(f"[{m['id']}] {m['name']} ...", flush=True)
-        r = run_mutant(m)
+        r = runner.run_mutant(m)
         results.append(r)
         if r["status"] == "SETUP-ERROR":
             print(f"    !! {r.get('detail', '')}", flush=True)
@@ -888,13 +891,15 @@ def main() -> None:
                      if r.get("commands") and r["commands"][0]["failures"] else "")
                   + (f"  | {r.get('detail', '')}" if r["campaign"] == "N" else ""),
                   flush=True)
-    killed = sum(1 for r in results if r["killed"])
-    done = [r for r in results if r["killed"] is not None]
-    print(f"\n{killed}/{len(done)} killed/caught, {len(done) - killed} survived/missed", flush=True)
+    killed = sum(verdict_passes(r) for r in results)
+    print(f"\n{killed}/{len(results)} genuinely killed/caught; {len(results) - killed} failed the gate", flush=True)
     stamp = time.strftime("%Y-%m-%dT%H%M%S")
     path = OUT_DIR / f"mutation_results_{stamp}.json"
+    OUT_DIR.mkdir(exist_ok=True)
     path.write_text(json.dumps(results, indent=2))
     print(f"results: {path}")
+    if killed != len(results):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

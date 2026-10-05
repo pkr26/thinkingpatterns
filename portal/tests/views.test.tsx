@@ -2362,3 +2362,53 @@ it("preserves the writing without publishing a note if its chart unmounts during
   expect(saved?.text.general).toBe("writing interrupted during encryption");
   expect(saved?.pending.general).toBeUndefined();
 });
+
+
+describe("2026-10-04 clinical evidence remediation", () => {
+  it("unavailable revision history stays unknown on screen and paper; a retry can confirm empty history", async () => {
+    mockedApi.notes.mockResolvedValueOnce({ notes: [{ id: "n0", client_note_id: "c0", pattern_pid: null, blob: "b", created_at: "2026-09-10T00:00:00Z", updated_at: "2026-09-12T00:00:00Z" }], nextOffset: null });
+    mockedApi.noteRevisions.mockRejectedValueOnce(new Error("network unavailable"));
+    const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+    await flush(6);
+    await press(root, "View history");
+    await flush(8);
+    expect(textOf(root)).toContain("earlier versions could not be loaded");
+    expect(textOf(root)).not.toContain("no earlier text recorded");
+    const printOnly = root.root.findAllByType("div").find(n => n.props.className === "print-only");
+    expect(rtr.textOfNode(printOnly!)).toContain("earlier versions could not be loaded");
+    await press(root, "Hide history");
+    mockedApi.noteRevisions.mockResolvedValueOnce([]);
+    await press(root, "View history");
+    await flush(8);
+    expect(textOf(root)).toContain("no earlier text recorded");
+    expect(textOf(root)).not.toContain("earlier versions could not be loaded");
+  });
+
+  it.each([
+    { avg_sentiment: null, observations: 0, explicit_mood: 0, text_estimates: 0, excluded_entries: 35, source: "unavailable", reading: "average reading unavailable", coverage: "no eligible mood observations; 35 entries excluded" },
+    { avg_sentiment: 1, observations: 1, explicit_mood: 1, text_estimates: 0, excluded_entries: 34, source: "explicit_mood", reading: "average reading 1.00", coverage: "1 observations (1 explicit mood ratings, 0 text estimates); 34 entries excluded" },
+  ])("screen and print qualify mood coverage: $source", async ({ avg_sentiment, reading, coverage, ...summary }) => {
+    const payload = await mockedCrypto.decryptInsights(new Uint8Array(32), "u", "");
+    mockedCrypto.decryptInsights.mockResolvedValueOnce({ ...payload, stats: { ...payload.stats, total_entries: 35, avg_sentiment, mood_summary: summary } } as Awaited<ReturnType<typeof mockedCrypto.decryptInsights>>);
+    const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+    await flush(8);
+    expect(textOf(root)).toContain(reading);
+    expect(textOf(root)).toContain(coverage);
+    const printOnly = root.root.findAllByType("div").find(n => n.props.className === "print-only");
+    expect(rtr.textOfNode(printOnly!)).toContain(reading);
+    expect(rtr.textOfNode(printOnly!)).toContain(coverage);
+  });
+
+  it("renders the numeric p-value as unadjusted", async () => {
+    const payload = await mockedCrypto.decryptInsights(new Uint8Array(32), "u", "");
+    payload.stats.patterns[0]!.detail.p_value = 0.00059;
+    mockedCrypto.decryptInsights.mockResolvedValueOnce(payload);
+    const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+    await flush(8);
+    const details = root.root.findAllByType("button").filter(n => rtr.textOfNode(n).includes("Evidence"));
+    if (details.length) await act(async () => details[0]!.props.onClick());
+    expect(textOf(root)).toContain("p (unadjusted)");
+    expect(textOf(root)).toContain("0.00059");
+    expect(textOf(root)).not.toContain("p (corrected)");
+  });
+});

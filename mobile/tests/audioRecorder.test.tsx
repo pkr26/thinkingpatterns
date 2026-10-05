@@ -54,7 +54,7 @@ afterEach(() => {
 describe("recorder lifecycle", () => {
   it("records with the pinned codec contract (mono 16 kHz ~24 kbps AAC in .m4a)", async () => {
     await render(<Harness />);
-    const options = vi.mocked(await import("./helpers/expoAudioMock")).useAudioRecorder.mock.calls[0][0];
+    const options = AudioModule.AudioRecorder.mock.calls[0]![0] as Record<string, any>;
     // Android: STRING enums — numeric constants crash the EnumTypeConverter.
     expect(options.android.outputFormat).toBe("mpeg4");
     expect(options.android.audioEncoder).toBe("aac");

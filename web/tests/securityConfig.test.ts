@@ -5,7 +5,7 @@
  *  2026-09-26 hardening pass tightened the pinned contract: no
  *  'unsafe-inline' anywhere (the stylesheet is the same-origin /app.css;
  *  React's CSSOM inline styles are outside style-src), no framing, no
- *  form submission, COEP isolation, HSTS ready for preload submission,
+ *  cross-origin form submission, COEP isolation, HSTS ready for preload submission,
  *  and noindex on a mental-health app that must stay out of search
  *  indexes and referrer graphs. */
 import { createHash } from "node:crypto";
@@ -22,7 +22,7 @@ const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const nginxPath = resolve(webRoot, "../deploy/nginx/mindpattern.conf.example");
 
 const CSP =
-  "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; frame-src 'none'; upgrade-insecure-requests";
+  "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; frame-src 'none'; upgrade-insecure-requests";
 
 describe("static-host security policy", () => {
   it.skipIf(!existsSync(nginxPath))(

@@ -272,6 +272,38 @@ def test_production_refuses_short_secret(monkeypatch):
         Settings.from_env()
 
 
+@pytest.mark.parametrize("environment", ["PRODUCTION", " Production "])
+def test_valid_production_configuration_normalizes_the_environment(environment):
+    settings = Settings(
+        environment=environment,
+        database_url="postgresql+asyncpg://u:p@h/db",
+        token_secret="x" * 32,
+        **production_secret_settings(),
+    )
+    assert settings.environment == "production"
+    assert settings.audio_enabled is False
+    assert settings.therapist_sharing_enabled is False
+
+
+def test_mixed_case_development_configuration_keeps_the_development_boot_contract():
+    settings = Settings(environment=" Development ")
+    assert settings.audio_enabled is True
+    assert settings.therapist_sharing_enabled is True
+    assert settings.database_url.startswith("sqlite")
+
+
+def test_primary_signing_secret_exact_floor_with_other_boot_gates_valid():
+    values = {
+        "environment": "production",
+        "database_url": "postgresql+asyncpg://u:p@h/db",
+        **production_secret_settings(),
+    }
+    valid = Settings(token_secret="x" * 32, **values)
+    assert len(valid.token_secret) == 32
+    with pytest.raises(RuntimeError, match=r"^MINDPATTERN_TOKEN_SECRET must be at least 32"):
+        Settings(token_secret="x" * 31, **values)
+
+
 def test_production_refuses_sqlite(monkeypatch):
     monkeypatch.setenv("MINDPATTERN_ENV", "production")
     monkeypatch.setenv("MINDPATTERN_TOKEN_SECRET", "x" * 48)

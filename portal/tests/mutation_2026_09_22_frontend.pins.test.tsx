@@ -813,7 +813,7 @@ describe("mutation pins 2026-09-22: PatientView", () => {
     expect(text).toContain("9");
     expect(text).toContain("legacy sample size (unit unverified)");
     expect(text).toContain("21");
-    expect(text).toContain("p (corrected)");
+    expect(text).toContain("p (unadjusted)");
     expect(text).toContain("0.03");
     expect(text).toContain("effect (Cohen's d)");
     expect(text).toContain("0.8");
@@ -1094,7 +1094,8 @@ describe("mutation pins 2026-09-22: PatientView", () => {
     const text = textOf(root);
     expect(text).toContain("? entries");
     expect(text).toContain("? active days");
-    expect(text).not.toContain("average reading");
+    expect(text).toContain("average reading unavailable");
+    expect(text).toContain("source and coverage unavailable");
   });
 
   it("retrying a failed chart load clears the previous notes and measures", async () => {

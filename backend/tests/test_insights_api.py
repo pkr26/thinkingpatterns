@@ -129,6 +129,32 @@ async def test_baseline_phase_before_threshold(client, app):
     assert question.status_code == 404
 
 
+@pytest.mark.parametrize("pending_token", [None, "already-expired-session"])
+async def test_baseline_recompute_needs_no_usable_processing_key(
+    client, app, settings, pending_token
+):
+    """Date-only progress is available before unlocking any journal key."""
+    settings.unlock_threshold_days = 2
+    emu = ClientEmulator("baseline-date-progress", "fresh-password")
+    await emu.register(client)
+    await emu.create_entry(client, "An ordinary first day.", TODAY)
+    headers = dict(emu.headers)
+    if pending_token is not None:
+        headers["X-Processing-Token"] = pending_token
+
+    response = await client.post("/api/insights/recompute", headers=headers)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["phase"] == "baseline"
+    assert body["active_days"] == 1
+    assert body["days_remaining"] == 1
+    assert body["analyzer"] == "none"
+    assert body["patterns_stored"] == 0
+    assert body["question_stored"] is False
+    assert len(app.state.key_store) == 0
+
+
 async def test_question_is_deterministic_within_day(client):
     emu = ClientEmulator("stable", "quiet-password")
     await emu.register(client)

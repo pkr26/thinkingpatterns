@@ -20,7 +20,7 @@ import { App } from "../src/App";
 import { setKvBackendForTests, kv, type KvBackend } from "../src/kvstore";
 import { vault } from "../src/vault";
 import { clearSession, hasSession } from "../src/api/client";
-import { jsonResponse, resetTestState, stubFetch } from "./helpers/api";
+import { installSession, jsonResponse, resetTestState, stubFetch } from "./helpers/api";
 import { press, render, settle, textOf, textOfNode, typeArea } from "./helpers/rtr";
 
 const USER = "user-1";
@@ -270,6 +270,7 @@ describe("EntryView draft contract", () => {
   });
 
   it("a successful save clears the sealed draft", async () => {
+    installSession(USER);
     authStubs();
     await saveActiveDraft(DATA_KEY, USER, DRAFT);
     const root = await render(<EntryView onSaved={() => undefined} />);

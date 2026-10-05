@@ -756,3 +756,40 @@ def test_clean_label_rejects_bare_domains():
     assert _clean_label("call support at gethelp.io today") is None
     # Ordinary labels are untouched.
     assert _clean_label("work stress on sundays") == "work stress on sundays"
+
+
+@pytest.mark.parametrize(
+    "hostile",
+    [
+        "This diagnosis follows from the pattern.",
+        "These entries diagnose a condition.",
+        "This pattern was diagnosed from the entries.",
+        "This pattern appears on 3 days.",
+        "This pattern appears on ٣ days.",
+        "This pattern appears on ३ days.",
+    ],
+)
+def test_provider_narrative_clinical_and_number_claims_never_replace_brain_finding(hostile):
+    """Exercise the provider-result path with otherwise admissible narratives."""
+    from app.services.patterns import Pattern
+
+    analyzer = _make_analyzer()
+    original = Pattern("temporal", "work", 7, 0.6, {"day": "Sunday"})
+    corpus = [entry(0, "a calm work day")]
+    item = {"kind": "temporal", "label": "work", "narrative": hostile}
+    analyzer._post = lambda payload: _llm_response([item])
+    found = analyzer.extract_patterns(corpus, findings=[original])
+    assert analyzer.last_error is None
+    assert len(found) == 1
+    assert found[0].detail == original.detail
+    assert found[0].occurrences == original.occurrences
+    assert found[0].confidence == original.confidence
+    assert "narrative" not in found[0].detail
+
+    # Positive control ensures the whole provider-result path isn't merely
+    # disabled or rejecting every narrative. Production recompute separately
+    # disables provider narration; this exercises the retained sanitizer.
+    safe = "A calm pattern repeats around work."
+    item["narrative"] = safe
+    kept = analyzer.extract_patterns(corpus, findings=[original])
+    assert kept[0].detail == {**original.detail, "narrative": safe}

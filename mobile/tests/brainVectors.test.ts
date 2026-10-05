@@ -1,7 +1,8 @@
 /**
- * Cross-platform brain vectors: the TS on-device engine against the same
+ * Component parity only: ported TS sentiment/statistics against the
  * golden outputs the Python engine generated (shared/brain_vectors.json —
- * backend/scripts/gen_brain_vectors.py). Sentiment scores must be EXACT
+ * backend/scripts/gen_brain_vectors.py). The full-engine `updates` cases
+ * have no mobile runner yet; see src/brain/PORT.md. Sentiment scores must be EXACT
  * (same walk, same rounding points); statistics agree to 1e-9 (both are
  * double-precision math, but transcendental tails may differ in the last
  * ulp). The same standing as tests/vectors.test.ts holds for the crypto.

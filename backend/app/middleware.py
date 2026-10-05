@@ -247,6 +247,8 @@ class HardeningMiddleware:
         constructions without a settings provider (or without the audio
         attribute) keep the historical single-cap behavior.
         """
+        if path in {"/api/account/export-download", "/api/v1/account/export-download"}:
+            return 128
         live = self._live_settings()
         if live is None:
             return self.max_body_bytes

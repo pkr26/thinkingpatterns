@@ -11,7 +11,6 @@ import base64
 import hashlib
 import json
 import os
-import time
 import uuid
 from datetime import date
 
@@ -700,7 +699,10 @@ class TherapistEmulator:
             secret = base64.b32decode(setup.json()["secret_base32"])
             from app.security import totp
 
-            code = totp._code_for_counter(secret, int(time.time() // totp.STEP_SECONDS))
+            # Tests may install a controlled TOTP clock. Generate the
+            # enrollment code on that same clock; wall-clock crossings
+            # must not silently disagree with the verifier's frozen time.
+            code = totp._code_for_counter(secret, int(totp.time.time() // totp.STEP_SECONDS))
             enabled = await client.post(
                 "/api/account/totp/enable",
                 headers=self.headers,

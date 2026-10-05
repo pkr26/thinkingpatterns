@@ -74,6 +74,18 @@ def test_encrypt_nonce_seam_rejects_wrong_size():
     assert crypto.encrypt(key, b"data") != crypto.encrypt(key, b"data")
 
 
+def test_entry_content_version_is_bound_to_the_ciphertext():
+    key = bytes(range(32))
+    first_aad = crypto.entry_aad_v2("owner", "entry-id", 1)
+    second_aad = crypto.entry_aad_v2("owner", "entry-id", 2)
+    assert first_aad == b'["entry","owner","entry-id","1"]'
+    assert second_aad == b'["entry","owner","entry-id","2"]'
+    blob = crypto.encrypt(key, b"second revision", second_aad)
+    assert crypto.decrypt(key, blob, second_aad) == b"second revision"
+    with pytest.raises(crypto.TamperError):
+        crypto.decrypt(key, blob, first_aad)
+
+
 class TestAadEdgeCases:
     """The 16 edge-case AAD vectors promoted from redteam/a_crypto.py's
     A6 corpus (2026-09-17): surrogates, DEL/control chars, CJK, RTL,

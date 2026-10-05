@@ -298,8 +298,8 @@ FROZEN_REGISTRY = {
                 ("code", "envelope_key_mismatch"),
                 (
                     "detail",
-                    "the processing session's key did not authenticate stored ciphertext; "
-                    "open a session with the account's current data key",
+                    "the processing session's key did not authenticate stored ciphertext; open a session with "
+                    "the account's current data key",
                 ),
                 ("status_code", 403),
             ),
@@ -341,6 +341,14 @@ FROZEN_REGISTRY = {
             (("code", "not_found"), ("detail", "account not found"), ("status_code", 404)),
         ),
         ("ApiError", (("code", "not_found"), ("detail", "totp not enabled"), ("status_code", 404))),
+        (
+            "ApiError",
+            (
+                ("code", "payload_too_large"),
+                ("detail", "export form too large"),
+                ("status_code", 413),
+            ),
+        ),
         (
             "ApiError",
             (
@@ -453,6 +461,10 @@ FROZEN_REGISTRY = {
                 ("detail", "account verifier required (X-Account-Verifier header)"),
                 ("status_code", 422),
             ),
+        ),
+        (
+            "ApiError",
+            (("code", "validation_error"), ("detail", "invalid export form"), ("status_code", 422)),
         ),
         (
             "ApiError",
@@ -819,6 +831,14 @@ FROZEN_REGISTRY = {
         (
             "ApiError",
             (("code", "conflict"), ("detail", "entry already exists"), ("status_code", 409)),
+        ),
+        (
+            "ApiError",
+            (
+                ("code", "entry_blob_invalid"),
+                ("detail", "entry blob failed authentication"),
+                ("status_code", 400),
+            ),
         ),
         ("ApiError", (("code", "not_found"), ("detail", "entry not found"), ("status_code", 404))),
         ("ApiError", (("code", "quota_exceeded"), ("status_code", 413))),

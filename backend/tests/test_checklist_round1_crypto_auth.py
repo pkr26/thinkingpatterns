@@ -451,12 +451,41 @@ class TestExhaustiveRoleWalls:
             # test_therapist_api.py).
             "POST /api/v1/therapist/register",
         }
+        # A capability-presentation route is not a public anonymous route.
+        # This exact exception is behaviorally exercised below and by the
+        # exhaustive revocation/body/replay cases in test_export_download.py.
+        capabilities = {"POST /api/v1/account/export-download"}
         mapping = self._route_roles(app)
+        assert capabilities <= mapping.keys()
+        assert mapping["POST /api/v1/account/export-ticket"] == {"user"}
         assert len(mapping) >= 40, f"expected the full route table, got {len(mapping)}"
         unwalled = {
-            key: roles for key, roles in mapping.items() if not roles and key not in anonymous
+            key: roles
+            for key, roles in mapping.items()
+            if not roles and key not in anonymous and key not in capabilities
         }
         assert not unwalled, f"routes shipped without any auth dependency: {sorted(unwalled)}"
+
+    async def test_download_capability_is_a_patient_scoped_one_use_credential(self, client):
+        patient = ClientEmulator("wall-export-patient", "p")
+        therapist = TherapistEmulator("wall-export-therapist", "p")
+        await patient.register(client)
+        await therapist.register(client)
+        path = "/api/v1/account/export-download"
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        assert (
+            await client.post(path, content="ticket=" + "x" * 43, headers=headers)
+        ).status_code == 401
+        assert (
+            await client.post("/api/v1/account/export-ticket", headers=therapist.headers)
+        ).status_code == 403
+        issued = await client.post("/api/v1/account/export-ticket", headers=patient.headers)
+        assert issued.status_code == 200
+        body = "ticket=" + issued.json()["ticket"]
+        exported = await client.post(path, content=body, headers=headers)
+        assert exported.status_code == 200
+        assert exported.json()["user_id"] == patient.user_id
+        assert (await client.post(path, content=body, headers=headers)).status_code == 401
 
     async def test_every_walled_route_answers_401_without_a_token(self, client, app):
         # 2026-09-28 deep audit (test-quality MEDIUM): the structural

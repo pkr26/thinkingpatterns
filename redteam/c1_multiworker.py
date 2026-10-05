@@ -306,14 +306,19 @@ async def main() -> None:
                         "a calm journal about work",
                         day.isoformat(),
                     )
-                    session.add(
-                        Entry(
-                            user_id=u3["user_id"],
-                            client_entry_id=f"e-k-{i}",
-                            entry_date=day,
-                            blob=base64.b64decode(blob),
-                        )
+                    from app.config import Settings
+                    from app.security.entry_guard import seal_entry_guard
+
+                    guard_settings = Settings.from_env()
+                    guard_settings.token_secret = "redteam-c1-secret-32-chars-minimum"
+                    row = Entry(
+                        user_id=u3["user_id"],
+                        client_entry_id=f"e-k-{i}",
+                        entry_date=day,
+                        blob=base64.b64decode(blob),
                     )
+                    seal_entry_guard(row, guard_settings, v2_bound=False)
+                    session.add(row)
                 await session.commit()
         finally:
             await engine.dispose()

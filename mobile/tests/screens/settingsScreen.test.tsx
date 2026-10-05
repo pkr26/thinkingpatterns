@@ -1169,7 +1169,7 @@ describe("daily reminder section (module linked)", () => {
     });
     await flush();
     expect(await storage.getItem("@mindpattern/reminders_user-1")).toContain("\"enabled\":true");
-    expect(scheduleDailyReminder).toHaveBeenCalledWith(20, 0); // the default time
+    expect(scheduleDailyReminder).toHaveBeenCalledWith(20, 0, expect.any(Object)); // the default time
     expect(cancelDailyReminder).not.toHaveBeenCalled();
     expect(
       root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Daily reminder")!.props.value,
@@ -1776,7 +1776,7 @@ describe("daily reminder and check-in cadence (independent audit 2026-09-27)", (
     await flush(5);
     // The sync scheduled at the STORED preference time (the reconciliation
     // contract: preference is the direction of truth).
-    expect(scheduleDailyReminder).toHaveBeenCalledWith(12, 0);
+    expect(scheduleDailyReminder).toHaveBeenCalledWith(12, 0, expect.any(Object));
     expect(switchByA11y(root, "Daily reminder").props.value).toBe(true);
     // The time chips render with the current one selected.
     const chips = root.root.findAll((n) => n.props.accessibilityRole === "radio");
@@ -1797,7 +1797,7 @@ describe("daily reminder and check-in cadence (independent audit 2026-09-27)", (
     scheduleDailyReminder.mockClear();
     await pressLabel(root, "Evening");
     await flush(5);
-    expect(scheduleDailyReminder).toHaveBeenCalledWith(20, 0);
+    expect(scheduleDailyReminder).toHaveBeenCalledWith(20, 0, expect.any(Object));
     const { getReminderPrefs } = await import("../../src/reminders");
     expect((await getReminderPrefs("user-1")).hour).toBe(20);
   });

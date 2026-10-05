@@ -109,7 +109,9 @@ def build_aad(*parts: str) -> bytes:
 # belongs to, never WHICH VERSION. v2 adds the entry's monotonic
 # content_version as a fourth AAD part, so a version-echo lie and the
 # ciphertext can no longer travel together: the client (and the server's own
-# recompute) also keeps a per-id high-water mark.
+# recompute) also keeps authenticated per-entry generation metadata. The
+# server's entry_guard must authorize the legacy fallback and becomes sticky
+# after positive v2 authentication; these raw candidates alone are not a guard.
 #
 # Legacy v1 blobs remain decryptable (both platforms try v2 then v1); every
 # new write and every server-side rekey encrypts under v2.

@@ -134,7 +134,7 @@ async def test_logout_revokes_only_the_presented_token(client):
     response = await client.post("/api/auth/logout", headers=emu.headers)
     assert response.status_code == 204
 
-    # The pre-logout bearer token is dead (epoch bumped)...
+    # The pre-logout bearer token is dead (its jti was revoked)...
     stale = await client.get("/api/entries", headers={"Authorization": f"Bearer {old_token}"})
     assert stale.status_code == 401
     assert stale.json()["detail"] == "invalid token"  # flat reason, no oracle
@@ -160,6 +160,48 @@ async def test_logout_revokes_only_the_presented_token(client):
     assert sibling_alive.status_code == 200, (
         "logout killed a sibling token — kill-all semantics regressed"
     )
+
+
+async def test_legacy_jtiless_logout_retires_the_account_epoch(client, app):
+    """An accepted pre-jti bearer must remain revocable during migration.
+
+    Modern single-token logout cannot cover this compatibility path: the
+    old wire format has no token id, so its logout must retire the epoch
+    and reject both the legacy bearer and a sibling from that generation.
+    """
+    import hashlib
+    import hmac
+    import json
+
+    from app.security import tokens
+
+    emu = ClientEmulator("legacy-logout", "legacy-logout-password")
+    await emu.register(client)
+    sibling = emu.token
+    secret = app.state.settings.auth_token_secret
+    payload = tokens.verify_token(sibling, secret)
+    payload.pop("jti")
+
+    def b64(value: bytes) -> str:
+        return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
+
+    body = b64(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode())
+    signature = b64(hmac.new(secret.encode(), body.encode("ascii"), hashlib.sha256).digest())
+    legacy = f"{body}.{signature}"
+    legacy_headers = {"Authorization": f"Bearer {legacy}"}
+    assert (await client.get("/api/entries", headers=legacy_headers)).status_code == 200
+
+    assert (await client.post("/api/auth/logout", headers=legacy_headers)).status_code == 204
+    for bearer in (legacy, sibling):
+        stale = await client.get("/api/entries", headers={"Authorization": f"Bearer {bearer}"})
+        assert stale.status_code == 401
+        assert stale.json()["detail"] == "invalid token"
+
+    # Revocation retires only the generation, not the active account.
+    logged_in = await emu.login(client)
+    assert (
+        await client.get("/api/entries", headers={"Authorization": f"Bearer {logged_in['token']}"})
+    ).status_code == 200
 
 
 async def test_protected_routes_require_token(client):

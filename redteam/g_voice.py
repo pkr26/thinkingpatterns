@@ -38,6 +38,7 @@ import asyncio
 import base64
 import os
 import tempfile
+import time
 from datetime import datetime, timedelta, timezone
 
 from common import (
@@ -55,9 +56,7 @@ TODAY = datetime.now(timezone.utc).date()
 FAKE_AUDIO = b"RIFF-redteam-voice-take" * 64
 
 
-def _audio_body(
-    audio: bytes = FAKE_AUDIO, duration: int = 60, mime: str = "audio/webm"
-):
+def _audio_body(audio: bytes = FAKE_AUDIO, duration: int = 60, mime: str = "audio/webm"):
     return {
         "audio_b64": base64.b64encode(audio).decode("ascii"),
         "mime": mime,
@@ -157,8 +156,7 @@ async def main() -> None:
 
 
 async def _campaign(app, client, settings) -> None:
-    from app.models import AccessLog, AudioAttachment, Consent, utcnow
-    from app.models import User as UserModel
+    from app.models import AccessLog, AudioAttachment, Consent, User as UserModel, utcnow
     from app.services import stt as stt_service
     from app.services.audio_store import get_audio_store
     from sqlalchemy import select
@@ -337,18 +335,12 @@ async def _campaign(app, client, settings) -> None:
     shared = await _register(client, "gvoice-shared")
     await _consent_voice(client, shared)
     shared_entry = await _make_entry(client, shared, "e-redteam-shared")
-    shared_created = await _upload(
-        client, shared, shared_entry, b"RIFF-shared-take" + b"2" * 40
-    )
+    shared_created = await _upload(client, shared, shared_entry, b"RIFF-shared-take" + b"2" * 40)
 
     therapist = await _register(client, "gvoice-therapist")
     async with app.state.sessionmaker() as session:
         t_row = (
-            (
-                await session.execute(
-                    select(UserModel).where(UserModel.id == therapist["user_id"])
-                )
-            )
+            (await session.execute(select(UserModel).where(UserModel.id == therapist["user_id"])))
             .scalars()
             .one()
         )
@@ -365,11 +357,7 @@ async def _campaign(app, client, settings) -> None:
         )
         await session.commit()
         consent_id = (
-            (
-                await session.execute(
-                    select(Consent.id).where(Consent.user_id == shared["user_id"])
-                )
-            )
+            (await session.execute(select(Consent.id).where(Consent.user_id == shared["user_id"])))
             .scalars()
             .one()
         )
@@ -384,9 +372,40 @@ async def _campaign(app, client, settings) -> None:
     assert login.status_code == 200, login.text
     therapist["headers"] = {"Authorization": "Bearer " + login.json()["token"]}
 
+    # Enroll and then obtain an MFA-authenticated session. A pre-enrollment
+    # 403 must never be mistaken for exercising the downstream voice grant.
+    setup = await client.post(
+        "/api/v1/account/totp/setup",
+        headers=therapist["headers"],
+        json={"verifier": therapist["verifier"]},
+    )
+    assert setup.status_code == 200, setup.text
+    from app.security import totp
+
+    encoded_secret = setup.json()["secret_base32"]
+    secret = base64.b32decode(encoded_secret + "=" * (-len(encoded_secret) % 8))
+    enabled = await client.post(
+        "/api/v1/account/totp/enable",
+        headers=therapist["headers"],
+        json={
+            "verifier": therapist["verifier"],
+            "code": totp._code_for_counter(secret, int(time.time() // totp.STEP_SECONDS)),
+        },
+    )
+    assert enabled.status_code == 200, enabled.text
+    login_mfa = await client.post(
+        "/api/v1/auth/login",
+        json={
+            "username": "gvoice-therapist",
+            "verifier": therapist["verifier"],
+            "totp_code": enabled.json()["backup_codes"][0],
+        },
+    )
+    assert login_mfa.status_code == 200, login_mfa.text
+    therapist["headers"] = {"Authorization": "Bearer " + login_mfa.json()["token"]}
+
     audio_url = (
-        f"/api/therapist/patients/{shared['user_id']}/audio/"
-        f"{shared_created['attachment_id']}"
+        f"/api/therapist/patients/{shared['user_id']}/audio/{shared_created['attachment_id']}"
     )
     denied_fetch = await client.get(audio_url, headers=therapist["headers"])
     async with app.state.sessionmaker() as session:
@@ -505,9 +524,7 @@ async def _campaign(app, client, settings) -> None:
             raise httpx.HTTPStatusError(
                 "busy",
                 request=request,
-                response=httpx.Response(
-                    429, request=request, headers={"retry-after": "0"}
-                ),
+                response=httpx.Response(429, request=request, headers={"retry-after": "0"}),
             )
         return {"text": "after retry", "language": "english"}
 
@@ -538,12 +555,7 @@ async def _campaign(app, client, settings) -> None:
         await engine2.transcribe(b"audio", "audio/webm")
     except httpx.HTTPStatusError:
         raised = True
-    ok = (
-        retried.text == "after retry"
-        and calls["n"] == 2
-        and raised
-        and calls2["n"] == 1
-    )
+    ok = retried.text == "after retry" and calls["n"] == 2 and raised and calls2["n"] == 1
     verdict(
         "G-VOICE.V-12-retry",
         "BLOCKED" if ok else "FINDING",
@@ -588,11 +600,7 @@ async def _campaign(app, client, settings) -> None:
             .scalars()
             .all()
         )
-    ok = (
-        expired.status_code == 410
-        and remaining == []
-        and not expired_object_path.exists()
-    )
+    ok = expired.status_code == 410 and remaining == [] and not expired_object_path.exists()
     verdict(
         "G-VOICE.V-9-lazy-expiry",
         "BLOCKED" if ok else "FINDING",

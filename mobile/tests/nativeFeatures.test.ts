@@ -6,6 +6,7 @@
  * the next local fire time.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beginNotificationUpdate } from "../src/notificationOwnership";
 import { __resetLocalKeyLifecycleForTests, changeLocalSessionOwner } from "../src/localWriteGuard";
 
 // The seam resolves the module through a dynamic import (require fails in
@@ -43,7 +44,7 @@ beforeEach(() => {
 describe("scheduleDailyReminder", () => {
   it("asks permission first, then creates ONE repeating daily trigger at the next local fire time", async () => {
     const before = Date.now();
-    expect(await scheduleDailyReminder(20, 0)).toBe(true);
+    expect(await scheduleDailyReminder(20, 0, beginNotificationUpdate("user-1", "daily"))).toBe(true);
     expect(requestPermission).toHaveBeenCalledTimes(1);
     expect(createTriggerNotification).toHaveBeenCalledTimes(1);
     const [notification, trigger] = createTriggerNotification.mock.calls[0] as [
@@ -72,30 +73,30 @@ describe("scheduleDailyReminder", () => {
 
   it("a denied permission schedules NOTHING and reports false", async () => {
     requestPermission.mockResolvedValue({ authorizationStatus: 0 }); // DENIED
-    expect(await scheduleDailyReminder(9, 0)).toBe(false);
+    expect(await scheduleDailyReminder(9, 0, beginNotificationUpdate("user-1", "daily"))).toBe(false);
     expect(createTriggerNotification).not.toHaveBeenCalled();
     expect(createChannel).not.toHaveBeenCalled();
   });
 
   it("a bare AuthorizationStatus number is honored too (Android contract)", async () => {
     requestPermission.mockResolvedValue(1);
-    expect(await scheduleDailyReminder(9, 0)).toBe(true);
+    expect(await scheduleDailyReminder(9, 0, beginNotificationUpdate("user-1", "daily"))).toBe(true);
   });
 
   it("provisional authorization does not count as granted for a daily nudge", async () => {
     requestPermission.mockResolvedValue({ authorizationStatus: 2 });
-    expect(await scheduleDailyReminder(9, 0)).toBe(false);
+    expect(await scheduleDailyReminder(9, 0, beginNotificationUpdate("user-1", "daily"))).toBe(false);
     expect(createTriggerNotification).not.toHaveBeenCalled();
   });
 
   it("a native failure mid-schedule is a false, never a throw", async () => {
     createTriggerNotification.mockRejectedValue(new Error("native exploded"));
-    expect(await scheduleDailyReminder(20, 0)).toBe(false);
+    expect(await scheduleDailyReminder(20, 0, beginNotificationUpdate("user-1", "daily"))).toBe(false);
   });
 
   it("a permission call failure is a false, never a throw", async () => {
     requestPermission.mockRejectedValue(new Error("no activity"));
-    expect(await scheduleDailyReminder(20, 0)).toBe(false);
+    expect(await scheduleDailyReminder(20, 0, beginNotificationUpdate("user-1", "daily"))).toBe(false);
     expect(createTriggerNotification).not.toHaveBeenCalled();
   });
 });
@@ -110,7 +111,7 @@ describe("reschedule idempotency (2026-09-26 audit MEDIUM)", () => {
     // platform builds that lag on same-id replacement).
     const syncs = 5; // five app restarts for an enabled user
     for (let i = 0; i < syncs; i++) {
-      expect(await scheduleDailyReminder(20, 0)).toBe(true);
+      expect(await scheduleDailyReminder(20, 0, beginNotificationUpdate("user-1", "daily"))).toBe(true);
     }
     expect(createTriggerNotification).toHaveBeenCalledTimes(syncs);
     expect(cancelNotification).toHaveBeenCalledTimes(syncs);
@@ -135,7 +136,7 @@ describe("reschedule idempotency (2026-09-26 audit MEDIUM)", () => {
 
   it("a failed pre-create cancel never blocks the schedule (the stable id is the primary guarantee)", async () => {
     cancelNotification.mockRejectedValue(new Error("nothing scheduled"));
-    expect(await scheduleDailyReminder(20, 0)).toBe(true);
+    expect(await scheduleDailyReminder(20, 0, beginNotificationUpdate("user-1", "daily"))).toBe(true);
     expect(createTriggerNotification).toHaveBeenCalledTimes(1);
   });
 
@@ -146,7 +147,7 @@ describe("reschedule idempotency (2026-09-26 audit MEDIUM)", () => {
     const original = notifee.default.cancelNotification;
     delete notifee.default.cancelNotification;
     try {
-      expect(await scheduleDailyReminder(20, 0)).toBe(true);
+      expect(await scheduleDailyReminder(20, 0, beginNotificationUpdate("user-1", "daily"))).toBe(true);
       const [notification] = createTriggerNotification.mock.calls[0] as [
         { id: string },
         unknown,
@@ -209,7 +210,7 @@ describe("module ABSENT (this build)", () => {
     const original = notifee.default.requestPermission;
     delete notifee.default.requestPermission;
     try {
-      expect(await scheduleDailyReminder(20, 0)).toBe(false);
+      expect(await scheduleDailyReminder(20, 0, beginNotificationUpdate("user-1", "daily"))).toBe(false);
       expect(await cancelDailyReminder()).toBe(false);
       expect(await cancelOriginNotifications()).toBe(true);
     } finally {
@@ -232,7 +233,7 @@ describe("notification copy resolves through the catalog (audit fix 22, 2026-09-
 
     __setLocaleForTests("es");
     try {
-      expect(await scheduleDailyReminder(20, 0)).toBe(true);
+      expect(await scheduleDailyReminder(20, 0, beginNotificationUpdate("user-1", "daily"))).toBe(true);
       const [notification] = createTriggerNotification.mock.calls[0] as [
         { title: string; body: string },
         unknown,
@@ -250,7 +251,7 @@ describe("notification copy resolves through the catalog (audit fix 22, 2026-09-
     }
 
     // English still resolves through the catalog (not a hardcoded literal).
-    expect(await scheduleDailyReminder(20, 0)).toBe(true);
+    expect(await scheduleDailyReminder(20, 0, beginNotificationUpdate("user-1", "daily"))).toBe(true);
     const calls = createTriggerNotification.mock.calls as unknown as [
       { title: string; body: string },
       unknown,

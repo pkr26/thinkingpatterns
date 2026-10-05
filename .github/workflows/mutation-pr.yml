@@ -6,8 +6,9 @@ name: PR mutation gate
 # default standard between schedules. Two bounded layers:
 #
 #  1. BEHAVIORAL RE-RUN (fast, exact): every hand-written campaign mutant
-#     (redteam/mutation_campaign_*/harness.py) whose target file is in
-#     the diff is re-applied and must stay killed. A mutant whose
+#     (redteam/mutation_campaign_*/harness.py) whose target, oracle, or
+#     shared oracle support/configuration is in the diff is re-applied
+#     and must stay killed. A mutant whose
 #     find-string no longer matches (SETUP-ERROR) also fails: a rotted
 #     pin is a pin that stopped guarding.
 #  2. BOUNDED MUTMUT (diff-scoped): mutmut restricted to the PR's changed
@@ -26,9 +27,19 @@ on:
       # must re-run the gate so the harness can report SETUP-ERROR instead
       # of silently "killing" every mutant against a rotted suite.
       - "backend/tests/**"
+      - "backend/conftest.py"
+      - "backend/pyproject.toml"
+      - "backend/pytest.ini"
+      - "backend/setup.cfg"
+      - "backend/tox.ini"
       - "backend/scripts/mutmut_runner.sh"
       - "redteam/mutation_campaign*/**"
       - "redteam/run_pr_mutation_gate.py"
+      - "redteam/mutation_preflight.py"
+      - "redteam/mutation_oracles.py"
+      - "redteam/*.py"
+      - "mobile/tests/**"
+      - "portal/tests/**"
       - "shared/vectors.json"
       - "shared/crisis_phrases.json"
       - "shared/generic_questions.json"
@@ -46,7 +57,10 @@ jobs:
   behavioral-gate:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Latest accepted proofs require ~77 minutes sequentially, including
+    # deduplicated baselines but excluding installation. Keep a hard failure
+    # deadline with room for cold dependencies and CI machine variation.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -67,13 +81,15 @@ jobs:
           # backend/; point that seam at the runner's interpreter.
           mkdir -p .venv/bin
           ln -s "$(command -v python)" .venv/bin/python
-      - name: Install JS suites when the diff touches them
+      - name: Install client oracles and inventory the diff
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           git diff --name-only "$BASE_SHA"...HEAD > /tmp/pr_files.txt
-          if grep -q '^mobile/' /tmp/pr_files.txt; then (cd mobile && npm ci); fi
-          if grep -q '^portal/' /tmp/pr_files.txt; then (cd portal && npm ci); fi
+          # Catalog/shared-fixture edits can select client oracles even
+          # without changing a client source path. Both must be available.
+          (cd mobile && npm ci)
+          (cd portal && npm ci)
       - name: Re-run behavioral mutants targeting changed files
         run: |
           cat /tmp/pr_files.txt

@@ -63,8 +63,10 @@ import sys
 import time
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
+if str(ROOT / "redteam") not in sys.path:
+    sys.path.insert(0, str(ROOT / "redteam"))
+from mutation_oracles import oracle_setup_error
 OUT_DIR = pathlib.Path(__file__).resolve().parent / "results"
-OUT_DIR.mkdir(exist_ok=True)
 
 PY = ".venv/bin/python"
 # The repo-root venv is the canonical interpreter (README); backend/.venv is
@@ -118,8 +120,8 @@ MUTANTS: list[dict] = [
         id="U3", campaign="U", name="wrong-code acceptance (matched None no longer refuses)",
         expectation="a wrong code must 401 totp_code_invalid, never issue a token",
         file="backend/app/api/auth.py",
-        find="            if matched is None or replayed:",
-        replace="            if replayed:",
+        find='                if not redeemed:',
+        replace='                if False:',
         tests=[backend_pytest("tests/test_totp.py")],
     ),
     dict(
@@ -127,16 +129,10 @@ MUTANTS: list[dict] = [
         expectation="the SAME code must be refused on the immediately following login",
         file="backend/app/api/auth.py",
         find=(
-            "            replayed = (\n"
-            "                user.totp_last_counter is not None and matched is not None\n"
-            "                and matched <= user.totp_last_counter\n"
-            "            )"
+            '                            User.totp_last_counter < matched,'
         ),
         replace=(
-            "            replayed = (\n"
-            "                user.totp_last_counter is not None and matched is not None\n"
-            "                and matched < user.totp_last_counter\n"
-            "            )"
+            '                            User.totp_last_counter <= matched,'
         ),
         tests=[backend_pytest("tests/test_totp.py")],
     ),
@@ -144,8 +140,8 @@ MUTANTS: list[dict] = [
         id="U5", campaign="U", name="login never persists the consumed timestep (fence frozen at arm time)",
         expectation="the replay fence must advance with every successful TOTP login",
         file="backend/app/api/auth.py",
-        find="                .where(User.id == user.id, User.totp_enabled.is_(True))",
-        replace="                .where(User.id == user.id, User.totp_enabled.is_(False))",
+        find='                    .values(totp_last_counter=matched)',
+        replace='                    .values(totp_last_counter=User.totp_last_counter)',
         tests=[backend_pytest("tests/test_totp.py")],
     ),
     dict(
@@ -199,7 +195,8 @@ MUTANTS: list[dict] = [
         file="backend/app/api/measures.py",
         find="            if count >= MAX_MEASURES_PER_USER:",
         replace="            if False:",
-        tests=[backend_pytest("tests/test_measures_api.py", "tests/test_audit_2026_09_21_backend.py")],
+        tests=[backend_pytest("tests/test_remediation_measure_quota.py",
+                              "tests/test_measures_api.py", "tests/test_audit_2026_09_21_backend.py")],
     ),
     dict(
         id="V2", campaign="V", name="forward date grace widened (far-future measure dates accepted)",
@@ -213,32 +210,32 @@ MUTANTS: list[dict] = [
         id="V3", campaign="V", name="backdate floor removed (pre-account measure dates accepted)",
         expectation="a measure_date before account-creation-minus-1 must 422",
         file="backend/app/api/measures.py",
-        find="    earliest = min(user.created_at.date(), today) - timedelta(days=BACKDATE_GRACE_DAYS)",
-        replace="    earliest = min(user.created_at.date(), today) - timedelta(days=3650)",
+        find='    earliest = min(created_day, today) - timedelta(days=BACKDATE_GRACE_DAYS)',
+        replace='    earliest = min(created_day, today) - timedelta(days=3650)',
         tests=[backend_pytest("tests/test_measures_api.py")],
     ),
     dict(
         id="V4", campaign="V", name="legacy measure page byte budget x100 (413 removed)",
         expectation="an unpaged request over 2 MiB ciphertext must 413",
-        file="backend/app/api/measures.py",
-        find="            if sum(size for _, size in selected) > MEASURE_PAGE_BLOB_BYTES:",
-        replace="            if sum(size for _, size in selected) > MEASURE_PAGE_BLOB_BYTES * 100:",
+        file='backend/app/api/_paging.py',
+        find='        if total > hard_budget:',
+        replace='        if total > hard_budget * 100:',
         tests=[backend_pytest("tests/test_audit_2026_09_21_backend.py")],
     ),
     dict(
         id="V5", campaign="V", name="page_bytes budget walk never stops (over-budget page served)",
         expectation="a byte-paginating client must receive at most its page_bytes budget",
-        file="backend/app/api/measures.py",
-        find="                if total_bytes + blob_bytes > page_bytes:",
-        replace="                if False:",
+        file='backend/app/api/_paging.py',
+        find='        if used + size > page_bytes:',
+        replace='        if False:',
         tests=[backend_pytest("tests/test_audit_2026_09_21_backend.py")],
     ),
     dict(
         id="V6", campaign="V", name="has_more drops the short-page arm (byte-truncated pages look terminal)",
         expectation="a byte-truncated page must still advertise X-Next-Offset",
-        file="backend/app/api/measures.py",
-        find="        has_more = len(selected) < len(requested) or len(metadata) > limit",
-        replace="        has_more = len(metadata) > limit",
+        file='backend/app/api/_paging.py',
+        find='    return BytePage(selected, more_after_request or truncated)',
+        replace='    return BytePage(selected, more_after_request)',
         tests=[backend_pytest("tests/test_audit_2026_09_21_backend.py")],
     ),
     dict(
@@ -255,7 +252,8 @@ MUTANTS: list[dict] = [
         file="backend/app/api/measures.py",
         find="    if db_rowcount(result) != 1:",
         replace="    if False:",
-        tests=[backend_pytest("tests/test_snapshot_revisions.py", "tests/test_audit_2026_09_21_backend.py")],
+        tests=[backend_pytest("tests/test_remediation_measure_quota.py",
+                              "tests/test_snapshot_revisions.py", "tests/test_audit_2026_09_21_backend.py")],
     ),
     dict(
         id="V9", campaign="V", name="patient read drops the final revision drift fence",
@@ -263,7 +261,8 @@ MUTANTS: list[dict] = [
         file="backend/app/api/measures.py",
         find="        if final_revision != revision:",
         replace="        if False:",
-        tests=[backend_pytest("tests/test_audit_2026_09_21_backend.py", "tests/test_snapshot_revisions.py")],
+        tests=[backend_pytest("tests/test_remediation_measure_quota.py",
+                              "tests/test_audit_2026_09_21_backend.py", "tests/test_snapshot_revisions.py")],
     ),
     dict(
         id="V10", campaign="V", name="therapist measures mirror ignores the disclosure version",
@@ -286,21 +285,19 @@ MUTANTS: list[dict] = [
             "            final_revision = await current_measures_revision(session, consent.user_id)\n"
             "            if False:"
         ),
-        tests=[backend_pytest("tests/test_audit_2026_09_21_backend.py")],
+        tests=[backend_pytest("tests/test_remediation_therapist_measures.py", "tests/test_audit_2026_09_21_backend.py")],
     ),
     dict(
         id="V12", campaign="V", name="therapist mirror post-fetch byte sanity x100",
         expectation="the served page must respect the byte budget even after the blob fetch",
-        file="backend/app/api/therapist.py",
+        file='backend/app/api/_paging.py',
         find=(
-            "                byte_limit = page_bytes if page_bytes is not None else MEASURE_PAGE_BLOB_BYTES\n"
-            "                if sum(len(bytes(row.blob)) for row in rows) > byte_limit:"
+            '    if sum(len(bytes(row.blob)) for row in ordered) > byte_limit:'
         ),
         replace=(
-            "                byte_limit = page_bytes if page_bytes is not None else MEASURE_PAGE_BLOB_BYTES\n"
-            "                if sum(len(bytes(row.blob)) for row in rows) > byte_limit * 100:"
+            '    if sum(len(bytes(row.blob)) for row in ordered) > byte_limit * 100:'
         ),
-        tests=[backend_pytest("tests/test_audit_2026_09_21_backend.py")],
+        tests=[backend_pytest("tests/test_remediation_measure_fetch_bytes.py", "tests/test_audit_2026_09_21_backend.py")],
     ),
     dict(
         id="V13", campaign="V", name="therapist ENTRIES mirror drops the final revision drift fence",
@@ -351,11 +348,11 @@ MUTANTS: list[dict] = [
         tests=[backend_pytest("tests/test_note_history.py")],
     ),
     dict(
-        id="W4", campaign="W", name="idempotent retry with new text skips the revision (history replaced in place)",
+        id="W4", campaign="W", name='idempotent note POST accepts conflicting new content without revision or 409',
         expectation="a retried create with different content must preserve the superseded v1",
         file="backend/app/api/therapist.py",
-        find="                if bytes(existing.blob) != blob:",
-        replace="                if False:",
+        find='            changed = bytes(existing.blob) != blob or existing.pattern_pid != body.pattern_pid',
+        replace='            changed = False',
         tests=[backend_pytest("tests/test_note_history.py")],
     ),
     dict(
@@ -388,50 +385,35 @@ MUTANTS: list[dict] = [
     ),
     dict(
         id="W7", campaign="W", name="revision read drops therapist scoping",
-        expectation="oracle question: unreachable behind the still-scoped note fetch?",
+        expectation="inconsistent foreign revision metadata must not disrupt owned history; final blob scope still prevents disclosure",
         file="backend/app/api/therapist.py",
         find=(
-            "                .where(\n"
-            "                    TherapistNoteRevision.note_id == note_id,\n"
-            "                    TherapistNoteRevision.therapist_id == user.id,\n"
-            "                )"
+            '                TherapistNoteRevision.note_id == note_id,\n                TherapistNoteRevision.therapist_id == user.id,'
         ),
         replace=(
-            "                .where(\n"
-            "                    TherapistNoteRevision.note_id == note_id,\n"
-            "                )"
+            '                TherapistNoteRevision.note_id == note_id,'
         ),
-        tests=[backend_pytest("tests/test_note_history.py")],
+        tests=[backend_pytest("tests/test_remediation_note_history.py", "tests/test_note_history.py")],
     ),
     dict(
         id="W8", campaign="W", name="history read serves oldest-first",
         expectation="revisions must arrive newest-first for the portal timeline",
         file="backend/app/api/therapist.py",
-        find="                .order_by(TherapistNoteRevision.created_at.desc(), TherapistNoteRevision.id.desc())",
-        replace="                .order_by(TherapistNoteRevision.created_at.asc(), TherapistNoteRevision.id.asc())",
-        tests=[backend_pytest("tests/test_note_history.py")],
+        find='            .order_by(TherapistNoteRevision.created_at.desc(), TherapistNoteRevision.id.desc())',
+        replace='            .order_by(TherapistNoteRevision.created_at.asc(), TherapistNoteRevision.id.asc())',
+        tests=[backend_pytest("tests/test_remediation_note_history.py", "tests/test_note_history.py")],
     ),
     dict(
         id="W9", campaign="W", name="history page ceiling 200 -> 2000",
-        expectation="oracle question: is the history read cap pinned anywhere?",
+        expectation="the public request accepts limit200 and refuses limit201 with validation_error",
         file="backend/app/api/therapist.py",
         find=(
-            "async def read_note_revisions(\n"
-            "    note_id: str,\n"
-            "    user: User = Depends(require_therapist),\n"
-            "    session: AsyncSession = Depends(get_session),\n"
-            "    limit: int = Query(default=50, ge=1, le=200),\n"
-            "):"
+            'async def read_note_revisions(\n    note_id: str,\n    response: Response,\n    user: User = Depends(require_therapist),\n    session: AsyncSession = Depends(get_session),\n    offset: int = Query(default=0, ge=0, le=100_000),\n    limit: int = Query(default=50, ge=1, le=200),'
         ),
         replace=(
-            "async def read_note_revisions(\n"
-            "    note_id: str,\n"
-            "    user: User = Depends(require_therapist),\n"
-            "    session: AsyncSession = Depends(get_session),\n"
-            "    limit: int = Query(default=50, ge=1, le=2000),\n"
-            "):"
+            'async def read_note_revisions(\n    note_id: str,\n    response: Response,\n    user: User = Depends(require_therapist),\n    session: AsyncSession = Depends(get_session),\n    offset: int = Query(default=0, ge=0, le=100_000),\n    limit: int = Query(default=50, ge=1, le=2000),'
         ),
-        tests=[backend_pytest("tests/test_note_history.py")],
+        tests=[backend_pytest("tests/test_remediation_note_history.py", "tests/test_note_history.py")],
     ),
     # ---------------------------------------------------------------- X. entry content versioning
     dict(
@@ -471,8 +453,8 @@ MUTANTS: list[dict] = [
         id="X5", campaign="X", name="rekey re-encrypts under the legacy v1 AAD",
         expectation="oracle question: does any pin assert the post-rekey AAD generation?",
         file="backend/app/api/insights.py",
-        find="                    new_key, plaintext, crypto.entry_aad_v2(user_id, client_entry_id, version)",
-        replace="                    new_key, plaintext, crypto.entry_aad_v1(user_id, client_entry_id)",
+        find='                        crypto.entry_aad_v2(user_id, client_entry_id, version),',
+        replace='                        crypto.entry_aad_v1(user_id, client_entry_id),',
         tests=[backend_pytest("tests/test_rotation_pins.py", "tests/test_audit_2026_09_21_backend.py")],
     ),
     # ---------------------------------------------------------------- Y. time-of-day + Spanish parity
@@ -490,7 +472,7 @@ MUTANTS: list[dict] = [
         file="backend/app/services/brain.py",
         find="TEMPORAL_MIN_TOD_N = 3",
         replace="TEMPORAL_MIN_TOD_N = 1",
-        tests=[backend_pytest("tests/test_time_of_day.py")],
+        tests=[backend_pytest("tests/test_time_of_day.py", "tests/test_remediation_mutation_language.py")],
     ),
     dict(
         id="Y3", campaign="Y", name="temporal dominance fraction floor collapsed to 0.1",
@@ -506,7 +488,7 @@ MUTANTS: list[dict] = [
         file="backend/app/services/brain.py",
         find="                if dominant_k / len(tod_seen) >= TEMPORAL_MIN_TOD_FRACTION:",
         replace="                if dominant_k / len(tod_seen) > TEMPORAL_MIN_TOD_FRACTION:",
-        tests=[backend_pytest("tests/test_time_of_day.py")],
+        tests=[backend_pytest("tests/test_time_of_day.py", "tests/test_remediation_mutation_language.py")],
     ),
     dict(
         id="Y5", campaign="Y", name="theme lookup ignores the language (ES map never consulted)",
@@ -520,9 +502,9 @@ MUTANTS: list[dict] = [
         id="Y6", campaign="Y", name="lexicon merge order flipped (Spanish overrides English collisions)",
         expectation="English must win every graded-sentiment collision",
         file="backend/app/services/brain.py",
-        find="SENTIMENT_LEXICON: dict[str, float] = {**VADER_BASE_ES, **SENTIMENT_LEXICON_EN}",
-        replace="SENTIMENT_LEXICON: dict[str, float] = {**SENTIMENT_LEXICON_EN, **VADER_BASE_ES}",
-        tests=[backend_pytest("tests/test_audit_round2_2026_09_21_brain.py", "tests/test_brain.py")],
+        find='SENTIMENT_LEXICON: dict[str, float] = _fold_canonicalize_lexicon(\n    {**VADER_BASE_ES, **SENTIMENT_LEXICON_EN}\n)',
+        replace='SENTIMENT_LEXICON: dict[str, float] = _fold_canonicalize_lexicon(\n    {**SENTIMENT_LEXICON_EN, **VADER_BASE_ES}\n)',
+        tests=[backend_pytest("tests/test_audit_round2_2026_09_21_brain.py", "tests/test_brain.py", "tests/test_remediation_mutation_language.py")],
     ),
     dict(
         id="Y7", campaign="Y", name="ES topic-eligibility stopwords dropped (function words become topics)",
@@ -533,12 +515,12 @@ MUTANTS: list[dict] = [
         tests=[backend_pytest("tests/test_es_themes.py", "tests/test_audit_2026_09_21_brain.py")],
     ),
     dict(
-        id="Y8", campaign="Y", name="language floor lowered 50 -> 5 tokens",
-        expectation="oracle question: short corpora must keep the English default",
+        id="Y8", campaign="Y", name="language coverage floor lowered 0.10 -> 0.01 for insufficient text",
+        expectation="short unsupported-language corpora must not be classified from one English sentiment word",
         file="backend/app/services/brain.py",
-        find="LANGUAGE_MIN_TOKENS = 50  # too little text to judge a language honestly",
-        replace="LANGUAGE_MIN_TOKENS = 5  # too little text to judge a language honestly",
-        tests=[backend_pytest("tests/test_es_themes.py", "tests/test_audit_2026_09_21_brain.py")],
+        find="LANGUAGE_HIT_FLOOR = 0.10  # ~10% recognized = English with names/slang;",
+        replace="LANGUAGE_HIT_FLOOR = 0.01  # MUTANT: insufficient language evidence accepted",
+        tests=[backend_pytest("tests/test_es_themes.py", "tests/test_audit_2026_09_21_brain.py", "tests/test_remediation_mutation_language.py")],
     ),
     dict(
         id="Y9", campaign="Y", name="Spanish hopelessness crisis phrase never matches",
@@ -571,14 +553,9 @@ MUTANTS: list[dict] = [
         expectation="cursor pagination must be complete and unduplicated across equal timestamps",
         file="backend/app/api/account.py",
         find=(
-            "        query = query.where(\n"
-            "            or_(\n"
-            "                AccessLog.at < cursor_at,\n"
-            "                (AccessLog.at == cursor_at) & (AccessLog.id < parts[1]),\n"
-            "            )\n"
-            "        )"
+            '                (AccessLog.at == cursor_at) & (AccessLog.id < cursor_id),'
         ),
-        replace="        query = query.where(AccessLog.at < cursor_at)",
+        replace='                False,',
         tests=[backend_pytest("tests/test_audit_trail_phase2.py")],
     ),
     dict(
@@ -614,16 +591,16 @@ MUTANTS: list[dict] = [
         id="Z6", campaign="Z", name="wrap-key rotation skips the deactivated-account recheck",
         expectation="oracle question: rotation under the lock must re-see the account",
         file="backend/app/api/therapist.py",
-        find="        if fresh is None or not fresh.is_active:",
-        replace="        if False:",
+        find='        if fresh is None or not fresh.is_active:\n            raise ApiError(status_code=404, detail="account not found", code="not_found")\n        if fresh.token_epoch != expected_epoch:\n            # M-B1 (2026-09-26): a logout/credential rotation committed',
+        replace='        if False:\n            raise ApiError(status_code=404, detail="account not found", code="not_found")\n        if fresh.token_epoch != expected_epoch:\n            # M-B1 (2026-09-26): a logout/credential rotation committed',
         tests=[backend_pytest("tests/test_therapist_lifecycle.py", "tests/test_api_resilience_coverage.py")],
     ),
     dict(
         id="Z7", campaign="Z", name="password-equivalent verifier gate removed (setup/rotation on bearer alone)",
         expectation="every verifier-gated action must 403 without the password half",
         file="backend/app/api/account.py",
-        find="    if not hmac.compare_digest(candidate, bytes(user.verifier)):",
-        replace="    if False:",
+        find='    if not hmac.compare_digest(candidate, bytes(target.verifier)):',
+        replace='    if False:',
         tests=[backend_pytest("tests/test_totp.py", "tests/test_therapist_lifecycle.py",
                              "tests/test_rotation_pins.py")],
     ),
@@ -648,17 +625,6 @@ def parse_failures(kind: str, output: str) -> list[str]:
 # these as KILLED would print PASSED while verifying nothing — they are
 # SETUP-ERRORs, reported loudly, never kills.
 PYTEST_SETUP_EXITS = {2, 3, 4, 5}
-
-
-def oracle_setup_error(kind: str, returncode: int, output: str) -> str | None:
-    """Why this non-zero exit is a broken oracle rather than a kill, or None."""
-    if kind != "pytest":
-        return None
-    if returncode in PYTEST_SETUP_EXITS:
-        return f"pytest exited {returncode} (oracle broken, not a kill)"
-    if "no tests ran" in output:
-        return "pytest collected no tests (oracle broken, not a kill)"
-    return None
 
 
 def run_command(spec: dict, mutant_id: str) -> tuple[bool, str | None, list[str], str, float]:
@@ -688,7 +654,7 @@ def run_command(spec: dict, mutant_id: str) -> tuple[bool, str | None, list[str]
         elapsed = round(time.monotonic() - t0, 1)
         out = ((exc.stdout or b"").decode(errors="replace")
                + (exc.stderr or b"").decode(errors="replace"))
-        return True, None, [], out, elapsed
+        return True, "oracle timed out; behavioral kill not established", [], out, elapsed
 
 
 def run_mutant(m: dict) -> dict:
@@ -697,13 +663,13 @@ def run_mutant(m: dict) -> dict:
     text = original.decode("utf-8")
     n = text.count(m["find"])
     want = m.get("count", 1)
-    if n < want:
+    if n != want:
         return {**m, "killed": None, "status": "SETUP-ERROR",
                 "detail": f"find-string matched {n} times, expected {want}"}
     mutated = text.replace(m["find"], m["replace"], want)
-    target.write_text(mutated)
     specs = m["tests"] if isinstance(m["tests"], list) else [m["tests"]]
     try:
+        target.write_text(mutated)
         per_cmd: list[dict] = []
         killed = False
         for spec in specs:
@@ -736,13 +702,16 @@ def run_mutant(m: dict) -> dict:
 
 
 def main() -> None:
+    from run_pr_mutation_gate import prepare_direct_campaign, verdict_passes
+
     wanted = sys.argv[1:]
     todo = [m for m in MUTANTS if not wanted or m["campaign"] in wanted]
+    runner = prepare_direct_campaign(todo)
     print(f"{len(todo)} mutants queued\n", flush=True)
     results = []
     for m in todo:
         print(f"[{m['id']}] {m['name']} ...", flush=True)
-        r = run_mutant(m)
+        r = runner.run_mutant(m)
         results.append(r)
         if r["status"] == "SETUP-ERROR":
             print(f"    !! {r.get('detail', '')}", flush=True)
@@ -755,13 +724,15 @@ def main() -> None:
                   + (f"  first: {r['commands'][0]['failures'][0]}"
                      if r.get("commands") and r["commands"][0]["failures"] else ""),
                   flush=True)
-    killed = sum(1 for r in results if r["killed"])
-    done = [r for r in results if r["killed"] is not None]
-    print(f"\n{killed}/{len(done)} killed, {len(done) - killed} survived", flush=True)
+    killed = sum(verdict_passes(r) for r in results)
+    print(f"\n{killed}/{len(results)} genuinely killed/caught; {len(results) - killed} failed the gate", flush=True)
     stamp = time.strftime("%Y-%m-%dT%H%M%S")
     path = OUT_DIR / f"mutation_results_{stamp}.json"
+    OUT_DIR.mkdir(exist_ok=True)
     path.write_text(json.dumps(results, indent=2))
     print(f"results: {path}")
+    if killed != len(results):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

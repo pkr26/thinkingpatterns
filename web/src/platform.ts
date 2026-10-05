@@ -20,6 +20,35 @@ export function currentOrigin(): string {
   }
 }
 
+/** Hand a small, single-use capability to the browser's native download
+ * manager. The journal never becomes a JavaScript string, Blob, or buffer.
+ * A successful attachment response keeps this document open. */
+export function requestAccountDownload(ticket: string): boolean {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(ticket)) return false;
+  let form: HTMLFormElement | undefined;
+  try {
+    form = document.createElement("form");
+    form.method = "POST";
+    form.action = "/api/v1/account/export-download";
+    form.target = "_self";
+    form.enctype = "application/x-www-form-urlencoded";
+    form.acceptCharset = "UTF-8";
+    form.hidden = true;
+    const input = document.createElement("input");
+    input.type = "hidden";
+    input.name = "ticket";
+    input.value = ticket;
+    form.appendChild(input);
+    document.body.appendChild(form);
+    form.submit();
+    return true;
+  } catch {
+    return false;
+  } finally {
+    form?.remove();
+  }
+}
+
 export const localStore = {
   get(key: string): string | null {
     try {

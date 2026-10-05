@@ -571,11 +571,12 @@ describe("P3 (2026-09-21): note edit history in the interactive card + printed s
     expect(buttonByLabel(root, "View history")).toBe(true);
   });
 
-  it("degrades a failed revisions fetch to the honest empty history", async () => {
+  it("reports a failed revisions fetch as unavailable history", async () => {
     mockedApi.noteRevisions.mockRejectedValueOnce(new Error("revisions down"));
     const root = await renderChart();
     await press(root, "View history");
     await flush(8);
-    expect(textOf(root)).toContain("no earlier text recorded");
+    expect(textOf(root)).toContain("earlier versions could not be loaded");
+    expect(textOf(root)).not.toContain("no earlier text recorded");
   });
 });

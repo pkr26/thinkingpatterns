@@ -26,6 +26,7 @@ import {
   decryptAudio,
   decryptMeasure,
   type MeasureReading,
+  type MoodSummary,
   unwrapPatientDataKey,
   type PatternPayload,
 } from "../crypto";
@@ -33,6 +34,24 @@ import { Button, Card, Disclosure, ErrorBanner, Note as NoteText, theme } from "
 import { usePortalDrafts } from "../noteDrafts";
 import { printPage, randomBytes, visitAnchorStore } from "../platform";
 import { displayError } from "../errors";
+
+interface AccountStats {
+  avg_sentiment?: number | null;
+  mood_summary?: MoodSummary;
+  total_entries?: number;
+  active_days?: number;
+  first_date?: string;
+  last_date?: string;
+}
+
+function averageReading(stats: AccountStats): string {
+  const summary = stats.mood_summary;
+  const average = typeof stats.avg_sentiment === "number"
+    ? `average reading ${stats.avg_sentiment.toFixed(2)}` : "average reading unavailable";
+  if (!summary) return `${average} · source and coverage unavailable for this older analysis`;
+  if (summary.observations === 0) return `${average} · no eligible mood observations; ${summary.excluded_entries} entries excluded`;
+  return `${average} · ${summary.observations} observations (${summary.explicit_mood} explicit mood ratings, ${summary.text_estimates} text estimates); ${summary.excluded_entries} entries excluded`;
+}
 
 export interface PortalSession {
   username: string;
@@ -375,7 +394,7 @@ function evidenceRows(pattern: PatternPayload): [string, string][] {
   rows.push(["mentions", String(pattern.occurrences)]);
   if (typeof d.sample_entries === "number") rows.push(["sample entries", String(d.sample_entries)]);
   if (typeof d.sample_days === "number") rows.push([d.sample_entries === undefined ? "legacy sample size (unit unverified)" : "sample days", String(d.sample_days)]);
-  if (d.p_value !== undefined) rows.push(["p (corrected)", String(d.p_value)]);
+  if (d.p_value !== undefined) rows.push(["p (unadjusted)", String(d.p_value)]);
   if (d.cohens_d !== undefined) rows.push(["effect (Cohen's d)", String(d.cohens_d)]);
   if (typeof d.strength === "number") rows.push(["evidence density (heuristic; not diagnostic probability)", `${Math.round(d.strength * 100)}%`]);
   if (Array.isArray(d.evidence_dates)) rows.push(["evidence days", String(d.evidence_dates.length)]);
@@ -649,7 +668,7 @@ export function PatientView(props: {
    *  "no measures" — the honest inline line names the failure without
    *  blocking the rest of the chart (patterns/notes keep rendering). */
   const [measuresError, setMeasuresError] = useState<string | null>(null);
-  const [stats, setStats] = useState<{ avg_sentiment?: number; total_entries?: number; active_days?: number; first_date?: string; last_date?: string } | null>(null);
+  const [stats, setStats] = useState<AccountStats | null>(null);
   /** Notes search filter (client-side: notes are already decrypted here). */
   const [noteQuery, setNoteQuery] = useState("");
   /** P3 (2026-09-21): the note edit history — decrypted prior texts per
@@ -659,7 +678,7 @@ export function PatientView(props: {
    *  blobs) — clinically distinct from "this note was never edited", which
    *  is what an empty list must keep meaning. */
   const [history, setHistory] = useState<Record<string, string[]>>({});
-  const [historyFailed, setHistoryFailed] = useState<Record<string, boolean>>({});
+  const [historyFailed, setHistoryFailed] = useState<Record<string, "fetch" | "decrypt">>({});
   const [historyBusy, setHistoryBusy] = useState<string | null>(null);
   /** The note being edited (id + textarea buffer). */
   const editing = draftState.editing;
@@ -939,14 +958,14 @@ export function PatientView(props: {
           // distinctly (rendered as its own honest line below). Never put
           // the server note id or exception text into diagnostics.
           console.warn("note_history_decrypt_failed");
-          setHistoryFailed((prev) => ({ ...prev, [note.id]: true }));
+          setHistoryFailed((prev) => ({ ...prev, [note.id]: "decrypt" }));
           setHistory((prev) => ({ ...prev, [note.id]: [] }));
           return;
         }
         setHistory((prev) => ({ ...prev, [note.id]: texts }));
       } catch {
-        // The revisions FETCH itself failed: an honest empty history for a
-        // load that never happened (the pinned P3 degradation).
+        // Failure to fetch is unknown history, never evidence of absence.
+        setHistoryFailed((prev) => ({ ...prev, [note.id]: "fetch" }));
         setHistory((prev) => ({ ...prev, [note.id]: [] }));
       } finally {
         setHistoryBusy(null);
@@ -1359,7 +1378,7 @@ export function PatientView(props: {
         <Card title="Account summary">
           <NoteText>
             {stats.total_entries ?? "?"} entries · {stats.active_days ?? "?"} active days
-            {typeof stats.avg_sentiment === "number" && ` · average reading ${stats.avg_sentiment.toFixed(2)}`}
+            {` · ${averageReading(stats)}`}
             {stats.first_date && stats.last_date && ` · ${dayOf(stats.first_date)} → ${dayOf(stats.last_date)}`}
           </NoteText>
         </Card>
@@ -1631,12 +1650,12 @@ export function PatientView(props: {
             {(() => {
               const priorTexts = history[note.id];
               if (priorTexts === undefined) return null;
-              if (historyFailed[note.id] === true) {
+              if (historyFailed[note.id] !== undefined) {
                 // 2026-09-26 audit round (L): revisions existed but their
                 // blobs would not decrypt — never read as "never edited".
                 return (
                   <p className="history-line">
-                    (earlier versions could not be decrypted)
+                    {historyFailed[note.id] === "fetch" ? "(earlier versions could not be loaded; hide and show history to retry)" : "(earlier versions could not be decrypted)"}
                   </p>
                 );
               }
@@ -1734,7 +1753,7 @@ ${tpl}` : tpl)}
         {stats && (
           <p className="print-meta">
             {stats.total_entries ?? "?"} entries · {stats.active_days ?? "?"} active days
-            {typeof stats.avg_sentiment === "number" && ` · average reading ${stats.avg_sentiment.toFixed(2)}`}
+            {` · ${averageReading(stats)}`}
           </p>
         )}
         {/* Audit fix 15 (2026-09-21): recorded measures join the printed
@@ -1811,8 +1830,8 @@ ${tpl}` : tpl)}
                   )}
                   {priorTexts !== undefined && priorTexts.length === 0 && (
                     <p className="print-prior-line">
-                      {historyFailed[note.id] === true
-                        ? "(earlier versions could not be decrypted)"
+                      {historyFailed[note.id] !== undefined
+                        ? historyFailed[note.id] === "fetch" ? "(earlier versions could not be loaded)" : "(earlier versions could not be decrypted)"
                         : "no earlier text recorded"}
                     </p>
                   )}

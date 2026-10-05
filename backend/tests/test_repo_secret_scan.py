@@ -131,16 +131,22 @@ def test_gitleaks_false_positive_exceptions_stay_at_reviewed_locations():
     approved = {
         b"therapist linkage, speech/translation": {
             Path(".gitleaks.toml"),
-            Path(".github/workflows/ci.yml"),
+            Path("tools/verify_secret_scan.py"),
             Path("backend/tests/test_repo_secret_scan.py"),
             Path("docs/OPERATOR_PACK.md"),
         },
         b"React-cxxstableapi: 1e0ad8a5ecb7f2f5440c012798cf20bec6341c1f": {
             Path(".gitleaks.toml"),
-            Path(".github/workflows/ci.yml"),
+            Path("tools/verify_secret_scan.py"),
             Path("backend/tests/test_repo_secret_scan.py"),
             Path("mobile/ios/Podfile.lock"),
         },
+    }
+    approved[b"a3b747d3c02e9468"] = {
+        Path(".gitleaks.toml"),
+        Path("backend/tests/test_mutation_pins_2026_09_30.py"),
+        Path("backend/tests/test_repo_secret_scan.py"),
+        Path("tools/verify_secret_scan.py"),
     }
     found = {needle: set() for needle in approved}
     source_files = _working_tree_source_files()

@@ -513,6 +513,14 @@ const v2BoundEntries = new Set<string>();
 
 const decodeJson = (bytes: Uint8Array): unknown => JSON.parse(new TextDecoder().decode(bytes));
 
+export interface MoodSummary {
+  observations: number;
+  explicit_mood: number;
+  text_estimates: number;
+  excluded_entries: number;
+  source: "explicit_mood" | "text_estimate" | "mixed" | "unavailable";
+}
+
 export async function decryptInsights(
   dataKey: Bytes,
   userId: string,
@@ -528,7 +536,8 @@ export async function decryptInsights(
     patterns: PatternPayload[];
     /** Aggregate account stats the backend already packs into the same
      *  blob (2026-09-17: the portal stopped discarding them). */
-    avg_sentiment?: number;
+    avg_sentiment?: number | null;
+    mood_summary?: MoodSummary;
     total_entries?: number;
     active_days?: number;
     first_date?: string;
@@ -849,6 +858,19 @@ function validateInsights(value: unknown): Record<string, unknown> {
   if (row.stats === undefined) return row;
   const stats = payloadRecord(row.stats);
   finiteField(stats,"avg_sentiment",-1,1); finiteField(stats,"total_entries",0,10_000_000); finiteField(stats,"active_days",0,10_000_000);
+  if (stats.mood_summary !== undefined) {
+    const summary = payloadRecord(stats.mood_summary);
+    for (const key of ["observations", "explicit_mood", "text_estimates", "excluded_entries"]) {
+      if (!Number.isSafeInteger(summary[key]) || (summary[key] as number) < 0 || (summary[key] as number) > 10_000_000) throw new Error("Invalid encrypted mood coverage.");
+    }
+    const observations = summary.observations as number;
+    const explicit = summary.explicit_mood as number;
+    const estimates = summary.text_estimates as number;
+    const source = observations === 0 ? "unavailable" : explicit === 0 ? "text_estimate" : estimates === 0 ? "explicit_mood" : "mixed";
+    if (explicit + estimates !== observations || summary.source !== source ||
+        (observations === 0 ? stats.avg_sentiment !== null : typeof stats.avg_sentiment !== "number") ||
+        (stats.total_entries !== undefined && observations + (summary.excluded_entries as number) !== stats.total_entries)) throw new Error("Inconsistent encrypted mood coverage.");
+  }
   for (const key of ["first_date", "last_date"]) if (stats[key] !== undefined && stats[key] !== null && (typeof stats[key] !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(stats[key] as string))) throw new Error("Invalid encrypted chart date.");
   if (stats.patterns !== undefined) {
     if (!Array.isArray(stats.patterns) || stats.patterns.length > 1_000) throw new Error("Invalid encrypted patterns.");

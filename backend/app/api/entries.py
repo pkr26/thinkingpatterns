@@ -41,7 +41,8 @@ from ..schemas import (
     EntryReplace,
     entry_out,
 )
-from ..security.crypto import MIN_BLOB_SIZE
+from ..security.crypto import MIN_BLOB_SIZE, TamperError
+from ..security.entry_guard import seal_entry_guard, validate_entry_guard
 from ._paging import (
     MAX_COLLECTION_REVISION,
     assert_expected_revision,
@@ -359,6 +360,7 @@ async def create_entry(
                 entry_date=body.entry_date,
                 content_version=1,
             )
+            seal_entry_guard(row, request.app.state.settings, v2_bound=False)
             session.add(row)
             try:
                 # The insert, the revision advance and the quota counters
@@ -439,6 +441,14 @@ async def replace_entry(
             )
             if row is None:
                 raise ApiError(status_code=404, detail="entry not found", code="not_found")
+            try:
+                v2_bound = validate_entry_guard(row, request.app.state.settings)
+            except TamperError:
+                raise ApiError(
+                    status_code=400,
+                    detail="entry blob failed authentication",
+                    code="entry_blob_invalid",
+                ) from None
             # Version binding (M-2): a modern client sends the version it
             # bound into the replacement blob's v2 AAD; it must be exactly
             # the successor of the stored version. A mismatch is a retryable
@@ -461,6 +471,7 @@ async def replace_entry(
                 row.blob = blob
                 row.entry_date = body.entry_date
                 row.content_version = body.content_version or row.content_version + 1
+                seal_entry_guard(row, request.app.state.settings, v2_bound=v2_bound)
                 await _increment_entries_revision(session, fresh_user)
                 if len(blob) != old_size:
                     # Wave 4: keep the byte counter moving with the write.

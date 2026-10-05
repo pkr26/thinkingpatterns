@@ -10,6 +10,7 @@ B3 enumeration: registration oracle, salt decoys, login timing, username recycli
 from __future__ import annotations
 
 import base64
+import random
 import statistics
 import time
 from datetime import datetime, timedelta, timezone
@@ -38,9 +39,7 @@ async def b1_verifier_and_tokens() -> None:
         captured_verifier = base64.b64encode(user["auth_key"]).decode()
 
         # The verifier IS the login credential — replay after logout
-        r = await client.post(
-            "/api/v1/auth/logout", headers=auth_headers(user["token"])
-        )
+        r = await client.post("/api/v1/auth/logout", headers=auth_headers(user["token"]))
         assert r.status_code == 204, r.text
         dead = await client.get("/api/v1/entries", headers=auth_headers(user["token"]))
         r = await client.post(
@@ -84,9 +83,7 @@ async def b1_verifier_and_tokens() -> None:
 
         def trapped_provider(self, body):
             provider_requests.append(body)
-            return {
-                "choices": [{"finish_reason": "stop", "message": {"content": "{}"}}]
-            }
+            return {"choices": [{"finish_reason": "stop", "message": {"content": "{}"}}]}
 
         LLMAnalyzer._post = trapped_provider
         try:
@@ -161,9 +158,7 @@ async def b1_verifier_and_tokens() -> None:
         ]
         codes = set()
         for h in hostile:
-            r = await client.get(
-                "/api/v1/entries", headers={"Authorization": h} if h else {}
-            )
+            r = await client.get("/api/v1/entries", headers={"Authorization": h} if h else {})
             codes.add(r.status_code)
         verdict(
             "B1.hostile-tokens",
@@ -258,9 +253,7 @@ async def b2_rate_limits() -> None:
 
     # IPv6 /64 aggregation holds (raw ASGI scope — the same input the
     # middleware passes, immune to Request-wrapper signature changes)
-    keys = {
-        client_key_from_scope({"client": (f"2001:db8::{i:x}", 1234)}) for i in range(50)
-    }
+    keys = {client_key_from_scope({"client": (f"2001:db8::{i:x}", 1234)}) for i in range(50)}
     verdict(
         "B2.ipv6-aggregation",
         "BLOCKED" if len(keys) == 1 else "FINDING",
@@ -376,18 +369,10 @@ async def b3_enumeration() -> None:
         )
 
         # Salt decoys: deterministic, distinguishable from real only with the secret
-        s1 = (
-            await client.post("/api/v1/auth/salt", json={"username": "b3_known"})
-        ).json()["salt"]
-        s2 = (
-            await client.post("/api/v1/auth/salt", json={"username": "b3_known"})
-        ).json()["salt"]
-        d1 = (
-            await client.post("/api/v1/auth/salt", json={"username": "ghost-404"})
-        ).json()["salt"]
-        d2 = (
-            await client.post("/api/v1/auth/salt", json={"username": "ghost-404"})
-        ).json()["salt"]
+        s1 = (await client.post("/api/v1/auth/salt", json={"username": "b3_known"})).json()["salt"]
+        s2 = (await client.post("/api/v1/auth/salt", json={"username": "b3_known"})).json()["salt"]
+        d1 = (await client.post("/api/v1/auth/salt", json={"username": "ghost-404"})).json()["salt"]
+        d2 = (await client.post("/api/v1/auth/salt", json={"username": "ghost-404"})).json()["salt"]
         stable = s1 == s2 and d1 == d2 and s1 != d1
         verdict(
             "B3.salt-decoys",
@@ -401,21 +386,38 @@ async def b3_enumeration() -> None:
 
         async def time_login(name):
             t0 = time.perf_counter()
-            await client.post(
+            response = await client.post(
                 "/api/v1/auth/login", json={"username": name, "verifier": wrong}
             )
+            assert response.status_code == 401, response.text
             return (time.perf_counter() - t0) * 1000
 
-        known = [await time_login("b3_known") for _ in range(4)]
-        unknown = [await time_login(f"ghost-{i}") for i in range(4)]
+        # Warm both branches, then interleave deterministically randomized
+        # pairs rather than measuring one entire group before the other.
+        await time_login("b3_known")
+        await time_login("ghost-warmup")
+        known, unknown = [], []
+        rng = random.Random(20261004)
+        for index in range(16):
+            pair = [("b3_known", known), (f"ghost-{index}", unknown)]
+            rng.shuffle(pair)
+            for name, samples in pair:
+                samples.append(await time_login(name))
         km, um = statistics.median(known), statistics.median(unknown)
         ratio = max(km, um) / max(1e-9, min(km, um))
         verdict(
             "B3.login-timing",
-            "BLOCKED" if ratio < 1.35 else "FINDING",
+            "PARTIAL" if ratio < 1.35 else "FINDING",
             f"median login latency known={km:.0f}ms vs unknown={um:.0f}ms "
-            f"(ratio {ratio:.2f}, samples {len(known)}v{len(unknown)}) — equal-CPU "
-            f"scrypt burn keeps them indistinguishable within noise",
+            f"(ratio {ratio:.2f}, samples {len(known)}v{len(unknown)}, "
+            f"interleaved 401 responses). "
+            + (
+                "No large median separation observed in this bounded local diagnostic; "
+                "it does not establish timing indistinguishability."
+                if ratio < 1.35
+                else "Large median separation observed; investigate under controlled load "
+                "before attributing it to account existence."
+            ),
         )
 
         # Username recycling after deletion

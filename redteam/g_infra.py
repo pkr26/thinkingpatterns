@@ -8,9 +8,15 @@ G3 production fail-closed verification (subprocess boots) + repo hygiene
 
 from __future__ import annotations
 
+import importlib.util
+import io
 import json
 import os
 import subprocess
+import tempfile
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import yaml
 from common import RESULTS, guard, run, section, verdict
@@ -18,6 +24,46 @@ from common import RESULTS, guard, run, section, verdict
 ROOT = RESULTS.parent.parent
 BACKEND = ROOT / "backend"
 VENV_PY = ROOT / ".venv" / "bin" / "python"
+
+
+def _backup_helper_contract(path: Path) -> bool:
+    """Exercise file-secret resolution and the actual OpenSSL argv builder.
+
+    Formatting cannot change this oracle. The authenticated restore drill
+    supplies separate end-to-end encryption/HMAC evidence.
+    """
+    spec = importlib.util.spec_from_file_location("redteam_backup_contract", path)
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    with tempfile.TemporaryDirectory(prefix="redteam-backup-contract-") as scratch:
+        key = Path(scratch) / "fixture-key"
+        key.write_text("redteam-backup-fixture-not-production\n")
+        with patch.dict(os.environ, {"BACKUP_KEY_FILE": str(key)}, clear=True):
+            resolved = helper._resolve_backup_key()
+        with patch.dict(os.environ, {}, clear=True):
+            try:
+                helper._resolve_backup_key()
+            except RuntimeError:
+                refuses_missing = True
+            else:
+                refuses_missing = False
+        with patch.object(
+            helper.subprocess, "run", return_value=SimpleNamespace(returncode=0)
+        ) as call:
+            helper._openssl(resolved, io.BytesIO(b"fixture"), io.BytesIO(), decrypt=False)
+        args = call.call_args.args[0]
+        iter_at = args.index("-iter") if "-iter" in args else -1
+        return (
+            refuses_missing
+            and resolved == "redteam-backup-fixture-not-production"
+            and "-aes-256-cbc" in args
+            and "-pbkdf2" in args
+            and iter_at >= 0
+            and iter_at + 1 < len(args)
+            and args[iter_at + 1] == "600000"
+            and resolved not in args
+            and "BACKUP_KEY" not in call.call_args.kwargs["env"]
+        )
 
 
 def g1_backups() -> None:
@@ -32,28 +78,23 @@ def g1_backups() -> None:
         isinstance(volume, str) and volume.endswith(":/backups") for volume in volumes
     )
     retention = env.get("BACKUP_RETENTION_DAYS") == "${BACKUP_RETENTION_DAYS:-35}"
-    env_fallback = env.get("BACKUP_KEY") == "${BACKUP_KEY:-}"
+    plaintext_env_absent = env.get("BACKUP_KEY") in (None, "")
     key_file_mount = env.get("BACKUP_KEY_FILE") == "/run/secrets/backup_key"
     mounted = backup.get("secrets", [])
     secret_mounted = any(
-        secret == "backup_key"
-        or isinstance(secret, dict)
-        and secret.get("source") == "backup_key"
+        secret == "backup_key" or isinstance(secret, dict) and secret.get("source") == "backup_key"
         for secret in mounted
     ) and "backup_key" in compose.get("secrets", {})
-    helper = (ROOT / "backup/backup_mac.py").read_text()
     uses_helper = 'mindpattern-backup-mac encrypt "$$tmp" "$$mac_tmp"' in script
-    iter_pinned = (
-        '"-aes-256-cbc"' in helper and '"-pbkdf2", "-iter", "600000"' in helper
-    )
+    helper_contract = _backup_helper_contract(ROOT / "backup/backup_mac.py")
     encrypted = (
         has_backup
         and retention
-        and env_fallback
+        and plaintext_env_absent
         and key_file_mount
         and secret_mounted
         and uses_helper
-        and iter_pinned
+        and helper_contract
     )
     verdict(
         "G1.backup-profile-config",
@@ -61,8 +102,8 @@ def g1_backups() -> None:
         f"compose backup profile: pg_dump={has_backup}, 35-day "
         f"retention={'yes' if retention else 'no'}, AES-256-CBC/PBKDF2-600k dump "
         f"encryption with the key REQUIRED via the mounted secret file "
-        f"(env-fallback line={env_fallback}, BACKUP_KEY_FILE mount={key_file_mount}, "
-        f"secrets: entry={secret_mounted}, shared helper={uses_helper}, -iter pin={iter_pinned}) — a stolen backup "
+        f"(plaintext env absent={plaintext_env_absent}, BACKUP_KEY_FILE mount={key_file_mount}, "
+        f"secrets: entry={secret_mounted}, shared helper={uses_helper}, executed helper contract={helper_contract}) — a stolen backup "
         f"volume is ciphertext at rest and a missing key refuses the dump outright. "
         f"Residual by design: dumps taken before a deletion still hold the "
         f"user's rows until retention expires; the README states this as "
@@ -78,9 +119,7 @@ def g1_backups() -> None:
 
     con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     try:
-        users = con.execute(
-            "select username, created_at, is_active from users limit 5"
-        ).fetchall()
+        users = con.execute("select username, created_at, is_active from users limit 5").fetchall()
         n_entries = con.execute("select count(*) from entries").fetchone()[0]
         dates = con.execute(
             "select distinct entry_date from entries order by entry_date limit 40"
@@ -130,9 +169,7 @@ def g2_supply_chain() -> None:
             timeout=300,
         )
         vulns = [
-            ln
-            for ln in r.stdout.splitlines()
-            if "vuln" in ln.lower() or "Vulnerability" in ln
+            ln for ln in r.stdout.splitlines() if "vuln" in ln.lower() or "Vulnerability" in ln
         ]
         verdict(
             "G2.pip-audit",
@@ -170,9 +207,7 @@ def g2_supply_chain() -> None:
                     f"(rc={r.returncode}; likely offline)",
                 )
             else:
-                total = sum(v for k, v in meta.items() if k != "total") or meta.get(
-                    "total", 0
-                )
+                total = sum(v for k, v in meta.items() if k != "total") or meta.get("total", 0)
                 verdict(
                     "G2.npm-audit",
                     "FINDING" if total else "BLOCKED",
@@ -203,9 +238,7 @@ def g2_supply_chain() -> None:
 
     # CI pinning
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
-    uses_lines = [
-        ln.split("uses:", 1)[1].strip() for ln in ci.splitlines() if "uses:" in ln
-    ]
+    uses_lines = [ln.split("uses:", 1)[1].strip() for ln in ci.splitlines() if "uses:" in ln]
     unpinned = [u for u in uses_lines if "@" not in u or len(u.split("@")[-1]) < 20]
     verdict(
         "G2.actions-pinning",
@@ -222,7 +255,12 @@ def g2_supply_chain() -> None:
     )
 
 
-def _boot_check(name: str, env_overrides: dict[str, str], expect_refuse: bool) -> None:
+def _boot_check(
+    name: str,
+    env_overrides: dict[str, str],
+    expect_refuse: bool,
+    expected_setting: str | None = None,
+) -> None:
     env = {"PATH": os.environ["PATH"]}
     env.update(env_overrides)
     code = (
@@ -246,7 +284,11 @@ def _boot_check(name: str, env_overrides: dict[str, str], expect_refuse: bool) -
     # Any crash (import error, syntax error, missing module) used to read
     # as "refused boot as expected" — with stderr inspected only on the
     # failure path, never on the verdict (2026-09-19 audit, L-46).
-    refusal_sig = "RuntimeError" in r.stderr and "MINDPATTERN_" in r.stderr
+    refusal_sig = (
+        "RuntimeError" in r.stderr
+        and "MINDPATTERN_" in r.stderr
+        and (expected_setting is None or expected_setting in r.stderr)
+    )
     if booted:
         ok = expect_refuse is False
     else:
@@ -268,32 +310,43 @@ def g3_config_and_hygiene() -> None:
     base = {
         "MINDPATTERN_DB_URL": "postgresql+asyncpg://u:p@localhost/db",
         "MINDPATTERN_TOKEN_SECRET": "x" * 40,
+        "MINDPATTERN_AUTH_TOKEN_SECRET": "redteam-auth-purpose-fixture-32-chars",
+        "MINDPATTERN_TOTP_WRAP_SECRET": "redteam-totp-purpose-fixture-32-chars",
+        "MINDPATTERN_PAIRING_SECRET": "redteam-pair-purpose-fixture-32-chars",
+        "MINDPATTERN_DECOY_SECRET": "redteam-decoy-purpose-fixture-32-chars",
+        "MINDPATTERN_AUDIT_MAC_SECRET": bytes(range(16)).hex() * 2,
+        "MINDPATTERN_AUDIT_JOURNAL": "/tmp/redteam-config-probe-audit.jsonl",
     }
     _boot_check(
         "prod-default-secret",
         {
+            **base,
             "MINDPATTERN_ENV": "production",
-            "MINDPATTERN_DB_URL": base["MINDPATTERN_DB_URL"],
+            "MINDPATTERN_TOKEN_SECRET": "",
         },
         True,
+        "MINDPATTERN_TOKEN_SECRET",
     )
     _boot_check(
         "prod-short-secret",
         {
+            **base,
             "MINDPATTERN_ENV": "production",
-            "MINDPATTERN_DB_URL": base["MINDPATTERN_DB_URL"],
             "MINDPATTERN_TOKEN_SECRET": "short",
         },
         True,
+        "MINDPATTERN_TOKEN_SECRET",
     )
     _boot_check(
         "prod-sqlite",
         {
+            **base,
             "MINDPATTERN_ENV": "production",
             "MINDPATTERN_DB_URL": "sqlite+aiosqlite:///./x.db",
             "MINDPATTERN_TOKEN_SECRET": "x" * 40,
         },
         True,
+        "MINDPATTERN_DB_URL",
     )
     _boot_check(
         "prod-http-llm-url",
@@ -303,16 +356,19 @@ def g3_config_and_hygiene() -> None:
             "MINDPATTERN_LLM_URL": "http://evil.example/v1",
         },
         True,
+        "MINDPATTERN_LLM_URL",
     )
     # The real fail-closed probe: a TYPO/staging env must NOT slip into the
     # development branch — with the default dev secret it must still refuse.
     _boot_check(
         "typo-env-fails-closed",
         {
+            **base,
             "MINDPATTERN_ENV": "staging ",
-            "MINDPATTERN_DB_URL": base["MINDPATTERN_DB_URL"],
+            "MINDPATTERN_TOKEN_SECRET": "",
         },
         True,
+        "MINDPATTERN_TOKEN_SECRET",
     )
     # Staging with VALID config boots — under production gates (that is the
     # correct fail-closed semantics, not a refusal).
@@ -344,11 +400,8 @@ def g3_config_and_hygiene() -> None:
     # verify_native_release.mjs's own allowlist instead.)
     def _secretish(path: str) -> bool:
         base = os.path.basename(path)
-        return (
-            base.startswith(".env")
-            or base.endswith(
-                (".env", ".pem", ".key", ".db", ".sqlite3", ".p12", ".pfx", ".crt")
-            )
+        return base.startswith(".env") or base.endswith(
+            (".env", ".pem", ".key", ".db", ".sqlite3", ".p12", ".pfx", ".crt")
         )
 
     bad = [f for f in tracked if _secretish(f) and f not in ALLOWED_ENV_PATHS]

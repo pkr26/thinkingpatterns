@@ -378,7 +378,9 @@ def test_language_gate_is_deterministic():
     a = _run(corpus, T0)
     b = _run(corpus, T0)
     assert brain.dump_state(a.new_state) == brain.dump_state(b.new_state)
-    assert math.isfinite(a.stats["avg_sentiment"])
+    assert a.stats["avg_sentiment"] is None
+    assert a.stats["mood_summary"]["observations"] == 0
+    assert a.stats["mood_summary"]["excluded_entries"] == len(corpus)
 
 
 class TestAuditRemediation2026_09_17:

@@ -194,6 +194,7 @@ async def direct_insert_entry(app, user_id: str, data_key: bytes, text: str,
     """Insert an Entry row bypassing the API's ±1-day date bound — how a
     long-lived account's history actually looks. Uses the real client crypto."""
     from app.models import Entry
+    from app.security.entry_guard import seal_entry_guard
 
     cid = cid or f"e-{entry_date.isoformat()}-{uuid.uuid4().hex[:12]}"
     blob_b64 = encrypt_entry(data_key, user_id, cid, text,
@@ -204,11 +205,13 @@ async def direct_insert_entry(app, user_id: str, data_key: bytes, text: str,
         # (2026-09-18 harness repair, found by the round-2 oracle campaign).
         from datetime import datetime, timezone
 
-        session.add(Entry(user_id=user_id, client_entry_id=cid,
+        row = Entry(user_id=user_id, client_entry_id=cid,
                           blob=base64.b64decode(blob_b64),
                           entry_date=entry_date,
                           received_at=datetime(entry_date.year, entry_date.month,
-                                               entry_date.day, tzinfo=timezone.utc)))
+                                               entry_date.day, tzinfo=timezone.utc))
+        seal_entry_guard(row, app.state.settings, v2_bound=False)
+        session.add(row)
         await session.commit()
     return cid
 

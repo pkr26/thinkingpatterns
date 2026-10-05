@@ -54,8 +54,10 @@ import sys
 import time
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
+if str(ROOT / "redteam") not in sys.path:
+    sys.path.insert(0, str(ROOT / "redteam"))
+from mutation_oracles import oracle_setup_error
 OUT_DIR = pathlib.Path(__file__).resolve().parent / "results"
-OUT_DIR.mkdir(exist_ok=True)
 
 PY = ".venv/bin/python"
 # The repo-root venv is the canonical interpreter (README); backend/.venv is
@@ -76,27 +78,28 @@ def backend_pytest(*targets: str, extra: tuple[str, ...] = ()) -> dict:
 MUTANTS: list[dict] = [
     # ---------------------------------------------------------------- O. authorization & access control
     dict(
-        id="O1", campaign="O", name="token-epoch kill switch disabled (pre-logout bearer stays valid)",
-        expectation="logout must retire every previously issued token",
+        id="O1", campaign="O", name="token-epoch kill switch disabled (legacy logout leaves bearers valid)",
+        expectation="legacy jti-less logout must retire its account generation; modern logout stays per-token",
         file="backend/app/deps.py",
-        find='    if payload.get("ep", 1) != user.token_epoch:',
-        replace="    if False:",
+        find='    if token_epoch not in valid_epochs:',
+        replace='    if False:',
         tests=[backend_pytest("tests/test_auth_api.py", "tests/test_api_hardening.py")],
     ),
     dict(
         id="O2", campaign="O", name="is_active check dropped (deactivated accounts authenticate)",
         expectation="a deactivated account must 401 on bearer use",
         file="backend/app/deps.py",
-        find="    if user is None or not user.is_active:\n        raise failure",
-        replace="    if user is None:\n        raise failure",
+        find='    if user is None or not user.is_active:',
+        replace='    if user is None:',
         tests=[backend_pytest("tests/test_hardening.py", "tests/test_auth_api.py", "tests/test_mutation_pins.py")],
     ),
     dict(
         id="O3", campaign="O", name="journal role wall removed (therapist token reaches journal endpoints)",
         expectation="a therapist token must 403 on /entries and friends",
         file="backend/app/deps.py",
-        find="    if user.role != ROLE_USER:",
-        replace="    if False:",
+        find='    if user.role != ROLE_USER:',
+        replace='    if False:',
+        count=2,
         tests=[backend_pytest("tests/test_therapist_api.py")],
     ),
     dict(
@@ -116,20 +119,20 @@ MUTANTS: list[dict] = [
         tests=[backend_pytest("tests/test_therapist_api.py")],
     ),
     dict(
-        id="O6", campaign="O", name="note re-fetch drops therapist scoping (cross-therapist update/delete by id)",
+        id="O6", campaign="O", name='note ownership walls removed from initial and locked lookups',
         expectation="one therapist must never touch another's note id",
         file="backend/app/api/therapist.py",
-        find="                    select(TherapistNote).where(\n                        TherapistNote.id == note_id, TherapistNote.therapist_id == user.id\n                    )",
-        replace="                    select(TherapistNote).where(\n                        TherapistNote.id == note_id\n                    )",
-        count=2,
+        find='TherapistNote.therapist_id == user.id,',
+        replace='True,',
+        count=10,
         tests=[backend_pytest("tests/test_therapist_api.py")],
     ),
     dict(
         id="O7", campaign="O", name="revoke drops patient ownership (any patient revokes any consent id)",
         expectation="a consent id from another patient must 404",
         file="backend/app/api/consents.py",
-        find="                    select(Consent)\n                    .where(Consent.id == consent_id, Consent.user_id == fresh_user.id)",
-        replace="                    select(Consent)\n                    .where(Consent.id == consent_id)",
+        find='                        Consent.id == consent_id,\n                        Consent.user_id == fresh_user.id,',
+        replace='                        Consent.id == consent_id,',
         tests=[backend_pytest("tests/test_therapist_api.py")],
     ),
     dict(
@@ -207,12 +210,12 @@ MUTANTS: list[dict] = [
         tests=[backend_pytest("tests/test_entry_pagination_bytes.py", "tests/test_snapshot_revisions.py", "tests/test_mutation_pins.py")],
     ),
     dict(
-        id="P6", campaign="P", name="same-day question upsert no longer rewrites the blob",
-        expectation="a repeated same-day recompute must store the fresh question",
+        id="P6", campaign="P", name="same-day question pin removed so recompute rewrites an already served question",
+        expectation="the first question served for a UTC day must remain stable after later entries",
         file="backend/app/api/insights.py",
-        find='            set_={"blob": blob, "created_at": now},',
-        replace='            set_={"created_at": now},',
-        tests=[backend_pytest("tests/test_api_hardening.py", "tests/test_insights_api.py", "tests/test_mutation_pins.py")],
+        find='            if surfaced and not question_pinned:',
+        replace='            if surfaced:',
+        tests=[backend_pytest("tests/test_api_pins.py::test_same_day_recompute_with_extra_pattern_serves_same_question", "tests/test_api_hardening.py", "tests/test_insights_api.py", "tests/test_mutation_pins.py")],
     ),
     dict(
         id="P7", campaign="P", name="undated insight replace deletes EVERY kind for the user",
@@ -267,16 +270,16 @@ MUTANTS: list[dict] = [
         id="Q3", campaign="Q", name="per-chart note count quota disabled",
         expectation="note count over the cap must 413",
         file="backend/app/api/therapist.py",
-        find="    if is_new and int(count) >= MAX_NOTES_PER_PATIENT:",
-        replace="    if False:",
+        find='    if is_new and int(note_count) + int(revision_count) >= MAX_NOTES_PER_PATIENT:',
+        replace='    if False:',
         tests=[backend_pytest("tests/test_api_resilience_coverage.py")],
     ),
     dict(
         id="Q4", campaign="Q", name="per-chart note byte quota x1000",
         expectation="chart ciphertext over the cap must 413",
         file="backend/app/api/therapist.py",
-        find="    if int(total) - previous_size + incoming > MAX_NOTE_BYTES_PER_PATIENT:",
-        replace="    if int(total) - previous_size + incoming > MAX_NOTE_BYTES_PER_PATIENT * 1000:",
+        find='        > MAX_NOTE_BYTES_PER_PATIENT\n',
+        replace='        > MAX_NOTE_BYTES_PER_PATIENT * 1000\n',
         tests=[backend_pytest("tests/test_api_resilience_coverage.py")],
     ),
     dict(
@@ -288,11 +291,11 @@ MUTANTS: list[dict] = [
         tests=[backend_pytest("tests/test_therapist_api.py")],
     ),
     dict(
-        id="Q6", campaign="Q", name="continuation advances by limit, not rows received",
+        id="Q6", campaign="Q", name='continuation advances by a full 100-row page, not rows received',
         expectation="X-Next-Offset must be exactly offset + rows returned",
-        file="backend/app/api/entries.py",
-        find='                response.headers["X-Next-Offset"] = str(offset + len(result))',
-        replace='                response.headers["X-Next-Offset"] = str(offset + limit)',
+        file='backend/app/api/_paging.py',
+        find='        response.headers[NEXT_OFFSET_HEADER] = str(offset + rows_returned)',
+        replace='        response.headers[NEXT_OFFSET_HEADER] = str(offset + 100)',
         tests=[backend_pytest("tests/test_entry_pagination_bytes.py")],
     ),
     dict(
@@ -306,9 +309,9 @@ MUTANTS: list[dict] = [
     dict(
         id="Q8", campaign="Q", name="access-log retention x100 (prune never fires)",
         expectation="audit rows past the retention window must be deleted",
-        file="backend/app/api/therapist.py",
-        find="    return delete(AccessLog).where(AccessLog.at < now - timedelta(days=retention_days))",
-        replace="    return delete(AccessLog).where(AccessLog.at < now - timedelta(days=retention_days * 100))",
+        file='backend/app/main.py',
+        find='            cutoff=now - timedelta(days=settings.access_log_retention_days),',
+        replace='            cutoff=now - timedelta(days=settings.access_log_retention_days * 100),',
         tests=[backend_pytest("tests/test_ops_hardening.py")],
     ),
     dict(
@@ -356,16 +359,16 @@ MUTANTS: list[dict] = [
         id="R3", campaign="R", name="middleware-produced responses drop the security header set",
         expectation="413/400/500 from the edge still carry every header",
         file="backend/app/middleware.py",
-        find='                "headers": [(b"content-type", b"application/json"), *SECURITY_HEADERS],',
-        replace='                "headers": [(b"content-type", b"application/json")],',
+        find='        headers = [(b"content-type", b"application/json"), *SECURITY_HEADERS]',
+        replace='        headers = [(b"content-type", b"application/json")]',
         tests=[backend_pytest("tests/test_hardening.py", "tests/test_api_hardening.py", "tests/test_coverage_gaps.py")],
     ),
     dict(
         id="R4", campaign="R", name="recompute FK violation no longer maps to 410",
         expectation="account-deleted-during-recompute must 410, never a bare 500",
         file="backend/app/api/insights.py",
-        find="                    if _is_fk_violation(exc):",
-        replace="                    if False:",
+        find='                    if _is_fk_violation(exc):\n                        # DELETE /account committed while we were analyzing:',
+        replace='                    if False:\n                        # DELETE /account committed while we were analyzing:',
         tests=[backend_pytest("tests/test_deep_mutation_pins.py", "tests/test_api_hardening.py")],
     ),
     dict(
@@ -377,8 +380,8 @@ MUTANTS: list[dict] = [
         tests=[backend_pytest("tests/test_api_resilience_coverage.py")],
     ),
     dict(
-        id="R6", campaign="R", name="logout epoch bump becomes a stale read-modify-write",
-        expectation="the bump must be a single atomic UPDATE expression",
+        id="R6", campaign="R", name="legacy logout fails to advance the account epoch",
+        expectation="a legacy jti-less logout must atomically retire its account generation",
         file="backend/app/api/auth.py",
         find="            update(User).where(User.id == user.id).values(token_epoch=User.token_epoch + 1)",
         replace="            update(User).where(User.id == user.id).values(token_epoch=user.token_epoch)",
@@ -447,16 +450,16 @@ MUTANTS: list[dict] = [
         id="S4", campaign="S", name="entry delete does not advance the snapshot revision",
         expectation="a delete must invalidate every continuation marker",
         file="backend/app/api/entries.py",
-        find='            if db_rowcount(result) == 0:\n                raise ApiError(status_code=404, detail="entry not found", code="not_found")\n            await _increment_entries_revision(session, fresh_user)',
-        replace='            if db_rowcount(result) == 0:\n                raise ApiError(status_code=404, detail="entry not found", code="not_found")\n            pass',
+        find='            new_revision = await _increment_entries_revision(session, fresh_user)',
+        replace='            new_revision = fresh_user.entries_revision',
         tests=[backend_pytest("tests/test_snapshot_revisions.py")],
     ),
     dict(
         id="S5", campaign="S", name="stale marker comparison relaxed (!= -> <)",
         expectation="ANY divergence of the collection marker must 409, ahead or behind",
-        file="backend/app/api/entries.py",
-        find="    if expected_revision is not None and expected_revision != current_revision:",
-        replace="    if expected_revision is not None and expected_revision < current_revision:",
+        file='backend/app/api/_paging.py',
+        find='    if expected_revision is not None and expected_revision != current_revision:',
+        replace='    if expected_revision is not None and expected_revision < current_revision:',
         tests=[backend_pytest("tests/test_snapshot_revisions.py", "tests/test_mutation_pins.py")],
     ),
     dict(
@@ -492,12 +495,12 @@ MUTANTS: list[dict] = [
         tests=[backend_pytest("tests/test_infra_coverage.py")],
     ),
     dict(
-        id="S10", campaign="S", name="per-user recompute serialization broken (unique lock per call)",
+        id="S10", campaign="S", name='per-user recompute serialization broken across lifecycle and recompute fences',
         expectation="two recomputes for one account must serialize",
         file="backend/app/api/insights.py",
-        find='        async with _recompute_locks.hold(f"insights:{user.id}"):',
-        replace='        async with _recompute_locks.hold(f"insights:{user.id}:{time.monotonic()}"):',
-        tests=[backend_pytest("tests/test_brain_api.py", "tests/test_insights_api.py")],
+        find='    lifecycle_guard = lifecycle_locks.hold(f"llm-lifecycle:{user.id}")\n    lifecycle_entered = False\n    try:\n        # The zeroizing finally MUST cover lock acquisition too: cancellation\n        # while this request waits behind consent withdrawal/account deletion\n        # must not strand the popped bytearray until garbage collection.\n        await lifecycle_guard.__aenter__()\n        lifecycle_entered = True\n        async with _recompute_locks.hold(f"insights:{user.id}"):\n',
+        replace='    lifecycle_guard = lifecycle_locks.hold(f"llm-lifecycle:{user.id}:{time.monotonic()}")\n    lifecycle_entered = False\n    try:\n        # The zeroizing finally MUST cover lock acquisition too: cancellation\n        # while this request waits behind consent withdrawal/account deletion\n        # must not strand the popped bytearray until garbage collection.\n        await lifecycle_guard.__aenter__()\n        lifecycle_entered = True\n        async with _recompute_locks.hold(f"insights:{user.id}:{time.monotonic()}"):\n',
+        tests=[backend_pytest("tests/test_remediation_recompute_serialization.py", "tests/test_security_fixes.py::test_concurrent_recomputes_for_one_user_serialize", "tests/test_brain_api.py", "tests/test_insights_api.py")],
     ),
     # ---------------------------------------------------------------- T. rate limiting & concurrency
     dict(
@@ -512,9 +515,9 @@ MUTANTS: list[dict] = [
         id="T2", campaign="T", name="window rollover boundary strict (>= -> >, hit + check)",
         expectation="a window aged exactly window_seconds must reset",
         file="backend/app/cache.py",
-        find="            if current - start >= window_seconds:",
-        replace="            if current - start > window_seconds:",
-        count=2,
+        find='        while log and now - log[0][0] >= window_seconds:',
+        replace='        while log and now - log[0][0] > window_seconds:',
+        count=1,
         tests=[backend_pytest("tests/test_hardening.py", "tests/test_mutation_pins.py")],
     ),
     dict(
@@ -529,16 +532,16 @@ MUTANTS: list[dict] = [
         id="T4", campaign="T", name="eviction by oldest window only (count ignored)",
         expectation="a real user's multi-hit bucket must be the LAST active key evicted",
         file="backend/app/cache.py",
-        find="                overflow, self._hits, key=lambda k: (self._hits[k][0], self._hits[k][1])",
-        replace="                overflow, self._hits, key=lambda k: (self._hits[k][1],)",
+        find='                key=lambda k: (self._hits[k].total, self._hits[k].last_activity()),',
+        replace='                key=lambda k: (self._hits[k].last_activity(),),',
         tests=[backend_pytest("tests/test_mutation_pins.py", "tests/test_deep_mutation_pins.py", "tests/test_security_fixes.py")],
     ),
     dict(
         id="T5", campaign="T", name="stale-window drop removed from eviction",
         expectation="eviction must clear stale windows first",
         file="backend/app/cache.py",
-        find="        stale = [k for k, (_, s, w) in self._hits.items() if now - s >= w]",
-        replace="        stale = []",
+        find='        stale = [\n            k\n            for k, state in self._hits.items()\n            if not state.log or now - state.last_activity() >= state.window_seconds\n        ]',
+        replace='        stale = []',
         tests=[backend_pytest("tests/test_mutation_pins.py", "tests/test_hardening.py")],
     ),
     dict(
@@ -561,8 +564,8 @@ MUTANTS: list[dict] = [
         id="T8", campaign="T", name="lock overflow discipline dropped (fresh keys bypass the fallback)",
         expectation="absent keys must stay on the overflow lock until it drains",
         file="backend/app/locks.py",
-        find="            if self._overflow_refs:",
-        replace="            if False:",
+        find='            if shard.refs:',
+        replace='            if False:',
         tests=[backend_pytest("tests/test_infra_coverage.py", "tests/test_mutation_pins.py")],
     ),
     dict(
@@ -577,8 +580,8 @@ MUTANTS: list[dict] = [
         id="T10", campaign="T", name="single-process guard never takes the flock",
         expectation="a second process serving the same deployment must refuse to boot",
         file="backend/app/singleprocess.py",
-        find="        fcntl.flock(fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)",
-        replace="        pass",
+        find='        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)',
+        replace='        pass',
         tests=[backend_pytest("tests/test_infra_coverage.py")],
     ),
 ]
@@ -602,17 +605,6 @@ def parse_failures(kind: str, output: str) -> list[str]:
 # these as KILLED would print PASSED while verifying nothing — they are
 # SETUP-ERRORs, reported loudly, never kills.
 PYTEST_SETUP_EXITS = {2, 3, 4, 5}
-
-
-def oracle_setup_error(kind: str, returncode: int, output: str) -> str | None:
-    """Why this non-zero exit is a broken oracle rather than a kill, or None."""
-    if kind != "pytest":
-        return None
-    if returncode in PYTEST_SETUP_EXITS:
-        return f"pytest exited {returncode} (oracle broken, not a kill)"
-    if "no tests ran" in output:
-        return "pytest collected no tests (oracle broken, not a kill)"
-    return None
 
 
 def run_command(spec: dict, mutant_id: str) -> tuple[bool, str | None, list[str], str, float]:
@@ -642,7 +634,7 @@ def run_command(spec: dict, mutant_id: str) -> tuple[bool, str | None, list[str]
         elapsed = round(time.monotonic() - t0, 1)
         out = ((exc.stdout or b"").decode(errors="replace")
                + (exc.stderr or b"").decode(errors="replace"))
-        return True, None, [], out, elapsed
+        return True, "oracle timed out; behavioral kill not established", [], out, elapsed
 
 
 def run_mutant(m: dict) -> dict:
@@ -651,13 +643,13 @@ def run_mutant(m: dict) -> dict:
     text = original.decode("utf-8")
     n = text.count(m["find"])
     want = m.get("count", 1)
-    if n < want:
+    if n != want:
         return {**m, "killed": None, "status": "SETUP-ERROR",
                 "detail": f"find-string matched {n} times, expected {want}"}
     mutated = text.replace(m["find"], m["replace"], want)
-    target.write_text(mutated)
     specs = m["tests"] if isinstance(m["tests"], list) else [m["tests"]]
     try:
+        target.write_text(mutated)
         per_cmd: list[dict] = []
         killed = False
         for spec in specs:
@@ -690,13 +682,16 @@ def run_mutant(m: dict) -> dict:
 
 
 def main() -> None:
+    from run_pr_mutation_gate import prepare_direct_campaign, verdict_passes
+
     wanted = sys.argv[1:]
     todo = [m for m in MUTANTS if not wanted or m["campaign"] in wanted]
+    runner = prepare_direct_campaign(todo)
     print(f"{len(todo)} mutants queued\n", flush=True)
     results = []
     for m in todo:
         print(f"[{m['id']}] {m['name']} ...", flush=True)
-        r = run_mutant(m)
+        r = runner.run_mutant(m)
         results.append(r)
         if r["status"] == "SETUP-ERROR":
             print(f"    !! {r.get('detail', '')}", flush=True)
@@ -709,13 +704,15 @@ def main() -> None:
                   + (f"  first: {r['commands'][0]['failures'][0]}"
                      if r.get("commands") and r["commands"][0]["failures"] else ""),
                   flush=True)
-    killed = sum(1 for r in results if r["killed"])
-    done = [r for r in results if r["killed"] is not None]
-    print(f"\n{killed}/{len(done)} killed, {len(done) - killed} survived", flush=True)
+    killed = sum(verdict_passes(r) for r in results)
+    print(f"\n{killed}/{len(results)} genuinely killed/caught; {len(results) - killed} failed the gate", flush=True)
     stamp = time.strftime("%Y-%m-%dT%H%M%S")
     path = OUT_DIR / f"mutation_results_{stamp}.json"
+    OUT_DIR.mkdir(exist_ok=True)
     path.write_text(json.dumps(results, indent=2))
     print(f"results: {path}")
+    if killed != len(results):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

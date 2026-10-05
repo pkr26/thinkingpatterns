@@ -69,12 +69,18 @@ intensifiers, contrast weighting, and morphological candidates. Curated rules
 override the underlying VADER entries. The generated lexicon is shared with the
 TypeScript port and checked against Python through golden vectors.
 
-Analysis supports English and Spanish. Detection compares each language's share
-of recognized tokens over the analysis window. One winning language controls
-theme extraction for the corpus; minority-language themes in a mixed journal
-may be missed. Unsupported languages suppress text-dependent analyses while
-retaining applicable explicit mood and writing-calendar observations. Phrase
-matching is limited by the supported tokenizer scripts.
+Analysis supports English and Spanish. Eligibility compares recognized words
+and requires a majority of the text's letters to survive the Latin tokenizer;
+non-Latin letters count in that coverage denominator. A short English quotation
+inside predominantly unsupported-script text therefore cannot enable scoring.
+The window and each entry are checked; eligible entries use their own EN/ES
+lexicon. This conservative gate is not a general language identifier or a
+validated multilingual classifier. Unsupported text is excluded from mood
+analyses and account averages, while explicit finite mood ratings and the
+writing calendar remain usable. No eligible mood evidence is reported as
+unavailable, not neutral. Summary metadata gives the number of explicit ratings,
+text estimates and excluded entries. Phrase matching remains limited by the
+tokenizer's supported scripts.
 
 Spanish has its own sentiment and theme lexicons, negators, intensifiers,
 function words, and generic question catalog. Person-name anchoring remains
@@ -87,6 +93,10 @@ detrending, weekly-cycle adjustment, and one Benjamini–Hochberg family over th
 run's statistical candidates. Candidate p-values are computed before effect-size
 filtering. Corrupt stored analysis state is discarded and rebuilt; authenticated
 entry failures remain errors.
+
+The technical panel's `p_value` is the detector's raw, unadjusted p-value;
+the displayed number is not a BH-adjusted p-value. Passing the multiple-testing
+selection gate and displaying a numerically adjusted value are different facts.
 
 The engine deliberately excludes relapse prediction, diagnosis, bipolar
 classification, and critical-slowing-down claims. The research reference records

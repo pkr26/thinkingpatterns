@@ -262,10 +262,15 @@ services:
     # PBKDF2-SHA-256 floor, and every decrypt side (restore example below,
     # rehearse_restore.sh, CI) must pass the SAME count or decryption
     # fails. The dump still contains usernames/dates/ciphertext sizes, but
-    # a stolen volume/file is now ciphertext at rest. Restore:
-    #   openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 \
-    #     -pass file:deploy/secrets/backup_key \
-    #     -in mindpattern-<stamp>.dump.enc | pg_restore --clean ...
+    # a stolen volume/file is now ciphertext at rest. Authenticate BEFORE
+    # restoring; the sibling .hmac must be present and valid. Run in a
+    # pipefail shell, targeting an explicitly selected restore database:
+    #   BACKUP_KEY_FILE=deploy/secrets/backup_key \
+    #     python3 backup/backup_mac.py decrypt mindpattern-<stamp>.dump.enc \
+    #     | pg_restore --clean --if-exists --dbname "$RESTORE_DB_URL"
+    # The helper verifies and snapshots ciphertext before emitting plaintext.
+    # See backup/README.md and backend/scripts/rehearse_restore.sh for a
+    # disposable full restoration drill; never substitute bare openssl -d.
     #
     # RETENTION IS PART OF THE DELETION PROMISE. `DELETE /api/account`
     # removes a user from the live database only; every dump taken before

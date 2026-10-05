@@ -1,8 +1,16 @@
 # Fathom remediation status
 
-October 3, 2026. Original baseline: `9c1ba47508f474afc5f70588dd2771d80c2eece7`.
+**October 4, 2026 follow-up:** all 22 finding groups from the independent
+24-track audit have implementation and passing local regression evidence.
+See the [latest remediation register](archive/audits/2026-10-04/REMEDIATION.md)
+for the fixes, complete verification counts, remaining assurance limits and
+required trusted database-bootstrap procedure. All 220 behavioral mutation
+controls were verified. The October 3 checkpoint below remains historical
+evidence rather than the latest test count.
 
-**Independent follow-up:** the latest commit was independently audited and
+October 3 checkpoint. Original baseline: `9c1ba47508f474afc5f70588dd2771d80c2eece7`.
+
+**October 3 independent follow-up:** that commit was independently audited and
 additional defects were reproduced and fixed. See
 [docs/archive/audits/AUDIT_LAST_COMMIT_2026-10-03.md](archive/audits/AUDIT_LAST_COMMIT_2026-10-03.md) for the new
 findings and current verification. The implementation descriptions and suite

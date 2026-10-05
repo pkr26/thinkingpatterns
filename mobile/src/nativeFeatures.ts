@@ -18,6 +18,7 @@ import {
   nextMeasureReminderFireTime,
 } from "./measureReminders";
 import { t } from "./strings";
+import { assertNotificationOwner, beginNotificationUpdate, runOwnedNotification, runNotificationCancellation, type NotificationOwner, type ReminderKind } from "./notificationOwnership";
 
 export interface NativeCapability {
   available: boolean;
@@ -159,207 +160,171 @@ function authorizationGranted(result: unknown): boolean {
   return status === AUTHORIZATION_STATUS_AUTHORIZED;
 }
 
-/** Schedule the daily reminder at a local clock time. A stable ID and scoped
- * cancel-before-create keep rescheduling idempotent. Missing modules, denied
- * permission, and native failures return false. */
-export async function scheduleDailyReminder(hour: number, minute: number): Promise<boolean> {
-  const mod = await probeAsync("@notifee/react-native");
-  const api = notifeeFrom(mod);
-  if (api === null) return false;
+/** Native primitives below run only inside the shared, tracked notification
+ * lane. Sibling restoration must use these primitives rather than enqueueing
+ * another operation and waiting on itself. */
+async function scheduleNative(
+  mod: unknown, api: NotifeeModule, owner: NotificationOwner,
+  kind: ReminderKind, fireAt: () => Date,
+): Promise<boolean> {
+  const check = () => assertNotificationOwner(owner, kind);
+  check();
+  const permission = await api.requestPermission();
+  check();
+  if (!authorizationGranted(permission)) return false;
+  const id = kind === "daily" ? REMINDER_NOTIFICATION_ID : MEASURE_REMINDER_NOTIFICATION_ID;
+  if (typeof api.cancelNotification === "function") {
+    await api.cancelNotification(id).catch(() => {});
+    check();
+  }
+  if (typeof api.createChannel === "function") {
+    await api.createChannel({ id: REMINDER_CHANNEL_ID, name: t("notify.channelName") });
+    check();
+  }
+  const enums = mod as { TriggerType?: { TIMESTAMP?: number }; RepeatFrequency?: { DAILY?: number } };
+  check();
+  await api.createTriggerNotification(kind === "daily" ? reminderNotification() : measureReminderNotification(), {
+    type: enums.TriggerType?.TIMESTAMP ?? FALLBACK_TRIGGER_TYPE_TIMESTAMP,
+    timestamp: fireAt().getTime(),
+    ...(kind === "daily" ? { repeatFrequency: enums.RepeatFrequency?.DAILY ?? FALLBACK_REPEAT_FREQUENCY_DAILY } : {}),
+  });
+  check();
+  return true;
+}
+
+/** The owner is captured by reconciliation before reading preferences. */
+export async function scheduleDailyReminder(hour: number, minute: number, owner: NotificationOwner): Promise<boolean> {
   try {
-    if (!authorizationGranted(await api.requestPermission())) return false;
-    // Cancel-before-create, scoped to the ONE reminder id (never the app's
-    // whole notification set): the belt-and-braces half of idempotency. A
-    // failure here must not block the create — the stable id is the primary
-    // guarantee, and there may be nothing scheduled to cancel yet.
-    if (typeof api.cancelNotification === "function") {
-      await api.cancelNotification(REMINDER_NOTIFICATION_ID).catch(() => {});
-    }
-    // Prefer the module's own enum values (named exports
-    // TriggerType.TIMESTAMP / RepeatFrequency.DAILY); the constants above
-    // are only a fallback for builds that stopped exporting them.
-    const enums = mod as {
-      TriggerType?: { TIMESTAMP?: number };
-      RepeatFrequency?: { DAILY?: number };
-    };
-    const triggerType = enums.TriggerType?.TIMESTAMP ?? FALLBACK_TRIGGER_TYPE_TIMESTAMP;
-    const repeatFrequency = enums.RepeatFrequency?.DAILY ?? FALLBACK_REPEAT_FREQUENCY_DAILY;
-    // Android delivers through a channel; creating it again is an idempotent
-    // update. A channel-less Android notification never shows. The channel
-    // NAME is user-visible in system settings, so it localizes too (fix 22).
-    if (typeof api.createChannel === "function") {
-      await api.createChannel({ id: REMINDER_CHANNEL_ID, name: t("notify.channelName") });
-    }
-    await api.createTriggerNotification(reminderNotification(), {
-      type: triggerType,
-      // The first fire is the next H:M still ahead of now; the daily repeat
-      // keeps that time-of-day (reminders.ts computes it in LOCAL time).
-      timestamp: nextReminderFireTime(new Date(), hour, minute).getTime(),
-      repeatFrequency,
+    return await runOwnedNotification(owner, async () => {
+      assertNotificationOwner(owner, "daily");
+      const mod = await probeAsync("@notifee/react-native");
+      assertNotificationOwner(owner, "daily");
+      const api = notifeeFrom(mod);
+      return api === null ? false : await scheduleNative(mod, api, owner, "daily", () => nextReminderFireTime(new Date(), hour, minute));
     });
-    return true;
-  } catch {
-    return false;
-  }
+  } catch { return false; }
 }
 
-/**
- * Schedule (or reschedule) the ONE-SHOT measure check-in nudge at an exact
- * moment (`fireAt` — reminderSync.ts computes it: only when the cadence is
- * due, at the next calm 20:00 local). No repeatFrequency: the nudge is
- * re-evaluated against the cadence at every sync, never left to a blind OS
- * repeat that would nag daily about a fortnightly check-in. Same
- * idempotency contract as the daily reminder (stable id + scoped
- * cancel-before-create), and the same quiet false on absent module /
- * denied permission / native failure.
- */
-export async function scheduleMeasureReminder(fireAt: Date): Promise<boolean> {
-  const mod = await probeAsync("@notifee/react-native");
-  const api = notifeeFrom(mod);
-  if (api === null) return false;
+export async function scheduleMeasureReminder(fireAt: Date, owner: NotificationOwner): Promise<boolean> {
   try {
-    if (!authorizationGranted(await api.requestPermission())) return false;
-    if (typeof api.cancelNotification === "function") {
-      await api.cancelNotification(MEASURE_REMINDER_NOTIFICATION_ID).catch(() => {});
-    }
-    const enums = mod as { TriggerType?: { TIMESTAMP?: number } };
-    const triggerType = enums.TriggerType?.TIMESTAMP ?? FALLBACK_TRIGGER_TYPE_TIMESTAMP;
-    if (typeof api.createChannel === "function") {
-      await api.createChannel({ id: REMINDER_CHANNEL_ID, name: t("notify.channelName") });
-    }
-    await api.createTriggerNotification(measureReminderNotification(), {
-      type: triggerType,
-      timestamp: fireAt.getTime(),
+    return await runOwnedNotification(owner, async () => {
+      assertNotificationOwner(owner, "measure");
+      const mod = await probeAsync("@notifee/react-native");
+      assertNotificationOwner(owner, "measure");
+      const api = notifeeFrom(mod);
+      return api === null ? false : await scheduleNative(mod, api, owner, "measure", () => fireAt);
     });
-    return true;
-  } catch {
-    return false;
+  } catch { return false; }
+}
+
+async function restoreSibling(mod: unknown, api: NotifeeModule, owner: NotificationOwner, kind: ReminderKind): Promise<boolean> {
+  // A newer reconciliation is queued behind this native operation. Let it
+  // restore its own current preference rather than replaying this snapshot.
+  try { assertNotificationOwner(owner, kind); }
+  catch { assertNotificationOwner(owner); return true; }
+  const userId = owner.permit.userId;
+  if (kind === "daily") {
+    const prefs = await getReminderPrefs(userId);
+    assertNotificationOwner(owner, kind);
+    return !prefs.enabled || await scheduleNative(mod, api, owner, kind, () => nextReminderFireTime(new Date(), prefs.hour, prefs.minute));
   }
-}
-
-/** Cancel only the check-in reminder when per-ID cancellation is available.
- * A cancel-all fallback restores the daily sibling when userId is supplied.
- * Sign-out and erasure omit userId to remove every schedule. */
-export async function cancelMeasureReminder(userId?: string): Promise<boolean> {
-  const api = notifeeFrom(await probeAsync("@notifee/react-native"));
-  if (api === null) return false;
-  try {
-    if (typeof api.cancelNotification === "function") {
-      await api.cancelNotification(MEASURE_REMINDER_NOTIFICATION_ID);
-      return true;
-    }
-    // Ancient builds without per-id cancel: cancel-all is the only tool.
-    // The measure nudge (and any reschedule) self-heals at the next sync.
-    await api.cancelAllNotifications();
-    if (userId !== undefined) {
-      await rescheduleDailyReminderSibling(userId).catch(() => {});
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Restore an enabled daily reminder after a cancel-all fallback. A failed
- * restore is retried at the next schedule sync. */
-async function rescheduleDailyReminderSibling(userId: string): Promise<void> {
-  const prefs = await getReminderPrefs(userId);
-  if (!prefs.enabled) return;
-  await scheduleDailyReminder(prefs.hour, prefs.minute);
-}
-
-/** Restore an enabled check-in reminder after a cancel-all fallback, using
- * the stored completion date and cadence. */
-async function rescheduleMeasureReminderSibling(userId: string): Promise<void> {
   const prefs = await getMeasureReminderPrefs(userId);
-  if (!prefs.enabled) return;
+  assertNotificationOwner(owner, kind);
+  if (!prefs.enabled) return true;
   const last = await lastMeasureCompletedOn(userId);
-  if (last === null) return;
-  await scheduleMeasureReminder(nextMeasureReminderFireTime(new Date(), last, prefs.intervalWeeks));
+  assertNotificationOwner(owner, kind);
+  return last === null || await scheduleNative(mod, api, owner, kind, () => nextMeasureReminderFireTime(new Date(), last, prefs.intervalWeeks));
 }
 
-/** Cancel the daily reminder. A cancel-all fallback restores the check-in
- * sibling when userId is supplied. Return false on missing native support
- * or cancellation failure. */
-export async function cancelDailyReminder(userId?: string): Promise<boolean> {
-  const api = notifeeFrom(await probeAsync("@notifee/react-native"));
-  if (api === null) return false;
+async function cancelReminder(kind: ReminderKind, userId?: string, suppliedOwner?: NotificationOwner): Promise<boolean> {
+  const id = kind === "daily" ? REMINDER_NOTIFICATION_ID : MEASURE_REMINDER_NOTIFICATION_ID;
   try {
-    if (typeof api.cancelNotification === "function") {
-      await api.cancelNotification(REMINDER_NOTIFICATION_ID);
-      return true;
-    }
-    await api.cancelAllNotifications();
     if (userId !== undefined) {
-      await rescheduleMeasureReminderSibling(userId).catch(() => {});
+      const owner = suppliedOwner ?? beginNotificationUpdate(userId, kind);
+      if (owner.permit.userId !== userId) return false;
+      return await runOwnedNotification(owner, async () => {
+        const check = () => assertNotificationOwner(owner, kind);
+        check();
+        const mod = await probeAsync("@notifee/react-native");
+        check();
+        const api = notifeeFrom(mod);
+        if (api === null) return false;
+        if (typeof api.cancelNotification === "function") {
+          await api.cancelNotification(id);
+        } else {
+          await api.cancelAllNotifications();
+          check();
+          // The cancellation succeeded even if native delivery of the
+          // sibling is temporarily unavailable. Ownership errors still
+          // prevent any following native dispatch or success claim.
+          await restoreSibling(mod, api, owner, kind === "daily" ? "measure" : "daily").catch(() => {});
+        }
+        check();
+        return true;
+      });
     }
-    return true;
-  } catch {
-    return false;
-  }
+    return await runNotificationCancellation([kind], async check => {
+      const api = notifeeFrom(await probeAsync("@notifee/react-native"));
+      check();
+      if (api === null) return false;
+      if (typeof api.cancelNotification === "function") await api.cancelNotification(id);
+      else await api.cancelAllNotifications();
+      check();
+      return true;
+    });
+  } catch { return false; }
 }
 
-/** Administrative origin retirement. Unlike the preference-level helpers,
- * this deliberately cancels the complete app-owned notification set so
- * pre-stable-id schedules cannot remain associated with the old server.
- * A build without the native module has no reachable native scheduler and
- * is already clean; a present module that rejects is a retryable failure. */
+/** Feature cancellation retains the other reminder; administrative removal
+ * omits userId and never recreates a sibling. */
+export async function cancelDailyReminder(userId?: string, owner?: NotificationOwner): Promise<boolean> {
+  return cancelReminder("daily", userId, owner);
+}
+export async function cancelMeasureReminder(userId?: string, owner?: NotificationOwner): Promise<boolean> {
+  return cancelReminder("measure", userId, owner);
+}
+
+/** Origin retirement invalidates both producers before waiting for already
+ * dispatched native work. No old completion can follow the final cancel. */
 export async function cancelOriginNotifications(): Promise<boolean> {
-  const api = notifeeFrom(await probeAsync("@notifee/react-native"));
-  if (api === null) return true;
   try {
-    await api.cancelAllNotifications();
-    return true;
-  } catch {
-    return false;
-  }
+    return await runNotificationCancellation(["daily", "measure"], async check => {
+      const api = notifeeFrom(await probeAsync("@notifee/react-native"));
+      check();
+      if (api === null) return true;
+      await api.cancelAllNotifications();
+      check();
+      return true;
+    });
+  } catch { return false; }
 }
 
-/** L-9 (2026-09-28): the persisted "orphaned random-id notifications were
- *  cleared" mark. Notifications are device-local (not per-account), so the
- *  flag is device-wide in this module's prefs namespace — it says THIS
- *  build's one-time sweep ran, and nothing else. */
 const REMINDER_MIGRATION_V2_KEY = "@mindpattern/reminder.migration.v2.done";
 
-/**
- * L-9 (2026-09-28): ONE-TIME sweep of the pre-stable-id era's orphaned
- * notifications. Before the stable-id fix (2026-09-26 audit MEDIUM) notifee
- * minted a RANDOM id per create and every reschedule stacked a new daily
- * trigger; the fix made NEW schedules replace-by-id, but a device upgraded
- * from a pre-fix build keeps every orphaned random-id notification firing
- * forever — no stable id exists to cancel them by. The only tool that
- * reaches them is the cancel-all fallback, so the FIRST reminder resync on
- * this version:
- *
- *   1. cancelAllNotifications() — clears EVERY scheduled notification,
- *      orphaned random ids included (reminders are the only notifications
- *      this app schedules, and disabled prefs lose nothing by the sweep —
- *      orphans SHOULD be cleared even then);
- *   2. immediately reschedules BOTH reminders from stored prefs via the
- *      existing stable-id resync paths (daily reminder; measure-cadence
- *      nudge when its preference AND cadence say one should exist);
- *   3. only then sets the flag, so the sweep is idempotent — every later
- *      boot skips it. A mid-migration failure leaves the flag unset and the
- *      next resync retries the whole sweep (harmless: the reschedule is the
- *      same reconciliation the sync performs anyway).
- *
- * Called from reminderSync.syncReminderSchedule (the resync every session
- * start runs). Never throws; a build without the notification module has
- * nothing to sweep and simply marks the migration done.
- */
-export async function migrateOrphanedReminderNotifications(userId: string): Promise<void> {
+/** One-time removal of old random IDs, followed by restoration from current
+ * preferences. The entire migration is one tracked native transaction. */
+export async function migrateOrphanedReminderNotifications(userId: string, suppliedOwner?: NotificationOwner): Promise<void> {
   try {
-    if ((await AsyncStorage.getItem(REMINDER_MIGRATION_V2_KEY)) !== null) return; // already swept
-    const api = notifeeFrom(await probeAsync("@notifee/react-native"));
-    if (api !== null) {
-      await api.cancelAllNotifications();
-      await rescheduleDailyReminderSibling(userId);
-      await rescheduleMeasureReminderSibling(userId);
-    }
-    await AsyncStorage.setItem(REMINDER_MIGRATION_V2_KEY, "1");
-  } catch {
-    // Nothing committed: the flag stays unset and the next resync retries.
-  }
+    const owner = suppliedOwner ?? beginNotificationUpdate(userId, "daily");
+    if (owner.permit.userId !== userId) return;
+    await runOwnedNotification(owner, async () => {
+      const migrated = await AsyncStorage.getItem(REMINDER_MIGRATION_V2_KEY);
+      assertNotificationOwner(owner);
+      if (migrated !== null) return;
+      const mod = await probeAsync("@notifee/react-native");
+      assertNotificationOwner(owner);
+      const api = notifeeFrom(mod);
+      if (api !== null) {
+        await api.cancelAllNotifications();
+        assertNotificationOwner(owner);
+        if (!await restoreSibling(mod, api, owner, "daily")) return;
+        if (!await restoreSibling(mod, api, owner, "measure")) return;
+      }
+      assertNotificationOwner(owner);
+      await AsyncStorage.setItem(REMINDER_MIGRATION_V2_KEY, "1");
+      assertNotificationOwner(owner);
+    });
+  } catch { /* Keep migration pending for a later valid reconciliation. */ }
 }
 
 // ---------------------------------------------------------------------------

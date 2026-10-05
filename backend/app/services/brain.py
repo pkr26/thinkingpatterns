@@ -487,6 +487,29 @@ CONFIRM_AGE_DAYS = 21  # emerging → confirmed by age
 LANGUAGE_MIN_TOKENS = 50  # too little text to judge a language honestly
 LANGUAGE_HIT_FLOOR = 0.10  # ~10% recognized = English with names/slang;
 # Latin-script non-English prose lands ~2-5%
+LANGUAGE_LATIN_SHARE_FLOOR = 0.5  # text scoring needs a majority of tokenizable letters
+
+
+def _analysis_language(tokens: list[str], latin_letters: int, letters: int, has_text: bool) -> str:
+    """Conservative EN/ES eligibility, including letters WORD_RE cannot tokenize.
+
+    This is a coverage gate, not general language identification. A supported
+    quotation inside predominantly unsupported-script prose cannot enable text
+    scoring. Emoji/numbers/punctuation are not letters in this denominator.
+    """
+    if not has_text:
+        return "en"
+    if not letters or latin_letters / letters <= LANGUAGE_LATIN_SHARE_FLOOR:
+        return "other"
+    scored = [token for token in tokens if len(token) >= 3]
+    if not scored:
+        return "other"
+    en_share = sum(token in _KNOWN_TOKENS for token in scored) / len(scored)
+    es_share = sum(token in _KNOWN_TOKENS_ES for token in scored) / len(scored)
+    if es_share >= LANGUAGE_HIT_FLOOR and es_share > en_share:
+        return "es"
+    return "en" if en_share >= LANGUAGE_HIT_FLOOR else "other"
+
 
 # --- store bounds --------------------------------------------------------------
 HISTORY_DAYS = 90
@@ -4812,8 +4835,17 @@ def update(
     # (audit H-8: every accented word must survive [a-z']+ as one whole
     # token, and iOS U+2019 must read as ' so contraction negators fire).
     entry_tokens: list[list[str]] = []
+    entry_languages: list[str] = []
+    window_latin_letters = 0
+    window_letters = 0
     for entry in window:
-        tokens = WORD_RE.findall(_fold_sentiment_text(entry.text.lower()))
+        folded = _fold_sentiment_text(entry.text.lower())
+        tokens = WORD_RE.findall(folded)
+        latin_letters = sum("a" <= char <= "z" for char in folded)
+        letters = sum(char.isalpha() for char in folded)
+        window_latin_letters += latin_letters
+        window_letters += letters
+        entry_languages.append(_analysis_language(tokens, latin_letters, letters, bool(entry.text)))
         # Emoji ride along as their own tokens: they score mood through
         # EMOJI_VALENCES but never become themes or phrase shingles (the
         # theme/phrase lookups simply never match them). Counted per
@@ -4854,23 +4886,13 @@ def update(
     # scoring (length-aware tie rule) rather than guessing English. Only
     # the fully EMPTY corpus (no tokens, no text at all) keeps the
     # historical English default — nothing is being suppressed there.
-    language = "en"
-    any_text = any(entry.text for entry in window)
-    if scored or any_text:
-        en_hits = sum(1 for t in scored if t in _KNOWN_TOKENS)
-        es_hits = sum(1 for t in scored if t in _KNOWN_TOKENS_ES)
-        en_share = en_hits / len(scored) if scored else 0.0
-        es_share = es_hits / len(scored) if scored else 0.0
-        if es_share >= LANGUAGE_HIT_FLOOR and es_share > en_share:
-            language = "es"
-        elif en_share >= LANGUAGE_HIT_FLOOR:
-            language = "en"
-        else:
-            language = "other"
+    language = _analysis_language(
+        scored, window_latin_letters, window_letters, any(entry.text for entry in window)
+    )
     language_ok = language != "other"
 
     per_entry: list[tuple[JournalEntry, list[str], set[str], float]] = []
-    for entry, tokens in zip(window, entry_tokens):
+    for entry, tokens, entry_language in zip(window, entry_tokens, entry_languages):
         if entry.sentiment is not None and math.isfinite(entry.sentiment):
             # Client-supplied mood tag: clamped to the engine's scale. A
             # non-finite value (NaN poisons every average downstream) falls
@@ -4881,11 +4903,16 @@ def update(
             # merge selection and negator scoping live inside
             # sentiment_score; the None default (vector/TS callers) keeps
             # the pinned historical behavior.
-            sentiment = sentiment_score(tokens, language)
+            sentiment = sentiment_score(tokens, entry_language)
         # Themes under the DETECTED language's lexicon (Phase 2 ES theme
         # set): Spanish corpora read Spanish words, English corpora English
         # ones; client tags (English wire values) join unchanged.
-        themes = extract_themes(tokens, language) | (set(entry.tags) & kept_tags)
+        text_themes = (
+            extract_themes(tokens, entry_language)
+            if language_ok and entry_language != "other"
+            else set()
+        )
+        themes = text_themes | (set(entry.tags) & kept_tags)
         if entry.entry_date in poor_sleep_days:
             themes.add(SLEEP_CHANNEL_THEME)
         per_entry.append((entry, tokens, themes, sentiment))
@@ -4917,19 +4944,19 @@ def update(
             for entry, tokens, themes, sentiment in per_entry
         ]
 
-    mood_entries = (
-        per_entry
-        if language_ok
-        # `isfinite`, not just `is not None` (audit L-15): a NaN tag would
-        # pass the filter and slip a fabricated text-score into the
-        # "explicitly tagged" series. (The API rejects non-finite tags, so
-        # this is the hostile-store belt-and-braces.)
-        else [
-            (e, t, th, m)
-            for (e, t, th, m) in per_entry
-            if e.sentiment is not None and math.isfinite(e.sentiment)
-        ]
-    )
+    # Per-entry eligibility matters even in a supported-language window:
+    # a minority of unsupported entries must not become fabricated mood.
+    # Explicit finite ratings remain available regardless of script/text.
+    mood_entries = [
+        item
+        for item, entry_language in zip(per_entry, entry_languages)
+        if (item[0].sentiment is not None and math.isfinite(item[0].sentiment))
+        or (
+            language_ok
+            and entry_language != "other"
+            and (bool(item[0].text) or item[0].sentiment is None)
+        )
+    ]
 
     day_buckets: dict[date, list[float]] = {}
     for entry, _, _, sentiment in mood_entries:
@@ -5353,7 +5380,28 @@ def update(
     # truncation or empty submit carrying zero mood evidence, and averaging
     # its fabricated neutral 0.0 pulled "average reading" (portal) toward
     # the middle. Tagged entries keep counting: the user's own report.
-    sentiments = [s for entry, _, _, s in per_entry if entry.text or entry.sentiment is not None]
+    # Blank/unrated rows can carry real activity tags for prevalence, but
+    # carry no numeric mood evidence (the day-bucket pass has the same rule).
+    mood_observations = [
+        item
+        for item in mood_entries
+        if item[0].text or (item[0].sentiment is not None and math.isfinite(item[0].sentiment))
+    ]
+    sentiments = [s for _, _, _, s in mood_observations]
+    explicit_mood = sum(
+        entry.sentiment is not None and math.isfinite(entry.sentiment)
+        for entry, _, _, _ in mood_observations
+    )
+    text_estimates = len(sentiments) - explicit_mood
+    mood_source = (
+        "mixed"
+        if explicit_mood and text_estimates
+        else "explicit_mood"
+        if explicit_mood
+        else "text_estimate"
+        if text_estimates
+        else "unavailable"
+    )
     stats = {
         "total_entries": len(per_entry),
         # Honesty signal (2026-09-19): the detected analysis language;
@@ -5364,7 +5412,14 @@ def update(
         # mood-bucket calendar counted only mood-tagged days and understated
         # the user's actual journaling cadence.
         "active_days": len({entry.entry_date for entry in window}),
-        "avg_sentiment": round(sum(sentiments) / len(sentiments), 3) if sentiments else 0.0,
+        "avg_sentiment": round(sum(sentiments) / len(sentiments), 3) if sentiments else None,
+        "mood_summary": {
+            "observations": len(sentiments),
+            "explicit_mood": explicit_mood,
+            "text_estimates": text_estimates,
+            "excluded_entries": len(per_entry) - len(sentiments),
+            "source": mood_source,
+        },
         "first_date": _iso(window[0].entry_date) if window else None,
         "last_date": _iso(window[-1].entry_date) if window else None,
     }

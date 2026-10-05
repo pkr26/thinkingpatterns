@@ -39,7 +39,10 @@ def zeroize(key: bytearray) -> None:
 
 
 def _decrypt_with_candidates(
-    key: bytearray, blob: bytes, aad: bytes | None | tuple[bytes, ...]
+    key: bytearray,
+    blob: bytes,
+    aad: bytes | None | tuple[bytes, ...],
+    authenticated_aads: list[bytes | None] | None = None,
 ) -> bytes:
     """Decrypt one envelope under a single AAD or an ordered candidate tuple.
 
@@ -49,11 +52,17 @@ def _decrypt_with_candidates(
     single-AAD contract for genuinely tampered ciphertext.
     """
     if aad is None or isinstance(aad, (bytes, bytearray)):
-        return decrypt(key, blob, aad)
+        plain = decrypt(key, blob, aad)
+        if authenticated_aads is not None:
+            authenticated_aads.append(aad)
+        return plain
     failure: TamperError | None = None
     for candidate in aad:
         try:
-            return decrypt(key, blob, candidate)
+            plain = decrypt(key, blob, candidate)
+            if authenticated_aads is not None:
+                authenticated_aads.append(candidate)
+            return plain
         except TamperError as exc:
             failure = exc
     assert failure is not None  # a non-empty tuple reached its end
@@ -267,8 +276,14 @@ class SecureProcessingContext:
         if len(key) != KEY_SIZE:
             raise ValueError(f"key must be {KEY_SIZE} bytes")
         self._key = bytearray(key)
+        # Public authentication metadata only; never plaintext or key material.
+        self.authenticated_aads: list[bytes | None] = []
 
-    def run(self, encrypted: Sequence[EncryptedItem], analyze: Callable[[list[bytearray]], object]):
+    def run(
+        self,
+        encrypted: Sequence[EncryptedItem],
+        analyze: Callable[[list[bytearray]], object],
+    ):
         global _open_plaintext_windows
         buffers: list[SecureBuffer] = []
         with _windows_lock:
@@ -281,7 +296,9 @@ class SecureProcessingContext:
         key_material = bytearray(self._key)
         try:
             for aad, blob in encrypted:
-                plaintext = _decrypt_with_candidates(key_material, blob, aad)
+                plaintext = _decrypt_with_candidates(
+                    key_material, blob, aad, self.authenticated_aads
+                )
                 buffers.append(SecureBuffer(plaintext))
             return analyze([buf.data for buf in buffers])
         finally:

@@ -84,7 +84,7 @@ def _brain_tuning_contract() -> dict[str, object]:
 
 
 # Digests frozen 2026-09-30 from the live engine at campaign start.
-BRAIN_TUNING_DIGEST = "db54bd23fea9c4f9"
+BRAIN_TUNING_DIGEST = "7a7757d18cc85017"
 
 # Snapshots are captured at COLLECTION time (this module's import): some
 # engine modules carry runtime memoization dicts among their module-level
@@ -156,7 +156,7 @@ MODULE_CONSTANTS_DIGESTS = {
     "app.api._audit": "3e07fb7ea7f005bc",
     "app.api._paging": "db67a3b84a562735",
     "app.api._sharing_state": "9f695ac5429dc595",
-    "app.api.account": "c4c1df3e0da017f9",
+    "app.api.account": "1a12dc1dd5c6215d",
     "app.api.audio": "a7d942ebdd3f6cfc",
     "app.api.auth": "e6806670574bf7b3",
     "app.api.consents": "6b6234fc0eb8e3d7",
@@ -167,10 +167,10 @@ MODULE_CONSTANTS_DIGESTS = {
     "app.api.therapist": "a3b747d3c02e9468",
     "app.cache": "9cafcda6da25d7e1",
     "app.config": "48fce0698f78bffb",
-    "app.db": "d375979383d7a6f1",
+    "app.db": "0c9f943cba22d0f7",
     "app.deps": "eef3badf33769d80",
     "app.locks": "37856db1c6d2e319",
-    "app.main": "2b23248e6a2be2b3",
+    "app.main": "147c5a06e83300af",
     "app.metrics": "10aefb028623642d",
     "app.middleware": "27babfd5745e9b0b",
     "app.schemas": "20fbb6883918e31c",

@@ -7,6 +7,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api/client";
+import { usePatientOperation } from "../patientOperation";
 import { toBase64,zeroize } from "../crypto/core";
 import { decryptQuestion } from "../crypto/patient";
 import { genericQuestionForDate } from "../genericQuestions";
@@ -21,6 +22,7 @@ import { kv } from "../kvstore";
 import { Button, Card, Chip, ErrorBanner, Icon, Note } from "../ui";
 
 export function QuestionView(props: { onRefreshed: (message: string) => void }): React.JSX.Element {
+  const beginOperation = usePatientOperation();
   const [question, setQuestion] = useState<{ text: string; pid?: string; forDate: string } | null>(null);
   const [answered, setAnswered] = useState<"resonated" | "not-me" | null>(null);
   // The on-device fallback question (M-W5): `offline` picks the honest
@@ -33,8 +35,9 @@ export function QuestionView(props: { onRefreshed: (message: string) => void }):
   const load = useCallback(async (): Promise<void> => {
     const run = generation.current + 1;
     generation.current = run;
-    const owner = vault.ownerUserId();
-    if (!owner || !vault.isUnlocked()) {
+    const operation = beginOperation();
+    const owner = operation?.owner;
+    if (!owner || !operation) {
       setError(t("common.sessionLocked"));
       return;
     }
@@ -46,12 +49,13 @@ export function QuestionView(props: { onRefreshed: (message: string) => void }):
     const keys = vault.get();
     try {
       const today = await api.questionToday();
-      if (generation.current !== run) return;
+      if (generation.current !== run || !operation.current()) return;
       const payload = await decryptQuestion(keys.dataKey, owner, today.for_date, today.blob);
+      if (!operation.current()) return;
       setQuestion({ text: payload.question, pid: payload.pattern_pid, forDate: today.for_date });
       setGeneric(null);
     } catch (err) {
-      if (generation.current !== run) return;
+      if (generation.current !== run || !operation.current()) return;
       if (err instanceof ApiError && err.status === 404) {
         // Baseline phase: 404 is the honest "no question yet" — today's
         // reflective question comes from the built-in LOCALIZED pool,
@@ -70,7 +74,7 @@ export function QuestionView(props: { onRefreshed: (message: string) => void }):
       }
       setError(displayError(err, t("question.loadFailed")));
     }
-  }, []);
+  }, [beginOperation]);
 
   useEffect(() => {
     void load();
@@ -84,8 +88,9 @@ export function QuestionView(props: { onRefreshed: (message: string) => void }):
   }, [question]);
 
   const refreshPatterns = useCallback(async (): Promise<void> => {
-    const owner = vault.ownerUserId();
-    if (!owner || !vault.isUnlocked()) {
+    const operation = beginOperation();
+    const owner = operation?.owner;
+    if (!owner || !operation) {
       setError(t("common.sessionLocked"));
       return;
     }
@@ -99,13 +104,19 @@ export function QuestionView(props: { onRefreshed: (message: string) => void }):
     const dataKey=new Uint8Array(keys.dataKey);
     try {
       const permit=await kv.captureWritePermit(owner,dataKey);
+      if (!operation.current()) return;
       // The ONLY place the data key leaves the client: a single-use,
       // TTL-bounded processing session opened by this explicit button.
       const session = await api.openProcessingSession(toBase64(dataKey));
+      if (!operation.current()) return;
       const feedback = await buildFeedbackBlob(dataKey, owner).catch(() => null);
+      if (!operation.current()) return;
       const result = await api.recompute(session.session_token, feedback ?? undefined);
+      if (!operation.current()) return;
       if (feedback) await clearFeedback(owner,permit).catch(() => undefined);
+      if (!operation.current()) return;
       await reconcile().catch(() => undefined);
+      if (!operation.current()) return;
       props.onRefreshed(
         result.phase === "baseline"
           ? result.days_remaining === undefined
@@ -115,12 +126,12 @@ export function QuestionView(props: { onRefreshed: (message: string) => void }):
       );
       await load();
     } catch (err) {
-      setError(displayError(err, t("question.refreshFailed")));
+      if (operation.current()) setError(displayError(err, t("question.refreshFailed")));
     } finally {
       zeroize(dataKey);
-      setBusy(false);
+      if (operation.current()) setBusy(false);
     }
-  }, [load, props]);
+  }, [load, props, beginOperation]);
 
   return (
     <>

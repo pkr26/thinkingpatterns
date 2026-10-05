@@ -114,6 +114,36 @@ async def _db_user(app, user_id: str) -> User:
         return (await session.execute(select(User).where(User.id == user_id))).scalars().one()
 
 
+@pytest.mark.parametrize("frozen_at", [1_000_000_000.0, 2_000_000_000.0])
+async def test_emulator_enrollment_uses_the_installed_totp_clock(
+    client, app, monkeypatch, frozen_at
+):
+    """A deliberately distant test clock must govern both code ends.
+
+    Mixing the emulator's real clock with the verifier's frozen clock made
+    enrollment fail whenever setup crossed a real thirty-second boundary.
+    Large positive/negative clock offsets make that disagreement explicit.
+    """
+    clock = install_totp_clock(monkeypatch, start=frozen_at)
+    therapist = TherapistEmulator("clock-aligned-enrollment", "deep-password")
+    await therapist.register(client)
+    row = await _db_user(app, therapist.user_id)
+    assert row.totp_enabled is True
+    assert row.totp_last_counter == clock.counter
+
+    # The next code then authenticates through the real login endpoint.
+    clock.advance_to_next_timestep()
+    logged_in = await client.post(
+        "/api/auth/login",
+        json={
+            "username": therapist.username,
+            "verifier": therapist.auth_key_b64,
+            "totp_code": clock.current_code(therapist.totp_secret),
+        },
+    )
+    assert logged_in.status_code == 200, logged_in.text
+
+
 async def test_totp_full_lifecycle(client, app, totp_clock):
     th = TherapistEmulator("totp-dr", "a-deep-therapist-password", auto_enroll_mfa=False)
     await th.register(client)
@@ -167,6 +197,20 @@ async def test_totp_full_lifecycle(client, app, totp_clock):
     codes = good.json()["backup_codes"]
     assert len(codes) == 8 and len(set(codes)) == 8
     assert all(len(c) == 10 for c in codes)
+
+    # Confirmation already presented this exact code. The first login
+    # must enforce that consumed counter, even though setup/enable did
+    # not issue a login token themselves.
+    enable_replay = await client.post(
+        "/api/auth/login",
+        json={
+            "username": th.username,
+            "verifier": th.auth_key_b64,
+            "totp_code": _current_code(secret, totp_clock),
+        },
+    )
+    assert enable_replay.status_code == 401
+    assert enable_replay.json()["code"] == "totp_code_invalid"
 
     # Login without a code: machine-readable distinct answer.
     missing = await client.post(
@@ -238,6 +282,17 @@ async def test_totp_full_lifecycle(client, app, totp_clock):
         headers=await _ther_headers(th),
     )
     assert bad_disable.status_code == 403, bad_disable.text
+    # The code which just authenticated login cannot disable the second
+    # factor. This exercises equality at the replay boundary rather than
+    # a random wrong code or an already-expired timestep.
+    replay_disable = await client.post(
+        "/api/account/totp/disable",
+        json={"verifier": th.auth_key_b64, "code": _current_code(secret, totp_clock)},
+        headers=await _ther_headers(th),
+    )
+    assert replay_disable.status_code == 403, replay_disable.text
+    assert replay_disable.json()["code"] == "totp_code_invalid"
+    assert (await _db_user(app, th.user_id)).totp_enabled is True
     # …verifier + a FRESH code (the login consumed this timestep)
     # clears the enrollment.
     await _next_timestep(totp_clock)

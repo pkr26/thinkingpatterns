@@ -34,6 +34,17 @@ def d1_sanitizer_corpus() -> None:
     section("D1: LLM output sanitizer attack corpus")
     from app.services.llm import sanitize_pattern
 
+    from app.services.llm import _clean_narrative
+
+    safe_narrative = "A calm pattern repeats around work."
+    numeric_claims = ["This pattern appears on 3 days.", "This pattern appears on ٣ days."]
+    clinical_claims = ["This diagnosis follows from the pattern.", "These entries diagnose a condition.", "This pattern was diagnosed from the entries."]
+    safe_kept = _clean_narrative(safe_narrative) == safe_narrative
+    verdict("D1.narrative-number-guard", "BLOCKED" if safe_kept and all(_clean_narrative(text) is None for text in numeric_claims) else "FINDING",
+            "numeric narratives are rejected while an ordinary narrative remains admissible")
+    verdict("D1.narrative-clinical-guard", "BLOCKED" if safe_kept and all(_clean_narrative(text) is None for text in clinical_claims) else "FINDING",
+            "diagnosis narratives are rejected while an ordinary narrative remains admissible")
+
     plant_phone = "reminder to myself call five five five zero one three four now"
     plant_url = "i keep meaning to visit evil dot com for laughs"
     plant_worthless = "felt worthless again at work today"

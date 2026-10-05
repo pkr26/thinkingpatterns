@@ -17,6 +17,15 @@ establish a minimal-risk classification or a legal no-PHI determination.
 - **Type**: single-arm, mixed-methods usability + acceptability study,
   4 weeks of naturalistic app use + 3 structured sessions (baseline,
   week 2, week 4).
+- **Evaluated scope**: onboarding, journaling, threshold explanations and
+  comprehension of investigator-supplied sample cards. A new account needs
+  30 distinct active journaling days before personal analysis unlocks. Four
+  weeks cannot meet that threshold even with daily writing; the suggested
+  three-times-weekly cadence is also insufficient. This protocol therefore
+  does not evaluate participants' own generated observations or post-unlock
+  workflows. Those endpoints require a separately reviewed longer protocol
+  with enough active days and subsequent experience; the app's production
+  threshold remains unchanged.
 - **N**: 30 adult journal users (18+), balanced for Spanish/English
   locale; powered for thematic saturation on the qualitative strand,
   descriptive statistics only on the quantitative strand.
@@ -24,10 +33,16 @@ establish a minimal-risk classification or a legal no-PHI determination.
   pattern-card comprehension task by 2 clinicians for content-validity
   ratings only.
 - **Setting**: remote; participants use their own devices and their own
-  accounts. No study server, no data collection beyond the instruments
-  below — the app is zero-knowledge and STAYS that way: the study never
-  requests journal content, and no decryption capability is extended to
-  investigators.
+  accounts. There is no study server and no study collection beyond the
+  instruments below. Investigators never request journal content or receive
+  an app decryption key. The app encrypts content on the client for storage
+  and sync. Requested server analysis is a disclosed processing exception:
+  the app sends its data key to a single-use session lasting at most five
+  minutes, and the server decrypts and analyzes content in process. This is
+  not hardware-enclave protection. Separately consented voice transcription
+  and translation can send recordings/text to configured providers. Study
+  staff access, server processing and provider processing are distinct; the
+  consent materials must explain them using the deployed configuration.
 
 ## 2. Inclusion / exclusion
 
@@ -56,8 +71,8 @@ establish a minimal-risk classification or a legal no-PHI determination.
 | Construct | Instrument | When |
 |---|---|---|
 | System usability | SUS (10-item) | week 4 |
-| Acceptability of the 30-day threshold | ad-hoc 5-item (clarity, burden, trust; piloted, Cronbach reported) | week 2 + 4 |
-| Perceived utility of pattern cards | ad-hoc comprehension task: interpret 3 sample cards | week 4 |
+| Acceptability of the 30-active-day threshold explanation | ad-hoc 5-item (clarity, expected burden, trust; pilot and report reliability); does not measure completed threshold experience | week 2 + 4 |
+| Sample-card comprehension | ad-hoc comprehension task: interpret 3 investigator-supplied sample cards; no participant's generated observations | week 4 |
 | Engagement (objective, privacy-preserving) | self-reported frequency; NO app telemetry exists to harvest — the app collects none | all sessions |
 | Qualitative experience | semi-structured interview (~30 min) | week 4 |
 
@@ -65,9 +80,13 @@ establish a minimal-risk classification or a legal no-PHI determination.
 
 - The study collects NO journal content and NO app-derived data. Every
   measure is a standard instrument administered outside the app.
-- The zero-knowledge architecture is itself a study material: the
-  informed-consent form states that investigators CANNOT read journal
-  content and that deleting the account deletes the data.
+- Informed-consent materials state that investigators cannot read journal
+  content through the study, and describe the client encryption and optional
+  server/provider processing boundaries above. Deleting an account removes
+  live account content; earlier encrypted backups and access-audit metadata
+  follow the deployed retention schedule. Do not promise immediate removal
+  from every backup or provider. Review the [retention schedule](DATA_RETENTION_SCHEDULE.md)
+  and configured provider disclosures before recruitment.
 - Interviews are recorded with consent, transcribed, de-identified;
   retention 7 years per institutional policy.
 
@@ -75,10 +94,10 @@ establish a minimal-risk classification or a legal no-PHI determination.
 
 - Descriptive statistics (median, IQR) for SUS and acceptability;
   pre-registered benchmark: SUS ≥ 68 (above-average usability).
-- Comprehension task: % of participants who correctly describe what a
-  card does and does NOT claim ("observed pattern", not diagnosis);
-  benchmark ≥ 80% — this is the published-claims gate for "honest
-  cards".
+- Sample-card comprehension task: % of participants who correctly describe
+  what the supplied cards claim (observations, not diagnoses); proposed
+  benchmark ≥ 80%. This endpoint measures comprehension of those materials,
+  not validity or usefulness of personal generated observations.
 - Thematic analysis (Braun & Clarke) of interviews; two coders, κ
   reported.
 
@@ -99,7 +118,9 @@ establish a minimal-risk classification or a legal no-PHI determination.
 If approved and completed, the measured results could support a bounded
 description of exactly this shape: "In a
 4-week single-arm usability study (N=30), participants rated the app
-X (SUS) and Y% correctly described the app's pattern cards as
-observations rather than diagnoses." No efficacy claims, no clinical
+X (SUS) and Y% correctly described three supplied sample cards as
+observations rather than diagnoses." These results do not establish
+post-unlock personal-pattern usability or longitudinal usefulness.
+No efficacy claims, no clinical
 outcome claims, no wellness-outcome claims beyond self-reported
 acceptability.

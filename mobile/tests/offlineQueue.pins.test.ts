@@ -67,6 +67,19 @@ describe("queue regression pins", () => {
     expect((await rejectedEntries("alice")).map((x: any) => x.clientEntryId)).toEqual(["bad"]);
   });
 
+  it("keeps one recovery item when the same client entry is rejected twice", async () => {
+    vi.mocked(api.createQueuedEntry).mockRejectedValue(new ApiError(422, "invalid encrypted entry", "entry_blob_invalid"));
+    await enqueue(item("repeated"));
+    await flushQueue("alice");
+    await enqueue(item("repeated"));
+    await enqueue(item("different"));
+    await flushQueue("alice");
+
+    const rejected = await rejectedEntries("alice");
+    expect(rejected.map(entry => entry.clientEntryId)).toEqual(["repeated", "different"]);
+    expect(await queueLength("alice")).toBe(0);
+  });
+
   it("makes a validation future-date response retryable, without uploading it to another origin", async () => {
     await enqueue(item("future"));
     vi.mocked(api.createQueuedEntry).mockRejectedValue(new ApiError(422, "entry date is in the future", "validation_error"));

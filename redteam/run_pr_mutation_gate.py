@@ -1,33 +1,33 @@
 #!/usr/bin/env python3
-"""Per-PR incremental mutation gate (driver).
+"""Behavioral mutation gate with a read-only applicability preflight.
 
-The scheduled deep campaigns (mutmut weekly, Stryker per platform, the
-hand-written behavioral campaigns) are far too slow to re-run whole on
-every pull request. This gate re-runs exactly the BEHAVIORAL mutants whose
-target file appears in the PR diff — the 36/36 + round-2 standards cannot
-silently regress on the files a PR actually touches.
+  python redteam/run_pr_mutation_gate.py --preflight
+  python redteam/run_pr_mutation_gate.py --preflight --json
+  git diff --name-only origin/main... | python redteam/run_pr_mutation_gate.py -
+  python redteam/run_pr_mutation_gate.py --all
 
-A mutant whose find-string no longer matches its file (SETUP-ERROR) also
-fails the gate: a pin that rotted is a pin that stopped guarding.
-
-Documented residuals (genuine survivors with a written defense-in-depth or
-unreachability argument in their campaign report) are re-run but only
-WARNED, never failed: their survival is the recorded state of the art, not
-a regression.
-
-Usage (from the repo root, against a merge-base ref):
-  python3 redteam/run_pr_mutation_gate.py origin/main...HEAD   # or a file list on stdin
-  git diff --name-only origin/main... | python3 redteam/run_pr_mutation_gate.py -
+Execution mutates and restores target files; run it only in an isolated checkout.
+Every selected oracle must pass on unmodified source before mutants run. Stale
+anchors, broken oracles, unknown statuses and surviving mutants fail the gate.
 """
 
 from __future__ import annotations
 
+import argparse
 import importlib.util
+import json
 import pathlib
 import subprocess
 import sys
+from collections import Counter
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+# Support import-by-path tests as well as executing the script directly.
+if str(ROOT / "redteam") not in sys.path:
+    sys.path.insert(0, str(ROOT / "redteam"))
+sys.dont_write_bytecode = True
+from mutation_preflight import inventory
+from mutation_oracles import redteam_baseline_error
 
 HARNESS_GLOBS = (
     "mutation_campaign_2026-09-18/harness.py",
@@ -36,93 +36,201 @@ HARNESS_GLOBS = (
     "mutation_campaign_2026-09-22/harness.py",
 )
 
-# Genuine survivors that are deliberately unpinned, with the report section
-# that argues why (campaign reports preserved in git
-# history). Round 2: I4 (pairing burn's expiry WHERE only closes the
-# lookup→burn race window; _live_code rejects expired codes), J1 (pool-side
-# suppress filter subsumed by three upstream tripwires), N4 (e2_brain's
-# noise corpora stay silent even at ALPHA=0.5 because the effect-size and
-# replication gates absorb the inflation; a borderline-p planted-
-# association corpus is the recorded follow-up — see the round-2
-# campaign report in git history, campaign N). Round 3: O6 (note
-# re-fetch scoping unreachable behind the still-scoped pre-lock read), S10
-# (recompute-lock keying masked by the outer per-user lifecycle fence).
-DOCUMENTED_RESIDUALS = {"I4", "J1", "N4", "N9", "O6", "S10"}
+BACKEND_PYTEST_CONFIG = {
+    "backend/conftest.py",
+    "backend/pyproject.toml",
+    "backend/pytest.ini",
+    "backend/setup.cfg",
+    "backend/tox.ini",
+}
 
 
 def load_harnesses() -> tuple[list[dict], object]:
-    """All behavioral campaign mutants + the harness module that serves
-    run_mutant for all of them. That MUST be the round-2 implementation:
-    round-1's run_mutant only accepts the single-suite `tests` dict, while
-    round-2/3 mutants may carry a list of suites (and round-2's carries the
-    redteam-oracle verdicts and the stale-bytecode/corpus hygiene)."""
-    mutants: list[dict] = []
-    module = None
-    for rel in HARNESS_GLOBS:
-        path = ROOT / "redteam" / rel
-        if not path.exists():
-            continue
-        spec = importlib.util.spec_from_file_location(rel.replace("/", "_"), path)
-        loaded = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(loaded)  # type: ignore[union-attr]
-        mutants.extend(loaded.MUTANTS)
-        if rel.startswith("mutation_campaign_2026-09-18_round2"):
-            module = loaded
-        elif module is None:
-            module = loaded
-    return mutants, module
+    mutants, runner = [], None
+    previous = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        for rel in HARNESS_GLOBS:
+            path = ROOT / "redteam" / rel
+            if not path.is_file():
+                raise ValueError(f"required campaign is missing: {rel}")
+            spec = importlib.util.spec_from_file_location(rel.replace("/", "_"), path)
+            loaded = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(loaded)
+            mutants.extend(loaded.MUTANTS)
+            if rel.startswith("mutation_campaign_2026-09-18_round2"):
+                runner = loaded
+    finally:
+        sys.dont_write_bytecode = previous
+    if runner is None:
+        raise ValueError("required mutation runner is missing")
+    return mutants, runner
 
 
 def changed_files(arg: str) -> set[str]:
-    if arg == "-":
-        raw = sys.stdin.read()
-        return {line.strip() for line in raw.splitlines() if line.strip()}
-    diff = subprocess.run(
-        ["git", "diff", "--name-only", arg], cwd=ROOT, capture_output=True, text=True, check=True
-    ).stdout
-    return {line.strip() for line in diff.splitlines() if line.strip()}
+    raw = (
+        sys.stdin.read()
+        if arg == "-"
+        else subprocess.run(
+            ["git", "diff", "--name-only", arg],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    )
+    return {line.strip() for line in raw.splitlines() if line.strip()}
 
 
-def main() -> int:
-    if len(sys.argv) != 2:
-        print(__doc__)
-        return 2
-    diff = changed_files(sys.argv[1])
-    if not diff:
-        print("no changed files — nothing to gate")
-        return 0
-    mutants, harness = load_harnesses()
-    mutants = [m for m in mutants if m["file"] in diff]
-    if not mutants:
-        print(f"{len(diff)} changed file(s); none carry behavioral mutants — gate passes trivially")
-        return 0
+def affected(mutant: dict, changed: set[str]) -> bool:
+    # Changes to the gate or campaign catalog can affect every control.
+    if any(
+        path.startswith("redteam/mutation_campaign_")
+        or path
+        in {
+            "redteam/run_pr_mutation_gate.py",
+            "redteam/mutation_preflight.py",
+            "redteam/mutation_oracles.py",
+        }
+        for path in changed
+    ):
+        return True
+    if mutant["file"] in changed:
+        return True
+    specs = mutant["tests"] if isinstance(mutant["tests"], list) else [mutant["tests"]]
+    for spec in specs:
+        if spec["kind"] == "redteam" and "redteam/common.py" in changed:
+            return True
+        # Pytest loads conftest implicitly, and suites import shared emulator
+        # helpers without naming them on the command line. Conservatively
+        # rerun backend pytest controls for changes to test-support modules;
+        # an import graph would otherwise miss indirect fixture dependencies.
+        if spec["kind"] == "pytest" and spec["cwd"] == "backend" and (
+            changed.intersection(BACKEND_PYTEST_CONFIG)
+            or any(
+                path.startswith("backend/tests/")
+                and pathlib.PurePosixPath(path).suffix == ".py"
+                and not pathlib.PurePosixPath(path).name.startswith("test_")
+                for path in changed
+            )
+        ):
+            return True
+        for argument in spec["cmd"]:
+            filename = argument.split("::", 1)[0]
+            if str(pathlib.Path(spec["cwd"]) / filename) in changed:
+                return True
+    return False
 
-    print(f"{len(diff)} changed file(s); {len(mutants)} behavioral mutants re-run:\n")
-    failures: list[str] = []
-    for m in mutants:
-        print(f"[{m['id']}] {m['name']} ...", flush=True)
-        result = harness.run_mutant(m)  # type: ignore[attr-defined]
-        status = result["status"]
-        print(f"    -> {status}"
-              + (f"  ({result.get('detail', '')})" if status == "SETUP-ERROR" else ""), flush=True)
-        if status in ("SURVIVED", "MISSED", "SETUP-ERROR"):
-            if m["id"] in DOCUMENTED_RESIDUALS and status in ("SURVIVED", "MISSED"):
-                print(f"    (documented residual {m['id']} — see its campaign report; "
-                      "not a gate failure)", flush=True)
-                continue
-            failures.append(f"{m['id']} {status}: {m['name']}")
-    if failures:
-        print("\nPR MUTATION GATE FAILED — surviving/rotted mutants:")
-        for f in failures:
-            print(f"  {f}")
+
+def baseline_errors(mutants: list[dict], harness: object) -> list[str]:
+    """No mutation receives credit for a failure already present in its oracle."""
+    unique = {}
+    for mutant in mutants:
+        specs = mutant["tests"] if isinstance(mutant["tests"], list) else [mutant["tests"]]
+        for spec in specs:
+            unique.setdefault((spec["cwd"], tuple(spec["cmd"]), spec["kind"]), []).append(spec)
+    errors = []
+    for index, specs in enumerate(unique.values(), 1):
+        spec = specs[0]
         print(
-            "\nEvery behavioral mutant targeting a changed file must be killed by the "
-            "current suite. Fix the regression, or (if the behavior intentionally "
-            "changed) update the campaign mutant AND its pinning test together."
+            f"[baseline {index}/{len(unique)}] {spec['cwd']}: {' '.join(spec['cmd'])}", flush=True
         )
+        failed, setup, _, output, _ = harness.run_command(spec, "baseline")
+        if spec["kind"] == "redteam":
+            # Each mutation names its own negative control. Unrelated
+            # architectural findings elsewhere in the campaign are not
+            # that control's baseline; errors still invalidate the runner.
+            for oracle in specs:
+                if redteam_baseline_error(oracle, output):
+                    failed = True
+        if failed or setup:
+            errors.append(setup or f"baseline failed: {' '.join(spec['cmd'])}")
+    return errors
+
+
+def verdict_passes(result: dict) -> bool:
+    # No residual allowlist: history is evidence, never an exemption.
+    return result.get("status") in {"KILLED", "CAUGHT"} and result.get("killed") is True
+
+
+def prepare_direct_campaign(selected: list[dict]) -> object:
+    """Legacy campaign launchers use the same gate before any source write."""
+    mutants, harness = load_harnesses()
+    stale = [row for row in inventory(ROOT, mutants) if row["status"] != "APPLICABLE"]
+    if stale:
+        raise SystemExit(f"MUTATION PREFLIGHT FAILED: {stale}")
+    if not selected:
+        raise SystemExit("No controls selected; no mutation audit was performed")
+    errors = baseline_errors(selected, harness)
+    if errors:
+        raise SystemExit(f"MUTATION BASELINE FAILED: {errors}; no mutants executed")
+    return harness
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("diff", nargs="?")
+    parser.add_argument("--preflight", action="store_true")
+    parser.add_argument(
+        "--json", action="store_true", help="print the complete applicability inventory"
+    )
+    parser.add_argument("--all", action="store_true")
+    args = parser.parse_args(argv)
+    if not args.preflight and not args.all and args.diff is None:
+        parser.error("provide a diff, --all, or --preflight")
+    try:
+        mutants, harness = load_harnesses()
+        rows = inventory(ROOT, mutants)
+    except (ValueError, OSError) as error:
+        print(f"MUTATION PREFLIGHT FAILED: {error}", file=sys.stderr)
         return 1
-    print(f"\nPR MUTATION GATE PASSED — {len(mutants)}/{len(mutants)} killed/caught")
-    return 0
+    stale = [row for row in rows if row["status"] != "APPLICABLE"]
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "total": len(rows),
+                    "applicable": len(rows) - len(stale),
+                    "errors": len(stale),
+                    "mutants": rows,
+                },
+                indent=2,
+            )
+        )
+    else:
+        print(f"Mutation preflight: {len(rows) - len(stale)}/{len(rows)} applicable")
+        for row in stale:
+            print(f"[{row['id']}] SETUP-ERROR: {row['detail']}")
+    if stale:
+        return 1
+    if args.preflight:
+        return 0
+    changed = set() if args.all else changed_files(args.diff)
+    selected = mutants if args.all else [mutant for mutant in mutants if affected(mutant, changed)]
+    if not selected:
+        print("No behavioral controls affected; applicability preflight passed.")
+        return 0
+    errors = baseline_errors(selected, harness)
+    if errors:
+        print("MUTATION GATE FAILED: unmodified oracle failures; no mutants executed")
+        for error in errors:
+            print(f"  {error}")
+        return 1
+    results = []
+    for mutant in selected:
+        print(f"[{mutant['id']}] {mutant['name']} ...", flush=True)
+        result = harness.run_mutant(mutant)
+        results.append(result)
+        print(f"    -> {result['status']} ({result.get('detail', '')})", flush=True)
+    counts = Counter(result["status"] for result in results)
+    failures = [result for result in results if not verdict_passes(result)]
+    print(
+        "Mutation results: " + ", ".join(f"{key}={value}" for key, value in sorted(counts.items()))
+    )
+    print(
+        f"PR MUTATION GATE {'FAILED' if failures else 'PASSED'}: {sum(verdict_passes(r) for r in results)}/{len(results)} genuinely killed/caught"
+    )
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":

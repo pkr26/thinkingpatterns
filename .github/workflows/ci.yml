@@ -590,6 +590,8 @@ jobs:
           node-version-file: .nvmrc
       - name: Check backup and campaign/mutation evidence contracts
         run: python -m unittest discover -s tools/tests -v
+      - name: Validate every behavioral mutation anchor and test selector without changing source
+        run: python redteam/run_pr_mutation_gate.py --preflight
 
   monitoring-verify:
     # deploy/monitoring/verify.sh is the drift gate for the alerting stack
@@ -728,33 +730,8 @@ jobs:
           tar xzf gitleaks.tgz gitleaks
           sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
           gitleaks version
-      - name: Prove narrow false-positive rules still expose planted secrets
-        run: |
-          probe_dir=$(mktemp -d)
-          trap 'find "$probe_dir" -type f -delete; rmdir "$probe_dir/docs" "$probe_dir/mobile/ios" "$probe_dir/mobile" "$probe_dir"' EXIT
-          mkdir -p "$probe_dir/docs" "$probe_dir/mobile/ios"
-          probe_secret="ghp_$(printf '%s%s%s' 'A1b2C3d4E5f6' 'G7h8I9j0K1l2' 'M3n4O5p6Q7r8')"
-          printf '%s\n%s\n' \
-            '| policy | therapist linkage, speech/translation processing |' \
-            "$probe_secret" > "$probe_dir/docs/OPERATOR_PACK.md"
-          printf '%s\n%s\n' \
-            '  React-cxxstableapi: 1e0ad8a5ecb7f2f5440c012798cf20bec6341c1f' \
-            "$probe_secret" > "$probe_dir/mobile/ios/Podfile.lock"
-          probe_status=0
-          gitleaks detect --source "$probe_dir" --no-git --config .gitleaks.toml \
-            --redact --exit-code 7 --report-format json --report-path "$probe_dir/report.json" \
-            || probe_status=$?
-          test "$probe_status" -eq 7
-          python3 - "$probe_dir/report.json" <<'PY'
-          import json
-          import sys
-
-          findings = json.load(open(sys.argv[1], encoding="utf-8"))
-          files = {str(row["File"]).replace("\\", "/") for row in findings}
-          assert len(findings) == 2, findings
-          assert any(path.endswith("/docs/OPERATOR_PACK.md") for path in files), files
-          assert any(path.endswith("/mobile/ios/Podfile.lock") for path in files), files
-          PY
+      - name: Prove exact public exceptions preserve all three scan modes
+        run: python3 tools/verify_secret_scan.py
       - name: Scan full git history
         run: gitleaks detect --source . --config .gitleaks.toml --redact --exit-code 1
       - name: Scan working tree (untracked files included)

@@ -102,6 +102,27 @@ class TestPool:
         pool = questions.build_pool([Pattern("mystery", "x", 3, 0.5, {})])
         assert pool == list(dict.fromkeys(list(questions.GENERIC_QUESTIONS)))
 
+    def test_rendered_detail_cannot_reintroduce_crisis_content_into_the_pool(self):
+        # Legacy/foreign pattern details are interpolated after the label,
+        # flag and stored-variant tripwires. The final pool filter must
+        # still protect questions assembled from those details.
+        from app.services import crisis
+
+        pattern = Pattern("temporal", "work", 12, 0.9, {"day": "I want to die"})
+        assert not questions.pattern_is_sensitive(pattern)
+        rendered = questions.render_pattern_questions(pattern)
+        unsafe = [question for question in rendered if crisis.matches_suppress(question)]
+        assert unsafe, "fixture must exercise the final rendered-question boundary"
+        pool = questions.build_pool([pattern])
+        assert not any(question in pool for question in unsafe)
+        assert not any(crisis.matches_suppress(question) for question in pool)
+        assert questions.GENERIC_QUESTIONS[0] in pool
+
+        ordinary = Pattern("temporal", "work", 12, 0.9, {"day": "Sunday"})
+        assert set(questions.render_pattern_questions(ordinary)) <= set(
+            questions.build_pool([ordinary])
+        )
+
     def test_max_pattern_questions_respected(self):
         many = [Pattern("temporal", f"t{i}", 5, 0.9, {"day": "Monday"}) for i in range(10)]
         pool = questions.build_pool(many)

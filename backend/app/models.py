@@ -352,6 +352,23 @@ class Entry(Base):
     content_version: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=1, server_default=text("1")
     )
+    # Authenticated server-side AAD history. Null seals are migration-only
+    # records and fail closed online; an explicit trusted bootstrap seals
+    # historical rows. Unknown (0) permits genuine legacy data until a v2
+    # binding is positively authenticated, after which the bit is sticky.
+    aad_guard_version: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, default=0, server_default=text("0")
+    )
+    aad_guard_key_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    aad_guard_mac: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class EntryGuardBootstrap(Base):
+    """One-time, operator-controlled adoption of existing entry metadata."""
+
+    __tablename__ = "entry_guard_bootstrap"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    completed_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
 
 
 class Insight(Base):

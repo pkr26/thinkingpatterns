@@ -754,11 +754,12 @@ async def test_recompute_retry_path_tampered_entry_contract(client, app):
             .scalars()
             .first()
         )
-        await session.execute(
-            update(Entry)
-            .where(Entry.id == row.id)
-            .values(blob=bytes(row.blob)[:-1] + bytes([row.blob[-1] ^ 1]))
-        )
+        row.blob = bytes(row.blob)[:-1] + bytes([row.blob[-1] ^ 1])
+        # The API accepts opaque uploads without the data key: seal this
+        # authorized malformed envelope to exercise GCM failure on retry.
+        from app.security.entry_guard import seal_entry_guard
+
+        seal_entry_guard(row, app.state.settings, v2_bound=False)
         await session.commit()
 
     token = await emu.open_processing_session(client)

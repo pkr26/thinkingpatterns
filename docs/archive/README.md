@@ -9,6 +9,8 @@ Line numbers, hashes, and code names describe their original snapshots.
 
 ## Historical reports
 
+- [Independent audit across 24 tracks, 2026-10-04](audits/2026-10-04/AUDIT.md)
+- [Remediation of all 22 findings, 2026-10-04](audits/2026-10-04/REMEDIATION.md)
 - [AUDIT 2026-09-21](audits/AUDIT_2026-09-21.md)
 - [AUDIT 2026-10-03](audits/AUDIT_2026-10-03.md)
 - [AUDIT FULL CODEBASE 2026-09-26](audits/AUDIT_FULL_CODEBASE_2026-09-26.md)
