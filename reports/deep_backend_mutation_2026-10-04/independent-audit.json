@@ -1,0 +1,354 @@
+{
+  "schema": 1,
+  "runs": {
+    "all48-final-2": {
+      "campaigns": 48,
+      "controls": 284,
+      "statuses": {
+        "KILLED": 284
+      },
+      "unique_ids": 284,
+      "distinct_mutation_definitions": 284,
+      "passing_baselines": 229,
+      "raw_log_sha256_checks": 513,
+      "all_baseline_gates_valid": true,
+      "no_setup_errors_or_timeouts": true,
+      "restored_flags_true": true,
+      "actual_worker_restoration_verified": 6,
+      "worker_restoration_issues": [],
+      "current_production_bytes_match": true,
+      "current_oracle_bytes_match": true,
+      "snapshot_sha256": "8d31974ef7949c0bf9d56bdac7c9cd5728576d1d7d5d94980b8018b0b7e5420b",
+      "nonproduction_nonoracle_file_drift": [],
+      "duplicate_definition_groups": [],
+      "issues": []
+    },
+    "historical-final-2": {
+      "campaigns": 26,
+      "controls": 220,
+      "statuses": {
+        "KILLED": 210,
+        "CAUGHT": 10
+      },
+      "unique_ids": 220,
+      "distinct_mutation_definitions": 211,
+      "passing_baselines": 186,
+      "raw_log_sha256_checks": 408,
+      "all_baseline_gates_valid": true,
+      "no_setup_errors_or_timeouts": true,
+      "restored_flags_true": true,
+      "actual_worker_restoration_verified": 4,
+      "worker_restoration_issues": [],
+      "current_production_bytes_match": true,
+      "current_oracle_bytes_match": true,
+      "snapshot_sha256": "8d31974ef7949c0bf9d56bdac7c9cd5728576d1d7d5d94980b8018b0b7e5420b",
+      "nonproduction_nonoracle_file_drift": [],
+      "duplicate_definition_groups": [
+        [
+          "D2",
+          "N10"
+        ],
+        [
+          "E1",
+          "N3"
+        ],
+        [
+          "F3",
+          "O3"
+        ],
+        [
+          "F7",
+          "N2"
+        ],
+        [
+          "H5",
+          "N7"
+        ],
+        [
+          "K6",
+          "N5"
+        ],
+        [
+          "K7",
+          "N6"
+        ],
+        [
+          "N8",
+          "Z7"
+        ],
+        [
+          "S8",
+          "W6"
+        ]
+      ],
+      "issues": []
+    }
+  },
+  "combined": {
+    "executed_controls": 504,
+    "distinct_mutation_definitions": 479,
+    "duplicate_definition_groups": [
+      [
+        {
+          "run": "all48-final-2",
+          "id": "S05-02"
+        },
+        {
+          "run": "historical-final-2",
+          "id": "I1"
+        }
+      ],
+      [
+        {
+          "run": "all48-final-2",
+          "id": "S09-03"
+        },
+        {
+          "run": "historical-final-2",
+          "id": "C3"
+        }
+      ],
+      [
+        {
+          "run": "all48-final-2",
+          "id": "S10-01"
+        },
+        {
+          "run": "historical-final-2",
+          "id": "C1"
+        }
+      ],
+      [
+        {
+          "run": "all48-final-2",
+          "id": "A01-01"
+        },
+        {
+          "run": "historical-final-2",
+          "id": "X1"
+        }
+      ],
+      [
+        {
+          "run": "all48-final-2",
+          "id": "A01-02"
+        },
+        {
+          "run": "historical-final-2",
+          "id": "X2"
+        }
+      ],
+      [
+        {
+          "run": "all48-final-2",
+          "id": "A01-03"
+        },
+        {
+          "run": "historical-final-2",
+          "id": "X3"
+        }
+      ],
+      [
+        {
+          "run": "all48-final-2",
+          "id": "A02-01"
+        },
+        {
+          "run": "historical-final-2",
+          "id": "V1"
+        }
+      ],
+      [
+        {
+          "run": "all48-final-2",
+          "id": "A02-02"
+        },
+        {
+          "run": "historical-final-2",
+          "id": "V2"
+        }
+      ],
+      [
+        {
+          "run": "all48-final-2",
+          "id": "A03-02"
+        },
+        {
+          "run": "historical-final-2",
+          "id": "V5"
+        }
+      ],
+      [
+        {
+          "run": "all48-final-2",
+          "id": "A03-03"
+        },
+        {
+          "run": "historical-final-2",
+          "id": "V6"
+        }
+      ],
+      [
+        {
+          "run": "all48-final-2",
+          "id": "A03-05"
+        },
+        {
+          "run": "historical-final-2",
+          "id": "Q6"
+        }
+      ],
+      [
+        {
+          "run": "all48-final-2",
+          "id": "A05-02"
+        },
+        {
+          "run": "historical-final-2",
+          "id": "I5"
+        }
+      ],
+      [
+        {
+          "run": "all48-final-2",
+          "id": "A06-01"
+        },
+        {
+          "run": "historical-final-2",
+          "id": "O5"
+        }
+      ],
+      [
+        {
+          "run": "all48-final-2",
+          "id": "A06-02"
+        },
+        {
+          "run": "historical-final-2",
+          "id": "V10"
+        }
+      ],
+      [
+        {
+          "run": "all48-final-2",
+          "id": "A14-01"
+        },
+        {
+          "run": "historical-final-2",
+          "id": "S6"
+        }
+      ],
+      [
+        {
+          "run": "all48-final-2",
+          "id": "A14-02"
+        },
+        {
+          "run": "historical-final-2",
+          "id": "P7"
+        }
+      ],
+      [
+        {
+          "run": "historical-final-2",
+          "id": "D2"
+        },
+        {
+          "run": "historical-final-2",
+          "id": "N10"
+        }
+      ],
+      [
+        {
+          "run": "historical-final-2",
+          "id": "E1"
+        },
+        {
+          "run": "historical-final-2",
+          "id": "N3"
+        }
+      ],
+      [
+        {
+          "run": "historical-final-2",
+          "id": "F3"
+        },
+        {
+          "run": "historical-final-2",
+          "id": "O3"
+        }
+      ],
+      [
+        {
+          "run": "historical-final-2",
+          "id": "F7"
+        },
+        {
+          "run": "historical-final-2",
+          "id": "N2"
+        }
+      ],
+      [
+        {
+          "run": "historical-final-2",
+          "id": "H5"
+        },
+        {
+          "run": "historical-final-2",
+          "id": "N7"
+        }
+      ],
+      [
+        {
+          "run": "historical-final-2",
+          "id": "K6"
+        },
+        {
+          "run": "historical-final-2",
+          "id": "N5"
+        }
+      ],
+      [
+        {
+          "run": "historical-final-2",
+          "id": "K7"
+        },
+        {
+          "run": "historical-final-2",
+          "id": "N6"
+        }
+      ],
+      [
+        {
+          "run": "historical-final-2",
+          "id": "N8"
+        },
+        {
+          "run": "historical-final-2",
+          "id": "Z7"
+        }
+      ],
+      [
+        {
+          "run": "historical-final-2",
+          "id": "S8"
+        },
+        {
+          "run": "historical-final-2",
+          "id": "W6"
+        }
+      ]
+    ],
+    "historical_y7_original_survivor_retained_in_triage": "redteam/deep_backend_mutation/triage.json",
+    "original_Y7_definition_restored_and_behaviorally_killed": {
+      "mutation_sha256": "4c8e282634ac258ba704a2033eb41d15054847385094108c2437b80244dc4619",
+      "status": "KILLED",
+      "failed_case": "tests/test_deep_campaign_analysis.py::test_spanish_window_excludes_code_switched_grammar_from_english_topic_cards",
+      "full_expanded_oracle_retained": true,
+      "earlier_survivor_and_overturned_assessment_preserved": true
+    },
+    "snapshot_sha256": "8d31974ef7949c0bf9d56bdac7c9cd5728576d1d7d5d94980b8018b0b7e5420b",
+    "raw_log_sha256_checks": 921
+  },
+  "passed": true
+}

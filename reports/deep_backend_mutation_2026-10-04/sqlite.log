@@ -1,0 +1,107 @@
+........................................................................ [  2%]
+........................................................................ [  5%]
+...................................s.................................... [  8%]
+........................................................................ [ 11%]
+........................................................................ [ 14%]
+........................................................................ [ 17%]
+........................................................................ [ 20%]
+........................................................................ [ 23%]
+........................................................................ [ 26%]
+........................................................................ [ 29%]
+........................................................................ [ 32%]
+........................................................................ [ 35%]
+........................................................................ [ 38%]
+...............................s........................................ [ 41%]
+........................................................................ [ 44%]
+........................................................................ [ 47%]
+........................................................................ [ 50%]
+........................................................................ [ 53%]
+........................................................................ [ 56%]
+........................................................................ [ 59%]
+...................................................................ss... [ 62%]
+........................................................................ [ 65%]
+........................................................................ [ 68%]
+........................................................................ [ 71%]
+........................................................................ [ 74%]
+........................................................................ [ 77%]
+..ss.................................................................... [ 80%]
+........................s............................................... [ 83%]
+........................................................................ [ 86%]
+........................................................................ [ 89%]
+........................................................................ [ 92%]
+........................................................................ [ 95%]
+........................................................................ [ 98%]
+..............................................                           [100%]
+================================ tests coverage ================================
+_______________ coverage: platform darwin, python 3.14.7-final-0 _______________
+
+Name                                   Stmts   Miss  Cover
+----------------------------------------------------------
+app/__init__.py                            1      0   100%
+app/api/__init__.py                        9      0   100%
+app/api/_audit.py                        917     91    90%
+app/api/_custody.py                      141     12    91%
+app/api/_paging.py                        59      0   100%
+app/api/_sharing_state.py                 38      0   100%
+app/api/account.py                       858     84    90%
+app/api/audio.py                         212     13    94%
+app/api/auth.py                          237      8    97%
+app/api/consents.py                      273     13    95%
+app/api/entries.py                       214      4    98%
+app/api/insights.py                      871     78    91%
+app/api/measures.py                      141     10    93%
+app/api/meta.py                           15      0   100%
+app/api/therapist.py                     705     46    93%
+app/cache.py                             227      3    99%
+app/config.py                            377     11    97%
+app/db.py                                 22      0   100%
+app/deps.py                              145      8    94%
+app/locks.py                              63      0   100%
+app/main.py                              568     32    94%
+app/metrics.py                           190      2    99%
+app/middleware.py                        284     10    96%
+app/models.py                            304      0   100%
+app/schemas.py                           462      0   100%
+app/security/__init__.py                   0      0   100%
+app/security/crypto.py                    55      0   100%
+app/security/deletion_tombstone.py        28      0   100%
+app/security/enclave.py                  153      1    99%
+app/security/entry_guard.py               63      1    98%
+app/security/envelope.py                  27      0   100%
+app/security/export_ticket.py             42      0   100%
+app/security/kdf.py                      105      0   100%
+app/security/sharing.py                  118      1    99%
+app/security/step_up.py                   47      0   100%
+app/security/tokens.py                    80      0   100%
+app/security/totp.py                      73      0   100%
+app/services/__init__.py                   0      0   100%
+app/services/account_deletion.py         213      4    98%
+app/services/audio_store.py              466     28    94%
+app/services/brain.py                   1478     37    97%
+app/services/crisis.py                   260      2    99%
+app/services/llm.py                      228      2    99%
+app/services/patterns.py                 201      6    97%
+app/services/phrases.py                  150      4    97%
+app/services/questions.py                 90      1    99%
+app/services/sentiment_lexicon.py          3      0   100%
+app/services/sentiment_lexicon_es.py       8      0   100%
+app/services/statsig.py                  204      0   100%
+app/services/stt.py                      140      5    96%
+app/services/threshold.py                 47      1    98%
+app/singleprocess.py                      92      6    93%
+----------------------------------------------------------
+TOTAL                                  11704    524    96%
+Coverage JSON written to file ../.tools/deep-final-coverage.json
+Required test coverage of 95% reached. Total coverage: 95.52%
+============================= slowest 10 durations =============================
+6.67s setup    tests/test_voice_remediation_2026_09_29.py::test_account_erasure_removes_audio_objects
+6.51s call     tests/test_property_based.py::test_parse_entries_adversarial_text_never_raises_and_roundtrips
+6.44s call     tests/test_residual_architecture_2026_10_04.py::test_sqlite_indexes_close_every_connection_without_resource_warnings
+5.03s call     tests/test_mutation_pins.py::test_byte_quota_boundary_admits_an_exactly_full_account
+4.06s call     tests/test_therapist_e2e_multipatient.py::test_act7_full_story_sequential
+4.05s call     tests/test_attack_resistance.py::TestPairingSingleUseUnderConcurrency::test_concurrent_grants_produce_exactly_one_consent
+3.92s call     tests/test_deep_campaign_api.py::test_sharing_identity_change_retires_all_grant_material
+3.88s call     tests/test_independent_security_controls_2026_10_04.py::test_age_attestation_is_required_persisted_and_postgres_width_is_sufficient
+3.69s call     tests/test_therapist_e2e_multipatient.py::TestAct5Movement::test_rekey_kills_the_old_wrap_rewrap_restores
+3.42s call     tests/test_dos_hardening.py::test_person_cardinality_work_is_bounded
+2415 passed, 7 skipped in 627.34s (0:10:27)

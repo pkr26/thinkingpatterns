@@ -1667,9 +1667,15 @@ def _parse_feedback(raw: bytes) -> FeedbackEvents:
         taps.append((pid, resonated))
 
     def _pid_list(key: str) -> list[str]:
-        raw_list = payload.get(key) if isinstance(payload, dict) else None
-        if not isinstance(raw_list, list):
+        if key not in payload:
             return []
+        raw_list = payload[key]
+        if not isinstance(raw_list, list):
+            raise ApiError(
+                status_code=400,
+                detail="feedback blob is malformed",
+                code="entry_payload_malformed",
+            )
         pids: list[str] = []
         for pid in raw_list[:100]:
             if not (isinstance(pid, str) and 1 <= len(pid) <= 128):

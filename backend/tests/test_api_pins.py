@@ -50,7 +50,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.api import insights as insights_api, measures as measures_api
 from app.deps import ApiError
-from app.models import AccessLog, Consent, User
+from app.models import AccessLog, Consent, TherapistNote, User
 from app.security import crypto
 from tests.helpers import ClientEmulator, TherapistEmulator, daterange
 from tests.test_insights_api import seed_corpus
@@ -771,11 +771,10 @@ class _FkCommitSession:
     """Serves the create_note query ladder, then fails the note commit
     with a FOREIGN KEY violation (the patient row vanished mid-request).
 
-    2026-09-26: the ladder changed twice — the pre-lock read transaction
-    now COMMITS before queueing on the chart lock (LOW, batch item b),
-    and the quota aggregate returns FOUR columns (audit H-6: live notes
-    plus revision rows/bytes). The first commit (the read release)
-    succeeds; the note commit raises the FK error the pin exercises."""
+    Read-release commits may precede the note insert, including the fresh
+    therapist read before waiting on the patient fence. Only a commit with
+    an added note raises the FK error this pin exercises. The quota aggregate
+    returns four columns: live notes plus revision rows/bytes."""
 
     bind = SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
 
@@ -821,8 +820,8 @@ class _FkCommitSession:
 
     async def commit(self):
         self.commits += 1
-        if self.commits == 1:
-            return  # the pre-lock read-release commit (LOW batch item b)
+        if not any(isinstance(row, TherapistNote) for row in self.added):
+            return  # release read transactions before waiting on application fences
         raise IntegrityError("INSERT", {}, Exception("foreign key constraint failed"))
 
     async def rollback(self):

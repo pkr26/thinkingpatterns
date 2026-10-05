@@ -1,0 +1,156 @@
+{
+  "snapshot_sha256": "8d31974ef7949c0bf9d56bdac7c9cd5728576d1d7d5d94980b8018b0b7e5420b",
+  "campaigns": 48,
+  "mutants": 284,
+  "completed": 284,
+  "counts": {
+    "KILLED": 284
+  },
+  "per_campaign": {
+    "D01": {
+      "KILLED": 6
+    },
+    "D02": {
+      "KILLED": 6
+    },
+    "D03": {
+      "KILLED": 11
+    },
+    "D04": {
+      "KILLED": 11
+    },
+    "D05": {
+      "KILLED": 7
+    },
+    "D06": {
+      "KILLED": 6
+    },
+    "D07": {
+      "KILLED": 8
+    },
+    "D08": {
+      "KILLED": 6
+    },
+    "D09": {
+      "KILLED": 7
+    },
+    "D10": {
+      "KILLED": 6
+    },
+    "D11": {
+      "KILLED": 9
+    },
+    "L01": {
+      "KILLED": 6
+    },
+    "S01": {
+      "KILLED": 5
+    },
+    "S02": {
+      "KILLED": 6
+    },
+    "S03": {
+      "KILLED": 5
+    },
+    "S04": {
+      "KILLED": 6
+    },
+    "S05": {
+      "KILLED": 6
+    },
+    "S06": {
+      "KILLED": 5
+    },
+    "S07": {
+      "KILLED": 5
+    },
+    "S08": {
+      "KILLED": 5
+    },
+    "S09": {
+      "KILLED": 6
+    },
+    "S10": {
+      "KILLED": 5
+    },
+    "A01": {
+      "KILLED": 5
+    },
+    "A02": {
+      "KILLED": 5
+    },
+    "A03": {
+      "KILLED": 5
+    },
+    "A04": {
+      "KILLED": 5
+    },
+    "A05": {
+      "KILLED": 5
+    },
+    "A06": {
+      "KILLED": 5
+    },
+    "A07": {
+      "KILLED": 14
+    },
+    "A08": {
+      "KILLED": 5
+    },
+    "A09": {
+      "KILLED": 5
+    },
+    "A10": {
+      "KILLED": 5
+    },
+    "A11": {
+      "KILLED": 5
+    },
+    "A12": {
+      "KILLED": 5
+    },
+    "A13": {
+      "KILLED": 6
+    },
+    "A14": {
+      "KILLED": 5
+    },
+    "A15": {
+      "KILLED": 5
+    },
+    "A16": {
+      "KILLED": 5
+    },
+    "A17": {
+      "KILLED": 5
+    },
+    "A18": {
+      "KILLED": 5
+    },
+    "O01": {
+      "KILLED": 6
+    },
+    "O02": {
+      "KILLED": 5
+    },
+    "O03": {
+      "KILLED": 5
+    },
+    "O04": {
+      "KILLED": 5
+    },
+    "O05": {
+      "KILLED": 5
+    },
+    "O06": {
+      "KILLED": 5
+    },
+    "O07": {
+      "KILLED": 5
+    },
+    "O08": {
+      "KILLED": 5
+    }
+  },
+  "passed": true
+}

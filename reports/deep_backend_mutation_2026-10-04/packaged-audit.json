@@ -1,0 +1,93 @@
+{
+  "schema": 2,
+  "recorded_at_utc": "2026-10-05T07:24:47.643904+00:00",
+  "result": "PASS",
+  "summary": "summary.json",
+  "runs": {
+    "domain": {
+      "controls": 284,
+      "distinct_mutation_definitions": 284,
+      "outcomes": {
+        "KILLED": 284
+      },
+      "passing_baseline_commands": 229,
+      "archived_raw_log_sha256_checks": 513,
+      "archive_members_unique_and_complete": true,
+      "packaged_run_files_byte_identical_to_final_originals": true,
+      "snapshot_sha256": "8d31974ef7949c0bf9d56bdac7c9cd5728576d1d7d5d94980b8018b0b7e5420b",
+      "current_production_oracle_catalog_runner_and_triage_bytes_match": true
+    },
+    "historical": {
+      "controls": 220,
+      "distinct_mutation_definitions": 211,
+      "outcomes": {
+        "KILLED": 210,
+        "CAUGHT": 10
+      },
+      "passing_baseline_commands": 186,
+      "archived_raw_log_sha256_checks": 408,
+      "archive_members_unique_and_complete": true,
+      "packaged_run_files_byte_identical_to_final_originals": true,
+      "snapshot_sha256": "8d31974ef7949c0bf9d56bdac7c9cd5728576d1d7d5d94980b8018b0b7e5420b",
+      "current_production_oracle_catalog_runner_and_triage_bytes_match": true
+    }
+  },
+  "combined_control_executions": 504,
+  "combined_distinct_mutation_definitions": 479,
+  "passing_unmodified_baseline_commands": 415,
+  "artifact_sha256_checks": 21,
+  "artifact_files_checked": [
+    "campaigns.json",
+    "coverage.json",
+    "documentation.log",
+    "domain-baselines.json",
+    "domain-logs.tar.gz",
+    "domain-manifest.json",
+    "domain-results.jsonl",
+    "domain-summary.json",
+    "historical-baselines.json",
+    "historical-logs.tar.gz",
+    "historical-manifest.json",
+    "historical-results.jsonl",
+    "historical-summary.json",
+    "independent-audit.json",
+    "mypy.log",
+    "postgresql.junit.xml",
+    "postgresql.log",
+    "sqlite.junit.xml",
+    "sqlite.log",
+    "tools.log",
+    "triage.json"
+  ],
+  "artifact_checksum_scope": "All non-self artifact checksums in summary.json match at verification. The prior packaged-audit.json checksum also matched before replacement; the fresh audit checksum must be refreshed in summary.json after writing.",
+  "archived_raw_log_sha256_checks": 921,
+  "junit": {
+    "sqlite": {
+      "passed": 2415,
+      "skipped": 7,
+      "failures": 0,
+      "errors": 0,
+      "seconds": 627.326,
+      "report_counts_match": true,
+      "packaged_xml_and_log_match_current_originals": true
+    },
+    "postgresql": {
+      "passed": 2419,
+      "skipped": 3,
+      "failures": 0,
+      "errors": 0,
+      "seconds": 818.803,
+      "report_counts_match": true,
+      "packaged_xml_and_log_match_current_originals": true
+    }
+  },
+  "coverage_counts_and_percent_match": true,
+  "campaign_inventory_and_group_counts_match": true,
+  "tools_runner_mypy_documentation_logs_support_report_counts": true,
+  "historical_Y7_original_definition_restored_and_behaviorally_killed": true,
+  "historical_Y7_prior_survivor_and_overturned_assessment_retained": true,
+  "historical_selector_replay_basis_matches_actual_final_run": true,
+  "postgresql_mutation_oracle_supplies_disposable_database_env_per_command": true,
+  "prior_independent_runner_integrity_audit": "independent-audit.json",
+  "issues": []
+}

@@ -389,10 +389,10 @@ MUTANTS: list[dict] = [
         expectation="inconsistent foreign revision metadata must not disrupt owned history; final blob scope still prevents disclosure",
         file="backend/app/api/therapist.py",
         find=(
-            '                TherapistNoteRevision.note_id == note_id,\n                TherapistNoteRevision.therapist_id == user.id,'
+            '                    TherapistNoteRevision.note_id == note_id,\n                    TherapistNoteRevision.therapist_id == user.id,'
         ),
         replace=(
-            '                TherapistNoteRevision.note_id == note_id,'
+            '                    TherapistNoteRevision.note_id == note_id,'
         ),
         tests=[backend_pytest("tests/test_remediation_note_history.py", "tests/test_note_history.py")],
     ),
@@ -400,8 +400,8 @@ MUTANTS: list[dict] = [
         id="W8", campaign="W", name="history read serves oldest-first",
         expectation="revisions must arrive newest-first for the portal timeline",
         file="backend/app/api/therapist.py",
-        find='            .order_by(TherapistNoteRevision.created_at.desc(), TherapistNoteRevision.id.desc())',
-        replace='            .order_by(TherapistNoteRevision.created_at.asc(), TherapistNoteRevision.id.asc())',
+        find='                .order_by(TherapistNoteRevision.created_at.desc(), TherapistNoteRevision.id.desc())',
+        replace='                .order_by(TherapistNoteRevision.created_at.asc(), TherapistNoteRevision.id.asc())',
         tests=[backend_pytest("tests/test_remediation_note_history.py", "tests/test_note_history.py")],
     ),
     dict(
@@ -513,7 +513,13 @@ MUTANTS: list[dict] = [
         file="backend/app/services/brain.py",
         find="        TOPIC_STOPWORDS | LANGUAGE_FUNCTION_WORDS_ES if language == \"es\" else TOPIC_STOPWORDS",
         replace="        TOPIC_STOPWORDS",
-        tests=[backend_pytest("tests/test_es_themes.py", "tests/test_audit_2026_09_21_brain.py")],
+        tests=[
+            backend_pytest(
+                "tests/test_es_themes.py",
+                "tests/test_audit_2026_09_21_brain.py",
+                "tests/test_deep_campaign_analysis.py::test_spanish_window_excludes_code_switched_grammar_from_english_topic_cards",
+            )
+        ],
     ),
     dict(
         id="Y8", campaign="Y", name="language coverage floor lowered 0.10 -> 0.01 for insufficient text",

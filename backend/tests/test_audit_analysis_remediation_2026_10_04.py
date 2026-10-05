@@ -197,7 +197,9 @@ def test_foreign_minority_cannot_supply_person_or_topic_evidence(monkeypatch):
     )
     assert result.stats["language"] == "en"
     # The explicit moods are valid, but German nouns cannot become people.
-    unsupported = [row for row in measured["themes"] if row[0].entry_date >= START + timedelta(days=30)]
+    unsupported = [
+        row for row in measured["themes"] if row[0].entry_date >= START + timedelta(days=30)
+    ]
     assert len(unsupported) == 15
     assert all(not row[2] for row in unsupported)
     assert len(measured["topics"]) == 30

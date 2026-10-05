@@ -201,6 +201,11 @@ class Pattern:
         if self.detail.get("channel") == "sleep_quality":
             if self.kind == "link":
                 direction = self.detail.get("direction", "lower")
+                if self.detail.get("lag_days", 1) != 1:
+                    return (
+                        "In the days after a night you rated as rougher than your own "
+                        f"usual, your entries read {direction} than usual for you."
+                    )
                 return (
                     "The day after a night you rated as rougher than your own "
                     f"usual, your entries read {direction} than usual for you."
@@ -262,6 +267,11 @@ class Pattern:
         if self.kind == "link":
             if self.detail.get("source") == "tag":
                 direction = self.detail.get("direction", "lower")
+                if self.detail.get("lag_days", 1) != 1:
+                    return (
+                        f"In the days after you tag '{self.label}', your entries read "
+                        f"{direction} than usual for you."
+                    )
                 return (
                     f"The day after you tag '{self.label}', your entries read "
                     f"{direction} than usual for you."

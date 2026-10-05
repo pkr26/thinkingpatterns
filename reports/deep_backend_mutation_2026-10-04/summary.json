@@ -1,0 +1,286 @@
+{
+  "schema": 1,
+  "date": "2026-10-04",
+  "result": "PASS: every selected control detected, including the original historical Y7 definition",
+  "scope": {
+    "campaigns": 48,
+    "selected_domain_mutants": 284,
+    "domain_outcomes": {
+      "KILLED": 284,
+      "SURVIVED": 0,
+      "TIMEOUT": 0,
+      "SETUP_ERROR": 0
+    },
+    "campaign_groups": {
+      "analysis_and_retained_legacy": {
+        "campaigns": 12,
+        "mutants": 89
+      },
+      "security": {
+        "campaigns": 10,
+        "mutants": 54
+      },
+      "api": {
+        "campaigns": 18,
+        "mutants": 100
+      },
+      "operations_and_erasure": {
+        "campaigns": 8,
+        "mutants": 41
+      }
+    },
+    "historical_controls": 220,
+    "historical_outcomes": {
+      "KILLED": 210,
+      "CAUGHT": 10,
+      "SURVIVED": 0,
+      "TIMEOUT": 0,
+      "SETUP_ERROR": 0
+    },
+    "combined_control_executions": 504,
+    "combined_distinct_mutation_definitions": 479,
+    "coverage_limit": "Selected domain-specific semantic mutations across all 48 identified backend areas. This is not an exhaustive enumeration of every possible source mutation.",
+    "caught_meaning": "The ten CAUGHT controls are independent audit checks rather than pytest assertion kills."
+  },
+  "source_and_evidence": {
+    "base_source_commit": "9e6b8583369bf541f28d5c18885b234b5dd38059",
+    "snapshot_sha256": "8d31974ef7949c0bf9d56bdac7c9cd5728576d1d7d5d94980b8018b0b7e5420b",
+    "same_snapshot_for_both_final_runs": true,
+    "current_production_and_oracle_bytes_match_tested_snapshot": true,
+    "python": "3.14.7 (main, Sep  1 2026, 14:05:28) [Clang 22.1.3 ]",
+    "passing_unmodified_baseline_commands": {
+      "domain": 229,
+      "historical": 186
+    },
+    "raw_log_sha256_checks": 921,
+    "independently_verified_restored_worker_trees": 10,
+    "setup_errors_and_timeouts_never_credited_as_kills": true,
+    "environment_limit": "Source and oracle bytes were frozen. Worker virtual environments and node_modules used existing local dependencies; dependency directories were linked rather than frozen into a hermetic image.",
+    "documentary_drift_after_snapshot": "Report artifacts were refreshed after the runs. Publication added exact-value secret-scanner exceptions in .gitleaks.toml; production, mutation targets, behavioral oracle source, catalogs, runner, replay helper, and canonical triage remain at their frozen bytes."
+  },
+  "survivor_triage": {
+    "historical_Y7": {
+      "original_observation": "SURVIVED",
+      "earlier_obsolete_classification_overturned": true,
+      "final_original_definition_status": "KILLED",
+      "original_definition_kill_credit": true,
+      "reason": "A legitimate Spanish-majority diary includes 48 English observations with grammatical porque code-switching and 72 Spanish entries. Real language detection and full brain.update show pottery as a valid topic. Removing the original window guard additionally surfaces porque as a false topic.",
+      "resolution": "Restored the original source replacement and added the missing full-result behavioral oracle. It passes unchanged source and kills the original definition in the fresh final historical replay. The exploratory per-entry replacement remains recorded as earlier evidence and supplies no substitute credit.",
+      "mutation_sha256": "4c8e282634ac258ba704a2033eb41d15054847385094108c2437b80244dc4619",
+      "details": "triage.json"
+    },
+    "deadline_boundary_O01": {
+      "resolution": "An initial equivalence interpretation was overturned. The original boundary mutation was retained as O01-06 and KILLED by a valid already-buffered ASGI receive oracle; O01-05 separately tests disabling the total deadline.",
+      "details": "triage.json"
+    },
+    "policy": "Original exploratory outcomes and overturned classifications remain recorded. Both challenged original mutations were retained and killed by behavioral oracles; no original survivor is replaced or ignored in the final counts."
+  },
+  "fixes": [
+    {
+      "files": [
+        "backend/app/security/tokens.py"
+      ],
+      "behavior": "Reject non-string signed token purposes as TokenError instead of raising TypeError."
+    },
+    {
+      "files": [
+        "backend/app/api/insights.py"
+      ],
+      "behavior": "Reject supplied non-list feedback channels as malformed input instead of silently discarding them."
+    },
+    {
+      "files": [
+        "backend/app/api/therapist.py"
+      ],
+      "behavior": "Serialize clinical note operations against retirement and erasure, release fresh read transactions before lock waits, bound history reads, preserve durable audit evidence, and verify snapshot consistency."
+    },
+    {
+      "files": [
+        "backend/app/services/brain.py"
+      ],
+      "behavior": "Use per-entry language for theme decontamination and topic eligibility; remove theme-driven lexical bias from rolling and weekday baselines; consistently handle nonfinite explicit mood ratings."
+    },
+    {
+      "files": [
+        "backend/app/services/patterns.py"
+      ],
+      "behavior": "Describe multiday sleep/tag associations with truthful lag wording."
+    },
+    {
+      "files": [
+        "backend/app/services/crisis.py",
+        "web/src/crisisDetect.ts",
+        "mobile/src/crisisDetect.ts"
+      ],
+      "behavior": "Preserve fragmented crisis expressions containing leading pronouns and split grammar while retaining all previously caught normalization cases."
+    },
+    {
+      "files": [
+        "redteam/deep_backend_mutation/runner.py",
+        "tools/tests/test_deep_mutation_runner.py",
+        ".github/workflows/ci.yml"
+      ],
+      "behavior": "Provide isolated baseline-gated mutation execution with process cleanup, exact source restoration, raw-log hashes and CI execution tests."
+    }
+  ],
+  "validation": {
+    "sqlite": {
+      "status": "PASS",
+      "passed": 2415,
+      "skipped": 7,
+      "failures": 0,
+      "errors": 0,
+      "seconds": 627.326
+    },
+    "postgresql": {
+      "status": "PASS",
+      "passed": 2419,
+      "skipped": 3,
+      "failures": 0,
+      "errors": 0,
+      "seconds": 818.803
+    },
+    "coverage": {
+      "percent": 95.5228981544771,
+      "required_percent": 95,
+      "covered_statements": 11180,
+      "total_statements": 11704,
+      "status": "PASS"
+    },
+    "tools_unittests": {
+      "passed": 65,
+      "status": "PASS"
+    },
+    "runner_execution_tests": {
+      "passed": 14,
+      "included_in_tools_unittests": true,
+      "status": "PASS"
+    },
+    "ruff_lint_and_backend_format": "PASS",
+    "mypy": {
+      "source_files": 52,
+      "status": "PASS"
+    },
+    "documentation_checks": "PASS",
+    "analysis_regression_including_calibration_and_golden_vectors": {
+      "passed": 591,
+      "status": "PASS"
+    },
+    "crisis_normalization_differential": {
+      "generated_splits": 11168,
+      "lost_original_catches": 0,
+      "additional_catches": 21
+    },
+    "targeted_web_tests": {
+      "passed": 20,
+      "status": "PASS"
+    },
+    "targeted_mobile_tests": {
+      "passed": 353,
+      "status": "PASS"
+    },
+    "web_and_mobile_typechecks": "PASS",
+    "postgresql_skips": [
+      "Fake-boto3-covered S3 integration arm",
+      "Dedicated O05 destructive migration URL intentionally unset; exercised separately by mutation campaign",
+      "SQLite-only foreign-key PRAGMA test"
+    ],
+    "skip_policy": "Skipped tests were not credited as mutant kills.",
+    "git_diff_check": "PASS",
+    "process_exit_codes": {
+      "domain_mutation_run": 0,
+      "historical_mutation_run": 0,
+      "sqlite_full_suite": 0,
+      "postgresql_full_suite": 0,
+      "tools_unittests": 0,
+      "ruff": 0,
+      "mypy": 0,
+      "documentation": 0
+    }
+  },
+  "reproduction": {
+    "working_directory": "Repository root unless a command says backend. Use the project backend virtual environment and project dependency setup.",
+    "postgresql_setup": "docker run -d --name fathom-deep-mutation-pg -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=mindpattern_mutation_test -p 127.0.0.1:55488:5432 postgres:16-alpine",
+    "postgresql_readiness": "Wait for pg_isready before running the operations catalog. Use this disposable database because the migration oracle resets its schema.",
+    "preflight": "backend/.venv/bin/python redteam/deep_backend_mutation/runner.py --preflight",
+    "all_48_campaigns": "backend/.venv/bin/python redteam/deep_backend_mutation/runner.py --workers 6 --output .tools/deep-mutation/reproduction-domain",
+    "maintained_historical_catalog": "backend/.venv/bin/python redteam/deep_backend_mutation/runner.py --historical --workers 4 --output .tools/deep-mutation/reproduction-historical",
+    "exact_final_historical_selector_replay": "backend/.venv/bin/python redteam/deep_backend_mutation/replay_historical.py --exploratory-run .tools/deep-mutation/historical-complete-final --workers 4 --output .tools/deep-mutation/reproduction-selector-replay",
+    "selector_replay_requirement": "The optimized replay uses the retained previous final run to select previously failing cases only when the exact source mutation is unchanged. Previous Y7 used a per-entry mutation, so its differing identity causes the restored original Y7 to retain its whole expanded current oracle. Every command is freshly baseline-gated and executed; no kill credit is reused.",
+    "sqlite_full_suite_from_backend": ".venv/bin/python -m pytest tests/ --cov=app --cov-report=json:../.tools/reproduction-coverage.json --cov-fail-under=95",
+    "postgresql_full_suite_from_backend": "Unset DEEP_MUTATION_POSTGRES_URL; set MINDPATTERN_TEST_DB_URL=postgresql+asyncpg://postgres@127.0.0.1:55488/mindpattern_final_test and run .venv/bin/python -m pytest tests/ from backend.",
+    "output_requirement": "Choose a fresh output directory for each mutation run.",
+    "cleanup": "docker rm -f fathom-deep-mutation-pg",
+    "postgresql_oracle_environment": "The operations catalog sets DEEP_MUTATION_POSTGRES_URL=postgresql+asyncpg://postgres@127.0.0.1:55488/mindpattern_mutation_test on its migration oracle commands. No global export is needed for the all48 runner.",
+    "postgresql_full_suite_database_setup": "docker exec fathom-deep-mutation-pg createdb -U postgres mindpattern_final_test"
+  },
+  "artifacts": {
+    "campaign_inventory": "campaigns.json",
+    "domain_manifest": "domain-manifest.json",
+    "domain_baselines": "domain-baselines.json",
+    "domain_results": "domain-results.jsonl",
+    "historical_manifest": "historical-manifest.json",
+    "historical_baselines": "historical-baselines.json",
+    "historical_results": "historical-results.jsonl",
+    "independent_audit": "independent-audit.json",
+    "triage": "triage.json",
+    "domain_raw_logs_archive": "domain-logs.tar.gz",
+    "historical_raw_logs_archive": "historical-logs.tar.gz",
+    "archive_mapping": "For a log path in either results/baselines file, its basename maps to logs/<basename> in the corresponding run archive. Original absolute local log paths are retained without rewriting the evidence.",
+    "sqlite_junit": "sqlite.junit.xml",
+    "postgresql_junit": "postgresql.junit.xml",
+    "coverage": "coverage.json",
+    "packaged_audit": "packaged-audit.json"
+  },
+  "artifact_sha256": {
+    "campaigns.json": "4acf87a6c4ee7df2671713d37a0f174bdb632850a836a4f9b8856a853f1f9767",
+    "coverage.json": "1f6ac48cc3b01a2afe82ab038cdd3ff84e21277e3fbf6fb49d20f1354df3a8c3",
+    "documentation.log": "e3d2e43fd322f8aab27298082a94f6de5c860ddeedde9776a5ac226ca881a237",
+    "domain-baselines.json": "7c73946041dd95750bf2837fd60dc05732cdd596c8e6fa9baf842e2730f626e6",
+    "domain-logs.tar.gz": "ad2634953efcb7c8683394e70d8878ea1108afb56d21631cce1d89f255deb9df",
+    "domain-manifest.json": "f778b41fd2ff2742d219fdb959298828de58500cccae302a9ab88b1011cb0309",
+    "domain-results.jsonl": "d6f2bb7f38825bb27248c46ab6895faeff5826b1ba7842690162aa22bcce8fbe",
+    "domain-summary.json": "c2463133f415a2510909f3a605529153fe8cdd998c3b911bc93d3bdf73e1c61f",
+    "historical-baselines.json": "dd74677fa117d2b9c2bd689d850de5b12b0b3f39fb9b3656fb16c997abfc4ed3",
+    "historical-logs.tar.gz": "3c4139c586c72abb03d3eefbd6f6d27b0f4b7303fda28b53c06843ee51857820",
+    "historical-manifest.json": "a9edb139339c2838e98a0567a56f838e6d897450cf79c786dde11ba154033651",
+    "historical-results.jsonl": "6dcdd00e461ffebea248457035d5d7aefcf1734bc8093508a4d316cc5d5e1222",
+    "historical-summary.json": "bea09ff724565d13e4ba542802206cfc6eccb512e736faaaee8a327dc02f7051",
+    "independent-audit.json": "a2158d75f465de59344a4df5949c1d5dc6fc4b91763ab97fa72cb7f7bcebbe61",
+    "mypy.log": "0f0451a70963ae73be675ad208919e74e8bf1cfecdd4689aabe892085d717fc7",
+    "packaged-audit.json": "0448e0959ce4a56126768452a13ec4a761d6a5550d8af17b439f6c5b110882ce",
+    "postgresql.junit.xml": "e088a8d7d0e74947d744a7665977e28771d5adf3cc828abf28b907beb6f217b0",
+    "postgresql.log": "10c566e8a56c79c6ada6577432ae01340fcca878396d5538adbe473a3fb7aea6",
+    "sqlite.junit.xml": "9c2700231b63802d78b98e10aab9709f14270ee446792b5cd105dd34dba40dd0",
+    "sqlite.log": "348f4e57fc77bfd3fc8581ca7186d455115ee0a682aab7fa44a1ff2f6e1ac7e9",
+    "tools.log": "abd32d54463e84c01cd1e4a5da00fcccfff968f66c834995fb9dc463063bafe7",
+    "triage.json": "fdb94bfc1279bbd675c0f17ee8322683d81c7b054a9b195e1d7bad0f3c611da1"
+  },
+  "started_date": "2026-10-04",
+  "completed_date": "2026-10-05",
+  "timezone": "America/Phoenix",
+  "temporary_resources": {
+    "disposable_postgresql_container": "fathom-deep-mutation-pg",
+    "removed_after_all_database_work": true
+  },
+  "publication_validation": {
+    "changed_after_mutation_snapshot": [
+      ".gitleaks.toml"
+    ],
+    "reason": "The secret-scanning gate needed exact full-match exceptions for 87 verified public file-SHA assignments and 3 throwaway therapist UUIDv4.hex values in generated evidence. Default rules and preexisting exceptions remain unchanged; no path or arbitrary value-shape exemption was added.",
+    "mutant_target_bytes_unchanged": true,
+    "scanner_version": "8.30.1",
+    "staged_secret_scan": "PASS",
+    "exact_exception_independent_review": "PASS",
+    "adjacent_synthetic_credential_and_changed_digest_probes": "PASS",
+    "repository_secret_scan_tests": {
+      "passed": 3,
+      "status": "PASS"
+    },
+    "tools_unittests": {
+      "passed": 65,
+      "status": "PASS"
+    },
+    "documentation_checks": "PASS"
+  }
+}

@@ -1,0 +1,250 @@
+{
+  "schema": 1,
+  "reviewed_candidates": [
+    {
+      "id": "O01-05",
+      "original_definition": {
+        "file": "backend/app/middleware.py",
+        "find": "if remaining <= 0:",
+        "replace": "if remaining <= -1:",
+        "count": 1
+      },
+      "original_mutation_sha256": "325f2abf0e4f2f1fe20fa90725e5653b6275ec6944253f89107c033240bb0ba3",
+      "observed_status": "SURVIVED",
+      "disposition": "EQUIVALENCE_REVIEW_OVERTURNED_AND_KILLED",
+      "independent_review": "Primary agent and security runner auditor",
+      "replacement": {
+        "file": "backend/app/middleware.py",
+        "find": "deadline = asyncio.get_running_loop().time() + self.body_read_timeout_seconds",
+        "replace": "deadline = float(\"inf\")",
+        "oracle": "tests/test_deep_campaign_operations.py::test_body_deadline_is_total_even_when_chunks_keep_arriving"
+      },
+      "credit_policy": "No equivalence exemption. The original definition is retained and killed as O01-06; O01-05 separately disables the total deadline.",
+      "initial_equivalence_reason": "Changing remaining <= 0 to remaining <= -1 sends a nonpositive remaining timeout to asyncio.wait_for. For a standard asynchronous ASGI receive coroutine, wait_for immediately raises TimeoutError without running receive, and the middleware returns the same 408. The externally observable deadline behavior is unchanged.",
+      "reason": "The local Starlette Receive type is Callable[[], Awaitable[Message]], so a buffered receive can return a pre-resolved Future. asyncio.wait_for returns such an already-completed result even with a nonpositive timeout. With -0.5 seconds remaining, the original <= 0 guard rejects with 408, whereas <= -1 admits the completed body and dispatches the app. An independent buffered-awaitable deadline test therefore distinguishes the original mutation without a timeout or setup error.",
+      "reexecuted_as": "O01-06",
+      "oracle": "tests/test_deep_campaign_operations.py::test_expired_deadline_refuses_even_an_already_buffered_receive_awaitable",
+      "verification": {
+        "path": ".tools/deep-mutation/buffered-deadline/summary.json",
+        "baseline_passed": true,
+        "status": "KILLED",
+        "restored": true
+      }
+    }
+  ],
+  "historical_definition_updates": [
+    {
+      "id": "Y7",
+      "original_definition": {
+        "id": "Y7",
+        "campaign": "Y",
+        "name": "ES topic-eligibility stopwords dropped (function words become topics)",
+        "expectation": "Spanish function words must not mint presence topic cards",
+        "file": "backend/app/services/brain.py",
+        "find": "        TOPIC_STOPWORDS | LANGUAGE_FUNCTION_WORDS_ES if language == \"es\" else TOPIC_STOPWORDS",
+        "replace": "        TOPIC_STOPWORDS",
+        "tests": [
+          {
+            "cwd": "backend",
+            "cmd": [
+              "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+              "-m",
+              "pytest",
+              "-q",
+              "-x",
+              "--no-header",
+              "-p",
+              "no:cacheprovider",
+              "-m",
+              "not slow",
+              "tests/test_es_themes.py",
+              "tests/test_audit_2026_09_21_brain.py"
+            ],
+            "timeout": 900,
+            "kind": "pytest"
+          }
+        ]
+      },
+      "original_observed_status": "KILLED",
+      "classification": "fixable_original_oracle_gap_fixed",
+      "reason": "The original window-level Spanish function-word union still excludes Spanish grammar inside genuinely English-classified minority entries in a Spanish-majority corpus. The per-entry Spanish guard does not cover those supported code-switched English entries. The earlier obsolescence conclusion was too broad and is explicitly overturned by a full-update behavioral counterexample.",
+      "replacement_contract": "Spanish function words remain excluded from topic candidates when supported Spanish entries are a minority inside an English-majority window.",
+      "replacement_definition": {
+        "id": "Y7",
+        "campaign": "Y",
+        "name": "per-entry ES topic-eligibility stopwords dropped in mixed-language writing",
+        "expectation": "Spanish function words must not mint topic cards even in an English-majority window",
+        "file": "backend/app/services/brain.py",
+        "find": "        if entry_language == \"es\" and token in LANGUAGE_FUNCTION_WORDS_ES:",
+        "replace": "        if False and token in LANGUAGE_FUNCTION_WORDS_ES:",
+        "tests": [
+          {
+            "cwd": "backend",
+            "cmd": [
+              "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+              "-m",
+              "pytest",
+              "-q",
+              "-x",
+              "--no-header",
+              "-p",
+              "no:cacheprovider",
+              "-m",
+              "not slow",
+              "tests/test_es_themes.py",
+              "tests/test_audit_2026_09_21_brain.py",
+              "tests/test_deep_campaign_analysis.py::test_spanish_minority_grammar_and_theme_words_are_not_emergent_topics"
+            ],
+            "timeout": 900,
+            "kind": "pytest"
+          }
+        ]
+      },
+      "replacement_observed_status": "KILLED",
+      "replacement_evidence": ".tools/deep-mutation/historical-y7-reanchored",
+      "replacement_summary": {
+        "snapshot_sha256": "5daf89f01bb99ad1d5335a4088ec019b70b83a0ddcff532ace6ce5c2ff863697",
+        "campaigns": 1,
+        "mutants": 1,
+        "completed": 1,
+        "counts": {
+          "KILLED": 1
+        },
+        "per_campaign": {
+          "Y": {
+            "KILLED": 1
+          }
+        },
+        "passed": true
+      },
+      "earlier_triage_overturned": {
+        "classification": "obsolete_for_its_stated_Spanish_function_word_invariant",
+        "reason": "The per-entry Spanish eligibility guard introduced during mixed-language remediation independently enforces the old stated invariant for Spanish entries. Removing only the older window-level guard no longer exercises that failure mode. This is retained as a survivor of the original definition; it is not credited as a kill.",
+        "replacement_contract": "Spanish function words remain excluded from topic candidates when supported Spanish entries are a minority inside an English-majority window.",
+        "replacement_definition": {
+          "id": "Y7",
+          "campaign": "Y",
+          "name": "per-entry ES topic-eligibility stopwords dropped in mixed-language writing",
+          "expectation": "Spanish function words must not mint topic cards even in an English-majority window",
+          "file": "backend/app/services/brain.py",
+          "find": "        if entry_language == \"es\" and token in LANGUAGE_FUNCTION_WORDS_ES:",
+          "replace": "        if False and token in LANGUAGE_FUNCTION_WORDS_ES:",
+          "tests": [
+            {
+              "cwd": "backend",
+              "cmd": [
+                "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+                "-m",
+                "pytest",
+                "-q",
+                "-x",
+                "--no-header",
+                "-p",
+                "no:cacheprovider",
+                "-m",
+                "not slow",
+                "tests/test_es_themes.py",
+                "tests/test_audit_2026_09_21_brain.py",
+                "tests/test_deep_campaign_analysis.py::test_spanish_minority_grammar_and_theme_words_are_not_emergent_topics"
+              ],
+              "timeout": 900,
+              "kind": "pytest"
+            }
+          ]
+        },
+        "replacement_observed_status": "KILLED",
+        "replacement_evidence": ".tools/deep-mutation/historical-y7-reanchored",
+        "replacement_summary": {
+          "snapshot_sha256": "5daf89f01bb99ad1d5335a4088ec019b70b83a0ddcff532ace6ce5c2ff863697",
+          "campaigns": 1,
+          "mutants": 1,
+          "completed": 1,
+          "counts": {
+            "KILLED": 1
+          },
+          "per_campaign": {
+            "Y": {
+              "KILLED": 1
+            }
+          },
+          "passed": true
+        }
+      },
+      "original_observed_status_before_oracle": "SURVIVED",
+      "replacement_role": "exploratory per-entry control retained as historical evidence; it does not replace or credit the original Y7 mutation",
+      "restored_original_definition_with_oracle": {
+        "id": "Y7",
+        "campaign": "Y",
+        "name": "ES topic-eligibility stopwords dropped (function words become topics)",
+        "expectation": "Spanish function words must not mint presence topic cards",
+        "file": "backend/app/services/brain.py",
+        "find": "        TOPIC_STOPWORDS | LANGUAGE_FUNCTION_WORDS_ES if language == \"es\" else TOPIC_STOPWORDS",
+        "replace": "        TOPIC_STOPWORDS",
+        "tests": [
+          {
+            "cwd": "backend",
+            "cmd": [
+              "/Users/pradeepreddy/Desktop/mental_health_application/.venv/bin/python",
+              "-m",
+              "pytest",
+              "-q",
+              "-x",
+              "--no-header",
+              "-p",
+              "no:cacheprovider",
+              "-m",
+              "not slow",
+              "tests/test_es_themes.py",
+              "tests/test_audit_2026_09_21_brain.py",
+              "tests/test_deep_campaign_analysis.py::test_spanish_window_excludes_code_switched_grammar_from_english_topic_cards"
+            ],
+            "timeout": 900,
+            "kind": "pytest"
+          }
+        ]
+      },
+      "original_kill_evidence": ".tools/deep-mutation/historical-y7-original-final",
+      "original_kill_summary": {
+        "snapshot_sha256": "2a36b314d35c7144cbcbb101e1905e0ac869ed2c31402128eb7be4d2912a8976",
+        "campaigns": 1,
+        "mutants": 1,
+        "completed": 1,
+        "counts": {
+          "KILLED": 1
+        },
+        "per_campaign": {
+          "Y": {
+            "KILLED": 1
+          }
+        },
+        "passed": true
+      },
+      "behavioral_counterexample": {
+        "oracle": "tests/test_deep_campaign_analysis.py::test_spanish_window_excludes_code_switched_grammar_from_english_topic_cards",
+        "total_entries": 120,
+        "distinct_English_observations": 48,
+        "entry_languages": {
+          "en": 48,
+          "es": 72
+        },
+        "window_language": "es",
+        "language_detection": "real unmodified detector used by full brain.update; no synthetic per-entry language map",
+        "grammatical_code_switch": "porque (because) connects varied English pottery observations to reasons",
+        "baseline_surfaced_topic_labels": [
+          "pottery"
+        ],
+        "original_Y7_surfaced_topic_labels": [
+          "porque",
+          "pottery"
+        ],
+        "false_topic_detail": {
+          "entries": 48,
+          "share": 0.4,
+          "trend": "steady",
+          "presence": true
+        },
+        "production_edits_required": false
+      }
+    }
+  ]
+}

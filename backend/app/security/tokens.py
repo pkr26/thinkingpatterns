@@ -187,7 +187,8 @@ def verify_token(token: str, secret: str, now: float | None = None) -> dict:
         ):
             raise TokenError("malformed payload")
     if "purpose" in payload:
-        if payload["purpose"] not in KNOWN_PURPOSES:
+        purpose = payload["purpose"]
+        if not isinstance(purpose, str) or purpose not in KNOWN_PURPOSES:
             raise TokenError("malformed payload")
     if "ksv" in payload:
         ksv = payload["ksv"]

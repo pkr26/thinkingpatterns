@@ -2961,6 +2961,7 @@ def _detect_themes(
     total_days: int,
     lag1: float | None = None,
     language: str = "en",
+    entry_languages: dict[int, str] | None = None,
 ) -> list[_Signal]:
     """Base-rate-corrected weekday concentration + within-person mood ties.
 
@@ -2984,6 +2985,7 @@ def _detect_themes(
     deflate per-group n in the mood Welch test — day residuals are not
     independent observations when mood carries over day to day.
     """
+    analysis_language = language
     signals: list[_Signal] = []
     themes = sorted({theme for _, _, themes, _, _, _ in per_entry for theme in themes})
     for theme in themes:
@@ -3000,8 +3002,8 @@ def _detect_themes(
         # every tag-less journal mentioning sleep got "entries read lower
         # when 'sleep' comes up" as a personalized discovery. For UNTAGGED
         # entries the tie mood is re-scored without the theme's own
-        # tokens (a first-order residual adjustment: the global baseline
-        # and weekday centering stay as computed); an entry whose kept
+        # tokens and their contribution to the rolling baseline/weekday
+        # centering; an entry whose kept
         # tokens are empty contributed nothing but the theme itself and
         # carries no independent mood evidence. Explicit client tags are
         # the user's own report and are never re-scored; tag-minted and
@@ -3010,6 +3012,10 @@ def _detect_themes(
         def _tie_mood(
             entry: JournalEntry, tokens: list[str], residual: float, raw: float, tagged: bool
         ) -> float | None:
+            # Supported minority entries were scored with their own lexicon.
+            # Remove the same language's theme words before testing a tie;
+            # the window's majority language cannot describe their grammar.
+            language = (entry_languages or {}).get(id(entry), analysis_language)
             if tagged or not tokens:
                 return residual
             kept = [t for t in tokens if theme_for(t, language) != theme]
@@ -3020,10 +3026,53 @@ def _detect_themes(
             return residual + (sentiment_score(kept, language) - raw)
 
         with_theme: list[tuple[JournalEntry, float]] = []
+        clean_scores: dict[int, float | None] = {}
+        contaminated = False
+        theme_lag1 = lag1
         for e, toks, _th, s, raw, tagged in all_with:
             tie = _tie_mood(e, toks, s, raw, tagged)
+            clean_scores[id(e)] = None if tie is None else raw + (tie - s)
+            if tie is None or abs(tie - s) > 1e-12:
+                contaminated = True
             if tie is not None:
                 with_theme.append((e, tie))
+        if contaminated:
+            # Removing a theme's sentiment words from just today's value
+            # leaves them inside neighbouring rolling baselines. Excluding
+            # the day itself then amplifies this remaining lexical contrast
+            # into a false association. Rebuild this theme's baseline and
+            # weekday adjustment from the independent, theme-stripped moods.
+            # Explicit ratings and themes without scored words keep the
+            # original residual path above.
+            independent: list[tuple[JournalEntry, float, bool]] = []
+            clean_day_buckets: dict[date, list[float]] = {}
+            for e, _t, th, _s, raw, _tagged in per_entry:
+                clean = clean_scores.get(id(e), raw)
+                if clean is None or (not e.text and e.sentiment is None):
+                    continue
+                independent.append((e, clean, theme in th))
+                clean_day_buckets.setdefault(e.entry_date, []).append(clean)
+            clean_days = sorted(
+                (day, sum(values) / len(values)) for day, values in clean_day_buckets.items()
+            )
+            clean_baselines = _personal_baselines(clean_days)
+            clean_residuals = {
+                day: mood - clean_baselines.get(day, mood) for day, mood in clean_days
+            }
+            clean_associations = _strip_weekday_effects(clean_residuals)
+            theme_lag1 = _daily_lag1_autocorr(clean_associations)
+            clean_weekdays = {
+                day: clean_residuals[day] - clean_associations[day] for day in clean_residuals
+            }
+            with_theme = []
+            without_theme = []
+            for e, clean, has_theme in independent:
+                residual = (
+                    clean
+                    - clean_baselines.get(e.entry_date, clean)
+                    - clean_weekdays.get(e.entry_date, 0.0)
+                )
+                (with_theme if has_theme else without_theme).append((e, residual))
         # Day-level Bernoulli (2026-09-17): a user who writes 4 entries
         # every Sunday contributes 4 CORRELATED trials to one weekday —
         # one calendar day, one observation. The entry-level version
@@ -3122,7 +3171,7 @@ def _detect_themes(
             delta = sum(moods_without) / len(moods_without) - sum(moods_with) / len(moods_with)
             effect = statsig.cohens_d(moods_with, moods_without, variance_floor=MOOD_SD_FLOOR)
             _, pvalue = statsig.welch_test(
-                moods_with, moods_without, variance_floor=MOOD_SD_FLOOR, lag1=lag1
+                moods_with, moods_without, variance_floor=MOOD_SD_FLOOR, lag1=theme_lag1
             )
             signals.append(
                 _Signal(
@@ -3777,9 +3826,13 @@ def _detect_phrases(
         # quotation cannot supply a negative-feeling classification. If
         # either source for a same-day phrase is unsupported, stay neutral.
         cluster_language_ok = "other" not in member_languages
-        is_rumination = allow_rumination and cluster_language_ok and (
-            negativity <= RUMINATION_NEGATIVITY_MAX
-            or (negativity <= 0.0 and negators >= RUMINATION_MIN_NEGATORS)
+        is_rumination = (
+            allow_rumination
+            and cluster_language_ok
+            and (
+                negativity <= RUMINATION_NEGATIVITY_MAX
+                or (negativity <= 0.0 and negators >= RUMINATION_MIN_NEGATORS)
+            )
         )
         kind = "rumination" if is_rumination else "recurring_phrase"
         tokens = " ".join(variants).split()
@@ -4170,6 +4223,7 @@ def _detect_topics(
     per_entry: list[tuple[JournalEntry, list[str], set[str], float]],
     phrase_clusters: list[phrase_miner.PhraseCluster],
     language: str = "en",
+    entry_languages: dict[int, str] | None = None,
 ) -> list[_Signal]:
     """Discover recurring content n-grams the fixed lexicon does not cover.
 
@@ -4219,9 +4273,11 @@ def _detect_topics(
     split = per_entry[n // 2][0].entry_date
 
     doc_tokens: list[tuple[date, list[str]]] = []
+    doc_languages: list[str] = []
     for entry, tokens, _, _ in per_entry:
         norm = [t[:-2] if t.endswith("'s") else t for t in tokens]
         doc_tokens.append((entry.entry_date, norm))
+        doc_languages.append((entry_languages or {}).get(id(entry), language))
     recent_idx = {i for i, (d, _) in enumerate(doc_tokens) if d >= split}
     earlier_n = n - len(recent_idx)
 
@@ -4253,12 +4309,14 @@ def _detect_topics(
         TOPIC_STOPWORDS | LANGUAGE_FUNCTION_WORDS_ES if language == "es" else TOPIC_STOPWORDS
     )
 
-    def eligible(token: str) -> bool:
+    def eligible(token: str, entry_language: str) -> bool:
+        if entry_language == "es" and token in LANGUAGE_FUNCTION_WORDS_ES:
+            return False
         if token in eligibility_stopwords or token in NEGATORS or token in BUT_WORDS:
             return False
         if token in ABSOLUTIST_WORDS or token in INTENSIFIERS:
             return False
-        if theme_for(token, language) is not None:  # also catches theme inflections
+        if theme_for(token, entry_language) is not None:  # also catches theme inflections
             return False
         if any(f in SENTIMENT_LEXICON for f in word_forms(token)):
             return False
@@ -4270,7 +4328,7 @@ def _detect_topics(
     for i, (day, tokens) in enumerate(doc_tokens):
         prev = None
         for j, tok in enumerate(tokens):
-            if not eligible(tok):
+            if not eligible(tok, doc_languages[i]):
                 prev = None
                 continue
             following = tokens[j + 1] if j + 1 < len(tokens) else None
@@ -4905,6 +4963,9 @@ def update(
         scored, window_latin_letters, window_letters, any(entry.text for entry in window)
     )
     language_ok = language != "other"
+    entry_language_by_id = {
+        id(entry): entry_language for entry, entry_language in zip(window, entry_languages)
+    }
 
     per_entry: list[tuple[JournalEntry, list[str], set[str], float]] = []
     for entry, tokens, entry_language in zip(window, entry_tokens, entry_languages):
@@ -4966,7 +5027,9 @@ def update(
                 },
                 sentiment,
             )
-            for (entry, tokens, themes, sentiment), entry_language in zip(per_entry, entry_languages)
+            for (entry, tokens, themes, sentiment), entry_language in zip(
+                per_entry, entry_languages
+            )
         ]
 
     # Per-entry eligibility matters even in a supported-language window:
@@ -5090,7 +5153,7 @@ def update(
             - baselines.get(entry.entry_date, sentiment)
             - weekday_adjustment.get(entry.entry_date, 0.0),
             sentiment,
-            entry.sentiment is not None,
+            entry.sentiment is not None and math.isfinite(entry.sentiment),
         )
         for entry, tokens, themes, sentiment in mood_entries
     ]
@@ -5122,7 +5185,14 @@ def update(
                     entry_language if previous == entry_language else "other"
                 )
         signals.extend(
-            _detect_themes(residual_per_entry, weekday_days, len(day_buckets), resid_lag1, language)
+            _detect_themes(
+                residual_per_entry,
+                weekday_days,
+                len(day_buckets),
+                resid_lag1,
+                language,
+                entry_language_by_id,
+            )
         )
         signals.extend(
             _detect_phrases(
@@ -5218,7 +5288,7 @@ def update(
                 for item, entry_language in zip(per_entry, entry_languages)
                 if entry_language != "other" and item[0].text
             ]
-            signals.extend(_detect_topics(text_entries, clusters, language))
+            signals.extend(_detect_topics(text_entries, clusters, language, entry_language_by_id))
 
     # Origin marking (2026-09-17): patterns fed by the user's own tags or
     # structured ratings say so — "you tagged it" is a different evidence

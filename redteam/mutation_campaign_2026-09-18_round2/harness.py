@@ -434,8 +434,8 @@ MUTANTS: list[dict] = [
         id="J3", campaign="J", name="rumination classifier disabled (worries surface as neutral phrases)",
         expectation="negative recurring clusters must be framed as rumination",
         file="backend/app/services/brain.py",
-        find="        is_rumination = allow_rumination and cluster_language_ok and (",
-        replace="        is_rumination = False and (",
+        find="        is_rumination = (\n            allow_rumination\n            and cluster_language_ok\n            and (",
+        replace="        is_rumination = (\n            False\n            and (",
         tests=brain_suite(),
     ),
     dict(

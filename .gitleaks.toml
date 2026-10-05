@@ -151,3 +151,116 @@ paths = [
 description = "exact public therapist-module constant-table digest assignment"
 regexTarget = "match"
 regexes = ['''^app\.api\.therapist": "a3b747d3c02e9468"$''']
+
+[[allowlists]]
+# Frozen mutation manifests record public SHA-256 hashes of repository files.
+# The generic API-key heuristic flags filenames containing api/key/token.
+# Each exact filename/digest assignment below was checked against the frozen
+# manifest files map. No paths or arbitrary digest shapes are exempted, so
+# adjacent credentials stay visible in staged, working-tree and history scans.
+# Source changes require separate review before adding new public hashes.
+description = "exact frozen mutation-evidence file hashes"
+regexTarget = "match"
+regexes = [
+  '''^TherapistShareScreen\.tsx": "930b8c18e347ec648a3cdaa61891a4cd072879b26fb87159a4d7e824769599f1"$''',
+  '''^a4e8c1f6b9d3_token_revocation\.py": "1fc7d4774290a9271cc6babfc9605b729d757a90011ad09b4c26de4c11cd59b3"$''',
+  '''^android-authenticated-ui\.xml": "890caf4139f89c715396b1855170cd70b285c47d79b43855084f47b39196f353"$''',
+  '''^api\.md": "1b8eb6f9eb317577b8acf03d0de790ee64f57d3e3488e51ab8711376c3f882f5"$''',
+  '''^api\.test\.ts": "1066a4f26a13cb531539a41dff68498d1affd31641c422fc556cf60b513407ce"$''',
+  '''^api\.test\.ts": "f4637ef6f5ef95124cd77fbf2c2becf8266dc097b5caeb3936bcc07d44f7f207"$''',
+  '''^api\.ts": "5505751c974bec9b8a5127362ab3ef0d9dccaeddcd89858b3d712d097cbf775d"$''',
+  '''^api\.ts": "882b596d7ada31a652df45d50e3ebc0fcf4af955056435116e726bf9879ce676"$''',
+  '''^apiMock\.ts": "a5e4b752050cabfe35d42824f95f969427c8763554189c7c898712b27e12d127"$''',
+  '''^apiSurface\.test\.ts": "761b44086b800bcebfa96989af685ab2af4024bd2721606119116cc28181d23a"$''',
+  '''^api_catalog\.py": "44f05a684788facd3918a6e04b6c3767f798ed7adc6717831e1a98a02ecbc482"$''',
+  '''^audit_mac_secret\.example": "931d932fa539160d3a697def90927b2132ef814e226e77c37ba9cf8461299957"$''',
+  '''^auth\.py": "f30e2e388e2b3873ae54c5de216bc2852cc8731f43edc91ccafc53b37095fc9f"$''',
+  '''^authOwnership\.test\.tsx": "f2ecb11dda93fd4933eadcaa5cff27b1150137c7128228980212a39728b599e3"$''',
+  '''^auth_token_secret\.example": "e03a6ecbec26068909ca2055cbf6e09931cb27db3a65d2b3bb115bf9ee0ea578"$''',
+  '''^b7f2d8a4e6c1_access_log_mac\.py": "36b320253d2d2e6f188a3316ed09f6641747db289f84dad983caaff73e037269"$''',
+  '''^b_auth\.json": "2a3e1ae905acc9cc5532e43433aebf697f9c3a453891646d2ab04fb63707f10f"$''',
+  '''^b_auth\.json": "470e251794f42e0d17ff388692c99048ad409b3e5ec71f46d86f0b8ba6e5a627"$''',
+  '''^b_auth\.py": "e73482ce70c5615a859b10fa1b000eea9438bb96df4fbbc73e8202ef11547657"$''',
+  '''^backup_key\.example": "b92e7e91b9f60886ad937b31c8e1803693fa6222c1a9bb1f8d508e98a6d6edfd"$''',
+  '''^browser-api-final\.log": "1ddb46cf68e26dd3bac5dc95c97d370e9b1652a221388dc78507abbf87710bfb"$''',
+  '''^browser-api-release\.log": "c23ab12cc815cc770e79ff2c198935a15fa8c0465430a1a313b72d2048d1a52c"$''',
+  '''^browser-api\.log": "d375fa36422562b3fbbc722f3b6f744b67e67c94defcbc55abdfc2b6065c8414"$''',
+  '''^browser-authenticated-smoke\.log": "0a11ca084a2ad8cbf99047ffedbb53081a317b9cdb7718dcda2269cbd9fa29ac"$''',
+  '''^c41f8a92d5e7_therapist_sharing\.py": "85a2161177dd83ddd51eb59346e64ca6adf13d77d80dcc26e1680247838bbe3a"$''',
+  '''^c_api\.json": "3aea53a9c76944695780c7cb6c69a8ed158943aed87ce73b33e6e32557de2a75"$''',
+  '''^c_api\.py": "ae8d0a5495f726772ef1b51a095ef7351f4ce17a1f2e6ac8e5795f2bf5c96b83"$''',
+  '''^d4e5f6a7b8c9_therapist_totp_columns\.py": "681b275fe32d6777c939e2d6dc275b4e262fdde5ef831311bd8dc9a05686179d"$''',
+  '''^d6a0c4e8b213_atomic_corpus_credentials\.py": "00b0a4c8fc7381ce07540e54fe98ee11e7c7f9e8ac32f771482a1b82981e8e36"$''',
+  '''^d7f1c5a9b3e0_rekey_journal\.py": "3299b6e4d5e0298339283a526470d6724fede62dc4ff87fcf90111acf0cd08ed"$''',
+  '''^debug\.keystore": "221e0a3106aa4c3ccc154e0a418b55020b3f9ea6e84f92e8749cd9e2f39f5e58"$''',
+  '''^decoy_secret\.example": "d3d7b8d7380631c4b8077030066b61cdde619c7de5ce617aba369e47231be36a"$''',
+  '''^designTokens\.test\.ts": "0ae50156c0d5a71c7e1ae626fa4afc6ef41053a4fd858b481a48b483419ff7a2"$''',
+  '''^designTokens\.test\.ts": "f964dd97f6499caf2a2a72b24883e34600a91d3090760a59fd77e2108ad6ea09"$''',
+  '''^f2a8c6d4e9b1_key_envelope_v2\.py": "3699cd617e00709d9108d8fcf269d6dbd06012961447e21aac7c9ef2d313a4d9"$''',
+  '''^keyConsent\.ts": "f1632e1c994b797de8dece9376d9957ded742864f1165389b49904f628c7dc8b"$''',
+  '''^keyEnvelope\.ts": "21f29fdfdf15f598765b81461e839f019164f94be85619106c1d0a6b1f628be2"$''',
+  '''^keyScheme\.ts": "f0276a42e622f6ec6c318c64ac1231f6c28d708cb1d343d3493b0502ad99b42c"$''',
+  '''^keychainMock\.ts": "633ed1c0dc292aaa8bc1cfb150b94eae27ee59dfbf56e89aa1d5d3d9f25eeeae"$''',
+  '''^keys\.ts": "5af87c21c7ac3a50296924b26b64bb43d58e106b416799865a7c5868fe42dfd2"$''',
+  '''^localRekey\.test\.ts": "079b9450fe322cdca71b468047983af92baa11516da22424aa816b181a9e23ac"$''',
+  '''^localRekey\.ts": "2e467386071b2a680d96d3b54f4f70928c6826d54a44f1fd55c54ee420bfb397"$''',
+  '''^make-preauth-catalogs\.mjs": "3aabc4a948b937384c7424e5e5ea587e94b5709f3610559ccbafa7149329e759"$''',
+  '''^mindpattern-mobile-auth-ownership-red\.log": "705b08978fbb63603e9da43ce9bd1a7794e7302052cd9fb6b58a357d39600741"$''',
+  '''^mobile-auth-ownership\.log": "e16bf6d5dcce79727cb73c01e7b6f608de4f7f803c965acab807d886c14eed0f"$''',
+  '''^pairing_secret\.example": "96bcc5505c6a9a612b0790d79b2dc7b640d16efda311119405a7305a2456c065"$''',
+  '''^passwordStrength\.test\.tsx": "08df4fe8f5e7c3feb59a000944a2bbbdeccfec9f109ee3cdbf389a029559da24"$''',
+  '''^portal-after-latest-password-change\.png": "e71fad3075e0bad2a149e59db00ed11e24b51edcf463eaef5cb97f0b82a3b651"$''',
+  '''^portal-after-password-change\.png": "61fa5770e87c0eab2964c06346bdec5b4ed60bca1c1a547989838055d034a724"$''',
+  '''^portal-authenticated\.png": "41e3617cc60c4ebd049ff7fd2255e5e4cf508d1d3736289b64c212748849d1e0"$''',
+  '''^portal-password-probe\.png": "d3cafec679de0730080d3bfbbab558369aa04f7cd613c011bf4951c236625b42"$''',
+  '''^postgres_password\.example": "a638765575f1b095c5465198f42ef89f9e67065c9c39db2eb8541919dc875ad7"$''',
+  '''^preauth\.ts": "a9d1bada396cecec5f592653b33d5483292cdb31536980cf85ae02f2e64af821"$''',
+  '''^reauth\.test\.ts": "7b6f329d84ba24b378fe305107f09f7ee8dc7dcc1507d2b367609bbf1fd76652"$''',
+  '''^reauth\.test\.ts": "ba43589043043d188551d59cea80ae651655880b265cff9be0f819899f2e2645"$''',
+  '''^reauth\.ts": "194e6d07881806af3003c67144b34b1a6d9dc41f322327bb89e25f9d9a7c2288"$''',
+  '''^reauth\.ts": "22d9fa479f1a3bbe4534bc50f3956b222825db94b2bc8dd9f9d3eed629860398"$''',
+  '''^redteam-auth-corrected\.log": "c2a58e7803478f2df19574b362605e5ee49e807588f46af68637117bea665241"$''',
+  '''^test_account_api\.py": "193f9f5c74d090ffbf5172ed701a460a4e7eecfd023b66e86abe110718503958"$''',
+  '''^test_api_hardening\.py": "7e892f15941d3dcacd68d96d5ee870cb253930b8aa8bb5596adfad5c088f8e75"$''',
+  '''^test_api_pins\.py": "e65c9875fe925f2ae6c4b6e9a027c43ecdd06efb5c008b8fb9ec7fd54f61b507"$''',
+  '''^test_audio_api\.py": "98b4cf0bd60eb6f4a9ff40410d7cd13bc69f2e575383e547db9d46c923e3bd0f"$''',
+  '''^test_auth_api\.py": "a66aaece7122f41e13287466054f56a3801da210beab4aa4982af8ed08bf584c"$''',
+  '''^test_brain_api\.py": "a6e8e36f22fc43ec402392299d5a357c7ee00dd53d0a5d43e4fe38495f2ffbd3"$''',
+  '''^test_checklist_round1_crypto_auth\.py": "d3bbcb9bd98a398e1835981cbc881cf390899ba1d753df77c9697fd827b27087"$''',
+  '''^test_deep_campaign_api\.py": "4f06274892ff96b4a98b5aa2a0a88af0b471d6ec2e482c248936979dcad58289"$''',
+  '''^test_entries_api\.py": "453f3909ebfd3f76762fbec3d4fa9ff50d18671c96fefe50570bcc15da4de12e"$''',
+  '''^test_insights_api\.py": "a94114d8ec7ca236db644ff1059b87eb55e1b1c1d41d545103e5bdfab11a0bf0"$''',
+  '''^test_key_envelope_v2\.py": "cd5db9e090b7bbb7a51c37fa7d1385727a499e5c9093d251f928b318a3a9d491"$''',
+  '''^test_key_zeroize\.py": "16eedae385e07cf845d9858bf6b87847c216f7a4a2e6c52b96b30a875bb56699"$''',
+  '''^test_measures_api\.py": "89dbd67429d595e209cb024b81af98edb497860c1898645258d3c3194726cbb5"$''',
+  '''^test_note_rekey_2026_10_01\.py": "ba6ad21f0f6eb6141bff471d1747553bdfa1bff2bf00ba1fc2f6eb4ca6b59473"$''',
+  '''^test_remediation_therapist_measures\.py": "bf208ca85d5c1e6ab8897bca20bb17ff96c4a3bb1ed379ca35c19712326c5156"$''',
+  '''^test_repo_secret_scan\.py": "d5d1d01d5f673ec13e124685532e6eb130e2b19fba24943c67628c9917e3da2a"$''',
+  '''^test_therapist_api\.py": "01b4bd52dee201e4a67926deea216e86f5e14dfe5967eca2965c21b57e4dadea"$''',
+  '''^test_therapist_lifecycle\.py": "7d74b115ad58aa0f752453218dc27a15674814e2d9050e6922b31be7a35f7778"$''',
+  '''^test_tokens\.py": "e012b324edcbb94f6f3bc9d9b2b6fa02639aee6ae077e1309afede502f5f9145"$''',
+  '''^therapist\.py": "1b7d24689bd9bb09f68a3fccd0dfacc50f8cd1fdc805f9476ec6cb6725ffca38"$''',
+  '''^token_secret\.example": "04f1bba5045523bfe13c3bc47e7aecf33109f1b4bbe1925be9339a5726b21412"$''',
+  '''^tokens\.py": "e0db05017d34929bcca62c409d8b15e61fb18611cb85aaaffa79691014d29d85"$''',
+  '''^tokens\.ts": "1ec863205febc688a3d0f6ac36b84e5dc8dcd886bc270afb5549c73485ae3cbb"$''',
+  '''^totp_wrap_secret\.example": "8cf92d97a0136060b3597d2367dc3128a09fdbad74cc7f289171bd6400249361"$''',
+  '''^verify_secret_scan\.py": "8848d591aedf5e977b76f3922a624dabae6e5c57c3c1a2b041de7957c5ecf534"$''',
+  '''^web-after-generation-key-rotation\.png": "13b29f78de5e47a2a12f2798a85f919ad9343d523558468f9b4874e968e44937"$''',
+  '''^web-after-latest-full-key-rotation\.png": "8fcb3284722899d3a7fec002f8dac3be6604da67823d02edc09e2a7ee7908713"$''',
+  '''^web-after-password-change\.png": "316267dc370ba96381b83d733fed26e7e3b1202dc167e008c3f6e06ee915b8c2"$''',
+  '''^web-authenticated\.png": "808d30920f036f88122416f1b796524947e40b0aea42e213f000a81dc96813d4"$''',
+]
+
+[[allowlists]]
+# These exact UUIDv4 therapist IDs were generated for disposable pytest users
+# and appear in synthetic failure excerpts; they are public row identifiers,
+# not authentication material. The heuristic matches api inside therapist.
+# Exempt only these complete field/value matches, never an evidence path or
+# arbitrary UUID, so future credentials and identifiers still get reviewed.
+description = "exact disposable mutation-test therapist identifiers"
+regexTarget = "match"
+regexes = [
+  '''^therapist_id': '0df10e361bdc427ca6c65e3b53e2077e'$''',
+  '''^therapist_id': '9a0cefd169d6463da9c5528e526d9c17'$''',
+  '''^therapist_id': '9cfbec2f3fbf4e80a32dc5b29fe2bc63'$''',
+]

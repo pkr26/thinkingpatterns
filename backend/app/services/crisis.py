@@ -729,7 +729,7 @@ def normalize_crisis_text(text: str) -> str:
     return _primary_join(_normalize_to_tokens(text))
 
 
-def _orphan_glue(tokens: list[str]) -> str:
+def _orphan_glue(tokens: list[str], *, preserve_first_person: bool = False) -> str:
     """Evasion variant: a run of 1-3 single-letter tokens glues onto the
     FOLLOWING word ("k ill myself" -> "kill myself", "k i ll myself" ->
     "kill myself"), catching partial splits the >=4 threshold misses.
@@ -751,7 +751,16 @@ def _orphan_glue(tokens: list[str]) -> str:
             out.append("".join(run))
             out.append(token)
         elif run:
-            out.append("".join(run) + token)
+            # A leading first-person pronoun is ordinary prose, followed by
+            # fragments of the next word: "I w a nt to die" must become
+            # "i want to die", rather than the unmatched "iwant to die".
+            # This optional interpretation supplements the original glue:
+            # "life i s n't worth living" needs its original "isn't" form.
+            if preserve_first_person and len(run) > 1 and run[0] == "i":
+                out.append("i")
+                out.append("".join(run[1:]) + token)
+            else:
+                out.append("".join(run) + token)
         else:
             out.append(token)
         run = []
@@ -981,6 +990,9 @@ def _folded_variants(text: str) -> tuple[str, ...]:
     out: list[str] = []
     for tokens in _variant_token_sets(_normalize_pre_punct(folded)):
         out.extend((_primary_join(tokens), _orphan_glue(tokens), _concat_join(tokens)))
+        pronoun_glue = _orphan_glue(tokens, preserve_first_person=True)
+        if pronoun_glue != _orphan_glue(tokens):
+            out.extend((_primary_join(tokens), pronoun_glue, _concat_join(tokens)))
     return tuple(out)
 
 
@@ -993,6 +1005,9 @@ def _match_variants(text: str) -> tuple[str, ...]:
     out: list[str] = []
     for tokens in _variant_token_sets(pre):
         out.extend((_primary_join(tokens), _orphan_glue(tokens), _concat_join(tokens)))
+        pronoun_glue = _orphan_glue(tokens, preserve_first_person=True)
+        if pronoun_glue != _orphan_glue(tokens):
+            out.extend((_primary_join(tokens), pronoun_glue, _concat_join(tokens)))
     return tuple(out)
 
 

@@ -39,6 +39,9 @@ jobs:
         # --cov-fail-under pins the floor at the suite's measured total
         # (97% at the time this gate was added); lower it only deliberately.
         run: python -m pytest tests/ --cov=app --cov-report=term --cov-fail-under=95  # 2026-09-30: measured 95.7% after waves 1-4 added ~600 stmts of new surface; the 97 floor is registered for restoration in docs/SECURITY_RESIDUALS.md
+      - name: Verify isolated mutation execution and evidence
+        working-directory: backend
+        run: python -m unittest discover -s ../tools/tests -p test_deep_mutation_runner.py -v
 
   backend-postgres:
     # The same suite against real Postgres. conftest.py reads
@@ -591,7 +594,9 @@ jobs:
       - name: Check backup and campaign/mutation evidence contracts
         run: python -m unittest discover -s tools/tests -v
       - name: Validate every behavioral mutation anchor and test selector without changing source
-        run: python redteam/run_pr_mutation_gate.py --preflight
+        run: |
+          python redteam/run_pr_mutation_gate.py --preflight
+          python redteam/deep_backend_mutation/runner.py --preflight
 
   monitoring-verify:
     # deploy/monitoring/verify.sh is the drift gate for the alerting stack

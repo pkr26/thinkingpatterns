@@ -1,0 +1,91 @@
+{
+  "snapshot_sha256": "8d31974ef7949c0bf9d56bdac7c9cd5728576d1d7d5d94980b8018b0b7e5420b",
+  "campaigns": 26,
+  "mutants": 220,
+  "completed": 220,
+  "counts": {
+    "KILLED": 210,
+    "CAUGHT": 10
+  },
+  "per_campaign": {
+    "A": {
+      "KILLED": 9
+    },
+    "B": {
+      "KILLED": 5
+    },
+    "C": {
+      "KILLED": 5
+    },
+    "D": {
+      "KILLED": 4
+    },
+    "E": {
+      "KILLED": 5
+    },
+    "F": {
+      "KILLED": 8
+    },
+    "G": {
+      "KILLED": 20
+    },
+    "H": {
+      "KILLED": 7
+    },
+    "I": {
+      "KILLED": 8
+    },
+    "J": {
+      "KILLED": 7
+    },
+    "K": {
+      "KILLED": 7
+    },
+    "L": {
+      "KILLED": 5
+    },
+    "M": {
+      "KILLED": 6
+    },
+    "N": {
+      "CAUGHT": 10
+    },
+    "O": {
+      "KILLED": 11
+    },
+    "P": {
+      "KILLED": 10
+    },
+    "Q": {
+      "KILLED": 11
+    },
+    "R": {
+      "KILLED": 10
+    },
+    "S": {
+      "KILLED": 10
+    },
+    "T": {
+      "KILLED": 10
+    },
+    "U": {
+      "KILLED": 9
+    },
+    "V": {
+      "KILLED": 13
+    },
+    "W": {
+      "KILLED": 9
+    },
+    "X": {
+      "KILLED": 5
+    },
+    "Y": {
+      "KILLED": 9
+    },
+    "Z": {
+      "KILLED": 7
+    }
+  },
+  "passed": true
+}

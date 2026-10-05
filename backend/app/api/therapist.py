@@ -97,7 +97,7 @@ from ..security.tokens import issue_token
 from ..services import threshold
 from ._audit import append_access_log, parse_access_log_cursor
 from ._paging import (
-    NEXT_OFFSET_HEADER,
+    NEXT_OFFSET_HEADER as NEXT_OFFSET_HEADER,
     assert_expected_revision,
     collection_changed_error,
     emit_page_headers,
@@ -219,6 +219,16 @@ async def _notes_guard(session: AsyncSession, user: User):
         if fresh is None or not fresh.is_active or fresh.token_epoch != expected_epoch:
             raise ApiError(status_code=401, detail="invalid token", code="unauthorized")
         yield
+
+
+@asynccontextmanager
+async def _note_chart_guard(session: AsyncSession, user: User, patient_id: str):
+    async with _notes_guard(session, user):
+        # The fresh therapist read reopens a transaction. Keep the lifecycle
+        # fence, but release that connection before waiting on patient erasure.
+        await session.commit()
+        async with sharing_locks.hold(sharing_patient_lock_key(patient_id)):
+            yield
 
 
 async def _current_notes_revision(session: AsyncSession, therapist_id: str) -> int:
@@ -1919,7 +1929,7 @@ async def list_notes(
     # page_bytes; legacy requests instead fail loudly if their full requested
     # page would exceed the safe response budget.
     byte_limit = page_bytes if page_bytes is not None else NOTES_PAGE_BLOB_BYTES
-    async with _notes_guard(session, user):
+    async with _note_chart_guard(session, user, patient_id):
         patient_id = await _note_target(session, user, user_id)
         revision = await _current_notes_revision(session, user.id)
         assert_expected_revision(
@@ -2055,7 +2065,7 @@ async def create_note(
     # same pooling discipline list_notes/update_note already apply; the row
     # is re-resolved under the lock below.
     await session.commit()
-    async with _notes_guard(session, user):
+    async with _note_chart_guard(session, user, patient_id):
         _assert_custody_write(user, body.custody_version)
         patient_id = await _note_target(session, user, user_id)
         existing = (
@@ -2206,8 +2216,9 @@ async def update_note(
     blob = _decode_note_blob(body.blob)
     # This read establishes the chart key used for serialization; close its
     # transaction before potentially waiting behind another note update.
+    patient_id = row.user_id
     await session.commit()
-    async with _notes_guard(session, user):
+    async with _note_chart_guard(session, user, patient_id):
         _assert_custody_write(user, body.custody_version)
         # Re-fetch under the same chart lock: another request may have
         # deleted the row while this endpoint was waiting to update it.
@@ -2495,6 +2506,7 @@ async def read_note_revisions(
     offset: int = Query(default=0, ge=0, le=100_000),
     limit: int = Query(default=50, ge=1, le=200),
     page_bytes: int | None = Query(default=None, ge=1, le=NOTES_PAGE_BLOB_BYTES),
+    expected_revision: str | None = None,
 ):
     """The edit history of one of the therapist's OWN notes (P3,
     2026-09-21 — clinic readiness). Revisions are the superseded blobs,
@@ -2509,88 +2521,122 @@ async def read_note_revisions(
     entries/measures/notes contract: metadata-first sizing, the 2 MiB
     hard page budget (a legacy no-``page_bytes`` request over budget
     fails loudly with 413; a byte-paginating client gets short pages +
-    X-Next-Offset), and the mid-page drift guard on the blob fetch."""
-    row = (
-        (
-            await session.execute(
-                select(TherapistNote)
-                .join(User, User.id == TherapistNote.user_id)
-                .where(
-                    TherapistNote.id == note_id,
-                    TherapistNote.therapist_id == user.id,
-                    User.is_active.is_(True),
-                )
-                .with_for_update()
-            )
+    X-Next-Offset), and the mid-page drift guard on the blob fetch.
+
+    The therapist lifecycle/notes and patient erasure fences cover the complete
+    read and response construction. X-Notes-Revision and expected_revision use
+    the same global therapist snapshot as live notes, so edits between history pages require
+    a restart instead of silently shifting offsets."""
+    expected = parse_expected_revision(expected_revision)
+    patient_id = await session.scalar(
+        select(TherapistNote.user_id).where(
+            TherapistNote.id == note_id, TherapistNote.therapist_id == user.id
         )
-        .scalars()
-        .first()
     )
-    if row is None:
+    if patient_id is None:
         raise ApiError(status_code=404, detail="note not found", code="not_found")
-    # The revisions collection changes exactly when the note is edited (each
-    # edit supersedes one blob and bumps note.version), so the live row's
-    # version is the snapshot marker stamped on drift conflicts below.
-    note_version = row.version if row.version is not None else 1
-    candidate_rows = (
-        await session.execute(
-            select(
-                TherapistNoteRevision.id,
-                _revision_blob_length(session).label("size"),
+    # Only chart identity was inspected. Release the connection before
+    # waiting; the live, ownership-scoped row is fetched inside both fences.
+    await session.commit()
+    # History is part of the same private chart as live notes. Re-authorize
+    # inside their fence and hold it through ciphertext serialization.
+    async with _note_chart_guard(session, user, patient_id):
+        row = (
+            (
+                await session.execute(
+                    select(TherapistNote)
+                    .join(User, User.id == TherapistNote.user_id)
+                    .where(
+                        TherapistNote.id == note_id,
+                        TherapistNote.therapist_id == user.id,
+                        User.is_active.is_(True),
+                    )
+                    .with_for_update()
+                )
             )
-            .where(
-                TherapistNoteRevision.note_id == note_id,
-                TherapistNoteRevision.therapist_id == user.id,
-            )
-            .order_by(TherapistNoteRevision.created_at.desc(), TherapistNoteRevision.id.desc())
-            # One extra METADATA row is has-more evidence only; it never
-            # becomes a returned revision.
-            .offset(offset)
-            .limit(limit + 1)
+            .scalars()
+            .first()
         )
-    ).all()
-    page = select_byte_page(
-        [(str(rev_id), int(size or 0)) for rev_id, size in candidate_rows[:limit]],
-        more_after_request=len(candidate_rows) > limit,
-        page_bytes=page_bytes,
-        hard_budget=NOTES_PAGE_BLOB_BYTES,
-        collection="note revision",
-    )
-    selected_ids = [rev_id for rev_id, _ in page.selected]
-    fetched = (
-        (
+        if row is None:
+            raise ApiError(status_code=404, detail="note not found", code="not_found")
+        revision = await _current_notes_revision(session, user.id)
+        assert_expected_revision(
+            expected,
+            revision,
+            collection="note revisions",
+            header_name=NOTES_REVISION_HEADER,
+        )
+        await _audit(session, user, row.user_id, "read_note_revisions")
+        candidate_rows = (
             await session.execute(
-                select(TherapistNoteRevision).where(
-                    TherapistNoteRevision.id.in_(selected_ids),
+                select(
+                    TherapistNoteRevision.id,
+                    _revision_blob_length(session).label("size"),
+                )
+                .where(
+                    TherapistNoteRevision.note_id == note_id,
                     TherapistNoteRevision.therapist_id == user.id,
                 )
+                .order_by(TherapistNoteRevision.created_at.desc(), TherapistNoteRevision.id.desc())
+                .offset(offset)
+                .limit(limit + 1)
             )
+        ).all()
+        page = select_byte_page(
+            [(str(rev_id), int(size or 0)) for rev_id, size in candidate_rows[:limit]],
+            more_after_request=len(candidate_rows) > limit,
+            page_bytes=page_bytes,
+            hard_budget=NOTES_PAGE_BLOB_BYTES,
+            collection="note revision",
         )
-        .scalars()
-        .all()
-        if selected_ids
-        else []
-    )
-    revisions = verify_fetched_page(
-        selected_ids,
-        fetched,
-        byte_limit=NOTES_PAGE_BLOB_BYTES,
-        collection="note revision",
-        header_name=NOTES_REVISION_HEADER,
-        revision=note_version,
-    )
-    await _audit(session, user, row.user_id, "read_note_revisions")
-    await session.commit()
-    if page.has_more and revisions:
-        response.headers[NEXT_OFFSET_HEADER] = str(offset + len(revisions))
-    return [
-        NoteRevisionOut(
-            id=rev.id,
-            blob=base64.b64encode(bytes(rev.blob)).decode("ascii"),
-            created_at=rev.created_at,
+        selected_ids = [rev_id for rev_id, _ in page.selected]
+        fetched = (
+            (
+                await session.execute(
+                    select(TherapistNoteRevision).where(
+                        TherapistNoteRevision.id.in_(selected_ids),
+                        TherapistNoteRevision.therapist_id == user.id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+            if selected_ids
+            else []
         )
-        for rev in revisions
-    ]
+        if fetched:
+            # Fetching private history is an access fact even if a later
+            # consistency check refuses the response.
+            await session.commit()
+        revisions = verify_fetched_page(
+            selected_ids,
+            fetched,
+            byte_limit=page_bytes if page_bytes is not None else NOTES_PAGE_BLOB_BYTES,
+            collection="note revisions",
+            header_name=NOTES_REVISION_HEADER,
+            revision=revision,
+        )
+        result = [
+            NoteRevisionOut(
+                id=rev.id,
+                blob=base64.b64encode(bytes(rev.blob)).decode("ascii"),
+                created_at=rev.created_at,
+            )
+            for rev in revisions
+        ]
+        final_revision = await _current_notes_revision(session, user.id)
+        if final_revision != revision:
+            raise collection_changed_error("note revisions", NOTES_REVISION_HEADER, final_revision)
+        emit_page_headers(
+            response,
+            revision=revision,
+            header_name=NOTES_REVISION_HEADER,
+            has_more=page.has_more,
+            rows_returned=len(result),
+            offset=offset,
+        )
+        await session.commit()
+        return result
 
 
 @router.delete(
@@ -2628,8 +2674,9 @@ async def delete_note(
     )
     if row is None:
         raise ApiError(status_code=404, detail="note not found", code="not_found")
+    patient_id = row.user_id
     await session.commit()
-    async with _notes_guard(session, user):
+    async with _note_chart_guard(session, user, patient_id):
         # The row may have been removed while this delete waited behind an
         # update/delete already holding the same chart lock.
         row = (

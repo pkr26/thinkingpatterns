@@ -351,7 +351,7 @@ function primaryJoin(tokens: string[]): string {
  *  to the unjoined variant: a real crisis phrase still matches there,
  *  and no benign sentence turns into one ("iwant to diet" matches
  *  nothing either way). */
-function orphanGlue(tokens: string[]): string {
+function orphanGlue(tokens: string[], preserveFirstPerson = false): string {
   const out: string[] = [];
   let run: string[] = [];
   for (const token of tokens) {
@@ -362,7 +362,14 @@ function orphanGlue(tokens: string[]): string {
     if (run.length >= SINGLE_LETTER_JOIN) {
       out.push(run.join(""), token);
     } else if (run.length > 0) {
-      out.push(run.join("") + token);
+      // Keep the first-person pronoun separate from fragments of the next
+      // word: "I w a nt to die" must become "i want to die".
+      // This optional interpretation supplements original split-word glue.
+      if (preserveFirstPerson && run.length > 1 && run[0] === "i") {
+        out.push("i", run.slice(1).join("") + token);
+      } else {
+        out.push(run.join("") + token);
+      }
     } else {
       out.push(token);
     }
@@ -593,6 +600,10 @@ export function foldedVariants(text: string): string[] {
   const out: string[] = [];
   for (const tokens of variantTokenSets(normalizePrePunct(folded))) {
     out.push(primaryJoin(tokens), orphanGlue(tokens), concatJoin(tokens));
+    const pronounGlue = orphanGlue(tokens, true);
+    if (pronounGlue !== orphanGlue(tokens)) {
+      out.push(primaryJoin(tokens), pronounGlue, concatJoin(tokens));
+    }
   }
   return out;
 }
@@ -606,6 +617,10 @@ export function matchVariants(text: string): string[] {
   const out: string[] = [];
   for (const tokens of variantTokenSets(pre)) {
     out.push(primaryJoin(tokens), orphanGlue(tokens), concatJoin(tokens));
+    const pronounGlue = orphanGlue(tokens, true);
+    if (pronounGlue !== orphanGlue(tokens)) {
+      out.push(primaryJoin(tokens), pronounGlue, concatJoin(tokens));
+    }
   }
   return out;
 }

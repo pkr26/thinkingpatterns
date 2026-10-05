@@ -1,0 +1,554 @@
+[
+  {
+    "id": "D01",
+    "name": "Writing calendar and progressive revelation",
+    "mutants": 6,
+    "outcomes": {
+      "KILLED": 6
+    },
+    "targets": [
+      "backend/app/services/threshold.py"
+    ]
+  },
+  {
+    "id": "D02",
+    "name": "Multilingual eligibility and honest missing evidence",
+    "mutants": 6,
+    "outcomes": {
+      "KILLED": 6
+    },
+    "targets": [
+      "backend/app/services/brain.py"
+    ]
+  },
+  {
+    "id": "D03",
+    "name": "Sentiment semantics and lexical authority",
+    "mutants": 11,
+    "outcomes": {
+      "KILLED": 11
+    },
+    "targets": [
+      "backend/app/services/brain.py",
+      "backend/app/services/sentiment_lexicon.py",
+      "backend/app/services/sentiment_lexicon_es.py"
+    ]
+  },
+  {
+    "id": "D04",
+    "name": "Personalized associations and truthful lag wording",
+    "mutants": 11,
+    "outcomes": {
+      "KILLED": 11
+    },
+    "targets": [
+      "backend/app/services/brain.py",
+      "backend/app/services/patterns.py"
+    ]
+  },
+  {
+    "id": "D05",
+    "name": "Comparative affect and behavior dynamics",
+    "mutants": 7,
+    "outcomes": {
+      "KILLED": 7
+    },
+    "targets": [
+      "backend/app/services/brain.py"
+    ]
+  },
+  {
+    "id": "D06",
+    "name": "EWMA mood-shift calibration and reanchoring",
+    "mutants": 6,
+    "outcomes": {
+      "KILLED": 6
+    },
+    "targets": [
+      "backend/app/services/brain.py"
+    ]
+  },
+  {
+    "id": "D07",
+    "name": "Emergent topics and recurring-thought discovery",
+    "mutants": 8,
+    "outcomes": {
+      "KILLED": 8
+    },
+    "targets": [
+      "backend/app/services/brain.py",
+      "backend/app/services/phrases.py"
+    ]
+  },
+  {
+    "id": "D08",
+    "name": "Statistics and full claim-family correction",
+    "mutants": 6,
+    "outcomes": {
+      "KILLED": 6
+    },
+    "targets": [
+      "backend/app/services/brain.py",
+      "backend/app/services/statsig.py"
+    ]
+  },
+  {
+    "id": "D09",
+    "name": "Pattern memory, evidence, replication and lifecycle",
+    "mutants": 7,
+    "outcomes": {
+      "KILLED": 7
+    },
+    "targets": [
+      "backend/app/services/brain.py"
+    ]
+  },
+  {
+    "id": "D10",
+    "name": "Patient-directed reflective questions",
+    "mutants": 6,
+    "outcomes": {
+      "KILLED": 6
+    },
+    "targets": [
+      "backend/app/services/questions.py"
+    ]
+  },
+  {
+    "id": "D11",
+    "name": "Crisis tiers and nonquoting interlock",
+    "mutants": 9,
+    "outcomes": {
+      "KILLED": 9
+    },
+    "targets": [
+      "backend/app/services/brain.py",
+      "backend/app/services/crisis.py",
+      "backend/app/services/questions.py"
+    ]
+  },
+  {
+    "id": "L01",
+    "name": "Dormant enrichment trust and legacy output boundaries",
+    "mutants": 6,
+    "outcomes": {
+      "KILLED": 6
+    },
+    "targets": [
+      "backend/app/services/llm.py"
+    ]
+  },
+  {
+    "id": "S01",
+    "name": "Registration/login and account enumeration privacy",
+    "mutants": 5,
+    "outcomes": {
+      "KILLED": 5
+    },
+    "targets": [
+      "backend/app/api/auth.py"
+    ]
+  },
+  {
+    "id": "S02",
+    "name": "Bearer authenticity, authorization and revocation",
+    "mutants": 6,
+    "outcomes": {
+      "KILLED": 6
+    },
+    "targets": [
+      "backend/app/deps.py",
+      "backend/app/security/tokens.py"
+    ]
+  },
+  {
+    "id": "S03",
+    "name": "Required therapist MFA, TOTP and single-use recovery codes",
+    "mutants": 5,
+    "outcomes": {
+      "KILLED": 5
+    },
+    "targets": [
+      "backend/app/api/account.py",
+      "backend/app/api/auth.py",
+      "backend/app/deps.py",
+      "backend/app/security/totp.py"
+    ]
+  },
+  {
+    "id": "S04",
+    "name": "Fresh sensitive-action reauthentication and one-use step-up",
+    "mutants": 6,
+    "outcomes": {
+      "KILLED": 6
+    },
+    "targets": [
+      "backend/app/security/step_up.py"
+    ]
+  },
+  {
+    "id": "S05",
+    "name": "KDF policy, key-purpose separation and canonical parameters",
+    "mutants": 6,
+    "outcomes": {
+      "KILLED": 6
+    },
+    "targets": [
+      "backend/app/api/auth.py",
+      "backend/app/security/kdf.py"
+    ]
+  },
+  {
+    "id": "S06",
+    "name": "AEAD and independent authenticated-data contracts",
+    "mutants": 5,
+    "outcomes": {
+      "KILLED": 5
+    },
+    "targets": [
+      "backend/app/security/crypto.py"
+    ]
+  },
+  {
+    "id": "S07",
+    "name": "V2 key-envelope migration and atomic password replacement",
+    "mutants": 5,
+    "outcomes": {
+      "KILLED": 5
+    },
+    "targets": [
+      "backend/app/api/account.py",
+      "backend/app/security/envelope.py"
+    ]
+  },
+  {
+    "id": "S08",
+    "name": "Patient recovery-kit creation, retirement and password reset",
+    "mutants": 5,
+    "outcomes": {
+      "KILLED": 5
+    },
+    "targets": [
+      "backend/app/api/account.py",
+      "backend/app/api/auth.py"
+    ]
+  },
+  {
+    "id": "S09",
+    "name": "Processing-key ownership, one-use custody and elapsed-time expiry",
+    "mutants": 6,
+    "outcomes": {
+      "KILLED": 6
+    },
+    "targets": [
+      "backend/app/security/enclave.py"
+    ]
+  },
+  {
+    "id": "S10",
+    "name": "Processing plaintext lifetime and all-path buffer cleanup",
+    "mutants": 5,
+    "outcomes": {
+      "KILLED": 5
+    },
+    "targets": [
+      "backend/app/security/crypto.py",
+      "backend/app/security/enclave.py"
+    ]
+  },
+  {
+    "id": "A01",
+    "name": "Journal sync and generation integrity",
+    "mutants": 5,
+    "outcomes": {
+      "KILLED": 5
+    },
+    "targets": [
+      "backend/app/api/entries.py"
+    ]
+  },
+  {
+    "id": "A02",
+    "name": "Recorded measures and correction",
+    "mutants": 5,
+    "outcomes": {
+      "KILLED": 5
+    },
+    "targets": [
+      "backend/app/api/measures.py"
+    ]
+  },
+  {
+    "id": "A03",
+    "name": "Snapshot-consistent bounded paging",
+    "mutants": 5,
+    "outcomes": {
+      "KILLED": 5
+    },
+    "targets": [
+      "backend/app/api/_paging.py"
+    ]
+  },
+  {
+    "id": "A04",
+    "name": "Provider consent currency and decision evidence",
+    "mutants": 5,
+    "outcomes": {
+      "KILLED": 5
+    },
+    "targets": [
+      "backend/app/api/account.py"
+    ]
+  },
+  {
+    "id": "A05",
+    "name": "Pairing and single-use sharing grants",
+    "mutants": 5,
+    "outcomes": {
+      "KILLED": 5
+    },
+    "targets": [
+      "backend/app/api/consents.py"
+    ]
+  },
+  {
+    "id": "A06",
+    "name": "Therapist scope and revocation",
+    "mutants": 5,
+    "outcomes": {
+      "KILLED": 5
+    },
+    "targets": [
+      "backend/app/api/therapist.py"
+    ]
+  },
+  {
+    "id": "A07",
+    "name": "Therapist-private clinical notes",
+    "mutants": 14,
+    "outcomes": {
+      "KILLED": 14
+    },
+    "targets": [
+      "backend/app/api/therapist.py"
+    ]
+  },
+  {
+    "id": "A08",
+    "name": "Clinician custody and atomic password retry",
+    "mutants": 5,
+    "outcomes": {
+      "KILLED": 5
+    },
+    "targets": [
+      "backend/app/api/_custody.py"
+    ]
+  },
+  {
+    "id": "A09",
+    "name": "Therapist sharing-identity replacement",
+    "mutants": 5,
+    "outcomes": {
+      "KILLED": 5
+    },
+    "targets": [
+      "backend/app/api/therapist.py"
+    ]
+  },
+  {
+    "id": "A10",
+    "name": "Speech and translation dispatch workflow",
+    "mutants": 5,
+    "outcomes": {
+      "KILLED": 5
+    },
+    "targets": [
+      "backend/app/api/audio.py"
+    ]
+  },
+  {
+    "id": "A11",
+    "name": "Kept-recording lifecycle",
+    "mutants": 5,
+    "outcomes": {
+      "KILLED": 5
+    },
+    "targets": [
+      "backend/app/api/audio.py"
+    ]
+  },
+  {
+    "id": "A12",
+    "name": "Portable export completeness and snapshot",
+    "mutants": 5,
+    "outcomes": {
+      "KILLED": 5
+    },
+    "targets": [
+      "backend/app/api/account.py"
+    ]
+  },
+  {
+    "id": "A13",
+    "name": "Encrypted analysis input provenance",
+    "mutants": 6,
+    "outcomes": {
+      "KILLED": 6
+    },
+    "targets": [
+      "backend/app/api/insights.py"
+    ]
+  },
+  {
+    "id": "A14",
+    "name": "Server insight publication and live revelation",
+    "mutants": 5,
+    "outcomes": {
+      "KILLED": 5
+    },
+    "targets": [
+      "backend/app/api/insights.py"
+    ]
+  },
+  {
+    "id": "A15",
+    "name": "Local-analysis upload generation CAS",
+    "mutants": 5,
+    "outcomes": {
+      "KILLED": 5
+    },
+    "targets": [
+      "backend/app/api/insights.py"
+    ]
+  },
+  {
+    "id": "A16",
+    "name": "Resumable corpus and credential rotation",
+    "mutants": 5,
+    "outcomes": {
+      "KILLED": 5
+    },
+    "targets": [
+      "backend/app/api/insights.py"
+    ]
+  },
+  {
+    "id": "A17",
+    "name": "Authenticated audit append and external evidence",
+    "mutants": 5,
+    "outcomes": {
+      "KILLED": 5
+    },
+    "targets": [
+      "backend/app/api/_audit.py"
+    ]
+  },
+  {
+    "id": "A18",
+    "name": "Authenticated audit retention and incremental checkpoints",
+    "mutants": 5,
+    "outcomes": {
+      "KILLED": 5
+    },
+    "targets": [
+      "backend/app/api/_audit.py"
+    ]
+  },
+  {
+    "id": "O01",
+    "name": "Request framing, body limits and error privacy",
+    "mutants": 6,
+    "outcomes": {
+      "KILLED": 6
+    },
+    "targets": [
+      "backend/app/middleware.py"
+    ]
+  },
+  {
+    "id": "O02",
+    "name": "Rate windows, proxy identity and bounded counters",
+    "mutants": 5,
+    "outcomes": {
+      "KILLED": 5
+    },
+    "targets": [
+      "backend/app/cache.py",
+      "backend/app/middleware.py"
+    ]
+  },
+  {
+    "id": "O03",
+    "name": "Runtime ownership, locking, readiness and admission",
+    "mutants": 5,
+    "outcomes": {
+      "KILLED": 5
+    },
+    "targets": [
+      "backend/app/locks.py",
+      "backend/app/main.py",
+      "backend/app/middleware.py",
+      "backend/app/singleprocess.py"
+    ]
+  },
+  {
+    "id": "O04",
+    "name": "Production startup, secret, transport and resource policy",
+    "mutants": 5,
+    "outcomes": {
+      "KILLED": 5
+    },
+    "targets": [
+      "backend/app/config.py"
+    ]
+  },
+  {
+    "id": "O05",
+    "name": "Database constraints and real PostgreSQL migrations",
+    "mutants": 5,
+    "outcomes": {
+      "KILLED": 5
+    },
+    "targets": [
+      "backend/alembic/env.py",
+      "backend/alembic/versions/f4a2d8c6b901_entry_aad_guards.py",
+      "backend/app/db.py",
+      "backend/app/main.py",
+      "backend/app/models.py"
+    ]
+  },
+  {
+    "id": "O06",
+    "name": "Privacy-safe metrics and maintenance visibility",
+    "mutants": 5,
+    "outcomes": {
+      "KILLED": 5
+    },
+    "targets": [
+      "backend/app/main.py",
+      "backend/app/metrics.py"
+    ]
+  },
+  {
+    "id": "O07",
+    "name": "Authenticated backup, exact retention and restore",
+    "mutants": 5,
+    "outcomes": {
+      "KILLED": 5
+    },
+    "targets": [
+      "backup/backup_mac.py"
+    ]
+  },
+  {
+    "id": "O08",
+    "name": "Logical account retirement and complete restart-safe erasure",
+    "mutants": 5,
+    "outcomes": {
+      "KILLED": 5
+    },
+    "targets": [
+      "backend/app/services/account_deletion.py"
+    ]
+  }
+]
