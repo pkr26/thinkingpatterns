@@ -74,7 +74,14 @@ describe("tracked account metadata commits", () => {
     await new Promise<void>(resolve => setImmediate(resolve));
     expect(erased).toBe(false);
     release.resolve();
-    await pendingWrite;
+    // Preference setters now report a retired completion to their caller
+    // as well as joining the erasure drain. The already-dispatched physical
+    // write must still be deleted before cleanup reports success.
+    if (slot === accountStorageKey.reminders(USER) || slot === accountStorageKey.measureReminders(USER)) {
+      await expect(pendingWrite).rejects.toThrow("deleted");
+    } else {
+      await pendingWrite;
+    }
     expect(await cleanup).toEqual([]);
     expect(await storage.getItem(slot)).toBeNull();
   });

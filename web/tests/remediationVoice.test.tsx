@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { EntryView } from '../src/views/Entry';
-import { clearSession, setSession } from '../src/api/client';
+import { api, clearSession, setSession } from '../src/api/client';
+import { loadActiveDraft } from '../src/entryDraft';
 import { vault } from '../src/vault';
 import { jsonResponse, resetTestState, stubFetch } from './helpers/api';
-import { press, render, settle, typeArea, textOfNode } from './helpers/rtr';
+import { press, pressSwitch, render, settle, typeArea, textOfNode } from './helpers/rtr';
 
 const recorder = vi.hoisted(() => ({ current: {} as Record<string, any> }));
 vi.mock('../src/audio/recorder', () => ({ useRecorder: () => recorder.current }));
@@ -86,4 +87,30 @@ it('current voice-policy consent permits microphone acquisition', async () => {
   await press(root, 'Record instead');
   await settle(10, 3);
   expect(recorder.current.start).toHaveBeenCalledTimes(1);
+});
+
+it('finishing a kept-audio upload preserves the newer draft already autosaved during that upload', async () => {
+  stubFetch(() => jsonResponse({ original_text: 'Recorded entry to save', language: 'en', language_raw: 'english', english_text: null }));
+  const root = await render(<EntryView onSaved={() => undefined} />);
+  await settle(10, 4);
+  recorder.current.recording = { blob: new Blob([new Uint8Array([1, 2, 3])], { type: 'audio/webm' }), normalizedMime: 'audio/webm', durationSeconds: 5 };
+  await act(async () => root.update(<EntryView onSaved={() => undefined} />));
+  await settle(10, 5);
+  expect(root.root.findAllByType('textarea')[0]!.props.value).toBe('Recorded entry to save');
+  await pressSwitch(root);
+  vi.spyOn(api, 'createEntry').mockResolvedValue({ id: 'saved-entry' } as Awaited<ReturnType<typeof api.createEntry>>);
+  let finish!: () => void, started!: () => void;
+  const uploading = new Promise<void>(resolve => { started = resolve; });
+  vi.spyOn(api, 'uploadAudioAttachment').mockImplementation(() => { started(); return new Promise(resolve => { finish = () => resolve({} as Awaited<ReturnType<typeof api.uploadAudioAttachment>>); }); });
+  await press(root, 'Save entry');
+  await uploading;
+  await settle(10, 2);
+  await typeArea(root, 'How was today?', 'New writing during the audio upload');
+  // Wait for the real debounce and real encrypted durable draft write.
+  await settle(50, 8);
+  expect((await loadActiveDraft(new Uint8Array(32).fill(7), 'owner-A'))?.text).toBe('New writing during the audio upload');
+  await act(async () => finish());
+  await settle(10, 5);
+  expect(root.root.findAllByType('textarea')[0]!.props.value).toBe('New writing during the audio upload');
+  expect((await loadActiveDraft(new Uint8Array(32).fill(7), 'owner-A'))?.text).toBe('New writing during the audio upload');
 });

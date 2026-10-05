@@ -839,7 +839,13 @@ export const MAX_LIST_PAGES = 200;
  *  continuation sends it back so a concurrent write answers a retryable
  *  409 instead of causing offset drift. A headerless legacy server
  *  (no revision) walks unpinned with dedupe — never mixed. */
-export async function listEntriesWalk(since?: string): Promise<ListedEntry[]> {
+export async function listEntriesWalk(since?: string, isCurrent: () => boolean = () => true): Promise<ListedEntry[]> {
+  const walkSession = session;
+  const requireCurrent = (): void => {
+    if (!walkSession || session !== walkSession || walkSession.controller.signal.aborted || !isCurrent()) {
+      throw new ApiError(0, "session ended");
+    }
+  };
   for (let attempt = 0; attempt <= MAX_LIST_SNAPSHOT_RESTARTS; attempt += 1) {
     try {
       const all: ListedEntry[] = [];
@@ -851,6 +857,10 @@ export async function listEntriesWalk(since?: string): Promise<ListedEntry[]> {
       const getPage = async (
         pageOffset: number,
       ): Promise<ListedEntriesPage> => {
+        // One ownership boundary spans the entire walk, including retries.
+        // Per-request fencing cannot protect a later continuation dispatched
+        // after the previous page's promise has already settled.
+        requireCurrent();
         const result = await api.listEntriesPage({
           since,
           limit: pageSize,
@@ -860,6 +870,7 @@ export async function listEntriesWalk(since?: string): Promise<ListedEntry[]> {
             ? { expectedRevision: revision }
             : {}),
         });
+        requireCurrent();
         const receivedRevision = result.revision ?? null;
         if (revisionMode === "unknown") {
           revisionMode = receivedRevision === null ? "legacy" : "snapshot";

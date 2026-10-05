@@ -3728,6 +3728,7 @@ def _detect_phrases(
     clusters: list[phrase_miner.PhraseCluster],
     allow_rumination: bool = True,
     language: str | None = None,
+    sentence_languages: dict[tuple[date, str], str] | None = None,
 ) -> list[_Signal]:
     """Near-duplicate clusters; negative ones surface as rumination.
 
@@ -3755,14 +3756,28 @@ def _detect_phrases(
         # collision words the per-language selectors exist to fix, and a
         # negativity detail inconsistent with the corpus's own mood
         # scoring two functions up.
-        member_sentiments = [sentiment_score(ref.text.split(), language) for ref in cluster.members]
-        member_negators = [
-            sum(1 for t in ref.text.split() if t in _negators_for(language))
+        member_languages = [
+            sentence_languages.get((ref.day, ref.text), "other")
+            if sentence_languages is not None
+            else language
             for ref in cluster.members
+        ]
+        member_sentiments = [
+            sentiment_score(ref.text.split(), member_language)
+            for ref, member_language in zip(cluster.members, member_languages)
+        ]
+        member_negators = [
+            sum(1 for t in ref.text.split() if t in _negators_for(member_language))
+            for ref, member_language in zip(cluster.members, member_languages)
         ]
         negativity = sum(member_sentiments) / len(member_sentiments)
         negators = sum(member_negators) / len(member_negators)
-        is_rumination = allow_rumination and (
+        # A supported-language window may contain unsupported entries.
+        # Repetition remains observable there, but its stripped Latin
+        # quotation cannot supply a negative-feeling classification. If
+        # either source for a same-day phrase is unsupported, stay neutral.
+        cluster_language_ok = "other" not in member_languages
+        is_rumination = allow_rumination and cluster_language_ok and (
             negativity <= RUMINATION_NEGATIVITY_MAX
             or (negativity <= 0.0 and negators >= RUMINATION_MIN_NEGATORS)
         )
@@ -4927,10 +4942,15 @@ def update(
     # OWN anchor (item 14, 2026-09-26): unambiguous possessive-relation
     # bigrams ("mi madre", "mi jefe") with no capitalization dependence —
     # see _person_candidates_es. Every other language anchors nothing.
+    person_window = [
+        entry
+        for entry, entry_language in zip(window, entry_languages)
+        if entry_language == language
+    ]
     if language == "en":
-        person_names: set[str] = _person_candidates(window)
+        person_names: set[str] = _person_candidates(person_window)
     elif language == "es":
-        person_names = _person_candidates_es(window)
+        person_names = _person_candidates_es(person_window)
     else:
         person_names = set()
     if person_names:
@@ -4938,10 +4958,15 @@ def update(
             (
                 entry,
                 tokens,
-                themes | {n for n in person_names if _person_mention(entry.text, n, language)},
+                themes
+                | {
+                    n
+                    for n in person_names
+                    if entry_language == language and _person_mention(entry.text, n, language)
+                },
                 sentiment,
             )
-            for entry, tokens, themes, sentiment in per_entry
+            for (entry, tokens, themes, sentiment), entry_language in zip(per_entry, entry_languages)
         ]
 
     # Per-entry eligibility matters even in a supported-language window:
@@ -4994,7 +5019,9 @@ def update(
     day_pa_buckets: dict[date, list[float]] = {}
     day_na_buckets: dict[date, list[float]] = {}
     if language_ok:
-        for entry, tokens, _, _ in per_entry:
+        for (entry, tokens, _, _), entry_language in zip(per_entry, entry_languages):
+            if entry_language == "other":
+                continue
             if entry.sentiment is not None:
                 continue
             if not entry.text:
@@ -5002,7 +5029,7 @@ def update(
                 # affect components either — (0.0, 0.0) would be fabricated
                 # neutral PA/NA days, the same lie as the mood series.
                 continue
-            pa, na = sentiment_components(tokens, language)
+            pa, na = sentiment_components(tokens, entry_language)
             day_pa_buckets.setdefault(entry.entry_date, []).append(pa)
             day_na_buckets.setdefault(entry.entry_date, []).append(na)
     day_pa = sorted((day, sum(v) / len(v)) for day, v in day_pa_buckets.items())
@@ -5015,7 +5042,9 @@ def update(
     # lexicon measurement.
     day_sense_buckets: dict[date, list[float]] = {}
     if language_ok:
-        for entry, tokens, _, _ in per_entry:
+        for (entry, tokens, _, _), entry_language in zip(per_entry, entry_languages):
+            if entry_language == "other":
+                continue
             density = _sense_density(tokens)
             if density is not None:
                 day_sense_buckets.setdefault(entry.entry_date, []).append(density)
@@ -5080,10 +5109,29 @@ def update(
         # the topic presence gate (a presence a repeated sentence already
         # explains is the same measurement twice) — computed once per run.
         clusters = _phrase_clusters(window)
+        sentence_languages: dict[tuple[date, str], str] = {}
+        for entry_language in ("en", "es", "other"):
+            # Each partition uses the same newest-first bound as clustering,
+            # so it covers every member without retaining an unbounded map.
+            for ref in _window_sentences(
+                [entry for entry, lang in zip(window, entry_languages) if lang == entry_language]
+            ):
+                identity = (ref.day, ref.text)
+                previous = sentence_languages.get(identity, entry_language)
+                sentence_languages[identity] = (
+                    entry_language if previous == entry_language else "other"
+                )
         signals.extend(
             _detect_themes(residual_per_entry, weekday_days, len(day_buckets), resid_lag1, language)
         )
-        signals.extend(_detect_phrases(clusters, allow_rumination=language_ok, language=language))
+        signals.extend(
+            _detect_phrases(
+                clusters,
+                allow_rumination=language_ok,
+                language=language,
+                sentence_languages=sentence_languages,
+            )
+        )
         # EWMA baseline re-anchor: once a stored shift is established, the
         # chart re-learns the new normal from post-shift data only.
         anchor = _mood_reanchor_day(store, today)
@@ -5165,7 +5213,12 @@ def update(
         if diversity is not None:
             signals.append(diversity)
         if language_ok:
-            signals.extend(_detect_topics(per_entry, clusters, language))
+            text_entries = [
+                item
+                for item, entry_language in zip(per_entry, entry_languages)
+                if entry_language != "other" and item[0].text
+            ]
+            signals.extend(_detect_topics(text_entries, clusters, language))
 
     # Origin marking (2026-09-17): patterns fed by the user's own tags or
     # structured ratings say so — "you tagged it" is a different evidence

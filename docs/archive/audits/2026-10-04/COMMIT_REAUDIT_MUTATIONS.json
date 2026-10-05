@@ -1,0 +1,735 @@
+{
+  "audited_commit": "9f22fb34977091297092680d0b4f24ad4b273162",
+  "date": "2026-10-04",
+  "scope": "Fresh behavior executions in isolated source copies; final mobile replay supersedes earlier mobile proofs. Every selected baseline passed, no setup error or exemption credited.",
+  "summary": {
+    "KILLED": 210,
+    "CAUGHT": 10
+  },
+  "controls_verified": 220,
+  "runs": [
+    {
+      "name": "complete_campaign/shard-0",
+      "controls": 55,
+      "passing_baseline_commands": 32
+    },
+    {
+      "name": "complete_campaign/shard-1",
+      "controls": 55,
+      "passing_baseline_commands": 37
+    },
+    {
+      "name": "complete_campaign/shard-2",
+      "controls": 55,
+      "passing_baseline_commands": 35
+    },
+    {
+      "name": "complete_campaign/shard-3",
+      "controls": 55,
+      "passing_baseline_commands": 36
+    },
+    {
+      "name": "final_mobile_replay/shard-0",
+      "controls": 17,
+      "passing_baseline_commands": 17
+    }
+  ],
+  "source_scope": "Final mutation targets and command-named oracle files; raw isolated-source manifests are retained locally.",
+  "sources": [
+    [
+      "backend/app/api/_paging.py",
+      "8831585988b530c62206a1b7d67a76951acd52938ce66f67c67aa773b1475d2e"
+    ],
+    [
+      "backend/app/api/account.py",
+      "682ac7d0ee78e352c2c7fe4f4f9a04488ecd01737ffca7c343a423ab46a2b1c5"
+    ],
+    [
+      "backend/app/api/auth.py",
+      "f30e2e388e2b3873ae54c5de216bc2852cc8731f43edc91ccafc53b37095fc9f"
+    ],
+    [
+      "backend/app/api/consents.py",
+      "78df4e1c5894dc2a566f47d3721d9a253b6519c599c740be847f4270ba9bb2fe"
+    ],
+    [
+      "backend/app/api/entries.py",
+      "22a4ad44ca1039f018c14abab1a27ecc79bc0c434f8a378643a13b8c25217f5e"
+    ],
+    [
+      "backend/app/api/insights.py",
+      "82b5c783ee63765a42d072b02f7f652b1387fc55d702469ed8d42f0d4ce0f978"
+    ],
+    [
+      "backend/app/api/measures.py",
+      "8508e29b5fb7da9fb2032a0b6f1114570f4103122bc8f81b35d2d00542f6eafd"
+    ],
+    [
+      "backend/app/api/therapist.py",
+      "3576c0905ec25aa27ba8c54d0b96718e52760c331d21b59fc5bd7ca33c835c5f"
+    ],
+    [
+      "backend/app/cache.py",
+      "3a8e13986e2924c2247ee73ed390472609fd09a642b382df591359881ba84ef0"
+    ],
+    [
+      "backend/app/config.py",
+      "c1e6923deef7ca1c891a98207b345774e0e5b617460e7d2e4b81ce9cb49c300d"
+    ],
+    [
+      "backend/app/deps.py",
+      "495895102ea8ce6aaca5936dd5983d80185be7155386f274e883900cc642041e"
+    ],
+    [
+      "backend/app/locks.py",
+      "8e9ff1ee4f00ffb605fb3bb402cf59a612d517f291c47a5dab2805c5b7e08797"
+    ],
+    [
+      "backend/app/main.py",
+      "57152cc3d709f9587dd507608d1ddffe89c8a4349c3e3aeec0d2a6dc7737759b"
+    ],
+    [
+      "backend/app/middleware.py",
+      "20186e6010396587159f1267b34189202f58b498d85e3d357d5896853c7f7ee2"
+    ],
+    [
+      "backend/app/models.py",
+      "12f6c5fbf8f112ab7b03626e6abddf1eb31191f7dda8a2a6bf0df43db486679f"
+    ],
+    [
+      "backend/app/security/crypto.py",
+      "6622b2e1e08aa16954d4b19976f21b1fa05e1ed348fc325e12497668393638ba"
+    ],
+    [
+      "backend/app/security/enclave.py",
+      "b7440b0dc1906d14f8d91927d69308445cdb730dff1de7ed69b8ee8ea77e442d"
+    ],
+    [
+      "backend/app/security/kdf.py",
+      "5cde59ec1dd1728da6c4ae745018155ce67608cd05e0d3c6c5877030be287133"
+    ],
+    [
+      "backend/app/security/totp.py",
+      "1f3a5b2d02593e6f435ed5e8ee74e88402f9ad16edec78b2b7662ad5c7a2a938"
+    ],
+    [
+      "backend/app/services/account_deletion.py",
+      "752d1821c6ef456e7aae25ce8f5bcc084ef6a2bcc66471493a863990639deb72"
+    ],
+    [
+      "backend/app/services/brain.py",
+      "88cd37d0429712efe9be265e9d163888348e386721033dde9640e2dba3c22670"
+    ],
+    [
+      "backend/app/services/crisis.py",
+      "91fbc91778c19cff3c5f25b44b390af7252b510cd6a20e973bc2593db1220419"
+    ],
+    [
+      "backend/app/services/llm.py",
+      "8dfe35c6d25e471405974101d3442b359e0fb38f810627e6477d99b3c9b521fd"
+    ],
+    [
+      "backend/app/services/phrases.py",
+      "b774b86078bf90abcf5550c3cd500a7b2df668681df2b8706b1181d4d29c44c2"
+    ],
+    [
+      "backend/app/services/questions.py",
+      "0cc0b31675b6dbb376fee8f851a31487ee04012ca564951cdf7603804c577e63"
+    ],
+    [
+      "backend/app/services/statsig.py",
+      "8d1e5d18c57fb88c9e3d5e48c05aa6a43d55cf54439a305564e8c4545fa3f209"
+    ],
+    [
+      "backend/app/services/threshold.py",
+      "496365eba8c8998790778431653e486eb0db6190c1c166b11cf7c4c18ba11ea8"
+    ],
+    [
+      "backend/app/singleprocess.py",
+      "b35a957dbc1dd248912ecf0fde457eae3c53c418d51c86cebee4d0ee96445a52"
+    ],
+    [
+      "backend/probe_brain.py",
+      "a930ddb894bbeb2971e9fa566b794d9dbbf98da002241e64e1fa1a91e3d0660d"
+    ],
+    [
+      "backend/tests/test_account_api.py",
+      "193f9f5c74d090ffbf5172ed701a460a4e7eecfd023b66e86abe110718503958"
+    ],
+    [
+      "backend/tests/test_adversarial.py",
+      "311e3eca69c6f2d9a7f4b1c506b164b721a2418b4fd421a63b2c009d406310c8"
+    ],
+    [
+      "backend/tests/test_api_hardening.py",
+      "7e892f15941d3dcacd68d96d5ee870cb253930b8aa8bb5596adfad5c088f8e75"
+    ],
+    [
+      "backend/tests/test_api_pins.py",
+      "e138429cf14c049648cb0b1a7182e797fea5f31c44c2c698fa98af16f31b7715"
+    ],
+    [
+      "backend/tests/test_api_resilience_coverage.py",
+      "844548871b2268c7afe9d541e547b39ec5160a0b5f69c53002f9e23ae2d1da43"
+    ],
+    [
+      "backend/tests/test_audit_2026_09_21_backend.py",
+      "06f8f8243095fdd041bd2f23658f73055285f796ba56f8b87081389219745379"
+    ],
+    [
+      "backend/tests/test_audit_2026_09_21_brain.py",
+      "685f586a394acbfa1513ae9196d4a599c18a24a43dcfd1bab84eb75a499758d5"
+    ],
+    [
+      "backend/tests/test_audit_round2_2026_09_21_brain.py",
+      "51c415d0cb102779c30b47d4c6828e630587b25f0ac110f574912c65b9bd03a9"
+    ],
+    [
+      "backend/tests/test_audit_trail_phase2.py",
+      "78d265cf827e80d11b841524b65c04a766f7421a36bdd464539383c27fe86724"
+    ],
+    [
+      "backend/tests/test_auth_api.py",
+      "a66aaece7122f41e13287466054f56a3801da210beab4aa4982af8ed08bf584c"
+    ],
+    [
+      "backend/tests/test_brain.py",
+      "d6d02403c4326a3ce25206dc034f4e18f1dae7220907db6ec578c5cf18ab4ca0"
+    ],
+    [
+      "backend/tests/test_brain_api.py",
+      "a6e8e36f22fc43ec402392299d5a357c7ee00dd53d0a5d43e4fe38495f2ffbd3"
+    ],
+    [
+      "backend/tests/test_brain_hardening.py",
+      "7b16e1d1c1623e4aad0fc3c3a3089ba8a78c32c909ff4f5820e1de39dcad6ced"
+    ],
+    [
+      "backend/tests/test_contract_pins.py",
+      "71345bb4596e531c88978034e6bba835bf14d08a4fc19906846e8d968d349e86"
+    ],
+    [
+      "backend/tests/test_coverage_gaps.py",
+      "63bd995c3a382041a209e2822fd7d024606cf2dbdabfafc7ef98a2543f37c896"
+    ],
+    [
+      "backend/tests/test_crisis.py",
+      "9a2f0287e26672a3340c40766c9626682bebc858569a32aba057d3b7f141cf91"
+    ],
+    [
+      "backend/tests/test_crypto.py",
+      "da92b5ac2c9d5387ffde3953d11f3836d0a10a59784cd77a26cabf416397b09b"
+    ],
+    [
+      "backend/tests/test_deep_mutation_pins.py",
+      "aa0b46aa62e4637c469dea9b7caf7bbde1a39149df2ab30c366746e3c4b09fed"
+    ],
+    [
+      "backend/tests/test_enclave.py",
+      "1ddf1bb9c5d06296585b64972ab016d2f44436d848eaea24166e4b6d4d769477"
+    ],
+    [
+      "backend/tests/test_encrypt_vectors.py",
+      "645694882e29bc830bf4c3bb31040a04298a99305f7f64fd805eb62f2f6b39d0"
+    ],
+    [
+      "backend/tests/test_entries_api.py",
+      "453f3909ebfd3f76762fbec3d4fa9ff50d18671c96fefe50570bcc15da4de12e"
+    ],
+    [
+      "backend/tests/test_entry_pagination_bytes.py",
+      "071c6aba54e9cea6793867cb335bcdc2315bccdbdb3cd5be0b939cf6fc844243"
+    ],
+    [
+      "backend/tests/test_es_themes.py",
+      "5370106f35ecd79209845365e544f864ee75c1a1aa0973145e105ceccbcab279"
+    ],
+    [
+      "backend/tests/test_hardening.py",
+      "f3676cb90aca2f4223751cb89cad34680474fe0e30db3d3e534cf45ec7b676b0"
+    ],
+    [
+      "backend/tests/test_infra_coverage.py",
+      "1efc6a43f4c5f109c898ba4850638b4104320f63dd7e439886cf874816251027"
+    ],
+    [
+      "backend/tests/test_insights_api.py",
+      "a94114d8ec7ca236db644ff1059b87eb55e1b1c1d41d545103e5bdfab11a0bf0"
+    ],
+    [
+      "backend/tests/test_kdf.py",
+      "dd3ecd21b99ce3d144994a435a9d057ec633f3ee3f3fddd7286bc674f8e527cd"
+    ],
+    [
+      "backend/tests/test_llm.py",
+      "d20882d03ec22f5ebd7a8922f5e032fa9bd399e8aa780476adfebc8dccf90bde"
+    ],
+    [
+      "backend/tests/test_measures_api.py",
+      "89dbd67429d595e209cb024b81af98edb497860c1898645258d3c3194726cbb5"
+    ],
+    [
+      "backend/tests/test_migrations.py",
+      "7fedafb6252c5eb39a0d0f20fd0b96dc759a521dcb975cf69166c55881504114"
+    ],
+    [
+      "backend/tests/test_mutation_pins.py",
+      "a5f1d5748987eb882e9e8d039a1a0abcc01cd56a2b031358bd69398080fa2ee0"
+    ],
+    [
+      "backend/tests/test_note_history.py",
+      "3697a67e32acc58c316c3cf61183d8f0479ebda131010d897b74000fa8000230"
+    ],
+    [
+      "backend/tests/test_ops_hardening.py",
+      "7fa6fe6278f6e778fc4e6d645eab6966cd30830fa9462fab766c14623ad2bdba"
+    ],
+    [
+      "backend/tests/test_patterns.py",
+      "f32ea2a297a456fdb96f6cbfc93774d13277f80e6e49c529d718255f92de4198"
+    ],
+    [
+      "backend/tests/test_phrases.py",
+      "6cc8820635af698203d61b068b5150aaa3d8bc0c50d720e1342131d1afa83d80"
+    ],
+    [
+      "backend/tests/test_questions.py",
+      "3e1c03779c55b3c0f1862add7f00d51a7332d5bd76e0765203865b88fcf8b908"
+    ],
+    [
+      "backend/tests/test_rate_limit.py",
+      "48b2fa6b89171627df1cf813672a71123a0ae0d34e1aede8d4bde59b1f87ab3c"
+    ],
+    [
+      "backend/tests/test_remediation_measure_fetch_bytes.py",
+      "64599fa88f03c75e85355104e8407a12debe9637f855514d4f1053a96390ac49"
+    ],
+    [
+      "backend/tests/test_remediation_measure_quota.py",
+      "8b964556bf4bd295dd84f41e8603143dd9ae8d72d7dc0220bc41ea89b9f46c98"
+    ],
+    [
+      "backend/tests/test_remediation_mutation_analysis.py",
+      "1817264e3dee3fab320f822c78871ae587bd75815de32620dcbac9b2acffa744"
+    ],
+    [
+      "backend/tests/test_remediation_mutation_evidence.py",
+      "2191a597c48a4ac5e3c3bddd3b0752aa5788a270745b84951788773ed3cccd85"
+    ],
+    [
+      "backend/tests/test_remediation_mutation_language.py",
+      "740dc8b4c0a801baac4014a41691184f48a606b76fb900d4b4f1496743a947f3"
+    ],
+    [
+      "backend/tests/test_remediation_note_history.py",
+      "a0bcbeebd03f985f0f194407225c041b0ac3e39f0c90f18bca7b715f0b8abad0"
+    ],
+    [
+      "backend/tests/test_remediation_recompute_serialization.py",
+      "85f13c53c8acaaff4213d9b4e1012e9949d302e345afbf9234a1b0809fa46333"
+    ],
+    [
+      "backend/tests/test_remediation_therapist_measures.py",
+      "bf208ca85d5c1e6ab8897bca20bb17ff96c4a3bb1ed379ca35c19712326c5156"
+    ],
+    [
+      "backend/tests/test_rotation_pins.py",
+      "260f0a4431a331a62955273fe9e9f78c5ffc7861259a89844fba7727c50edda3"
+    ],
+    [
+      "backend/tests/test_security_fixes.py",
+      "156df37968f4bae74ad7c349aac0cd8b9dd56532c644289369439c2acb976214"
+    ],
+    [
+      "backend/tests/test_sharing_crypto.py",
+      "5e5ed6265379e6cc338cd3b16a7ab2e7db7afb42e94878ed30bf9c007967a1a5"
+    ],
+    [
+      "backend/tests/test_snapshot_revisions.py",
+      "f62c9c9654694e046207badbcf86a61df2a2008d413ee0e03fd8602120bb11b2"
+    ],
+    [
+      "backend/tests/test_statsig.py",
+      "17a936bbbb8f268df745e8465f4294e5ce66d57c9f2f82dd79509b085896332c"
+    ],
+    [
+      "backend/tests/test_structured_channels.py",
+      "228958d3f0ff2fc73784ba121ce205cfe5356c2845c71ce41278a9fed8349634"
+    ],
+    [
+      "backend/tests/test_therapist_api.py",
+      "01b4bd52dee201e4a67926deea216e86f5e14dfe5967eca2965c21b57e4dadea"
+    ],
+    [
+      "backend/tests/test_therapist_lifecycle.py",
+      "7d74b115ad58aa0f752453218dc27a15674814e2d9050e6922b31be7a35f7778"
+    ],
+    [
+      "backend/tests/test_threshold.py",
+      "66a6ff874a6dc52468008b0505c867f80c7bfbc080767f8dd11934235ffc54ca"
+    ],
+    [
+      "backend/tests/test_time_of_day.py",
+      "91d1cda2a49d1be1a1cbdf6d21df3d52bb4b448a4d130117e5ec64ce0677549c"
+    ],
+    [
+      "backend/tests/test_totp.py",
+      "695e5a5024adb700ac4ecef3d62ff0c574bcbf4a462ffa196aa650c231081705"
+    ],
+    [
+      "mobile/src/crisisDetect.ts",
+      "45e0102f9cfe66f175585bbc4a5887659353b1cf88991aad2195fe66d84b154d"
+    ],
+    [
+      "mobile/src/crypto/kdf.ts",
+      "0c0f56148eb6be101f835ff45802b50772ed077a7bbf3dc81c65e3d8580f219b"
+    ],
+    [
+      "mobile/src/crypto/sharing.ts",
+      "3c14c9a5a8785141324eaa0298f044c041801d2f3d0be1f72c83b85e35484cfb"
+    ],
+    [
+      "mobile/src/navigation.tsx",
+      "572c70a027866bca33a2373cbe8650cd2390b14111eb3e7a54af97524af708ae"
+    ],
+    [
+      "mobile/src/offlineQueue.ts",
+      "d250996d0c1f4a991e0d47d1a40f3ed208d8e081fdc8581b2eb231e65348e30a"
+    ],
+    [
+      "mobile/src/screens/EntryScreen.tsx",
+      "7f29b10ba478984377889580dc955d5905c34204ddffead2d0f90333af9e43aa"
+    ],
+    [
+      "mobile/src/secureStore.ts",
+      "e045f7ed41e99b6c3b757a258eb27d454f2b9ebf2e638d6d41e07de53ad1d3a9"
+    ],
+    [
+      "mobile/tests/client.originSwitch.test.ts",
+      "35f8dcd3885f6ca9257f1ffd2b81225cee79d3d8429fcd92bcb72db7727b9957"
+    ],
+    [
+      "mobile/tests/crisisDetect.test.ts",
+      "3226918f23c96ccd43e377b16e05aa232aaf5f0cf7dab861f84d95520c4c7db0"
+    ],
+    [
+      "mobile/tests/crisisDialog.test.ts",
+      "d3a3d32e9f39cc6d7a59bf159f7ea128d3939c89ae5fc8512dd6f7f7b16467c9"
+    ],
+    [
+      "mobile/tests/crisisPhrases.test.ts",
+      "06ceb6a69a2a8ef9dffddfc651319b0da5e3824d4b2054d09b28cfa5cd7d0b45"
+    ],
+    [
+      "mobile/tests/crypto.test.ts",
+      "3b4ad65ac2b0d04bdd6e7f5b6cf063a9bac6b5430b85675c47c68335b4bdcd56"
+    ],
+    [
+      "mobile/tests/genericQuestions.test.ts",
+      "b66f6bea7fb1047fd2b2cae9a2f20ad49992bc9a8b1f923d4d431e6ec2d9796e"
+    ],
+    [
+      "mobile/tests/navigation.test.tsx",
+      "3aa688cb9b0b006a34ddfedc6ed846472e4440494d1a3bf96bd8aab2f25dbf32"
+    ],
+    [
+      "mobile/tests/offlineQueue.pins.test.ts",
+      "1e4e38cf567345a62639ad60231e4124a48b2d1ed31123f6f5451e888df93ce5"
+    ],
+    [
+      "mobile/tests/offlineQueue.test.ts",
+      "99f64bc02989e75377cacbd6e35215380573eea4f34d12731973c657b5551150"
+    ],
+    [
+      "mobile/tests/reconnectFlush.test.ts",
+      "1ae20e9bfae192ee68287395173fd81cf9be8dba6ef921bf82cc38dbf6332f69"
+    ],
+    [
+      "mobile/tests/screens/entryScreen.test.tsx",
+      "86726ebc1b0e3109e59066fc1b075520be502606151a2282c2456346cafde0b2"
+    ],
+    [
+      "mobile/tests/secureStore.test.ts",
+      "3154da94bc003ec8c1f5f5b95a77180819b02a85879433939a81612c51eeb2bc"
+    ],
+    [
+      "mobile/tests/securityFixes.test.ts",
+      "5638631464a374ac093a502e44a9eb4ad3ce961e523dde40b34379c35672a5ff"
+    ],
+    [
+      "mobile/tests/vectors.test.ts",
+      "3efe38e8c8dad0a038e449ab987e253a8a9b104f6b961f1ae0f9b5864b5d203d"
+    ],
+    [
+      "portal/src/crypto.ts",
+      "83f009fb22c52a89171dd7fa13930a6a9ecd750ef713a98b2241000fb3d00668"
+    ],
+    [
+      "portal/tests/crypto.test.ts",
+      "cfb887031cc70049180ae13491c125a325231fd2c2c948b40150c5b7879265a5"
+    ],
+    [
+      "redteam/a_crypto.py",
+      "5f0ff2695b03edc45b505ef04524fbe2f0442a80f03f23132b35b46d66bb7c8c"
+    ],
+    [
+      "redteam/b_auth.py",
+      "e73482ce70c5615a859b10fa1b000eea9438bb96df4fbbc73e8202ef11547657"
+    ],
+    [
+      "redteam/c_api.py",
+      "ae8d0a5495f726772ef1b51a095ef7351f4ce17a1f2e6ac8e5795f2bf5c96b83"
+    ],
+    [
+      "redteam/d_llm.py",
+      "32e7ff9c34e32012ac892b30237b94b5f3d78216a129ab6101adff3dc4cd5c71"
+    ],
+    [
+      "redteam/e2_brain.py",
+      "fc0aea1d1f79c104169336232f9fcf53d43bb223467603bcfcf8579afe480294"
+    ],
+    [
+      "redteam/e_crisis.py",
+      "2f72cf62db9ee2ea15ef6b31706d7fc736d1904bad721f48f474f00b83726640"
+    ],
+    [
+      "redteam/h_privacy.py",
+      "ba13562bb5c918ae8134fd5db1e7aaa5ce5e83228ff714ba1110b951daffd435"
+    ],
+    [
+      "shared/crisis_phrases.json",
+      "1cb0615b3cd7bc0287689943b12072f5f67bd0f9c26f8f417fb5612000ae5abc"
+    ],
+    [
+      "shared/generic_questions.json",
+      "c3b7698b1da0427b4360923ac3508eacf1591c25d8ec77456be55a0e69139eb9"
+    ],
+    [
+      "shared/vectors.json",
+      "88c09d8ff58dda28fc4f4006ae81b95a34655a219cfbb2e45cf50fb9d2e93d32"
+    ]
+  ],
+  "limits": "Local evidence for these 220 controls, not universal fault detection. Raw generated output retained in ignored audit evidence, not published.",
+  "controls": [
+    {"id":"A1","status":"KILLED","target":"backend/app/services/statsig.py","evidence":["FAILED tests/test_statsig.py::TestBenjaminiHochberg::test_partial_rejection_step_up"],"raw_proof_sha256":"981352b5abe1da27d3938017aaaa041f61f294bd93f6693855513e323f5e6219"},
+    {"id":"A2","status":"KILLED","target":"backend/app/services/statsig.py","evidence":["FAILED tests/test_statsig.py::TestBenjaminiHochberg::test_partial_rejection_step_up"],"raw_proof_sha256":"690e09532ce17a70c2e7d6e943599c25f561092884d8980d79c0315646c6401e"},
+    {"id":"A3","status":"KILLED","target":"backend/app/services/statsig.py","evidence":["FAILED tests/test_statsig.py::TestBenjaminiHochberg::test_none_rejected"],"raw_proof_sha256":"33beccad78688927d2f51d4558d911a98bac38f10fb4168850f3a5f7fbb22bac"},
+    {"id":"A4","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_brain.py::TestFullFamilyCorrection::test_daily_cadence_pure_noise_replication_bound"],"raw_proof_sha256":"62fd4b3dd65014bf2fd4aebe0e0c06c8ce77eccb4e1c21ddc967bc172b317963"},
+    {"id":"A5","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_remediation_mutation_analysis.py::test_statistically_significant_small_effect_is_not_a_mood_claim"],"raw_proof_sha256":"c9ccab74d30f20cdbd63e7afca9f5fb8eb9d526de372d575aa1bbf6db6c98139"},
+    {"id":"A6","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_brain.py::TestFullFamilyCorrection::test_mood_tie_is_emitted_pre_gate"],"raw_proof_sha256":"c471692ebd0da29ebc94df5c39350785203e72a70e5186a5f6baf849bccd3f88"},
+    {"id":"A7","status":"KILLED","target":"backend/app/services/threshold.py","evidence":["FAILED tests/test_threshold.py::test_phase_boundary[1-baseline]"],"raw_proof_sha256":"f81a350767ed5a087e63319d75a76d7de8108fd917f5fdfa258218abb72a34f9"},
+    {"id":"A8","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAIL  A temporal:work (Sundays, surfaced)"],"raw_proof_sha256":"3cba48298636499987a652b4bedb8f76416a9e3464d2b33ce97dd3c6dc470699"},
+    {"id":"A9","status":"KILLED","target":"backend/probe_brain.py","evidence":["FAIL  A temporal:work (Sundays, surfaced)","FAIL  A mood_correlation:work lower (within-weekday, surfaced)"],"raw_proof_sha256":"649152d54a9102f104c00ac72150442d37055199705c34cf5b0ff36aa29f4b06"},
+    {"id":"B1","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_brain.py::TestBaseRateCorrection::test_true_sunday_concentration_is_detected"],"raw_proof_sha256":"9b9fa2eb166785a5ee07929c86cc246ac65e65cb6ee490ba64b3d6e9921a7d84"},
+    {"id":"B2","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_brain.py::TestMoodShift::test_sustained_decline_is_detected"],"raw_proof_sha256":"6956cc5aa4704eca628ee0f68086849feb331e604b58cd8d33eae020f49ef158"},
+    {"id":"B3","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_brain.py::TestLifecycle::test_statistical_candidate_fades_to_archived_without_a_card"],"raw_proof_sha256":"49b0207230956d342af29c6bb2a2d25c8e5649ba255c364dd444786ed10f946e"},
+    {"id":"B4","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_brain.py::TestLifecycle::test_fading_then_archived_then_dropped"],"raw_proof_sha256":"a6f89b176a5d4ef56735ec3bcc363a7c1d20b9befe92c9d510a7efa4725f80be"},
+    {"id":"B5","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_brain.py::TestMemoryAndDecay::test_strength_decays_with_half_life"],"raw_proof_sha256":"66785e77299c99c308a9bf9b58ddf9766a3c177040b09745eef4d733b0621940"},
+    {"id":"C1","status":"KILLED","target":"backend/app/security/enclave.py","evidence":["FAILED tests/test_enclave.py::TestSecureProcessingContext::test_one_key_buffer_drives_every_decryption_and_is_zeroized"],"raw_proof_sha256":"6ed59b410081242d603e7f3d99078d47999f7a14900e534a2ef0dc11680d76f1"},
+    {"id":"C2","status":"KILLED","target":"backend/app/security/enclave.py","evidence":["FAILED tests/test_enclave.py::TestSecureProcessingContext::test_one_key_buffer_drives_every_decryption_and_is_zeroized"],"raw_proof_sha256":"ab724b7b059b1bd2a6d0081574d6ec0eaee80a2aecebcf53292166229d968443"},
+    {"id":"C3","status":"KILLED","target":"backend/app/security/enclave.py","evidence":["FAILED tests/test_mutation_pins.py::test_keystore_pop_is_single_use_by_mechanism"],"raw_proof_sha256":"b2a429a87f78cc6bbbd6ff01478e6479e98afdfd36611613087ed12dd63ad971"},
+    {"id":"C4","status":"KILLED","target":"backend/app/security/crypto.py","evidence":["FAILED tests/test_crypto.py::test_roundtrip_with_and_without_aad"],"raw_proof_sha256":"6df22ecb14a6c7d9868bd4cb273b07e843bd0f47f3f4e95af9efb189994034fc"},
+    {"id":"C5","status":"KILLED","target":"backend/app/security/crypto.py","evidence":["FAILED tests/test_crypto.py::test_build_aad_canonical_and_unambiguous"],"raw_proof_sha256":"8e65c01655b90a07ce39514aa735d6633166426e473425cb2975c3924f192537"},
+    {"id":"D1","status":"KILLED","target":"backend/app/services/llm.py","evidence":["FAILED tests/test_llm.py::test_provider_narrative_clinical_and_number_claims_never_replace_brain_finding[This"],"raw_proof_sha256":"3a91ef9301041cb532c408fddb994dc5064d66207e1b1c2809ad238bbc8ee357"},
+    {"id":"D2","status":"KILLED","target":"backend/app/services/llm.py","evidence":["FAILED tests/test_llm.py::test_provider_narrative_clinical_and_number_claims_never_replace_brain_finding[This"],"raw_proof_sha256":"5c067c27f59cf254a020f2cb88ced77d8f1962c3538db98bc679c8324dad54ed"},
+    {"id":"D3","status":"KILLED","target":"backend/app/services/llm.py","evidence":["FAILED tests/test_llm.py::test_narrative_rejects_crisis_language"],"raw_proof_sha256":"2804a54251d39871fab7baeeb344983e5471b199723677bb52202bffc51b4f69"},
+    {"id":"D4","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_remediation_mutation_evidence.py::test_public_evidence_dates_bind_observed_days_and_survive_state_roundtrip[70-7]"],"raw_proof_sha256":"58d21b7a7f53c5c349d1fa63cfe64916038e6fa0091f533dce761d453afdcb8b"},
+    {"id":"E1","status":"KILLED","target":"backend/app/services/crisis.py","evidence":["FAILED tests/test_crisis.py::TestFixtures::test_suppress_only_fixtures"],"raw_proof_sha256":"ee86a2ca6b9e022ee42a82c3f599b0cec6b4b58e334c11b65a70311608da693e"},
+    {"id":"E2","status":"KILLED","target":"backend/app/services/crisis.py","evidence":["FAILED tests/test_crisis.py::TestFixtures::test_dialog_fixtures_fire"],"raw_proof_sha256":"1522dd7dd9f915560e9739ba2cac6bc413c8b6823b3e04869a618050f1a99f31"},
+    {"id":"E3","status":"KILLED","target":"backend/app/services/questions.py","evidence":["FAILED tests/test_questions.py::TestPool::test_rendered_detail_cannot_reintroduce_crisis_content_into_the_pool"],"raw_proof_sha256":"8a55a50f913eb350e5341c4c18e8a397caa9194dab74606f266fb3cec050c7b3"},
+    {"id":"E4","status":"KILLED","target":"mobile/src/crisisDetect.ts","evidence":["fires on \"I keep thinking about how to kill myself\" 3ms","fires on \"i have been thinking about killing myself\" 0ms"],"raw_proof_sha256":"83b90bb050fbc8bbe58aa9062a4796fc53d73aeadbbfd09f4016fd7c5e1c249d"},
+    {"id":"E5","status":"KILLED","target":"mobile/src/crisisDetect.ts","evidence":["every crisis sample hits the suppress tier (zero bypasses) 2ms","observed verdicts match the contract exactly 1ms"],"raw_proof_sha256":"ae74b9a3fa72b2702721fa44353370916963d074f42a075242a80420a79b7510"},
+    {"id":"F1","status":"KILLED","target":"mobile/src/crypto/sharing.ts","evidence":["formats the shared-vector key identically to the portal 7ms"],"raw_proof_sha256":"c338de4878c3148d44585c9112e3110c3734d454dbad5cc4120c243432dff31a"},
+    {"id":"F2","status":"KILLED","target":"portal/src/crypto.ts","evidence":["formats the shared-vector key identically to the mobile app 4ms"],"raw_proof_sha256":"9b796345ea2003f112679e0963c1efa9c405432cd02272095c88c3bcb45f06c3"},
+    {"id":"F3","status":"KILLED","target":"backend/app/deps.py","evidence":["FAILED tests/test_therapist_api.py::TestRoleSeparation::test_therapist_cannot_use_journal_endpoints"],"raw_proof_sha256":"266828aa9d7dcdc9be4180884fe34f56360ecdfddb965e914815df4182efc219"},
+    {"id":"F4","status":"KILLED","target":"backend/app/deps.py","evidence":["FAILED tests/test_therapist_api.py::TestRoleSeparation::test_patient_cannot_use_therapist_endpoints"],"raw_proof_sha256":"e38106d2724ca21b59a1e37d487435c10403bd33ff1d9deba26b019b1d2dd653"},
+    {"id":"F5","status":"KILLED","target":"mobile/src/crypto/kdf.ts","evidence":["defaults to the pinned 600k production iteration count 3ms","derives independent auth/data keys from the same master 28ms"],"raw_proof_sha256":"d1fa8f045c3cfd3a5bbb08577cb55caab52098b0ba5b51952d25b97ed0c7b001"},
+    {"id":"F6","status":"KILLED","target":"portal/src/crypto.ts","evidence":["vector 0: master -> auth key matches the backend 4ms","vector 1: master -> auth key matches the backend 1ms"],"raw_proof_sha256":"530a4bb0da6975bcabdbbdb02500bed05621bd5ed4aa2854ee02ca5e4e5d2198"},
+    {"id":"F7","status":"KILLED","target":"backend/app/security/kdf.py","evidence":["FAILED tests/test_kdf.py::test_iteration_floor_is_enforced"],"raw_proof_sha256":"200cb8f757e115155e3d0b5f2170a8b7c3a1988ab5d4ffe7035ccf72df6dcc43"},
+    {"id":"F8","status":"KILLED","target":"mobile/src/secureStore.ts","evidence":["fails closed when Keychain REJECTS the write (returns false), never falling back to AsyncStorage 2ms"],"raw_proof_sha256":"aba7ac2de470d5c9cd4d472c30119ea5df6987e8649e53bc2023871a8da7b5ef"},
+    {"id":"G1","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_brain.py::TestMoodShift::test_sustained_decline_is_detected"],"raw_proof_sha256":"28ae066f4792a4cecfeb6511f8ef680d69dd42979d0fa0e0c3b2e8cd015f7a2f"},
+    {"id":"G2","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_brain.py::TestEwmaCalibration::test_false_alarm_rate_at_phi_05_is_within_the_calibrated_band"],"raw_proof_sha256":"b94d2dfaa8770b6c9b67c22269b47d6193e40676cbb1d0931da3554de116d5f6"},
+    {"id":"G3","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_brain.py::TestMoodShift::test_sustained_decline_is_detected"],"raw_proof_sha256":"882429d50f66eb3c3642abc25e53ef65112f4968bd43639983e29c0ab0ec0831"},
+    {"id":"G4","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_brain.py::TestEwmaDeployedPathCalibration::test_deployed_false_alarm_rate_at_short_lengths"],"raw_proof_sha256":"4deb949e25fba3ffb7ec1156124aee6464af37efcdfd4ecb10dae6dd9104056e"},
+    {"id":"G5","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_brain.py::TestEwmaCalibration::test_constants_are_the_calibrated_ones"],"raw_proof_sha256":"454f62f8987fa1e1f410c2d7dcb075b8b74975ad919b1d4a06663c7e371218c4"},
+    {"id":"G6","status":"KILLED","target":"backend/app/services/phrases.py","evidence":["FAILED tests/test_phrases.py::test_near_duplicates_cluster_across_days"],"raw_proof_sha256":"6b096a48d84a47a86e5dbdfaa4376919f768e661a9e55be7af25db4414688d07"},
+    {"id":"G7","status":"KILLED","target":"backend/app/services/phrases.py","evidence":["FAILED tests/test_brain.py::TestTopicDiscovery::test_steady_presence_surfaces_without_test"],"raw_proof_sha256":"afc95652249781f9ea047a2580df452f67a3ab4f3d5c782338937f1579e99b4f"},
+    {"id":"G8","status":"KILLED","target":"backend/app/services/phrases.py","evidence":["FAILED tests/test_brain.py::TestTopicDiscovery::test_steady_presence_surfaces_without_test"],"raw_proof_sha256":"a6cc8604d85cd766ecf58c796fdbc6c846c864ccdb58f9c3f8d088af1eb43143"},
+    {"id":"G9","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_brain.py::TestLaggedLinks::test_day_after_link_is_detected"],"raw_proof_sha256":"2d5984caef73b6240a7f241f99f5d6c0d9c3c898a79839283a8b311780ca9486"},
+    {"id":"G10","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_brain.py::TestLaggedLinks::test_day_after_link_is_detected"],"raw_proof_sha256":"4ada3d72876556f5cbfdab0bcac9119e41af73425ea2515e229ec3e0bb5bbb3a"},
+    {"id":"G11","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_brain.py::TestLaggedLinks::test_day_after_link_is_detected"],"raw_proof_sha256":"94f21870fc3c5a934af3a0f8f8781ab6f5adb4fe6060f5bbb1743210b78c0c56"},
+    {"id":"G12","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_brain.py::TestLifecycle::test_statistical_kinds_never_surface_on_first_qualification"],"raw_proof_sha256":"465ca8855db12e39c42e8ae90fe7b14393234e633a6ab65676077176cf8ebfd8"},
+    {"id":"G13","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_remediation_mutation_analysis.py::test_window_claim_waits_seven_days_before_replicated_display"],"raw_proof_sha256":"a17f3a94bacb5661990e932cd3fcd3aa4255f121725ecf0b68627eaac966cc90"},
+    {"id":"G14","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_remediation_mutation_analysis.py::test_pattern_lifecycle_exact_grace_and_archive_boundaries[7-emerging]"],"raw_proof_sha256":"7d1cb179a568761352cfc27275fc06ac73478839723fece240ae6e30b6b6d85f"},
+    {"id":"G15","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_remediation_mutation_analysis.py::test_pattern_lifecycle_exact_grace_and_archive_boundaries[45-fading]"],"raw_proof_sha256":"ffa733a45a1ca1dce09d71295df05e7379c92079f471e3f0c81096bf7c32e67d"},
+    {"id":"G16","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_brain.py::TestLifecycle::test_candidate_hidden_until_requalified"],"raw_proof_sha256":"058ad39bc84090edb9edc48e45ac64cce563e511599308eb975de92454fc3170"},
+    {"id":"G17","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_brain.py::TestMemoryAndDecay::test_strength_decays_with_half_life"],"raw_proof_sha256":"21267d87fda0d285b1439c7f7e0a0f6e69a3199b302c8e8df912c067dd9c77c6"},
+    {"id":"G18","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAIL  C mood_shift:lower (surfaced)"],"raw_proof_sha256":"792c8119e269b937823bae6511570abe26ce9b044af7466a44c21e88864436a7"},
+    {"id":"G19","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_brain.py::TestMoodCorrelation::test_effect_and_significance_gates"],"raw_proof_sha256":"101b3e803e2def6a0f9650a76d0babfa5eb92e1763f66999fc0b739ffa461130"},
+    {"id":"G20","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_brain.py::TestTopicDiscovery::test_cluster_covered_presence_is_suppressed"],"raw_proof_sha256":"9ae607ab05b399dd770f23c2d4c0c3eb1b0d52ee174680da1f550fb8abaf3742"},
+    {"id":"H1","status":"KILLED","target":"backend/app/services/threshold.py","evidence":["FAILED tests/test_threshold.py::test_duplicate_dates_count_once"],"raw_proof_sha256":"a15b7786f22dd5654a78a92113b517dbecb26cf5647c0be6700756f157033f73"},
+    {"id":"H2","status":"KILLED","target":"backend/app/services/threshold.py","evidence":["FAILED tests/test_threshold.py::test_phase_boundary[29-baseline]"],"raw_proof_sha256":"a007afdda6c52d56e0faa1753871b9a9317ebbb1af5a93ffce64609977ac6519"},
+    {"id":"H3","status":"KILLED","target":"backend/app/services/threshold.py","evidence":["FAILED tests/test_threshold.py::test_phase_boundary[30-insight]"],"raw_proof_sha256":"9904c5460cac3595aa26da18d8797627ba1d7b441fbc0344a33c004e2a7012b1"},
+    {"id":"H4","status":"KILLED","target":"backend/app/services/threshold.py","evidence":["FAILED tests/test_threshold.py::test_streak_yesterday_grace"],"raw_proof_sha256":"3a5010bd0b26a7952739a458618e1f8a03e71de2322849402e07e28c6eeeb341"},
+    {"id":"H5","status":"KILLED","target":"backend/app/api/entries.py","evidence":["FAILED tests/test_entries_api.py::test_rejects_entries_predating_the_account"],"raw_proof_sha256":"66670ff17bfcc1b57cb8d5a6c8eba8de5b77809fd25f0921c3184ffaa7f65106"},
+    {"id":"H6","status":"KILLED","target":"backend/app/api/entries.py","evidence":["FAILED tests/test_entries_api.py::test_rejects_future_entry_date"],"raw_proof_sha256":"355a53eb35a6b7652fe863dc4b1a8df8bd02290f25d17f9bb12e9f9a5074fb7b"},
+    {"id":"H7","status":"KILLED","target":"backend/app/api/insights.py","evidence":["FAILED tests/test_insights_api.py::test_baseline_recompute_needs_no_usable_processing_key[None]"],"raw_proof_sha256":"ff604c550dab66ec9e3cb5682989cd63ebc858a1c45e58c8272bf37c6b007932"},
+    {"id":"I1","status":"KILLED","target":"backend/app/security/kdf.py","evidence":["FAILED tests/test_kdf.py::test_auth_and_data_keys_are_separated"],"raw_proof_sha256":"8c695ac97854e585de0ad1049616772cd94415f66e26ce9fb4aedcee442b3ad6"},
+    {"id":"I2","status":"KILLED","target":"mobile/src/crypto/kdf.ts","evidence":["derives independent auth/data keys from the same master 110ms","pins the exact PBKDF2 and HKDF labels against the shared backend vector 81ms"],"raw_proof_sha256":"26e79e59ef0e446258a781f5f98154df00f2f3c89d6e9a09d193fbe8f4a4a6bf"},
+    {"id":"I3","status":"KILLED","target":"backend/app/security/crypto.py","evidence":["FAILED tests/test_crypto.py::test_unique_nonce_per_encryption"],"raw_proof_sha256":"a0698f448ca6446f5e0866827720588ff7dbe8f81ba32c1cd1ffbc16d8a4dfda"},
+    {"id":"I4","status":"KILLED","target":"backend/app/api/consents.py","evidence":["FAILED tests/test_therapist_api.py::test_pairing_expiry_crossing_after_live_lookup_is_enforced_at_atomic_burn[True]"],"raw_proof_sha256":"1062e1058591505c08c37a71c6a55b5e677e67c8bca8a7e226298f4783e68645"},
+    {"id":"I5","status":"KILLED","target":"backend/app/api/consents.py","evidence":["FAILED tests/test_therapist_api.py::TestPairing::test_grant_burns_code"],"raw_proof_sha256":"74212af8ce4031ff11c08efe8fc56353f10c984fd29b8a889d304f9b3bbef27b"},
+    {"id":"I6","status":"KILLED","target":"shared/vectors.json","evidence":["vector 0: KDF + envelope agree with the backend 83ms"],"raw_proof_sha256":"45c1a7304719980f9e4f95a8fcbb0cb484f97d6dab75bb44f66ce721ed228980"},
+    {"id":"I7","status":"KILLED","target":"shared/crisis_phrases.json","evidence":["FAILED tests/test_crisis.py::TestParity::test_dialog_list_matches_json"],"raw_proof_sha256":"e55a23ef801e16f4a825e394e46ba06883737ab8e3e563588cecb4dd8a21668d"},
+    {"id":"I8","status":"KILLED","target":"shared/generic_questions.json","evidence":["FAILED tests/test_contract_pins.py::test_generic_questions_pinned_to_shared_contract"],"raw_proof_sha256":"19621f40a38f89e068464366f1183c07f66e4b9723495df3009dd713e5b987fd"},
+    {"id":"J1","status":"KILLED","target":"backend/app/services/questions.py","evidence":["FAILED tests/test_questions.py::TestPool::test_rendered_detail_cannot_reintroduce_crisis_content_into_the_pool"],"raw_proof_sha256":"e3a627d9db25c94b1288b5d24d123d795c8452e88402297f09e95b5848200e35"},
+    {"id":"J2","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_crisis.py::test_carried_forward_label_alone_marks_the_public_card_sensitive"],"raw_proof_sha256":"bfd1fde13990b0fefc4abf7056c7dc4350a0d56f0f8076e4560664da9f237d83"},
+    {"id":"J3","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_brain.py::TestNearDuplicatePhrasesViaBrain::test_paraphrased_repetition_surfaces"],"raw_proof_sha256":"796432761063aa03aa8ed4ab9aac9f66b23dde58212f517feba574f9c75cd626"},
+    {"id":"J4","status":"KILLED","target":"backend/app/services/crisis.py","evidence":["FAILED tests/test_crisis.py::TestFixtures::test_dialog_fixtures_fire"],"raw_proof_sha256":"a941fc2fd3ff12469822d0c18fa3c89463d95272dc54c2580e3fdfdf74963023"},
+    {"id":"J5","status":"KILLED","target":"backend/app/services/crisis.py","evidence":["FAILED tests/test_crisis.py::TestParity::test_benign_compounds_match_json"],"raw_proof_sha256":"475786f1456a377eb96d800fbed04d2faf248781f6b21f57e83b1e8b85e516c7"},
+    {"id":"J6","status":"KILLED","target":"mobile/src/screens/EntryScreen.tsx","evidence":["shows the gentle support alert AFTER a successful save 9ms","'View support resources' navigates to Crisis; 'Not now' does nothing 6ms"],"raw_proof_sha256":"a0f71f8044bda5091c3548beb3ed41639da7b715a89aa2863f81c15421104868"},
+    {"id":"J7","status":"KILLED","target":"mobile/src/navigation.tsx","evidence":["shows the boot splash while the saved session resolves 6ms","logged out: the login screen plus crisis access \u2014 nothing else 6ms"],"raw_proof_sha256":"d54a22dd240c87435f93a753060d01e845b7fb0dc6ba8a11ad02db3d62b72dac"},
+    {"id":"K1","status":"KILLED","target":"backend/app/config.py","evidence":["FAILED tests/test_hardening.py::test_valid_production_configuration_normalizes_the_environment[PRODUCTION]"],"raw_proof_sha256":"efbb897563bfaf718c52eaaff927caa4751fd0dc05419552ca713312ebe8ef15"},
+    {"id":"K2","status":"KILLED","target":"backend/app/config.py","evidence":["FAILED tests/test_hardening.py::test_primary_signing_secret_exact_floor_with_other_boot_gates_valid"],"raw_proof_sha256":"fc3051bc2e1c92c26bc61c0397a6975cc5df209dab174388a86c5a77e1aaf7d4"},
+    {"id":"K3","status":"KILLED","target":"backend/app/config.py","evidence":["FAILED tests/test_hardening.py::test_production_refuses_sqlite"],"raw_proof_sha256":"119703542145cd5844a1ed33a5dbe1f237684a7db56acb874324f3eb035fbedd"},
+    {"id":"K4","status":"KILLED","target":"backend/app/main.py","evidence":["FAILED tests/test_mutation_pins.py::TestBootGates::test_production_app_mounts_no_docs"],"raw_proof_sha256":"df03094bb7ccc1fa40cd7a80cbac93f38032a12dcee139fb38ae11fee5558019"},
+    {"id":"K5","status":"KILLED","target":"backend/app/middleware.py","evidence":["FAILED tests/test_mutation_pins.py::test_crypto_and_auth_constants_are_pinned"],"raw_proof_sha256":"9603feab6ab3e51d25633d0963545c2a61f95834dc397a9cfd4827ccfedcf7e3"},
+    {"id":"K6","status":"KILLED","target":"backend/app/middleware.py","evidence":["FAILED tests/test_api_hardening.py::test_error_envelope_codes_across_endpoints"],"raw_proof_sha256":"f0a864ce20a6ce9c28c32180eedca92c2eb07da1b555add36430e9a4b0ef6a03"},
+    {"id":"K7","status":"KILLED","target":"backend/app/api/entries.py","evidence":["FAILED tests/test_api_hardening.py::test_quota_errors_carry_distinct_codes"],"raw_proof_sha256":"6aa7d6f43cbfc497735c9dc401a1eb406deb0b457c5974528342d17277d8e90d"},
+    {"id":"L1","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_brain.py::TestWithinPersonDetrending::test_day_level_association_survives_detrending"],"raw_proof_sha256":"d6843d8d64707b8cac7ed44b5e3a7328d044ff8e9d3281c6e3ad625f6653d2bf"},
+    {"id":"L2","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_remediation_mutation_analysis.py::test_sleep_mood_links_follow_the_person_not_a_fixed_rating_norm[3-5]"],"raw_proof_sha256":"d6396715bb7f2dfccb64a6d5ab7f5e2a3c5b6b7b0e6fcbd49a9371e150964329"},
+    {"id":"L3","status":"KILLED","target":"backend/app/api/insights.py","evidence":["FAILED tests/test_insights_api.py::test_full_pipeline_unlocks_at_threshold"],"raw_proof_sha256":"5e369de6c2c1fc2f518731b9bb8044fc143d3688f2546ce36aeaa57fa5b7b96e"},
+    {"id":"L4","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_brain.py::TestSpanishEngine::test_detection_separates_english_spanish_and_other"],"raw_proof_sha256":"0c858b742dfa4de07d0ec2a63a58766df3f3ac7121d2c36b1e5fa9ed86286943"},
+    {"id":"L5","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_brain.py::TestAuditFixes::test_client_sentiment_is_clamped_to_engine_scale"],"raw_proof_sha256":"2abbd4ed5287b5da8fa7dbc3b565ca35a098713d51bd2136d5f58b0695690b09"},
+    {"id":"M1","status":"KILLED","target":"mobile/src/offlineQueue.ts","evidence":["keeps one recovery item when the same client entry is rejected twice 3ms"],"raw_proof_sha256":"111f65c2d8f06c90ffc09626189f7d21bc3128014195aca8c25f36b886a7f41c"},
+    {"id":"M2","status":"KILLED","target":"mobile/src/offlineQueue.ts","evidence":["stops the flush when the selected origin moves between iterations 4ms"],"raw_proof_sha256":"b656ec600db91319f9036b2c992dbd74af82b26ee63128c2fe772188df692370"},
+    {"id":"M3","status":"KILLED","target":"mobile/src/offlineQueue.ts","evidence":["has a hard per-scope bound rather than evicting the oldest entry 14ms","enforces a per-scope capacity and preserves every existing ciphertext 14ms"],"raw_proof_sha256":"e3386a3d016d3adf8451dc498464fb2b63d970a55f352117b714aacfe629a2b2"},
+    {"id":"M4","status":"KILLED","target":"mobile/src/offlineQueue.ts","evidence":["keeps every scope's ciphertext QUEUED after an authentic 401 (M-14 auto-recovery) 4ms","a 401 mid-flush leaves the rejected store untouched (nothing is parked there) 0ms"],"raw_proof_sha256":"527ea30b2c2b854a7dd74b64519ce347b4476a48d37d42fe96a28d87dffc25ed"},
+    {"id":"M5","status":"KILLED","target":"mobile/src/offlineQueue.ts","evidence":["defers a retryable failure with exponential backoff and jitter 3ms","honors Retry-After from a 429 instead of local backoff 0ms"],"raw_proof_sha256":"58f03c9b952105481a24e3ff2676e3ab7bd79b96d5121c56ddfe1d24e1895de1"},
+    {"id":"M6","status":"KILLED","target":"mobile/src/offlineQueue.ts","evidence":["quarantines corrupt data in the current scope without touching another scope 3ms","recovers the scope when AsyncStorage refuses to hand back an oversize row (M-13) 1ms"],"raw_proof_sha256":"39555ed8f26555ad99f3ff93ab6320f9de23b415cf32edef1ace109def35a888"},
+    {"id":"N1","status":"CAUGHT","target":"backend/app/security/enclave.py","evidence":["AUDIT|A1.single-use|FINDING"],"raw_proof_sha256":"ce6c5b977c25b29cf7a6af666fa2d649f28cb605cb10c4a0991ce850f0881611"},
+    {"id":"N2","status":"CAUGHT","target":"backend/app/security/kdf.py","evidence":["AUDIT|A4.library-floor|FINDING"],"raw_proof_sha256":"77e1f0797c5fae1c583e9b24c25c53473ec0a80d0dbf5e354b7b47f28be4b477"},
+    {"id":"N3","status":"CAUGHT","target":"backend/app/services/crisis.py","evidence":["AUDIT|E1.contract-drift|FINDING","AUDIT|E1.python-suppress-bypass|FINDING"],"raw_proof_sha256":"25aca2b9c4867ec150334f65598065e436245a557bf4136b205510ee66529fb2"},
+    {"id":"N4","status":"CAUGHT","target":"backend/app/services/brain.py","evidence":["AUDIT|E2.pure-noise-fdr-ceiling|FINDING"],"raw_proof_sha256":"e8618df47244a4b39de8d99af5e0421e049421d9e61be1b2dc6d863af4293571"},
+    {"id":"N5","status":"CAUGHT","target":"backend/app/middleware.py","evidence":["AUDIT|C2.oversized-body|FINDING"],"raw_proof_sha256":"de015e4a08c4c7c691a1b2123d14a9ea069dfc87249c14e51627327162402758"},
+    {"id":"N6","status":"CAUGHT","target":"backend/app/api/entries.py","evidence":["AUDIT|C2.entry-quota|FINDING"],"raw_proof_sha256":"c96f8047cc6a546b7906bcf1c69a39d69a78f8c2314874af377e7035c8d1784c"},
+    {"id":"N7","status":"CAUGHT","target":"backend/app/api/entries.py","evidence":["AUDIT|C3.date-backdating|FINDING"],"raw_proof_sha256":"e1970d754964e2cce87ba6e68fb541cec1017268e667330afaf3cd2f3ebfcd12"},
+    {"id":"N8","status":"CAUGHT","target":"backend/app/api/account.py","evidence":["AUDIT|B1.wrong-verifier-rejected|FINDING"],"raw_proof_sha256":"83d3cc4aa1c8d47e97fa998a391e6af693b6dfc30e9e215072a3e5b0d05ca1bb"},
+    {"id":"N9","status":"CAUGHT","target":"backend/app/services/account_deletion.py","evidence":["AUDIT|H3.erasure-live-db|FINDING"],"raw_proof_sha256":"edbf52fcc2ef73112a745fab72f765070531bb634f6758770e5bace0b0a15415"},
+    {"id":"N10","status":"CAUGHT","target":"backend/app/services/llm.py","evidence":["AUDIT|D1.narrative-number-guard|FINDING"],"raw_proof_sha256":"f298adf1a979b3a8ae2c15ca4afbbcf32747b300851302ffd69f5d62d6ab7e55"},
+    {"id":"O1","status":"KILLED","target":"backend/app/deps.py","evidence":["FAILED tests/test_auth_api.py::test_legacy_jtiless_logout_retires_the_account_epoch"],"raw_proof_sha256":"9caa0f8558486254d2204c67b7c7599688b5c698957d1e3f364cc0f821e45581"},
+    {"id":"O2","status":"KILLED","target":"backend/app/deps.py","evidence":["FAILED tests/test_mutation_pins.py::test_suspended_account_is_refused_on_insights_reads"],"raw_proof_sha256":"b4878c4d2bb5514379f0e98c4c7445346c8833d47a845282912836665de986e9"},
+    {"id":"O3","status":"KILLED","target":"backend/app/deps.py","evidence":["FAILED tests/test_therapist_api.py::TestRoleSeparation::test_therapist_cannot_use_journal_endpoints"],"raw_proof_sha256":"4787572d4505346c95055682271f37bbb4f58f32f906ab884bee7e1933992c0e"},
+    {"id":"O4","status":"KILLED","target":"backend/app/deps.py","evidence":["FAILED tests/test_therapist_api.py::TestRoleSeparation::test_patient_cannot_use_therapist_endpoints"],"raw_proof_sha256":"a49614f0f54d9a13d0abf559bbb67c81d38bfba56e2c51bcf94e9093de4d779b"},
+    {"id":"O5","status":"KILLED","target":"backend/app/api/therapist.py","evidence":["FAILED tests/test_therapist_api.py::TestTherapistReads::test_revoked_consent_reads_404"],"raw_proof_sha256":"2d549a9fea110fb639338d5b86280c8689ec35a4c9530dd2e024443cf425acc2"},
+    {"id":"O6","status":"KILLED","target":"backend/app/api/therapist.py","evidence":["FAILED tests/test_therapist_api.py::TestNotes::test_other_therapist_cannot_touch_notes"],"raw_proof_sha256":"ab55d4c0f1aea0184a71f33e0dda94c18026fc993ea3078e7e1cbd5f986d00fb"},
+    {"id":"O7","status":"KILLED","target":"backend/app/api/consents.py","evidence":["FAILED tests/test_therapist_api.py::TestConsentRevoke::test_cannot_revoke_another_patients_consent"],"raw_proof_sha256":"1ddc49c377541bac759a9477f6b01e30f150ee711fd8ba875d5097689e9c25f9"},
+    {"id":"O8","status":"KILLED","target":"backend/app/deps.py","evidence":["FAILED tests/test_therapist_api.py::TestAuditAndCascades::test_therapist_account_delete_survives_a_sharing_shutdown"],"raw_proof_sha256":"1089cb408455daf0bb7efaf6ecf643d27d3fc7c8751af3e3c1ebeb213577b378"},
+    {"id":"O9","status":"KILLED","target":"backend/app/security/enclave.py","evidence":["FAILED tests/test_enclave.py::TestInMemoryKeyStore::test_foreign_owner_cannot_consume_or_destroy_a_session"],"raw_proof_sha256":"9692d577211305f6c586bf17ef1f18a929e94a650b8615b31e23ae9f3448d5e1"},
+    {"id":"O10","status":"KILLED","target":"backend/app/api/therapist.py","evidence":["FAILED tests/test_mutation_pins.py::test_therapist_registration_requires_the_enrollment_token"],"raw_proof_sha256":"5fdcbc032554fd81df33357b568330e1e5870058d7ea4f2527789c163c5b92a5"},
+    {"id":"O11","status":"KILLED","target":"backend/app/api/insights.py","evidence":["FAILED tests/test_adversarial.py::test_processing_token_is_bound_to_its_owner_at_api_level"],"raw_proof_sha256":"ebdb591ae675f4a748c8244e50cd4023eee39cf718c5352be2d02a0ba1004387"},
+    {"id":"P1","status":"KILLED","target":"backend/app/models.py","evidence":["FAILED tests/test_migrations.py::test_migrations_reproduce_create_all_schema"],"raw_proof_sha256":"75e5a335f7fa714aecf7907b56fa7e93164e0aef4d6d075fc3815f55716dbcf6"},
+    {"id":"P2","status":"KILLED","target":"backend/app/models.py","evidence":["FAILED tests/test_migrations.py::test_migrations_reproduce_create_all_schema"],"raw_proof_sha256":"0bffd30e43ca13f8aae22580c58591f1c2df7d9ecd4b64cc9af675e41042aab9"},
+    {"id":"P3","status":"KILLED","target":"backend/app/models.py","evidence":["FAILED tests/test_migrations.py::test_migrations_reproduce_create_all_schema"],"raw_proof_sha256":"28b2bfc1fd8abb6c26c8bdcc93f426824bb5f91aa909263c76b049b90dc13f28"},
+    {"id":"P4","status":"KILLED","target":"backend/app/api/insights.py","evidence":["FAILED tests/test_api_hardening.py::test_get_insights_uses_a_distinct_date_scan"],"raw_proof_sha256":"6cbb2dbc5231dd35ebfb5bf0f24c55da7dabed58510f2b07b22781fc4c2bcfa7"},
+    {"id":"P5","status":"KILLED","target":"backend/app/api/entries.py","evidence":["FAILED tests/test_mutation_pins.py::test_entry_page_ordering_carries_the_id_tiebreak"],"raw_proof_sha256":"1f6e5b8f4d16a401b7d9dbcd8cda241121f81aeeab77f8fa19334ae1715f3c90"},
+    {"id":"P6","status":"KILLED","target":"backend/app/api/insights.py","evidence":["FAILED tests/test_mutation_pins.py::test_same_day_recompute_preserves_the_question_blob"],"raw_proof_sha256":"ca3cc58a23fa3c996bf0b1e81f768063485abe9a24d9b9fc4634679a7cac2011"},
+    {"id":"P7","status":"KILLED","target":"backend/app/api/insights.py","evidence":["FAILED tests/test_insights_api.py::test_full_pipeline_unlocks_at_threshold"],"raw_proof_sha256":"178338f6b482e3a489f656bef4ff31845db61a2dce02c4fd2efa117b5e7ec3d7"},
+    {"id":"P9","status":"KILLED","target":"backend/app/api/entries.py","evidence":["FAILED tests/test_api_resilience_coverage.py::test_entry_paging_retries_when_metadata_row_disappears"],"raw_proof_sha256":"25754b3d9bfa758be551f1120ff764a1d4de1087adde8deb9ba3c5eb2a8614a8"},
+    {"id":"P10","status":"KILLED","target":"backend/app/api/entries.py","evidence":["FAILED tests/test_entries_api.py::test_create_list_delete_roundtrip"],"raw_proof_sha256":"7efd79330d8e6f3aee0fd8ca2c50f5d366cfacb5ad09961cbe945a2d49bd8659"},
+    {"id":"P11","status":"KILLED","target":"backend/app/api/entries.py","evidence":["FAILED tests/test_snapshot_revisions.py::test_revision_helpers_fail_closed_when_an_owner_is_missing_or_at_limit"],"raw_proof_sha256":"8c3b204d964d4bc01971fc0fe736ad695dd653c36986bc7700e22ec2e3f3b057"},
+    {"id":"Q1","status":"KILLED","target":"backend/app/api/entries.py","evidence":["FAILED tests/test_mutation_pins.py::test_legacy_entry_page_budget_is_two_mebibytes"],"raw_proof_sha256":"9936b15e6cd15277f55335e302bb2762fdac8f821fdb70effe01d7303ea70dcd"},
+    {"id":"Q2","status":"KILLED","target":"backend/app/api/entries.py","evidence":["FAILED tests/test_snapshot_revisions.py::test_entries_snapshot_revision_is_strict_and_tracks_real_mutations"],"raw_proof_sha256":"77c4003146620fc253054dc6cc441f280b2820c0c99f00ba6869d3411e0a9128"},
+    {"id":"Q3","status":"KILLED","target":"backend/app/api/therapist.py","evidence":["FAILED tests/test_api_resilience_coverage.py::test_therapist_note_quota_rejects_count_and_total_byte_overflow"],"raw_proof_sha256":"19b7a37d6ee348c9fd34e3622a4e045e3e7aa1e2c3686a1c66d92772c88981a3"},
+    {"id":"Q4","status":"KILLED","target":"backend/app/api/therapist.py","evidence":["FAILED tests/test_api_resilience_coverage.py::test_therapist_note_quota_rejects_count_and_total_byte_overflow"],"raw_proof_sha256":"72b2193a9ddc5c5623f431aae8e27a05793691ccb823ecd943768015b06a653b"},
+    {"id":"Q5","status":"KILLED","target":"backend/app/api/therapist.py","evidence":["FAILED tests/test_therapist_api.py::TestTherapistReads::test_entries_default_page_is_25_and_exposes_an_exact_continuation"],"raw_proof_sha256":"3151d185fc2c9a73955f5d813d02d7f20e947ab23faa6006831b2192551ca47b"},
+    {"id":"Q6","status":"KILLED","target":"backend/app/api/_paging.py","evidence":["FAILED tests/test_entry_pagination_bytes.py::test_entries_byte_paginate_without_legacy_silent_truncation"],"raw_proof_sha256":"4f444f6df070310fb8925536baf4bc52008765757a2d38fe5d65d01bd57dd306"},
+    {"id":"Q7","status":"KILLED","target":"backend/app/api/insights.py","evidence":["FAILED tests/test_api_hardening.py::test_question_rows_older_than_90_days_are_purged"],"raw_proof_sha256":"0071949a8ca02c0bfabf69a11cea0253246db7f93ce7b5d85fb8f02329168c2e"},
+    {"id":"Q8","status":"KILLED","target":"backend/app/main.py","evidence":["FAILED tests/test_ops_hardening.py::test_prune_once_deletes_only_rows_past_retention"],"raw_proof_sha256":"bd9707e9097b19bf4774a0605ec58d2e19d8aea639e2f0c70a5394274b1ac485"},
+    {"id":"Q9","status":"KILLED","target":"backend/app/api/consents.py","evidence":["FAILED tests/test_mutation_pins.py::test_grant_rejects_when_the_therapist_caseload_is_full"],"raw_proof_sha256":"be03edc66a3a6fdd3947e0f07e0567672477bbbe21e0c3592a5f44f2cd98528b"},
+    {"id":"Q10","status":"KILLED","target":"backend/app/api/consents.py","evidence":["FAILED tests/test_therapist_api.py::TestConsentGrant::test_grant_validation"],"raw_proof_sha256":"b80f7be33fa39261655e90af0b13165b27846ca6a001a735784e5edfa7361a89"},
+    {"id":"Q11","status":"KILLED","target":"backend/app/api/insights.py","evidence":["FAILED tests/test_deep_mutation_pins.py::test_parse_entries_inner_date_tolerance_edges"],"raw_proof_sha256":"767d146114e16803a145f571678ffcda286adc4569569b3347bb7cbfa3b51bcc"},
+    {"id":"R1","status":"KILLED","target":"backend/app/main.py","evidence":["FAILED tests/test_deep_mutation_pins.py::test_error_envelope_detail_is_always_a_string"],"raw_proof_sha256":"fd707fa969c297266bf27026a2d4bda97285b7e8bdda2aff1d9ac8ba944d3b35"},
+    {"id":"R2","status":"KILLED","target":"backend/app/middleware.py","evidence":["FAILED tests/test_coverage_gaps.py::test_middleware_maps_recursion_error_to_400"],"raw_proof_sha256":"d0d570c704ebfc016a5e9ac87ddfddcf9d82750e5e04d3d6075a288246443c8a"},
+    {"id":"R3","status":"KILLED","target":"backend/app/middleware.py","evidence":["FAILED tests/test_coverage_gaps.py::test_middleware_rejects_non_numeric_content_length"],"raw_proof_sha256":"7368c5e5ce7a561e47da115bf2afd436216ab90c71395a855ccc1897d17c6083"},
+    {"id":"R4","status":"KILLED","target":"backend/app/api/insights.py","evidence":["FAILED tests/test_deep_mutation_pins.py::test_recompute_fk_violation_maps_to_410_contract"],"raw_proof_sha256":"f1d4cc4a21858e37a6ab9d31e4d901d653b655401c661b4e70b53a2884da8eed"},
+    {"id":"R5","status":"KILLED","target":"backend/app/api/entries.py","evidence":["FAILED tests/test_api_resilience_coverage.py::test_entry_nonunique_commit_error_is_not_mislabeled_as_a_conflict"],"raw_proof_sha256":"b250880f1cdeaf208f165236201a28fe1039f361ff67dbcce1680af6aedc4e51"},
+    {"id":"R6","status":"KILLED","target":"backend/app/api/auth.py","evidence":["FAILED tests/test_auth_api.py::test_legacy_jtiless_logout_retires_the_account_epoch"],"raw_proof_sha256":"cc0464d9901157f58f7b4d6466b0aa5c3215fb1c745047255d7186b42e0e249c"},
+    {"id":"R7","status":"KILLED","target":"backend/app/api/account.py","evidence":["FAILED tests/test_adversarial.py::test_export_has_a_dedicated_rate_bucket"],"raw_proof_sha256":"8775d63af3c598d566b0b5ecdcfa5fcd4feb8650910e469ba921d6ccbbd75a7f"},
+    {"id":"R8","status":"KILLED","target":"backend/app/api/consents.py","evidence":["FAILED tests/test_mutation_pins.py::test_concurrent_pair_grant_answers_conflict_not_500"],"raw_proof_sha256":"a440cab52f4ea70ad52073263b594436a6b200d0e9a8ad2a1cba622f0e2e9622"},
+    {"id":"R9","status":"KILLED","target":"backend/app/api/consents.py","evidence":["FAILED tests/test_api_resilience_coverage.py::test_revoke_fails_as_deleted_account_when_lifecycle_recheck_loses_race"],"raw_proof_sha256":"a0aa8f60face1cb3c5f838b15a7f31ee65dcd9ee494ca32d5669a5a202d7aeaf"},
+    {"id":"R10","status":"KILLED","target":"backend/app/api/therapist.py","evidence":["FAILED tests/test_mutation_pins.py::test_pairing_code_creation_only_retries_unique_violations"],"raw_proof_sha256":"68c7b5abff6bda3bc7607c33b660df46713a4f5b29a2e7fafe42811d5a9859d1"},
+    {"id":"S1","status":"KILLED","target":"backend/app/security/enclave.py","evidence":["FAILED tests/test_enclave.py::TestInMemoryKeyStore::test_expiry"],"raw_proof_sha256":"c88414f167ee1f7c988ef670cd871c8ad4e7a1831c7a8f554305904092ed6a3a"},
+    {"id":"S2","status":"KILLED","target":"backend/app/security/enclave.py","evidence":["FAILED tests/test_api_hardening.py::test_logout_purges_processing_sessions"],"raw_proof_sha256":"0ad6cb689bd2f6d66615724869d7f227b9cf7b9b6588df38ea288f3c5bb6bd2f"},
+    {"id":"S3","status":"KILLED","target":"backend/app/security/enclave.py","evidence":["FAILED tests/test_mutation_pins.py::test_keystore_per_owner_session_cap"],"raw_proof_sha256":"6474c8726d85195365a5bd4404c936606fbd03e04078926b50084bcb3d2dfd8f"},
+    {"id":"S4","status":"KILLED","target":"backend/app/api/entries.py","evidence":["FAILED tests/test_snapshot_revisions.py::test_entries_snapshot_revision_is_strict_and_tracks_real_mutations"],"raw_proof_sha256":"c040a05699d411cb6fc81141a36132454925b8ef1d9acebde299fa6064abf673"},
+    {"id":"S5","status":"KILLED","target":"backend/app/api/_paging.py","evidence":["FAILED tests/test_mutation_pins.py::test_ahead_of_server_snapshot_marker_also_conflicts"],"raw_proof_sha256":"66ebbc9e09c8ed396ad52fb0023fce2427805f7fddf7aff5705e12abf5e158d0"},
+    {"id":"S6","status":"KILLED","target":"backend/app/api/insights.py","evidence":["FAILED tests/test_mutation_pins.py::test_insights_blob_not_served_after_threshold_regression"],"raw_proof_sha256":"cbb746385654b904b007b0763c25b51bfe5175b0f187c0ed3fb817cf4074d7e2"},
+    {"id":"S7","status":"KILLED","target":"backend/app/api/therapist.py","evidence":["FAILED tests/test_mutation_pins.py::test_therapist_insights_read_phase_gates_the_blob"],"raw_proof_sha256":"886fb1814f5b7e76bd56cb86c4e1b73585b105a07ada1cc49b99203a5398c0e1"},
+    {"id":"S8","status":"KILLED","target":"backend/app/api/therapist.py","evidence":["FAILED tests/test_snapshot_revisions.py::test_notes_snapshot_revision_tracks_create_update_delete_and_noop_retry"],"raw_proof_sha256":"e21effa670c55cb8db27b156ef4a40cbbf15cf72a63c1133850f3f208a5dcb39"},
+    {"id":"S9","status":"KILLED","target":"backend/app/main.py","evidence":["FAILED tests/test_infra_coverage.py::test_main_processing_key_sweep_retries_failures_but_propagates_cancellation"],"raw_proof_sha256":"73dcf87b35b7f7b1974cfb077417caca08b494ca91405c76356228fae34570b2"},
+    {"id":"S10","status":"KILLED","target":"backend/app/api/insights.py","evidence":["FAILED tests/test_remediation_recompute_serialization.py::test_overlapping_recomputes_preserve_account_serialization[True]"],"raw_proof_sha256":"e948c7dde4a3ae26dcf9baa07ee7adc7bbcad64dd53c180d8b41da332d863919"},
+    {"id":"T1","status":"KILLED","target":"backend/app/cache.py","evidence":["FAILED tests/test_rate_limit.py::test_login_rate_limited"],"raw_proof_sha256":"51e0e4e865e6be1a113f1fa0f2e42987da9f26623408e9fc7fd0a179bf0399b8"},
+    {"id":"T2","status":"KILLED","target":"backend/app/cache.py","evidence":["FAILED tests/test_hardening.py::test_counter_resets_after_window"],"raw_proof_sha256":"ae0cd36386528e7e7eaae03e4acdb4f88e4fc7616000b7d0edfd81606d3129f7"},
+    {"id":"T3","status":"KILLED","target":"backend/app/cache.py","evidence":["FAILED tests/test_rate_limit.py::test_register_probes_do_not_lock_out_a_legitimate_registrant"],"raw_proof_sha256":"82436003c25f31d380d2835ede3dd2b8a8900c4a4d21986bba513f70e83238d4"},
+    {"id":"T4","status":"KILLED","target":"backend/app/cache.py","evidence":["FAILED tests/test_security_fixes.py::test_eviction_prefers_single_hit_garbage_over_multi_hit_victim"],"raw_proof_sha256":"17c38308cbec987c0f60f3c34b0ccc5b16299f3a24c16d13be5560a322c362ca"},
+    {"id":"T5","status":"KILLED","target":"backend/app/cache.py","evidence":["FAILED tests/test_mutation_pins.py::test_counter_drops_exactly_expired_windows"],"raw_proof_sha256":"32071a9f5e4e31e33236eacc456ea874ad3e089dbf114ca04f9eec4a1b6dae97"},
+    {"id":"T6","status":"KILLED","target":"backend/app/cache.py","evidence":["FAILED tests/test_mutation_pins.py::test_forwarded_identity_requires_the_trusted_peer_decision"],"raw_proof_sha256":"5057634713fd07cd18d59ca6f9cfd4fe8ff187e9f523b5da53a5ce6908321e6c"},
+    {"id":"T7","status":"KILLED","target":"backend/app/cache.py","evidence":["FAILED tests/test_mutation_pins.py::test_forwarded_identity_requires_the_trusted_peer_decision"],"raw_proof_sha256":"d9b45c4fadcd8c09198fff6f4ecca57ed43d5e7ca357ab5eb3ced2d92fab7a97"},
+    {"id":"T8","status":"KILLED","target":"backend/app/locks.py","evidence":["FAILED tests/test_mutation_pins.py::test_absent_keys_stay_on_the_overflow_lock_until_it_drains"],"raw_proof_sha256":"0f12dfef0ef1debf2191b9343ce98ff1e537b2556b9bd6064256e3554d58f292"},
+    {"id":"T9","status":"KILLED","target":"backend/app/locks.py","evidence":["FAILED tests/test_infra_coverage.py::test_user_locks_keep_new_keys_on_live_overflow_shard_until_it_drains"],"raw_proof_sha256":"4e6ac2ed39555956dee1cb154449b7ea00116c4f85bae2311c785065e80b1a77"},
+    {"id":"T10","status":"KILLED","target":"backend/app/singleprocess.py","evidence":["FAILED tests/test_infra_coverage.py::test_single_process_guard_is_reentrant_and_handles_no_held_lock"],"raw_proof_sha256":"e61fee68525b908d220179ac917e599098afdd8e6de36e78626289c44cd3f6bf"},
+    {"id":"U1","status":"KILLED","target":"backend/app/api/auth.py","evidence":["FAILED tests/test_totp.py::test_totp_full_lifecycle"],"raw_proof_sha256":"248529129378f287f4d397eb8c52ff206b9ff55115b140225f247dbf312c0838"},
+    {"id":"U2","status":"KILLED","target":"backend/app/api/auth.py","evidence":["FAILED tests/test_totp.py::test_totp_full_lifecycle"],"raw_proof_sha256":"548a29bee6eff4b7ed1f4eab81c00f061227ab6b4822fb0556641fa4b1dd4dfd"},
+    {"id":"U3","status":"KILLED","target":"backend/app/api/auth.py","evidence":["FAILED tests/test_totp.py::test_totp_full_lifecycle"],"raw_proof_sha256":"8062db0bc371db56a24fbdc8a2a9c08d7fe28f42c52b179bd1c8e1ae5557f9a4"},
+    {"id":"U4","status":"KILLED","target":"backend/app/api/auth.py","evidence":["FAILED tests/test_totp.py::test_totp_full_lifecycle"],"raw_proof_sha256":"6c2f6da5ae9efceed38cc5db32453c3a5f839ce7f9b7c5dc7a85f12f660cd44d"},
+    {"id":"U5","status":"KILLED","target":"backend/app/api/auth.py","evidence":["FAILED tests/test_totp.py::test_totp_full_lifecycle"],"raw_proof_sha256":"e0282e75df7388176967bf0f36736abb7eaeb9fd2fbb69a72e965a7997f32325"},
+    {"id":"U6","status":"KILLED","target":"backend/app/api/account.py","evidence":["FAILED tests/test_totp.py::test_totp_setup_refuses_while_enabled_and_replaces_pending"],"raw_proof_sha256":"7dca3fbba8ce2fadded9d81ccd4a21698ad02e50b9a2fa36d74f48a70de23a61"},
+    {"id":"U7","status":"KILLED","target":"backend/app/api/account.py","evidence":["FAILED tests/test_totp.py::test_emulator_enrollment_uses_the_installed_totp_clock[1000000000.0]"],"raw_proof_sha256":"6c4f39457caef33c1bce9e19f3e08c766326fff14c7c2745c60fc85bfad1d848"},
+    {"id":"U8","status":"KILLED","target":"backend/app/api/account.py","evidence":["FAILED tests/test_totp.py::test_totp_full_lifecycle"],"raw_proof_sha256":"05c8553be18fe32defdd928e745bc728279f4644408834cb3a0f19220a16ecbc"},
+    {"id":"U9","status":"KILLED","target":"backend/app/security/totp.py","evidence":["FAILED tests/test_totp.py::test_totp_helper_accepts_current_and_drift_rejects_other"],"raw_proof_sha256":"5f54d0eb5516272f5a06c9d900ff1eaf1c59ff35d2f6f778d348fc600795d2ef"},
+    {"id":"V1","status":"KILLED","target":"backend/app/api/measures.py","evidence":["FAILED tests/test_remediation_measure_quota.py::test_real_measure_quota_allows_last_slot_rejects_overflow_and_recovers_after_delete"],"raw_proof_sha256":"fdf9d142eb9a50692a15e44b1a2a488ba306a795f7e7920a6b0f974696af4fc9"},
+    {"id":"V2","status":"KILLED","target":"backend/app/api/measures.py","evidence":["FAILED tests/test_measures_api.py::test_date_bounds_mirror_entries"],"raw_proof_sha256":"d971c8c567a13635effabc235a03bd17a76cecc939c1392869284d8ede985df9"},
+    {"id":"V3","status":"KILLED","target":"backend/app/api/measures.py","evidence":["FAILED tests/test_measures_api.py::test_date_bounds_mirror_entries"],"raw_proof_sha256":"d8cc21c77910fe3e5fbdd10daf12a3f7be6982bdc26a280c037915e687010afe"},
+    {"id":"V4","status":"KILLED","target":"backend/app/api/_paging.py","evidence":["FAILED tests/test_audit_2026_09_21_backend.py::test_measures_byte_paginate_and_legacy_413"],"raw_proof_sha256":"e937a1ed206372f96f9e31f64a5223832991d94485d3eff9acf06ccdb3bfc112"},
+    {"id":"V5","status":"KILLED","target":"backend/app/api/_paging.py","evidence":["FAILED tests/test_audit_2026_09_21_backend.py::test_measures_byte_paginate_and_legacy_413"],"raw_proof_sha256":"1a77fabddfe09828ab75c472718d8325c511d332a78d50ebaa890b5d212133a2"},
+    {"id":"V6","status":"KILLED","target":"backend/app/api/_paging.py","evidence":["FAILED tests/test_audit_2026_09_21_backend.py::test_measures_byte_paginate_and_legacy_413"],"raw_proof_sha256":"c692345f6e2648203d6c2ff6abc90b0d8058cdf53d6d842aa76aae22f5757536"},
+    {"id":"V7","status":"KILLED","target":"backend/app/api/measures.py","evidence":["FAILED tests/test_audit_2026_09_21_backend.py::test_measures_create_advances_revision_and_conflicts_stale_snapshots"],"raw_proof_sha256":"d09364c2d2507d67aa94c187260da9b2d69bc949983c600b7ff6f85912e46f7b"},
+    {"id":"V8","status":"KILLED","target":"backend/app/api/measures.py","evidence":["FAILED tests/test_remediation_measure_quota.py::test_unadvanceable_measure_revision_rejects_write_and_rolls_back_insert"],"raw_proof_sha256":"f1aa9002beb5144a6710caf7ba326e92ee9fe8e5944e779b17893d186d1fcf88"},
+    {"id":"V9","status":"KILLED","target":"backend/app/api/measures.py","evidence":["FAILED tests/test_remediation_measure_quota.py::test_measure_page_refuses_real_revision_change_after_assembly_and_retry_succeeds"],"raw_proof_sha256":"ccf23381da9a8a035b6696782ea9290ae8cb73d4064b3ca40cb7fdf8e806efe9"},
+    {"id":"V10","status":"KILLED","target":"backend/app/api/therapist.py","evidence":["FAILED tests/test_api_pins.py::test_v1_consent_refuses_measures_but_keeps_entries_and_insights"],"raw_proof_sha256":"d3ca75fb1b9ec77132463704bdfdc0bff8bf6918daa8938e6cf30b4f9504395e"},
+    {"id":"V11","status":"KILLED","target":"backend/app/api/therapist.py","evidence":["FAILED tests/test_remediation_therapist_measures.py::test_therapist_measure_page_detects_committed_mid_read_write_and_retry_succeeds"],"raw_proof_sha256":"7c4aca8d10dac94a7ce6239d0a101bd363b36c4f12a093b0789bbbfd97d54efe"},
+    {"id":"V12","status":"KILLED","target":"backend/app/api/_paging.py","evidence":["FAILED tests/test_remediation_measure_fetch_bytes.py::test_therapist_measure_fetch_refuses_real_blob_growth_and_larger_retry_succeeds"],"raw_proof_sha256":"6caf72b4bf7b2641c80c34b6f2ca95e6425039cf6c18be597ab22456d2f0ba5d"},
+    {"id":"V13","status":"KILLED","target":"backend/app/api/therapist.py","evidence":["FAILED tests/test_snapshot_revisions.py::test_snapshot_pages_fail_closed_if_marker_moves_during_assembly"],"raw_proof_sha256":"0ee9d30b6198b00482ff8749d50b2a6d1a14de55c4278d968c514355faa61fac"},
+    {"id":"W1","status":"KILLED","target":"backend/app/api/therapist.py","evidence":["FAILED tests/test_note_history.py::test_update_preserves_the_superseded_text"],"raw_proof_sha256":"b935004adfc51274e095deba836f295907d3b6fb3692f3dff88bd35985aefd14"},
+    {"id":"W2","status":"KILLED","target":"backend/app/api/therapist.py","evidence":["FAILED tests/test_note_history.py::test_update_preserves_the_superseded_text"],"raw_proof_sha256":"4c9a7c7954148e7ee2b769e5d010d539874e7174dd2eee24d5107a5b7d712083"},
+    {"id":"W3","status":"KILLED","target":"backend/app/api/therapist.py","evidence":["FAILED tests/test_note_history.py::test_update_preserves_the_superseded_text"],"raw_proof_sha256":"5332629551e42be76d29c91bd2b921c44dd445e8077b53f728efd5e39bd60967"},
+    {"id":"W4","status":"KILLED","target":"backend/app/api/therapist.py","evidence":["FAILED tests/test_note_history.py::test_changing_retry_conflicts_and_patch_preserves_history"],"raw_proof_sha256":"f0413b627f548dcd79bd16b2dddae6de66731bbec7db92921e5e1f49cc7d9c7d"},
+    {"id":"W5","status":"KILLED","target":"backend/app/api/therapist.py","evidence":["FAILED tests/test_snapshot_revisions.py::test_notes_snapshot_revision_tracks_create_update_delete_and_noop_retry"],"raw_proof_sha256":"4e6cc950671a11cbe3ac0b8cccf591d76f0416199f9c4b9c41b099efbe81bc63"},
+    {"id":"W6","status":"KILLED","target":"backend/app/api/therapist.py","evidence":["FAILED tests/test_snapshot_revisions.py::test_notes_snapshot_revision_tracks_create_update_delete_and_noop_retry"],"raw_proof_sha256":"3536358727f06dd71571408439693ca7028f2d447d1fff370c429c01e4d287dd"},
+    {"id":"W7","status":"KILLED","target":"backend/app/api/therapist.py","evidence":["FAILED tests/test_remediation_note_history.py::test_foreign_revision_metadata_cannot_disrupt_owned_history"],"raw_proof_sha256":"2be0611aaf857bb044d37a948923e2e7b3d521cbf7c9317e8f0d35fd4f86b6c4"},
+    {"id":"W8","status":"KILLED","target":"backend/app/api/therapist.py","evidence":["FAILED tests/test_remediation_note_history.py::test_note_history_orders_real_superseded_versions_newest_first_across_pages"],"raw_proof_sha256":"0bfbc1e67087dd3eeb7fbfef7fb20ed721c2d888d50349aeda3823978a6f27c8"},
+    {"id":"W9","status":"KILLED","target":"backend/app/api/therapist.py","evidence":["FAILED tests/test_remediation_note_history.py::test_note_history_accepts_limit_200_and_rejects_201_without_serving_ciphertext"],"raw_proof_sha256":"0b79d5b5ee495d1347236419353e1046073641e2de1ae88a3480cf092b1e0181"},
+    {"id":"X1","status":"KILLED","target":"backend/app/api/entries.py","evidence":["FAILED tests/test_rotation_pins.py::test_create_rejects_non_first_version"],"raw_proof_sha256":"291f49087ac735228be17f6b2093e060689c2acc52b6642b0419919f61890173"},
+    {"id":"X2","status":"KILLED","target":"backend/app/api/entries.py","evidence":["FAILED tests/test_rotation_pins.py::test_replace_enforces_next_version"],"raw_proof_sha256":"4c5361e12a92dc0f5a74fa6ea296725aa474688e5cfd337558adea1ac167e5ab"},
+    {"id":"X3","status":"KILLED","target":"backend/app/api/entries.py","evidence":["FAILED tests/test_rotation_pins.py::test_legacy_replace_without_version_still_advances"],"raw_proof_sha256":"477390e5c117fb2d987ea540538e35269b81f26ecdbb5500051ff11eaba6e6fe"},
+    {"id":"X4","status":"KILLED","target":"backend/app/security/crypto.py","evidence":["FAILED tests/test_encrypt_vectors.py::test_entry_content_version_is_bound_to_the_ciphertext"],"raw_proof_sha256":"25986e8986b747fde79779ed181e85f993dd74d34fc1ac43201887721155220a"},
+    {"id":"X5","status":"KILLED","target":"backend/app/api/insights.py","evidence":["FAILED tests/test_rotation_pins.py::test_full_rotation_flow_recovers_every_collection"],"raw_proof_sha256":"07e979af9fa510a1403c7810414aa4b511183c489168f21646e1943e651df3ee"},
+    {"id":"Y1","status":"KILLED","target":"backend/app/api/insights.py","evidence":["FAILED tests/test_time_of_day.py::test_recompute_rejects_an_unknown_tod_bucket"],"raw_proof_sha256":"bf9ab2348c5cde642a27f28717ec6c3e6c61bee5d2bcd38cc328713c17fced97"},
+    {"id":"Y2","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_remediation_mutation_language.py::test_one_or_two_timestamps_do_not_narrow_a_supported_weekday_claim[1]"],"raw_proof_sha256":"1b09fce4f1273569fc1894570920b52e721713697c0b7523485f19a2c1de8649"},
+    {"id":"Y3","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_time_of_day.py::TestTemporalTimeOfDay::test_mixed_windows_do_not_narrow_the_claim"],"raw_proof_sha256":"07ba87b0e0d262214cd2ff0502274e94445472862af71d886072ae9f747a5ceb"},
+    {"id":"Y4","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_remediation_mutation_language.py::test_exact_seventy_percent_dominance_narrows_a_supported_weekday_claim"],"raw_proof_sha256":"2ecbcf78bb44c1798a843970087c2068668f63a0e036cc0d3f1b728a901adba6"},
+    {"id":"Y5","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_es_themes.py::TestThemeLookupGating::test_theme_lookup_is_language_gated"],"raw_proof_sha256":"48b32f561ea22aeb0f2a9163cd7ad45427971b5ec614082a396ef62ebb546ddc"},
+    {"id":"Y6","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_remediation_mutation_language.py::test_shared_words_use_the_published_language_specific_scoring[genial-0.45-0.7]"],"raw_proof_sha256":"1e27a39be3bd18ed111410f002c7c750f7c2239cc64a9b2411e2b5dceaad653a"},
+    {"id":"Y7","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_audit_2026_09_21_brain.py::TestSpanishTopicEligibility::test_function_words_ineligible_under_spanish"],"raw_proof_sha256":"e59228e33210d9ad41be1b217ee613ce6066daa829d397daf2f9921f3b2a04f0"},
+    {"id":"Y8","status":"KILLED","target":"backend/app/services/brain.py","evidence":["FAILED tests/test_remediation_mutation_language.py::test_one_supported_word_cannot_enable_a_dominantly_unknown_latin_window"],"raw_proof_sha256":"66905acc0d2427137790706b58d76a041ac1f7dd84accd0732a0c2d1cc2813ed"},
+    {"id":"Y9","status":"KILLED","target":"backend/app/services/crisis.py","evidence":["FAILED tests/test_crisis.py::TestParity::test_dialog_list_matches_json"],"raw_proof_sha256":"25dfbaf5399c534bbee78822d241c78f05117a930193d9215d47e613ac94d338"},
+    {"id":"Z1","status":"KILLED","target":"backend/app/api/account.py","evidence":["FAILED tests/test_audit_trail_phase2.py::test_patient_sees_who_accessed_their_data"],"raw_proof_sha256":"0777a327e20e67dba6bf1bdeb4bddd0a27116c8258c0fe0f3a083ac9b664b718"},
+    {"id":"Z2","status":"KILLED","target":"backend/app/api/account.py","evidence":["FAILED tests/test_audit_trail_phase2.py::test_patient_sees_who_accessed_their_data"],"raw_proof_sha256":"968b646d5e4e612c1afcd9f9fd09d20f4b9234a10184ec148078121c6f7d3a86"},
+    {"id":"Z3","status":"KILLED","target":"backend/app/api/account.py","evidence":["FAILED tests/test_audit_trail_phase2.py::test_access_log_cursor_pagination_is_complete_and_unduplicated[equal-times]"],"raw_proof_sha256":"fbdff4a0f084796eb06800fc2e8309d4b78054a195a2e18dc80fe21da729c55b"},
+    {"id":"Z4","status":"KILLED","target":"backend/app/api/therapist.py","evidence":["FAILED tests/test_audit_trail_phase2.py::test_therapist_access_log_excludes_another_therapists_actions"],"raw_proof_sha256":"51541b9127493f0742b82fb4b1842f3f08033d4843e22ea8de046e7f2b12f542"},
+    {"id":"Z5","status":"KILLED","target":"backend/app/api/consents.py","evidence":["FAILED tests/test_api_resilience_coverage.py::test_pairing_with_a_deactivated_therapist_stays_flat_not_found"],"raw_proof_sha256":"e373e822e5eab01f9f01fda40e4e4542fbdcdfa4e71dd84a4960becc267ee450"},
+    {"id":"Z6","status":"KILLED","target":"backend/app/api/therapist.py","evidence":["FAILED tests/test_therapist_lifecycle.py::test_wrap_key_rotation_rechecks_account_after_concurrent_deletion"],"raw_proof_sha256":"2a9cb3fdb59711933408b95c873befc69e203d421987143ad0ecce5364248e4b"},
+    {"id":"Z7","status":"KILLED","target":"backend/app/api/account.py","evidence":["FAILED tests/test_totp.py::test_totp_full_lifecycle"],"raw_proof_sha256":"e914fafd0e5e35aa0ad1258d49a7b7ba510697ccf9e1a516e8074b09acdac241"}
+  ]
+}

@@ -189,6 +189,34 @@ describe("OnboardingScreen reminder opt-in (panel 1)", () => {
     return root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Daily reminder");
   }
 
+  it("an older pending opt-in cannot overtake a newer opt-out", async () => {
+    const root = await render(<OnboardingScreen navigation={nav} />);
+    await flush();
+    let release!: (owner: string) => void;
+    vi.mocked(api.getUserId).mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+    await act(async () => { reminderSwitch(root)!.props.onValueChange(true); });
+    await act(async () => { reminderSwitch(root)!.props.onValueChange(false); });
+    await flush();
+    await act(async () => { release("user-1"); });
+    await flush();
+    expect(JSON.parse((await storage.getItem("@mindpattern/reminders_user-1"))!).enabled).toBe(false);
+    expect(reminderSwitch(root)!.props.value).toBe(false);
+    await act(async () => { root.unmount(); });
+  });
+
+  it("a pending opt-in cannot adopt the account that replaces its unmounted screen", async () => {
+    const root = await render(<OnboardingScreen navigation={nav} />);
+    await flush();
+    let release!: (owner: string) => void;
+    vi.mocked(api.getUserId).mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+    await act(async () => { reminderSwitch(root)!.props.onValueChange(true); root.unmount(); });
+    changeLocalSessionOwner("user-2");
+    await act(async () => { release("user-2"); });
+    await flush();
+    expect(await storage.getItem("@mindpattern/reminders_user-1")).toBeNull();
+    expect(await storage.getItem("@mindpattern/reminders_user-2")).toBeNull();
+  });
+
   it("offers the opt-in on panel 1 only, calm copy, off by default", async () => {
     const root = await render(<OnboardingScreen navigation={nav} />);
     await flush();

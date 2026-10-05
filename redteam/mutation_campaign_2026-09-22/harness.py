@@ -10,8 +10,8 @@ now targets with the same discipline: snapshot the target file's bytes,
 apply ONE semantic mutation, run the targeted suite(s), restore the bytes
 exactly (byte-wise, never git), record killed/survived + the failing
 tests. Survivors are re-verified against the full fast suite by
-verify_survivors.py; genuine survivors get pin tests or documented
-residual entries.
+verify_survivors.py; survivors require behavior tests or repaired controls
+before the shared gate passes.
 
   U  TOTP second factor (2026-09-21 audit C-2/F-4): the login gate, the
      missing-code machine-readable challenge, wrong-code rejection, the
@@ -43,9 +43,10 @@ residual entries.
      tiebreak, the deactivated-therapist pairing refusal, the wrap-rotation
      deactivated recheck, the password-equivalent verifier gate.
 
-A mutant is KILLED when any of its commands exits non-zero (or times out —
-a hang is an observable behavior change). Pytest exits that mean the
-ORACLE is broken (2/3/4/5) are SETUP-ERRORs, never kills.
+A mutant is KILLED only by an observed behavioral test failure after its
+unmodified oracle passes. Timeouts, empty/skipped-only baselines, collection
+failures and runner errors are SETUP-ERRORs, never kills. The shared gate
+rejects all survivors, including historically documented residuals.
 
 Usage:
   python3 harness.py            # run all campaigns

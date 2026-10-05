@@ -7,12 +7,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App";
 import { api, hasSession } from "../src/api/client";
 import { enqueue } from "../src/offlineQueue";
+import { loadActiveDraft } from "../src/entryDraft";
 import { vault } from "../src/vault";
 import { jsonResponse, resetTestState, stubFetch } from "./helpers/api";
 import { applyLanguagePref } from "../src/strings";
 import { kv } from "../src/kvstore";
 import { withLock } from "../src/platform";
-import { buttonByLabel, flush, press, render, textOf } from "./helpers/rtr";
+import { buttonByLabel, flush, press, render, settle, textOf, typeArea } from "./helpers/rtr";
 
 // Preload modules in this state-machine suite; production still lazy-loads them.
 await import("../src/views/Entry");
@@ -387,6 +388,22 @@ describe("App", () => {
     expect(textOf(root)).toContain("Sign in");
     const calls = fetchMock?.mock.calls ?? [];
     expect(calls.some(([url]) => url.endsWith("/auth/logout"))).toBe(true);
+  });
+
+  it("explicit web sign-out preserves the encrypted draft for account recovery", async () => {
+    vi.useRealTimers();
+    authStubs();
+    const root = await render(<App />);
+    await settle(30, 3);
+    await signIn(root);
+    await press(root, "Next"); await press(root, "Next"); await press(root, "Start journaling");
+    await settle(10, 4);
+    await typeArea(root, "How was today?", "Recover this unfinished writing after signing back in");
+    await press(root, "More"); await press(root, "Sign out (this device)");
+    await settle(10, 6);
+    expect(hasSession()).toBe(false);
+    expect(vault.isUnlocked()).toBe(false);
+    expect((await loadActiveDraft(new Uint8Array(32), "user-7"))?.text).toBe("Recover this unfinished writing after signing back in");
   });
 
   it("locks plaintext immediately and orders delayed sign-out cleanup before successor account state", async () => {

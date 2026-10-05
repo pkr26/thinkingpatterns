@@ -12,6 +12,17 @@ from app.models import AccessLog, new_id
 from tests.helpers import ClientEmulator
 
 
+@pytest.fixture(autouse=True)
+def _authenticate_authorized_entry_fixture_inserts():
+    """Exercise production writes without conftest's legacy-seed repair hook.
+
+    Otherwise removing the API's seal call would still pass every guarded
+    recompute regression because the ORM fixture silently signs its insert.
+    The deliberate unsealed bootstrap rows in this module need no repair.
+    """
+    yield
+
+
 @pytest.fixture
 def settings(settings, tmp_path):
     settings.audit_journal_path = str(tmp_path / "committed-evidence.jsonl")
@@ -81,6 +92,21 @@ async def _recompute_response(client, patient):
     return await client.post(
         "/api/insights/recompute", headers={**patient.headers, "X-Processing-Token": token}
     )
+
+
+async def test_api_entry_write_seals_guard_without_fixture_repair(client, app, settings):
+    from datetime import date
+
+    from app.models import Entry
+    from app.security.entry_guard import validate_entry_guard
+
+    patient = ClientEmulator("api-entry-guard-seal", "synthetic password")
+    await patient.register(client)
+    await patient.create_entry(client, "calm home", date.today(), "entry", content_version=1)
+    async with app.state.sessionmaker() as session:
+        row = await session.scalar(select(Entry).where(Entry.user_id == patient.user_id))
+        assert row is not None
+        assert validate_entry_guard(row, settings) is False
 
 
 @pytest.mark.parametrize("corrupt_state", [False, True])

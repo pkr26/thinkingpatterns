@@ -7,8 +7,8 @@ and rate limiting/concurrency. Same discipline as rounds 1-2: snapshot the
 target file's bytes, apply ONE semantic mutation, run the targeted suite(s),
 restore the bytes exactly (byte-wise, never git), record killed/survived +
 the failing tests. Survivors are re-verified against the full fast suite by
-verify_survivors.py; genuine survivors get pin tests; documented residuals
-say why they are not pins.
+verify_survivors.py; survivors require behavior tests or repaired controls
+before the shared gate passes.
 
   O  Authorization & access control: token-epoch kill switch, active-user
      gate, role walls (both directions), revoked-consent reads, note chart
@@ -35,8 +35,10 @@ say why they are not pins.
      drop, XFF trust boundary, IPv6 /64 aggregation, lock overflow
      discipline, live-lock eviction, single-process guard.
 
-A mutant is KILLED when any of its commands exits non-zero (or times out —
-a hang is an observable behavior change).
+A mutant is KILLED only by an observed behavioral test failure after its
+unmodified oracle passes. Timeouts, empty/skipped-only baselines, collection
+failures and runner errors are SETUP-ERRORs, never kills. The shared gate
+rejects all survivors, including historically documented residuals.
 
 Usage:
   python3 harness.py            # run all campaigns

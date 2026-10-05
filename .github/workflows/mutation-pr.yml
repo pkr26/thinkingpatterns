@@ -32,6 +32,9 @@ on:
       - "backend/pytest.ini"
       - "backend/setup.cfg"
       - "backend/tox.ini"
+      - "backend/requirements*.in"
+      - "backend/requirements*.txt"
+      - "backend/uv.lock"
       - "backend/scripts/mutmut_runner.sh"
       - "redteam/mutation_campaign*/**"
       - "redteam/run_pr_mutation_gate.py"
@@ -40,6 +43,17 @@ on:
       - "redteam/*.py"
       - "mobile/tests/**"
       - "portal/tests/**"
+      - "mobile/redteam/**"
+      - "mobile/tools/**"
+      - "portal/tools/**"
+      - "mobile/*config*"
+      - "portal/*config*"
+      - "mobile/package*.json"
+      - "portal/package*.json"
+      - "mobile/.npmrc"
+      - "portal/.npmrc"
+      - ".nvmrc"
+      - ".github/workflows/mutation-pr.yml"
       - "shared/vectors.json"
       - "shared/crisis_phrases.json"
       - "shared/generic_questions.json"
@@ -72,7 +86,7 @@ jobs:
           cache-dependency-path: backend/requirements.dev.lock.txt
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "22"
+          node-version-file: .nvmrc
       - name: Install backend dependencies
         working-directory: backend
         run: |

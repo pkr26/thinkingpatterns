@@ -4,8 +4,9 @@
 # The app only runs create_all in development (see app/main.py lifespan), so
 # the schema MUST come from migrations here. `alembic upgrade head` is
 # idempotent and reads MINDPATTERN_DB_URL directly (alembic/env.py); a
-# database created by an old create_all-based deploy must first be adopted
-# with `alembic stamp head` (see alembic/README.md). Concurrent replicas are
+# database created by an old create_all-based deploy must first be compared
+# with the historical migrations and stamped at its verified matching
+# revision, never blindly at head (see alembic/README.md). Concurrent replicas are
 # serialized by a Postgres advisory lock inside alembic/env.py.
 set -eu
 

@@ -33,12 +33,10 @@ byte-wise — never git), record killed/survived + the failing tests.
      FINDING for the targeted audit; MISSED = the regression sailed
      through the attack harness.
 
-A mutant is KILLED when any of its commands exits non-zero (or times out —
-a hang is an observable behavior change) — EXCEPT pytest exits that mean
-the oracle itself is broken (2/3/4/5: interrupted, internal error, usage
-error, nothing collected — e.g. a renamed or deleted pin-test file);
-those are SETUP-ERRORs, never kills, so oracle rot cannot green the gate.
-Survivors are re-verified against the full fast suite by the campaign driver.
+A mutant is KILLED only by an observed behavioral test failure after its
+unmodified oracle passes. Timeouts, empty/skipped-only baselines, collection
+failures and runner errors are SETUP-ERRORs, never kills. Survivors fail the
+gate; historical residuals grant no exemptions.
 
 Usage:
   python3 harness.py            # run all campaigns
@@ -436,7 +434,7 @@ MUTANTS: list[dict] = [
         id="J3", campaign="J", name="rumination classifier disabled (worries surface as neutral phrases)",
         expectation="negative recurring clusters must be framed as rumination",
         file="backend/app/services/brain.py",
-        find="        is_rumination = allow_rumination and (",
+        find="        is_rumination = allow_rumination and cluster_language_ok and (",
         replace="        is_rumination = False and (",
         tests=brain_suite(),
     ),

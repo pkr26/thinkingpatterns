@@ -218,7 +218,7 @@ export function HistoryView(): React.JSX.Element {
       // quiet no-op, never vault.get()'s throw as an unhandled rejection.
       if (!vault.isUnlocked()) return;
       const keys = vault.get();
-      const listed = await listEntriesWalk();
+      const listed = await listEntriesWalk(undefined, operation.current);
       if (generation.current !== run || !operation.current()) return;
       const bindings = await entryV2Bindings(owner, keys.dataKey);
       if (!operation.current()) return;

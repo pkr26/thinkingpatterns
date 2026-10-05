@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { EntryView } from '../src/views/Entry';
 import * as patientCrypto from '../src/crypto/patient';
-import { clearSession, setSession } from '../src/api/client';
+import { api, clearSession, setSession } from '../src/api/client';
 import { QuestionView } from '../src/views/Question';
 import { kv } from '../src/kvstore';
 import { loadActiveDraft, preserveActiveDraft } from '../src/entryDraft';
@@ -114,4 +114,42 @@ it('retired History edit cannot update or refetch through a replacement account'
   await settle(10, 5);
   expect(requests).toHaveLength(requestsBeforeRetiredCompletion);
   expect(requests.some(row => row.init.method === 'PUT')).toBe(false);
+});
+
+it.each(['account replacement', 'view unmount', 'key replacement'])('a retired History page walk stops after %s', async retirement => {
+  const { HistoryView } = await import('../src/views/History');
+  setSession('token-A', 'owner-A', 'alice');
+  vault.unlock({ authKey: new Uint8Array(32).fill(7), dataKey: new Uint8Array(32).fill(7) }, 'owner-A');
+  const requests: { url: string; init: RequestInit }[] = [];
+  stubFetch((url, init) => {
+    requests.push({ url, init });
+    return url.includes('offset=0')
+      ? jsonResponse([{ client_entry_id: 'entry-A', blob: 'ciphertext', entry_date: '2026-10-01', content_version: 1 }], { headers: { 'X-Entries-Revision': '1', 'X-Next-Offset': '1' } })
+      : jsonResponse([], { headers: { 'X-Entries-Revision': '1' } });
+  });
+  let release!: () => void, reached!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const pageReady = new Promise<void>(resolve => { reached = resolve; });
+  const realPage = api.listEntriesPage;
+  vi.spyOn(api, 'listEntriesPage').mockImplementation(async options => {
+    const page = await realPage(options);
+    if (options?.offset === 0) { reached(); await gate; }
+    return page;
+  });
+  const root = await render(<HistoryView />);
+  await pageReady;
+  if (retirement === 'key replacement') {
+    vault.unlock({ authKey: new Uint8Array(32).fill(9), dataKey: new Uint8Array(32).fill(9) }, 'owner-A');
+  } else {
+    await act(async () => root.unmount());
+    if (retirement === 'account replacement') {
+      clearSession(); vault.lock();
+      setSession('token-B', 'owner-B', 'bob');
+      vault.unlock({ authKey: new Uint8Array(32).fill(9), dataKey: new Uint8Array(32).fill(9) }, 'owner-B');
+    }
+  }
+  await act(async () => release());
+  await settle(10, 5);
+  expect(requests).toHaveLength(1);
+  expect(requests[0]!.init.headers).toMatchObject({ Authorization: 'Bearer token-A' });
 });

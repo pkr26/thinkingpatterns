@@ -9,6 +9,7 @@ Line numbers, hashes, and code names describe their original snapshots.
 
 ## Historical reports
 
+- [Independent re-audit of remediation commit 9f22fb3, 2026-10-04](audits/2026-10-04/COMMIT_REAUDIT.md)
 - [Independent audit across 24 tracks, 2026-10-04](audits/2026-10-04/AUDIT.md)
 - [Remediation of all 22 findings, 2026-10-04](audits/2026-10-04/REMEDIATION.md)
 - [AUDIT 2026-09-21](audits/AUDIT_2026-09-21.md)

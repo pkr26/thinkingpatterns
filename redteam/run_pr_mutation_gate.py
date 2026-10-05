@@ -91,6 +91,8 @@ def affected(mutant: dict, changed: set[str]) -> bool:
             "redteam/run_pr_mutation_gate.py",
             "redteam/mutation_preflight.py",
             "redteam/mutation_oracles.py",
+            ".github/workflows/mutation-pr.yml",
+            ".nvmrc",
         }
         for path in changed
     ):
@@ -99,8 +101,33 @@ def affected(mutant: dict, changed: set[str]) -> bool:
         return True
     specs = mutant["tests"] if isinstance(mutant["tests"], list) else [mutant["tests"]]
     for spec in specs:
+        if spec["kind"] in {"pytest", "probe", "redteam"} and any(
+            path == "backend/uv.lock"
+            or path.startswith("backend/requirements") and path.endswith((".in", ".txt"))
+            for path in changed
+        ):
+            return True
         if spec["kind"] == "redteam" and "redteam/common.py" in changed:
             return True
+        if spec["kind"] == "vitest":
+            # Aliases, setup files and imported test helpers define the real
+            # oracle too. They are absent from Vitest's command-line selectors.
+            # Include all client test/support and runner/dependency changes;
+            # indirect imports cannot safely be inferred from filenames.
+            client = pathlib.PurePosixPath(spec["cwd"])
+            for path in map(pathlib.PurePosixPath, changed):
+                if not path.is_relative_to(client):
+                    continue
+                relative = path.relative_to(client)
+                if relative.parts and (
+                    relative.parts[0] in {"tests", "redteam", "tools"}
+                    or len(relative.parts) == 1 and (
+                        relative.name in {"package.json", "package-lock.json", ".npmrc"}
+                        or relative.name.startswith(("vite.config.", "vitest.config.", "tsconfig"))
+                        or ".vitest.config." in relative.name
+                    )
+                ):
+                    return True
         # Pytest loads conftest implicitly, and suites import shared emulator
         # helpers without naming them on the command line. Conservatively
         # rerun backend pytest controls for changes to test-support modules;

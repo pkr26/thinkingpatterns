@@ -19,6 +19,7 @@ import { useTheme } from "../theme";
 import { CrisisHelpButton, GhostButton, PrimaryButton } from "../components/buttons";
 import { hasSeenOnboarding, loadOnboardingPanel, recordOnboardingSeen, saveOnboardingPanel } from "../onboarding";
 import { setReminderEnabled } from "../reminders";
+import { useReminderPreferenceIntent } from "../reminderPreferences";
 import { syncReminderSchedule } from "../reminderSync";
 import { t as tr } from "../strings";
 
@@ -50,6 +51,7 @@ function panels(): readonly Panel[] {
 export function OnboardingScreen({ navigation }: { navigation: any }): React.JSX.Element {
   const t = useTheme();
   const { touchActivity } = useSession();
+  const beginReminderIntent = useReminderPreferenceIntent();
   const [index, setIndex] = useState(0);
   const [busy, setBusy] = useState(false);
   // The reminder opt-in (2026-09-19): off by default, one tap to say yes,
@@ -107,12 +109,15 @@ export function OnboardingScreen({ navigation }: { navigation: any }): React.JSX
    *  fails, skip silently: onboarding must never block or nag. */
   const toggleRemind = (on: boolean) => {
     touchActivity();
+    const intent = beginReminderIntent("daily-enabled", owner ?? undefined);
+    if (!intent) return;
     setRemind(on);
     api
       .getUserId()
       .then(async (userId) => {
-        if (!userId) return;
-        await setReminderEnabled(userId, on).catch(() => {});
+        if (!intent.current() || userId !== intent.owner) return;
+        await setReminderEnabled(userId, on);
+        if (!intent.current()) return;
         await syncReminderSchedule(userId).catch(() => {});
       })
       .catch(() => {});

@@ -1,10 +1,12 @@
 """OPS-02: applicability is read-only, and broken oracles never count as kills."""
 
 import contextlib
+import fnmatch
 import importlib.util
 import io
 import json
 import pathlib
+import re
 import sys
 import tempfile
 import unittest
@@ -196,6 +198,55 @@ class PreflightTests(unittest.TestCase):
         self.assertTrue(gate.affected(mixed, {"backend/pyproject.toml"}))
         self.assertFalse(gate.affected(mixed, {"backend/README.md"}))
 
+    def test_client_helpers_configuration_and_dependencies_select_client_oracles(self):
+        for client in ("mobile", "portal"):
+            control = {
+                **self.mutant,
+                "file": f"{client}/src/target.ts",
+                "tests": {
+                    "cwd": client,
+                    "kind": "vitest",
+                    "cmd": ["npx", "vitest", "run", "tests/target.test.ts"],
+                },
+            }
+            for support in (
+                "tests/helpers/setup.ts", "tests/helpers/nodeEngine.ts",
+                "vitest.config.ts", "vite.config.ts", "tsconfig.json",
+                "package.json", "package-lock.json", ".npmrc",
+            ):
+                with self.subTest(client=client, support=support):
+                    self.assertTrue(gate.affected(control, {f"{client}/{support}"}))
+                    self.assertFalse(gate.affected(self.mutant, {f"{client}/{support}"}))
+            self.assertFalse(gate.affected(control, {f"{client}/README.md"}))
+
+    def test_gate_workflow_and_runtime_changes_select_all_controls(self):
+        for path in (".github/workflows/mutation-pr.yml", ".nvmrc"):
+            with self.subTest(path=path):
+                self.assertTrue(gate.affected(self.mutant, {path}))
+
+    def test_workflow_triggers_cover_client_oracle_support(self):
+        workflow = (ROOT / ".github/workflows/mutation-pr.yml").read_text()
+        paths = re.findall(r'^\s+- "([^"]+)"\s*$', workflow, re.M)
+        for changed in (
+            "mobile/tests/helpers/nodeEngine.ts", "portal/tests/helpers/setup.ts",
+            "mobile/vitest.config.ts", "mobile/redteam.vitest.config.ts",
+            "portal/vite.config.ts", "mobile/tsconfig.json", "portal/tsconfig.json",
+            "mobile/package-lock.json", "portal/package.json", "mobile/.npmrc",
+            ".nvmrc", ".github/workflows/mutation-pr.yml",
+            "backend/requirements.dev.lock.txt", "backend/requirements.lock.txt",
+            "backend/requirements.in", "backend/uv.lock",
+        ):
+            with self.subTest(changed=changed):
+                self.assertTrue(any(fnmatch.fnmatchcase(changed, pattern) for pattern in paths))
+
+    def test_python_dependency_changes_select_all_python_oracle_kinds(self):
+        for kind in ("pytest", "probe", "redteam"):
+            control = {**self.mutant, "tests": {**self.mutant["tests"], "kind": kind}}
+            for path in ("backend/requirements.dev.lock.txt", "backend/requirements.lock.txt",
+                         "backend/requirements.in", "backend/uv.lock"):
+                with self.subTest(kind=kind, path=path):
+                    self.assertTrue(gate.affected(control, {path}))
+
     def test_baseline_failure_prevents_mutation_and_old_residual_ids_get_no_exemption(self):
         runner = mock.Mock()
         runner.run_command.return_value = (True, None, [], "FAILED tests/test_target.py", 0.1)
@@ -308,6 +359,27 @@ class PreflightTests(unittest.TestCase):
 
 
 class OracleClassificationTests(unittest.TestCase):
+    def test_success_without_executed_passing_controls_is_not_a_baseline(self):
+        for kind, output in (
+            ("pytest", ""), ("pytest", "3 skipped in 0.01s"),
+            ("vitest", ""), ("vitest", "Tests  3 skipped (3)"),
+            ("probe", ""), ("probe", "diagnostic started"),
+        ):
+            with self.subTest(kind=kind, output=output):
+                self.assertIsNotNone(oracle_setup_error(kind, 0, output))
+
+    def test_executed_passing_controls_are_valid_baselines(self):
+        for kind, output in (
+            ("pytest", "3 passed in 0.01s"),
+            ("pytest", "...s [100%]\n"),
+            ("vitest", "Tests  3 passed | 1 skipped (4)"),
+            ("probe", "  PASS planted association"),
+            ("pytest", "\x1b[32m3 passed\x1b[0m in 0.1s"),
+            ("vitest", "\x1b[2m Tests \x1b[22m \x1b[32m3 passed\x1b[39m (3)"),
+        ):
+            with self.subTest(kind=kind, output=output):
+                self.assertIsNone(oracle_setup_error(kind, 0, output))
+
     def test_missing_malformed_or_error_verdicts_never_kill(self):
         for kind, code, output in [
             ("pytest", 5, "no tests ran"),

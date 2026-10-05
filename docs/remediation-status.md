@@ -1,8 +1,16 @@
 # Fathom remediation status
 
-**October 4, 2026 follow-up:** all 22 finding groups from the independent
+**October 4, 2026 independent re-audit of `9f22fb3`:** verification of all
+22 remediation claims found additional account/draft, reminder, recording,
+language-analysis, verification-gate, build and documentation gaps. The
+repairs and fresh validation are recorded in the
+[commit re-audit](archive/audits/2026-10-04/COMMIT_REAUDIT.md), including
+failing-before regressions, browser export recovery and migration/restore
+evidence. Its assurance limits remain explicit.
+
+**Earlier October 4 remediation checkpoint:** all 22 finding groups from the independent
 24-track audit have implementation and passing local regression evidence.
-See the [latest remediation register](archive/audits/2026-10-04/REMEDIATION.md)
+See the [original remediation register](archive/audits/2026-10-04/REMEDIATION.md)
 for the fixes, complete verification counts, remaining assurance limits and
 required trusted database-bootstrap procedure. All 220 behavioral mutation
 controls were verified. The October 3 checkpoint below remains historical

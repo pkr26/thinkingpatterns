@@ -28,7 +28,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { secureStore } from "./secureStore";
 import { accountStorageKey } from "./accountStorage";
-import { commitActiveAccountWrite } from "./localWriteGuard";
+import { commitReminderPreferenceWrite } from "./reminderPreferences";
 
 export interface MeasureReminderPrefs {
   enabled: boolean;
@@ -78,23 +78,25 @@ export async function getMeasureReminderPrefs(userId: string): Promise<MeasureRe
   }
 }
 
-async function writePrefs(userId: string, prefs: MeasureReminderPrefs): Promise<void> {
-  await commitActiveAccountWrite(userId, () => AsyncStorage.setItem(prefKey(userId), JSON.stringify(prefs)));
+async function updatePrefs(userId: string, patch: Partial<MeasureReminderPrefs>): Promise<void> {
+  await commitReminderPreferenceWrite(userId, async check => {
+    const prefs = await getMeasureReminderPrefs(userId);
+    check();
+    await AsyncStorage.setItem(prefKey(userId), JSON.stringify({ ...prefs, ...patch }));
+  });
 }
 
 /** Flip the opt-in, preserving the stored interval. Throws on a storage
  *  failure — the UI never pretends a preference was saved when it was not. */
 export async function setMeasureReminderEnabled(userId: string, enabled: boolean): Promise<void> {
-  const prefs = await getMeasureReminderPrefs(userId);
-  await writePrefs(userId, { ...prefs, enabled });
+  await updatePrefs(userId, { enabled });
 }
 
 /** Choose the cadence (weeks). Out-of-offer values are refused
  *  defensively — never written as week 99. */
 export async function setMeasureReminderInterval(userId: string, intervalWeeks: number): Promise<void> {
   if (!Number.isInteger(intervalWeeks) || !MEASURE_INTERVAL_WEEKS.includes(intervalWeeks)) return;
-  const prefs = await getMeasureReminderPrefs(userId);
-  await writePrefs(userId, { ...prefs, intervalWeeks });
+  await updatePrefs(userId, { intervalWeeks });
 }
 
 /** Account-deletion hygiene: the preference must not outlive its account. */
@@ -124,9 +126,12 @@ function isValidLocalDate(iso: string): boolean {
 export async function recordMeasureCompleted(userId: string, dateISO: string): Promise<void> {
   try {
     if (!isValidLocalDate(dateISO)) return;
-    const current = await lastMeasureCompletedOn(userId);
-    if (current !== null && current >= dateISO) return;
-    await commitActiveAccountWrite(userId, () => secureStore.setItem(lastKey(userId), dateISO));
+    await commitReminderPreferenceWrite(userId, async check => {
+      const current = await lastMeasureCompletedOn(userId);
+      check();
+      if (current !== null && current >= dateISO) return;
+      await secureStore.setItem(lastKey(userId), dateISO);
+    });
   } catch {
     // Disposable cadence metadata, never an error surface.
   }

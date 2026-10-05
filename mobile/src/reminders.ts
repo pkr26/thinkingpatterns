@@ -9,7 +9,7 @@
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { accountStorageKey } from "./accountStorage";
-import { commitActiveAccountWrite } from "./localWriteGuard";
+import { commitReminderPreferenceWrite } from "./reminderPreferences";
 
 export interface ReminderPrefs {
   enabled: boolean;
@@ -61,16 +61,19 @@ export async function getReminderPrefs(userId: string): Promise<ReminderPrefs> {
   }
 }
 
-async function writePrefs(userId: string, prefs: ReminderPrefs): Promise<void> {
-  await commitActiveAccountWrite(userId, () => AsyncStorage.setItem(key(userId), JSON.stringify(prefs)));
+async function updatePrefs(userId: string, patch: Partial<ReminderPrefs>): Promise<void> {
+  await commitReminderPreferenceWrite(userId, async check => {
+    const prefs = await getReminderPrefs(userId);
+    check();
+    await AsyncStorage.setItem(key(userId), JSON.stringify({ ...prefs, ...patch }));
+  });
 }
 
 /** Flip the opt-in, preserving the stored time (or the default when none
  *  was ever chosen). Throwing surfaces to the caller as an honest failure —
  *  the UI never pretends a preference was saved when it was not. */
 export async function setReminderEnabled(userId: string, enabled: boolean): Promise<void> {
-  const prefs = await getReminderPrefs(userId);
-  await writePrefs(userId, { ...prefs, enabled });
+  await updatePrefs(userId, { enabled });
 }
 
 /** Choose the reminder time (local clock). The caller validates intent;
@@ -78,8 +81,7 @@ export async function setReminderEnabled(userId: string, enabled: boolean): Prom
 export async function setReminderTime(userId: string, hour: number, minute: number): Promise<void> {
   if (!Number.isInteger(hour) || hour < 0 || hour > 23) return;
   if (!Number.isInteger(minute) || minute < 0 || minute > 59) return;
-  const prefs = await getReminderPrefs(userId);
-  await writePrefs(userId, { ...prefs, hour, minute });
+  await updatePrefs(userId, { hour, minute });
 }
 
 /** Account-deletion hygiene: the preference must not outlive its account. */

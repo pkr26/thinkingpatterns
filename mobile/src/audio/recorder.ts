@@ -231,7 +231,11 @@ export function useVoiceRecorder(strings: {
         if (!owns()) return;
         // iOS startRecording guards on .prepared and Android record()
         // no-ops while unprepared — the native take only exists after this.
-        await recorder.prepareToRecordAsync();
+        // iOS reuses the previous AVAudioRecorder URL when options are
+        // omitted. Each take needs a fresh file identity: EntryScreen
+        // deduplicates transcription and attachment ownership by URI.
+        rememberUri();
+        await recorder.prepareToRecordAsync(RECORDING_OPTIONS);
         rememberUri();
         if (!owns()) { await stopNative(); await scrub(); return; }
         startedAtRef.current = Date.now();

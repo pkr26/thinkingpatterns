@@ -76,7 +76,8 @@ inside predominantly unsupported-script text therefore cannot enable scoring.
 The window and each entry are checked; eligible entries use their own EN/ES
 lexicon. This conservative gate is not a general language identifier or a
 validated multilingual classifier. Unsupported text is excluded from mood
-analyses and account averages, while explicit finite mood ratings and the
+analyses, rumination classifications, person/topic interpretation and account
+averages, while explicit finite mood ratings, neutral phrase repetition and the
 writing calendar remain usable. No eligible mood evidence is reported as
 unavailable, not neutral. Summary metadata gives the number of explicit ratings,
 text estimates and excluded entries. Phrase matching remains limited by the

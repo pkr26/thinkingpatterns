@@ -511,6 +511,11 @@ export function EntryView(props: {
         // 2026-10-01 audit M3: the crisis prompt is NOT cleared here — it
         // rides past the save and stays until dismissed from the card.
         setDraftRestored(false);
+        // Queue cleanup before any more asynchronous work. The editor is
+        // available for a new draft while a kept recording uploads; a clear
+        // queued after that upload could erase the newer autosaved writing.
+        if (unchanged && draftHydrated.current) await clearActiveDraft(owner,writePermit).catch(err => setDraftStatus(displayError(err, t("entry.draftFailed"))));
+        if (!operation.current()) return;
         // The kept recording rides only a SENT entry (the offline queue is
         // the text ciphertext's safety net, not an audio transport —
         // O-5); a dropped recording warns and never fails the save.
@@ -526,9 +531,6 @@ export function EntryView(props: {
           setVoice(null);
           recorder.reset();
         }
-        // The entry is safe (server or ciphertext queue) — the sealed draft's
-        // custody ends here (entryDraft.ts, audit 2026-09-26).
-        if (unchanged && draftHydrated.current) await clearActiveDraft(owner,writePermit).catch(err => setDraftStatus(displayError(err, t("entry.draftFailed"))));
         if (operation.current()) props.onSaved(result, date);
       } finally {
         zeroize(dataKey);

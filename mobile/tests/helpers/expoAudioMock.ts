@@ -30,7 +30,7 @@ export const fakeRecorderStatus: FakeRecorderStatus = {
  *  every instance the hook returns uses these EXACT vi.fn's — tests can
  *  mockRejectedValueOnce (e.g. prepareToRecordAsync failure) on them. */
 export const recorderControls = {
-  prepareToRecordAsync: vi.fn(async (): Promise<void> => {
+  prepareToRecordAsync: vi.fn(async (_options?: unknown): Promise<void> => {
     fakeRecorderStatus.canRecord = true;
   }),
   record: vi.fn((): void => {

@@ -164,6 +164,42 @@ describe("EntryScreen voice flow", () => {
     );
   });
 
+  it("a second iOS take gets its own file and transcribes after the first entry is saved", async () => {
+    // Expo Audio's iOS prepare(options: nil) reuses the AVAudioRecorder
+    // and its URL. Supplying options creates a fresh native recorder/file.
+    let currentUri = `${fs.cacheDirectory}ios-initial.m4a`;
+    let sequence = 0;
+    recorderControls.prepareToRecordAsync.mockImplementation(async options => {
+      if (options !== undefined) currentUri = `${fs.cacheDirectory}ios-${++sequence}.m4a`;
+      fakeRecorderStatus.url = currentUri;
+      fakeRecorderStatus.durationMillis = 4200;
+      fs.__seedFile(currentUri, "QUJDREVG");
+    });
+    vi.mocked(api.transcribeAudio)
+      .mockResolvedValueOnce({ language: "en", language_raw: "en", original_text: "First take", english_text: null } as never)
+      .mockResolvedValueOnce({ language: "en", language_raw: "en", original_text: "Second take", english_text: null } as never);
+    const root = await render(<EntryScreen navigation={nav} />);
+    await pressLabel(root, "Record instead");
+    await pressLabel(root, "Stop recording");
+    await flush();
+    const firstUri = currentUri;
+    await pressLabel(root, "Save");
+    await flush();
+    expect(fs.__hasFile(firstUri)).toBe(false);
+    await pressLabel(root, "Record instead");
+    await pressLabel(root, "Stop recording");
+    await flush();
+    expect(api.transcribeAudio).toHaveBeenCalledTimes(2);
+    expect(currentUri).not.toBe(firstUri);
+    expect(inputByPlaceholder(root, "What's going on today?").props.value).toBe("Second take");
+    await pressLabel(root, "Save");
+    await flush();
+    expect(api.createEntry).toHaveBeenCalledTimes(2);
+    await act(async () => { root.unmount(); });
+    await flush();
+    expect(fs.__hasFile(currentUri)).toBe(false);
+  });
+
   it("a consent error shows the localized message and discards the take", async () => {
     vi.mocked(api.transcribeAudio).mockRejectedValue(
       new ApiError(403, "voice consent required", "voice_consent_required"),

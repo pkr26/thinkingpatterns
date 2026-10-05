@@ -27,8 +27,8 @@ establish a minimal-risk classification or a legal no-PHI determination.
   with enough active days and subsequent experience; the app's production
   threshold remains unchanged.
 - **N**: 30 adult journal users (18+), balanced for Spanish/English
-  locale; powered for thematic saturation on the qualitative strand,
-  descriptive statistics only on the quantitative strand.
+  locale; proposed qualitative sample, with thematic sufficiency assessed
+  and reported rather than assumed. Quantitative statistics are descriptive only.
 - **Arms**: none (single-arm). Optional extension: masked review of the
   pattern-card comprehension task by 2 clinicians for content-validity
   ratings only.
@@ -73,13 +73,15 @@ establish a minimal-risk classification or a legal no-PHI determination.
 | System usability | SUS (10-item) | week 4 |
 | Acceptability of the 30-active-day threshold explanation | ad-hoc 5-item (clarity, expected burden, trust; pilot and report reliability); does not measure completed threshold experience | week 2 + 4 |
 | Sample-card comprehension | ad-hoc comprehension task: interpret 3 investigator-supplied sample cards; no participant's generated observations | week 4 |
-| Engagement (objective, privacy-preserving) | self-reported frequency; NO app telemetry exists to harvest — the app collects none | all sessions |
+| Engagement (self-reported, privacy-preserving) | self-reported frequency; NO app telemetry exists to harvest — the app collects none | all sessions |
 | Qualitative experience | semi-structured interview (~30 min) | week 4 |
 
 ## 4. Data handling consistent with the product's claims
 
-- The study collects NO journal content and NO app-derived data. Every
-  measure is a standard instrument administered outside the app.
+- The study collects NO journal content and NO app-derived data. Measures
+  are administered outside the app and include SUS, study-specific items,
+  sample-card tasks and interviews; the study-specific items are not presented
+  as standardized instruments.
 - Informed-consent materials state that investigators cannot read journal
   content through the study, and describe the client encryption and optional
   server/provider processing boundaries above. Deleting an account removes
@@ -93,7 +95,8 @@ establish a minimal-risk classification or a legal no-PHI determination.
 ## 5. Analysis plan
 
 - Descriptive statistics (median, IQR) for SUS and acceptability;
-  pre-registered benchmark: SUS ≥ 68 (above-average usability).
+  proposed benchmark for future pre-registration: SUS ≥ 68. No completed
+  pre-registration is claimed by this draft.
 - Sample-card comprehension task: % of participants who correctly describe
   what the supplied cards claim (observations, not diagnoses); proposed
   benchmark ≥ 80%. This endpoint measures comprehension of those materials,
@@ -103,7 +106,8 @@ establish a minimal-risk classification or a legal no-PHI determination.
 
 ## 6. Ethics
 
-- Minimal risk classification; no deception; withdraw-anytime; the
+- Risk classification remains for the reviewing institution to determine;
+  proposed safeguards include no deception and withdrawal at any time. The
   crisis resources are one tap away at all times (and the screen is
   offline static content).
 - The app never interprets scores or gives advice — the protocol does

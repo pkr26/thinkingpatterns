@@ -17,6 +17,7 @@ import { ThemeMode, themeStorageKey, useSetThemeMode } from "../theme";
 import { loadHapticsSetting, setHapticsEnabled } from "../haptics";
 import { reminderCapability } from "../nativeFeatures";
 import { getReminderPrefs, setReminderEnabled, setReminderTime } from "../reminders";
+import { useReminderPreferenceIntent } from "../reminderPreferences";
 import { readLanguageChoice, writeLanguageChoice, type LanguageChoice } from "../languagePref";
 import {
   generateRecoveryKey,
@@ -93,6 +94,7 @@ type SensitiveOwnership = { scope: number; owner: string | null; sensitive: numb
 export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.Element {
   const t = useTheme();
   const { signOut, touchActivity } = useSession();
+  const beginReminderIntent = useReminderPreferenceIntent();
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [llmAvailable, setLlmAvailable] = useState(false);
@@ -395,16 +397,21 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
    *  this build can schedule), then reconcile the native schedule. */
   const toggleReminders = async (on: boolean) => {
     touchActivity();
+    const intent = beginReminderIntent("daily-enabled");
+    if (!intent) return;
     const userId = await api.getUserId().catch(() => null);
-    if (!userId) return; // no account: nothing to bind the preference to
+    if (!intent.current() || userId !== intent.owner) return;
     try {
       await setReminderEnabled(userId, on);
     } catch {
+      if (!intent.current()) return;
       Alert.alert(tr("settings.reminderSaveFailedTitle"), tr("settings.reminderSaveFailedBody"));
       return;
     }
+    if (!intent.current()) return;
     setReminderOn(on);
     const scheduled = await syncReminderSchedule(userId).catch(() => false);
+    if (!intent.current()) return;
     if (on && !scheduled && reminders.available) {
       // The module is linked but the OS said no — honest, and fixable by
       // the user in system settings. (An unlinked module is already
@@ -417,11 +424,15 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
    *  side is unavailable, and syncs whenever it can. */
   const chooseReminderTime = async (hour: number, minute: number) => {
     touchActivity();
+    const intent = beginReminderIntent("daily-time");
+    if (!intent) return;
     const userId = await api.getUserId().catch(() => null);
-    if (!userId) return;
+    if (!intent.current() || userId !== intent.owner) return;
     try { await setReminderTime(userId, hour, minute); } catch {
+      if (!intent.current()) return;
       Alert.alert(tr("settings.reminderSaveFailedTitle"), tr("settings.reminderSaveFailedBody")); return;
     }
+    if (!intent.current()) return;
     setReminderTimeState({ hour, minute });
     void syncReminderSchedule(userId).catch(() => {});
   };
@@ -431,14 +442,18 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
    *  build can schedule, and the sync decides whether a nudge is due. */
   const toggleMeasureReminders = async (on: boolean) => {
     touchActivity();
+    const intent = beginReminderIntent("measure-enabled");
+    if (!intent) return;
     const userId = await api.getUserId().catch(() => null);
-    if (!userId) return;
+    if (!intent.current() || userId !== intent.owner) return;
     try {
       await setMeasureReminderEnabled(userId, on);
     } catch {
+      if (!intent.current()) return;
       Alert.alert(tr("settings.reminderSaveFailedTitle"), tr("settings.reminderSaveFailedBody"));
       return;
     }
+    if (!intent.current()) return;
     setMeasureReminderOn(on);
     void syncMeasureReminderSchedule(userId).catch(() => {});
   };
@@ -446,11 +461,15 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
   /** Choose the check-in cadence (weeks); same contract as the time chips. */
   const chooseMeasureInterval = async (weeks: number) => {
     touchActivity();
+    const intent = beginReminderIntent("measure-interval");
+    if (!intent) return;
     const userId = await api.getUserId().catch(() => null);
-    if (!userId) return;
+    if (!intent.current() || userId !== intent.owner) return;
     try { await setMeasureReminderInterval(userId, weeks); } catch {
+      if (!intent.current()) return;
       Alert.alert(tr("settings.reminderSaveFailedTitle"), tr("settings.reminderSaveFailedBody")); return;
     }
+    if (!intent.current()) return;
     setMeasureIntervalState(weeks);
     void syncMeasureReminderSchedule(userId).catch(() => {});
   };

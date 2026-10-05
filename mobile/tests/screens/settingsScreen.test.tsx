@@ -194,6 +194,75 @@ beforeEach(async () => {
   verifyPasswordForVault.mockImplementation(async () => ({ ok: true as const, verifierB64: authKeyB64() }));
 });
 
+describe("reminder control admission ownership", () => {
+  for (const kind of ["daily", "measure"] as const) {
+    const label = kind === "daily" ? "Daily reminder" : "Check-in reminders";
+    const slot = kind === "daily" ? "@mindpattern/reminders_" : "@mindpattern/measure_reminders_";
+    const schedule = kind === "daily" ? scheduleDailyReminder : scheduleMeasureReminder;
+    it(`${kind}: a late identity read cannot revive an older enable after a newer disable`, async () => {
+      reminderCapability.mockReturnValue({ available: true, reason: "" });
+      const root = await render(<SettingsScreen navigation={nav} />);
+      await flush();
+      let release!: (owner: string) => void;
+      vi.mocked(api.getUserId).mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+      const toggle = () => root.root.findAllByType(Switch).find(n => n.props.accessibilityLabel === label)!;
+      await act(async () => { toggle().props.onValueChange(true); });
+      await act(async () => { toggle().props.onValueChange(false); });
+      await flush();
+      await act(async () => { release("user-1"); });
+      await flush();
+      expect(JSON.parse((await storage.getItem(`${slot}user-1`))!).enabled).toBe(false);
+      expect(toggle().props.value).toBe(false);
+      expect(schedule).not.toHaveBeenCalled();
+      await act(async () => { root.unmount(); });
+    });
+
+    for (const retirement of ["unmount", "account", "key"] as const) {
+      it(`${kind}: a pending identity read cannot write after ${retirement} retirement`, async () => {
+        reminderCapability.mockReturnValue({ available: true, reason: "" });
+        const root = await render(<SettingsScreen navigation={nav} />);
+        await flush();
+        let release!: (owner: string) => void;
+        vi.mocked(api.getUserId).mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+        const toggle = root.root.findAllByType(Switch).find(n => n.props.accessibilityLabel === label)!;
+        await act(async () => { toggle.props.onValueChange(true); });
+        if (retirement !== "key") await act(async () => { root.unmount(); });
+        if (retirement === "account") {
+          const { changeLocalSessionOwner } = await import("../../src/localWriteGuard");
+          changeLocalSessionOwner(null); vault.lock(); changeLocalSessionOwner("user-2");
+          vault.unlock({ masterKey: Buffer.alloc(32, 7), authKey: Buffer.alloc(32, 8), dataKey: Buffer.alloc(32, 9) }, "user-2");
+        } else if (retirement === "key") {
+          vault.unlock({ masterKey: Buffer.alloc(32, 7), authKey: Buffer.alloc(32, 8), dataKey: Buffer.alloc(32, 9) }, "user-1");
+        }
+        await act(async () => { release(retirement === "account" ? "user-2" : "user-1"); });
+        await flush();
+        expect(await storage.getItem(`${slot}user-1`)).toBeNull();
+        expect(await storage.getItem(`${slot}user-2`)).toBeNull();
+        expect(schedule).not.toHaveBeenCalled();
+        if (retirement === "key") await act(async () => { root.unmount(); });
+      });
+    }
+  }
+
+  it.each(["daily time", "measure interval"] as const)("the latest %s choice wins when the older identity read finishes last", async kind => {
+    reminderCapability.mockReturnValue({ available: true, reason: "" });
+    await storage.setItem("@mindpattern/reminders_user-1", JSON.stringify({ enabled: true, hour: 20, minute: 0 }));
+    await storage.setItem("@mindpattern/measure_reminders_user-1", JSON.stringify({ enabled: true, intervalWeeks: 4 }));
+    const root = await render(<SettingsScreen navigation={nav} />);
+    await flush();
+    let release!: (owner: string) => void;
+    vi.mocked(api.getUserId).mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+    await pressLabel(root, kind === "daily time" ? "Morning" : "2 weeks");
+    await pressLabel(root, kind === "daily time" ? "Midday" : "8 weeks");
+    await flush();
+    await act(async () => { release("user-1"); });
+    await flush();
+    const prefs = JSON.parse((await storage.getItem(kind === "daily time" ? "@mindpattern/reminders_user-1" : "@mindpattern/measure_reminders_user-1"))!);
+    expect(kind === "daily time" ? prefs.hour : prefs.intervalWeeks).toBe(kind === "daily time" ? 12 : 8);
+    await act(async () => { root.unmount(); });
+  });
+});
+
 /** Drive the in-screen password re-auth card for a pending action. */
 async function reauth(root: Awaited<ReturnType<typeof render>>, password = "correct horse"): Promise<void> {
   await typeInto(root, "password", password);

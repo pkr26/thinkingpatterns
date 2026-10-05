@@ -1,5 +1,5 @@
 /** MOB-02: real reconciliation/native adapter with controlled native completion order. */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import storage from "./helpers/storageMock";
 import {
   __resetLocalKeyLifecycleForTests, changeLocalSessionOwner, markAccountDeleted,
@@ -22,8 +22,8 @@ vi.mock("@notifee/react-native", () => ({
 }));
 const native = await import("../src/nativeFeatures");
 const { syncReminderSchedule, syncMeasureReminderSchedule } = await import("../src/reminderSync");
-const { setReminderEnabled, setReminderTime } = await import("../src/reminders");
-const { setMeasureReminderEnabled, recordMeasureCompleted } = await import("../src/measureReminders");
+const { setReminderEnabled, setReminderTime, getReminderPrefs } = await import("../src/reminders");
+const { setMeasureReminderEnabled, recordMeasureCompleted, getMeasureReminderPrefs } = await import("../src/measureReminders");
 const migrationKey = "@mindpattern/reminder.migration.v2.done";
 const dailyId = "mindpattern-daily-reminder";
 const measureId = "mindpattern-measure-reminder";
@@ -48,6 +48,56 @@ beforeEach(async () => {
   cancelNotification.mockReset().mockImplementation(async id => { live.delete(id); events.push(`cancel:${id}`); });
   cancelAllNotifications.mockReset().mockImplementation(async () => { live.clear(); events.push("cancel:all"); });
 });
+afterEach(() => { vi.restoreAllMocks(); });
+
+for (const kind of ["daily", "measure"] as const) {
+  const slot = kind === "daily" ? "@mindpattern/reminders_a" : "@mindpattern/measure_reminders_a";
+  const setEnabled = kind === "daily" ? setReminderEnabled : setMeasureReminderEnabled;
+  const getPrefs = kind === "daily" ? getReminderPrefs : getMeasureReminderPrefs;
+  const sync = kind === "daily" ? syncReminderSchedule : syncMeasureReminderSchedule;
+
+  it(`${kind}: overlapping preference writes cannot let an older enable override the newest disable`, async () => {
+    await recordMeasureCompleted("a", new Date().toISOString().slice(0, 10));
+    const wait = deferred<void>();
+    const originalRead = storage.getItem.bind(storage);
+    let held = false;
+    vi.spyOn(storage, "getItem").mockImplementation(async key => {
+      const value = await originalRead(key);
+      if (key === slot && !held) { held = true; await wait.promise; }
+      return value;
+    });
+    const oldEnable = setEnabled("a", true).then(() => sync("a"));
+    await vi.waitFor(() => expect(held).toBe(true));
+    const latestDisable = setEnabled("a", false).then(() => sync("a"));
+    await tick();
+    wait.resolve();
+    await Promise.all([oldEnable, latestDisable]);
+    expect((await getPrefs("a")).enabled).toBe(false);
+    expect(live.size).toBe(0);
+  });
+
+  for (const retirement of ["session", "key"] as const) {
+    it(`${kind}: a preference read admitted before ${retirement} retirement cannot write into its replacement`, async () => {
+      const wait = deferred<void>();
+      const originalRead = storage.getItem.bind(storage);
+      let held = false;
+      vi.spyOn(storage, "getItem").mockImplementation(async key => {
+        const value = await originalRead(key);
+        if (key === slot && !held) { held = true; await wait.promise; }
+        return value;
+      });
+      const update = setEnabled("a", true);
+      // Observe rejection immediately to keep delayed ownership failure handled.
+      const outcome = update.then(() => "written", () => "retired");
+      await vi.waitFor(() => expect(held).toBe(true));
+      if (retirement === "session") { changeLocalSessionOwner(null); changeLocalSessionOwner("a"); }
+      else { freezeLocalKeyWrites("a"); installLocalDataKey("a", Buffer.alloc(32, 9)); }
+      wait.resolve();
+      expect(await outcome).toBe("retired");
+      expect(await storage.getItem(slot)).toBeNull();
+    });
+  }
+}
 
 for (const kind of ["daily", "measure"] as const) {
   for (const boundary of ["permission", "channel", "cancel"] as const) {
