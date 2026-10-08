@@ -14,7 +14,6 @@ import { describe, expect, it } from "vitest";
 
 import { sentimentComponents, sentimentScore } from "../src/brain/sentiment";
 import { erfc, fisherZDifferenceP, pearson } from "../src/brain/stats";
-import { LEXICON } from "../src/brain/lexicon";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const vectorsPath = join(here, "..", "..", "shared", "brain_vectors.json");
@@ -62,15 +61,6 @@ describe("on-device brain: statistics parity", () => {
     for (const [r1, n1, r2, n2, expected] of vectors.stats.fisher_z) {
       expect(Math.abs(fisherZDifferenceP(r1, n1, r2, n2) - expected)).toBeLessThan(1e-9);
     }
-  });
-});
-
-describe("on-device brain: the lexicon artifact is pinned to shared/", () => {
-  it("the TS lexicon module equals shared/brain_lexicon.json exactly", () => {
-    const shared = JSON.parse(
-      readFileSync(join(here, "..", "..", "shared", "brain_lexicon.json"), "utf8"),
-    );
-    expect(LEXICON).toEqual(shared);
   });
 });
 

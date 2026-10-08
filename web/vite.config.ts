@@ -69,9 +69,6 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       include: ["src/**"],
-      // main.tsx is the DOM-only entry point (react-dom render); it has no
-      // testable logic and no node-runnable renderer.
-      exclude: ["src/main.tsx"],
       // A global gate is deliberate (same decision as the portal): the app
       // has thin presentation components alongside crypto/network/sync
       // code; security-sensitive behavior has targeted tests, and this

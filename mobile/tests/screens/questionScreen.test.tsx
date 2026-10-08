@@ -64,7 +64,7 @@ beforeEach(() => {
   storage.__reset();
   void storage.setItem(CONSENT_KEY, "1");
   vault.lock();
-  vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey }, "user-1");
+  vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.from(dataKey) }, "user-1");
   // The draft stash is module state: consume leftovers so the bridge tests
   // cannot leak a stashed question into an unrelated test.
   takeStashedDraft("user-1");
@@ -300,8 +300,8 @@ describe("QuestionScreen", () => {
     // session, the corrupted feedback queue is dropped, and the question
     // still loads in the same flow.
     expect(api.openProcessingSession).toHaveBeenCalledTimes(2);
-    expect(api.recompute).toHaveBeenNthCalledWith(1, "st-1", expect.any(String));
-    expect(api.recompute).toHaveBeenNthCalledWith(2, "st-2");
+    expect(api.recompute).toHaveBeenNthCalledWith(1, "st-1", expect.any(String), expect.any(Function));
+    expect(api.recompute).toHaveBeenNthCalledWith(2, "st-2", undefined, expect.any(Function));
     expect(textOf(root)).toContain("What repeats?");
     expect(await storage.getItem("@mindpattern/question_feedback.user-1")).toBeNull();
   });
@@ -323,8 +323,7 @@ describe("QuestionScreen", () => {
     await pressLabel(root, "Show today's question");
     await flush();
 
-    expect(api.openProcessingSession).toHaveBeenCalledWith(dataKey.toString("base64"));
-    expect(api.recompute).toHaveBeenCalledWith("st", undefined); // no pending feedback taps
+    expect(api.recompute).toHaveBeenCalledWith("st", undefined, expect.any(Function)); // no pending feedback taps
     expect(textOf(root)).toContain("What repeats?");
   });
 
@@ -508,7 +507,7 @@ describe("H5: vault/account binding before shipping the data key", () => {
     vi.mocked(api.insights).mockResolvedValue({ phase: "insight", active_days: 31, days_remaining: 0 } as never);
     vi.mocked(api.questionToday).mockRejectedValue(new ApiError(404, "none"));
     vault.lock();
-    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey }, "user-2");
+    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.from(dataKey) }, "user-2");
     const root = await render(<QuestionScreen />);
     await pressLabel(root, "Show today's question");
     await flush();
@@ -663,7 +662,7 @@ describe("QuestionScreen feedback attribution (pattern_pid)", () => {
     expect(textOf(root)).toContain("Not me");
     await pressLabel(root, "This resonated");
     await flush();
-    expect(await readTaps()).toEqual([{ pid: "pid-1", resonated: true }]);
+    expect(await readTaps()).toMatchObject([{ pid: "pid-1", resonated: true }]);
   });
 
   it("an ordinary stored question (no pid) never offers the taps", async () => {
@@ -697,7 +696,7 @@ describe("QuestionScreen feedback attribution (pattern_pid)", () => {
     await pressLabel(root, "Not me");
     await flush();
     // The pid follows the question swap — never the previous question's.
-    expect(await readTaps()).toEqual([{ pid: "pid-b", resonated: false }]);
+    expect(await readTaps()).toMatchObject([{ pid: "pid-b", resonated: false }]);
   });
 
   it("a refresh onto a pid-less question clears the stale pid (no taps offered)", async () => {

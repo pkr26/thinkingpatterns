@@ -1,0 +1,1741 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`clears suspected-compromise confirmation after a failed rotation > rotation failure resets authorization 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "F3EA 67E5 8DD3 DEF0 EA04 C676 CD80 7836"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <p className="note">
+    "No patients are sharing with you yet."
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "patienta"
+        <p className="note">
+          "access ended "
+          "2026-09-02"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="stack">
+      <h3 className="section-label section-label--flush">
+        "Change password"
+      <p className="note">
+        "On success every session — including this one — is signed out. There is still no password reset: keep the new password in a password manager."
+      <details className="disclose">
+        <summary>
+          "How the change works (atomic custody)"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            "Your new credential, re-wrapped sharing identity, and encrypted notes keyring commit together in one transaction. A lost response retries the same operation safely. No intermediate password or private-key state is published."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-1">
+          "Current password"
+        <input autoComplete="current-password" className="input" id="field-association-1" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-2">
+          "New password"
+        <input autoComplete="new-password" className="input" id="field-association-2" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-3">
+          "Repeat new password"
+        <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Change password"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Recover sharing key"
+      <p className="note">
+        "Repairs an interrupted password change: if the change failed after the sharing key was re-wrapped, this seals the same key back under the password you actually sign in with, so the account opens normally again."
+      <p className="note">
+        "No interrupted change is remembered for this account in this browser session (S-4: a change interrupted in another tab of the same session is repairable there). Anything older is not recoverable — an account with no recovery path stays that way (audit F-4)."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-4">
+          "Current password (the one you sign in with)"
+        <input autoComplete="current-password" className="input" id="field-association-4" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-5">
+          "The password you were changing to"
+        <input autoComplete="off" className="input" id="field-association-5" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Recover sharing key"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Rotate sharing key (suspected compromise)"
+      <p className="note">
+        "Publishes a brand-new sharing keypair sealed under your current password and revokes existing patient grants. Each patient must pair and share again with the replacement identity. Existing notes remain readable through independently encrypted notes custody. Copies already obtained cannot be recalled."
+      <details className="disclose">
+        <summary>
+          "What happens to existing patient grants"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            "Existing grants are revoked. Each patient must verify the new pairing fingerprint and share again. Your notes remain readable through an independently encrypted notes keyring, including older password-derived notes and all verified revisions. Existing ciphertext is preserved; retaining historical keys does not recall copies already obtained by someone else."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-6">
+          "Current password (to authorize rotation)"
+        <input autoComplete="current-password" className="input" id="field-association-6" type="password" value="">
+      <label className="confirm-label">
+        <input aria-label="Confirm sharing-key rotation" checked=false type="checkbox">
+        "I understand that existing grants will be revoked and patients must share again."
+      <button className="btn btn--danger btn--small" disabled=true type="button">
+        "Rotate sharing key"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Two-factor authentication (authenticator app)"
+      <p className="note">
+        "Two-factor authentication is required before patient-data access. Your password AND a 6-digit code from an authenticator app are required at sign-in. Enrollment mints single-use recovery codes (shown once) for a lost authenticator."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-7">
+          "Current password (to authorize setup)"
+        <input autoComplete="current-password" className="input" id="field-association-7" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Set up authenticator"
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Hide account security"
+    <div className="banner banner--error" role="alert">
+      "could not rotate the sharing key"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`preserves current, identity and historical note ciphertext through an atomic password change > password change pending 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "F3EA 67E5 8DD3 DEF0 EA04 C676 CD80 7836"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <p className="note">
+    "No patients are sharing with you yet."
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "patienta"
+        <p className="note">
+          "access ended "
+          "2026-09-02"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="stack">
+      <h3 className="section-label section-label--flush">
+        "Change password"
+      <p className="note">
+        "On success every session — including this one — is signed out. There is still no password reset: keep the new password in a password manager."
+      <details className="disclose">
+        <summary>
+          "How the change works (atomic custody)"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            "Your new credential, re-wrapped sharing identity, and encrypted notes keyring commit together in one transaction. A lost response retries the same operation safely. No intermediate password or private-key state is published."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-1">
+          "Current password"
+        <input autoComplete="current-password" className="input" id="field-association-1" type="password" value="current-password">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-2">
+          "New password"
+        <input autoComplete="new-password" className="input" id="field-association-2" type="password" value="Strong!pass123">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-3">
+          "Repeat new password"
+        <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="Strong!pass123">
+      <button className="btn btn--small" disabled=true type="button">
+        "Changing…"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Recover sharing key"
+      <p className="note">
+        "Repairs an interrupted password change: if the change failed after the sharing key was re-wrapped, this seals the same key back under the password you actually sign in with, so the account opens normally again."
+      <p className="note">
+        "No interrupted change is remembered for this account in this browser session (S-4: a change interrupted in another tab of the same session is repairable there). Anything older is not recoverable — an account with no recovery path stays that way (audit F-4)."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-4">
+          "Current password (the one you sign in with)"
+        <input autoComplete="current-password" className="input" id="field-association-4" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-5">
+          "The password you were changing to"
+        <input autoComplete="off" className="input" id="field-association-5" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Recovering…"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Rotate sharing key (suspected compromise)"
+      <p className="note">
+        "Publishes a brand-new sharing keypair sealed under your current password and revokes existing patient grants. Each patient must pair and share again with the replacement identity. Existing notes remain readable through independently encrypted notes custody. Copies already obtained cannot be recalled."
+      <details className="disclose">
+        <summary>
+          "What happens to existing patient grants"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            "Existing grants are revoked. Each patient must verify the new pairing fingerprint and share again. Your notes remain readable through an independently encrypted notes keyring, including older password-derived notes and all verified revisions. Existing ciphertext is preserved; retaining historical keys does not recall copies already obtained by someone else."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-6">
+          "Current password (to authorize rotation)"
+        <input autoComplete="current-password" className="input" id="field-association-6" type="password" value="">
+      <label className="confirm-label">
+        <input aria-label="Confirm sharing-key rotation" checked=false type="checkbox">
+        "I understand that existing grants will be revoked and patients must share again."
+      <button className="btn btn--danger btn--small" disabled=true type="button">
+        "Rotating…"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Two-factor authentication (authenticator app)"
+      <p className="note">
+        "Two-factor authentication is required before patient-data access. Your password AND a 6-digit code from an authenticator app are required at sign-in. Enrollment mints single-use recovery codes (shown once) for a lost authenticator."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-7">
+          "Current password (to authorize setup)"
+        <input autoComplete="current-password" className="input" id="field-association-7" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Starting…"
+    <button className="btn btn--ghost btn--small" disabled=true type="button">
+      "Hide account security"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`preserves current, identity and historical note ciphertext through an atomic password change > successful password change clears all password fields 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "F3EA 67E5 8DD3 DEF0 EA04 C676 CD80 7836"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <p className="note">
+    "No patients are sharing with you yet."
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "patienta"
+        <p className="note">
+          "access ended "
+          "2026-09-02"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="stack">
+      <h3 className="section-label section-label--flush">
+        "Change password"
+      <p className="note">
+        "On success every session — including this one — is signed out. There is still no password reset: keep the new password in a password manager."
+      <details className="disclose">
+        <summary>
+          "How the change works (atomic custody)"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            "Your new credential, re-wrapped sharing identity, and encrypted notes keyring commit together in one transaction. A lost response retries the same operation safely. No intermediate password or private-key state is published."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-1">
+          "Current password"
+        <input autoComplete="current-password" className="input" id="field-association-1" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-2">
+          "New password"
+        <input autoComplete="new-password" className="input" id="field-association-2" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-3">
+          "Repeat new password"
+        <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Change password"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Recover sharing key"
+      <p className="note">
+        "Repairs an interrupted password change: if the change failed after the sharing key was re-wrapped, this seals the same key back under the password you actually sign in with, so the account opens normally again."
+      <p className="note">
+        "No interrupted change is remembered for this account in this browser session (S-4: a change interrupted in another tab of the same session is repairable there). Anything older is not recoverable — an account with no recovery path stays that way (audit F-4)."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-4">
+          "Current password (the one you sign in with)"
+        <input autoComplete="current-password" className="input" id="field-association-4" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-5">
+          "The password you were changing to"
+        <input autoComplete="off" className="input" id="field-association-5" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Recover sharing key"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Rotate sharing key (suspected compromise)"
+      <p className="note">
+        "Publishes a brand-new sharing keypair sealed under your current password and revokes existing patient grants. Each patient must pair and share again with the replacement identity. Existing notes remain readable through independently encrypted notes custody. Copies already obtained cannot be recalled."
+      <details className="disclose">
+        <summary>
+          "What happens to existing patient grants"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            "Existing grants are revoked. Each patient must verify the new pairing fingerprint and share again. Your notes remain readable through an independently encrypted notes keyring, including older password-derived notes and all verified revisions. Existing ciphertext is preserved; retaining historical keys does not recall copies already obtained by someone else."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-6">
+          "Current password (to authorize rotation)"
+        <input autoComplete="current-password" className="input" id="field-association-6" type="password" value="">
+      <label className="confirm-label">
+        <input aria-label="Confirm sharing-key rotation" checked=false type="checkbox">
+        "I understand that existing grants will be revoked and patients must share again."
+      <button className="btn btn--danger btn--small" disabled=true type="button">
+        "Rotate sharing key"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Two-factor authentication (authenticator app)"
+      <p className="note">
+        "Two-factor authentication is required before patient-data access. Your password AND a 6-digit code from an authenticator app are required at sign-in. Enrollment mints single-use recovery codes (shown once) for a lost authenticator."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-7">
+          "Current password (to authorize setup)"
+        <input autoComplete="current-password" className="input" id="field-association-7" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Set up authenticator"
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Hide account security"
+    <p className="note note--ok" role="status">
+      "Password changed. Every session — including this one — has ended; sign in with your new password."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`refuses to change a credential if a historical note cannot be authenticated > rejected custody preserves the unchanged record 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "F3EA 67E5 8DD3 DEF0 EA04 C676 CD80 7836"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <p className="note">
+    "No patients are sharing with you yet."
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "patienta"
+        <p className="note">
+          "access ended "
+          "2026-09-02"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="stack">
+      <h3 className="section-label section-label--flush">
+        "Change password"
+      <p className="note">
+        "On success every session — including this one — is signed out. There is still no password reset: keep the new password in a password manager."
+      <details className="disclose">
+        <summary>
+          "How the change works (atomic custody)"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            "Your new credential, re-wrapped sharing identity, and encrypted notes keyring commit together in one transaction. A lost response retries the same operation safely. No intermediate password or private-key state is published."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-1">
+          "Current password"
+        <input autoComplete="current-password" className="input" id="field-association-1" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-2">
+          "New password"
+        <input autoComplete="new-password" className="input" id="field-association-2" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-3">
+          "Repeat new password"
+        <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Change password"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Recover sharing key"
+      <p className="note">
+        "Repairs an interrupted password change: if the change failed after the sharing key was re-wrapped, this seals the same key back under the password you actually sign in with, so the account opens normally again."
+      <p className="note">
+        "No interrupted change is remembered for this account in this browser session (S-4: a change interrupted in another tab of the same session is repairable there). Anything older is not recoverable — an account with no recovery path stays that way (audit F-4)."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-4">
+          "Current password (the one you sign in with)"
+        <input autoComplete="current-password" className="input" id="field-association-4" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-5">
+          "The password you were changing to"
+        <input autoComplete="off" className="input" id="field-association-5" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Recover sharing key"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Rotate sharing key (suspected compromise)"
+      <p className="note">
+        "Publishes a brand-new sharing keypair sealed under your current password and revokes existing patient grants. Each patient must pair and share again with the replacement identity. Existing notes remain readable through independently encrypted notes custody. Copies already obtained cannot be recalled."
+      <details className="disclose">
+        <summary>
+          "What happens to existing patient grants"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            "Existing grants are revoked. Each patient must verify the new pairing fingerprint and share again. Your notes remain readable through an independently encrypted notes keyring, including older password-derived notes and all verified revisions. Existing ciphertext is preserved; retaining historical keys does not recall copies already obtained by someone else."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-6">
+          "Current password (to authorize rotation)"
+        <input autoComplete="current-password" className="input" id="field-association-6" type="password" value="">
+      <label className="confirm-label">
+        <input aria-label="Confirm sharing-key rotation" checked=false type="checkbox">
+        "I understand that existing grants will be revoked and patients must share again."
+      <button className="btn btn--danger btn--small" disabled=true type="button">
+        "Rotate sharing key"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Two-factor authentication (authenticator app)"
+      <p className="note">
+        "Two-factor authentication is required before patient-data access. Your password AND a 6-digit code from an authenticator app are required at sign-in. Enrollment mints single-use recovery codes (shown once) for a lost authenticator."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-7">
+          "Current password (to authorize setup)"
+        <input autoComplete="current-password" className="input" id="field-association-7" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Set up authenticator"
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Hide account security"
+    <div className="banner banner--error" role="alert">
+      "This note could not be authenticated with the account's notes custody. It was not changed."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`refuses to change a credential if a historical revision cannot be authenticated > rejected custody preserves the unchanged record 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "F3EA 67E5 8DD3 DEF0 EA04 C676 CD80 7836"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <p className="note">
+    "No patients are sharing with you yet."
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "patienta"
+        <p className="note">
+          "access ended "
+          "2026-09-02"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="stack">
+      <h3 className="section-label section-label--flush">
+        "Change password"
+      <p className="note">
+        "On success every session — including this one — is signed out. There is still no password reset: keep the new password in a password manager."
+      <details className="disclose">
+        <summary>
+          "How the change works (atomic custody)"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            "Your new credential, re-wrapped sharing identity, and encrypted notes keyring commit together in one transaction. A lost response retries the same operation safely. No intermediate password or private-key state is published."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-1">
+          "Current password"
+        <input autoComplete="current-password" className="input" id="field-association-1" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-2">
+          "New password"
+        <input autoComplete="new-password" className="input" id="field-association-2" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-3">
+          "Repeat new password"
+        <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Change password"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Recover sharing key"
+      <p className="note">
+        "Repairs an interrupted password change: if the change failed after the sharing key was re-wrapped, this seals the same key back under the password you actually sign in with, so the account opens normally again."
+      <p className="note">
+        "No interrupted change is remembered for this account in this browser session (S-4: a change interrupted in another tab of the same session is repairable there). Anything older is not recoverable — an account with no recovery path stays that way (audit F-4)."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-4">
+          "Current password (the one you sign in with)"
+        <input autoComplete="current-password" className="input" id="field-association-4" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-5">
+          "The password you were changing to"
+        <input autoComplete="off" className="input" id="field-association-5" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Recover sharing key"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Rotate sharing key (suspected compromise)"
+      <p className="note">
+        "Publishes a brand-new sharing keypair sealed under your current password and revokes existing patient grants. Each patient must pair and share again with the replacement identity. Existing notes remain readable through independently encrypted notes custody. Copies already obtained cannot be recalled."
+      <details className="disclose">
+        <summary>
+          "What happens to existing patient grants"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            "Existing grants are revoked. Each patient must verify the new pairing fingerprint and share again. Your notes remain readable through an independently encrypted notes keyring, including older password-derived notes and all verified revisions. Existing ciphertext is preserved; retaining historical keys does not recall copies already obtained by someone else."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-6">
+          "Current password (to authorize rotation)"
+        <input autoComplete="current-password" className="input" id="field-association-6" type="password" value="">
+      <label className="confirm-label">
+        <input aria-label="Confirm sharing-key rotation" checked=false type="checkbox">
+        "I understand that existing grants will be revoked and patients must share again."
+      <button className="btn btn--danger btn--small" disabled=true type="button">
+        "Rotate sharing key"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Two-factor authentication (authenticator app)"
+      <p className="note">
+        "Two-factor authentication is required before patient-data access. Your password AND a 6-digit code from an authenticator app are required at sign-in. Enrollment mints single-use recovery codes (shown once) for a lost authenticator."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-7">
+          "Current password (to authorize setup)"
+        <input autoComplete="current-password" className="input" id="field-association-7" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Set up authenticator"
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Hide account security"
+    <div className="banner banner--error" role="alert">
+      "This note could not be authenticated with the account's notes custody. It was not changed."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`renders a repairable interrupted change and drops both entered passwords on failure > failed sharing-key repair clears entered passwords 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "F3EA 67E5 8DD3 DEF0 EA04 C676 CD80 7836"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <p className="note">
+    "No patients are sharing with you yet."
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "patienta"
+        <p className="note">
+          "access ended "
+          "2026-09-02"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="stack">
+      <h3 className="section-label section-label--flush">
+        "Change password"
+      <p className="note">
+        "On success every session — including this one — is signed out. There is still no password reset: keep the new password in a password manager."
+      <details className="disclose">
+        <summary>
+          "How the change works (atomic custody)"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            "Your new credential, re-wrapped sharing identity, and encrypted notes keyring commit together in one transaction. A lost response retries the same operation safely. No intermediate password or private-key state is published."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-1">
+          "Current password"
+        <input autoComplete="current-password" className="input" id="field-association-1" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-2">
+          "New password"
+        <input autoComplete="new-password" className="input" id="field-association-2" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-3">
+          "Repeat new password"
+        <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Change password"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Recover sharing key"
+      <p className="note">
+        "Repairs an interrupted password change: if the change failed after the sharing key was re-wrapped, this seals the same key back under the password you actually sign in with, so the account opens normally again."
+      <p className="note note--warn">
+        "An interrupted change from this browser session is repairable right now — the recovery state survives a reload of this tab, but not closing the browser session."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-4">
+          "Current password (the one you sign in with)"
+        <input autoComplete="current-password" className="input" id="field-association-4" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-5">
+          "The password you were changing to"
+        <input autoComplete="off" className="input" id="field-association-5" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Recover sharing key"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Rotate sharing key (suspected compromise)"
+      <p className="note">
+        "Publishes a brand-new sharing keypair sealed under your current password and revokes existing patient grants. Each patient must pair and share again with the replacement identity. Existing notes remain readable through independently encrypted notes custody. Copies already obtained cannot be recalled."
+      <details className="disclose">
+        <summary>
+          "What happens to existing patient grants"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            "Existing grants are revoked. Each patient must verify the new pairing fingerprint and share again. Your notes remain readable through an independently encrypted notes keyring, including older password-derived notes and all verified revisions. Existing ciphertext is preserved; retaining historical keys does not recall copies already obtained by someone else."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-6">
+          "Current password (to authorize rotation)"
+        <input autoComplete="current-password" className="input" id="field-association-6" type="password" value="">
+      <label className="confirm-label">
+        <input aria-label="Confirm sharing-key rotation" checked=false type="checkbox">
+        "I understand that existing grants will be revoked and patients must share again."
+      <button className="btn btn--danger btn--small" disabled=true type="button">
+        "Rotate sharing key"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Two-factor authentication (authenticator app)"
+      <p className="note">
+        "Two-factor authentication is required before patient-data access. Your password AND a 6-digit code from an authenticator app are required at sign-in. Enrollment mints single-use recovery codes (shown once) for a lost authenticator."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-7">
+          "Current password (to authorize setup)"
+        <input autoComplete="current-password" className="input" id="field-association-7" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Set up authenticator"
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Hide account security"
+    <div className="banner banner--error" role="alert">
+      "the second password did not unlock the stored sharing key — nothing was changed; check the password you were changing to"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`repairs legacy interrupted custody without losing notes from either password > recovered custody clears repair salt and passwords 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "F3EA 67E5 8DD3 DEF0 EA04 C676 CD80 7836"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <p className="note">
+    "No patients are sharing with you yet."
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "patienta"
+        <p className="note">
+          "access ended "
+          "2026-09-02"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="stack">
+      <h3 className="section-label section-label--flush">
+        "Change password"
+      <p className="note">
+        "On success every session — including this one — is signed out. There is still no password reset: keep the new password in a password manager."
+      <details className="disclose">
+        <summary>
+          "How the change works (atomic custody)"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            "Your new credential, re-wrapped sharing identity, and encrypted notes keyring commit together in one transaction. A lost response retries the same operation safely. No intermediate password or private-key state is published."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-1">
+          "Current password"
+        <input autoComplete="current-password" className="input" id="field-association-1" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-2">
+          "New password"
+        <input autoComplete="new-password" className="input" id="field-association-2" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-3">
+          "Repeat new password"
+        <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Change password"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Recover sharing key"
+      <p className="note">
+        "Repairs an interrupted password change: if the change failed after the sharing key was re-wrapped, this seals the same key back under the password you actually sign in with, so the account opens normally again."
+      <p className="note">
+        "No interrupted change is remembered for this account in this browser session (S-4: a change interrupted in another tab of the same session is repairable there). Anything older is not recoverable — an account with no recovery path stays that way (audit F-4)."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-4">
+          "Current password (the one you sign in with)"
+        <input autoComplete="current-password" className="input" id="field-association-4" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-5">
+          "The password you were changing to"
+        <input autoComplete="off" className="input" id="field-association-5" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Recover sharing key"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Rotate sharing key (suspected compromise)"
+      <p className="note">
+        "Publishes a brand-new sharing keypair sealed under your current password and revokes existing patient grants. Each patient must pair and share again with the replacement identity. Existing notes remain readable through independently encrypted notes custody. Copies already obtained cannot be recalled."
+      <details className="disclose">
+        <summary>
+          "What happens to existing patient grants"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            "Existing grants are revoked. Each patient must verify the new pairing fingerprint and share again. Your notes remain readable through an independently encrypted notes keyring, including older password-derived notes and all verified revisions. Existing ciphertext is preserved; retaining historical keys does not recall copies already obtained by someone else."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-6">
+          "Current password (to authorize rotation)"
+        <input autoComplete="current-password" className="input" id="field-association-6" type="password" value="">
+      <label className="confirm-label">
+        <input aria-label="Confirm sharing-key rotation" checked=false type="checkbox">
+        "I understand that existing grants will be revoked and patients must share again."
+      <button className="btn btn--danger btn--small" disabled=true type="button">
+        "Rotate sharing key"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Two-factor authentication (authenticator app)"
+      <p className="note">
+        "Two-factor authentication is required before patient-data access. Your password AND a 6-digit code from an authenticator app are required at sign-in. Enrollment mints single-use recovery codes (shown once) for a lost authenticator."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-7">
+          "Current password (to authorize setup)"
+        <input autoComplete="current-password" className="input" id="field-association-7" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Set up authenticator"
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Hide account security"
+    <p className="note note--ok" role="status">
+      "Sharing key recovered — it is sealed under your current sign-in password again. Your sign-in password never changed; you can retry the password change."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`reports an ordinary failed password unlock before any sharing-identity rotation > password unlock failure cannot rotate sharing identity 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "F3EA 67E5 8DD3 DEF0 EA04 C676 CD80 7836"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <p className="note">
+    "No patients are sharing with you yet."
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "patienta"
+        <p className="note">
+          "access ended "
+          "2026-09-02"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="stack">
+      <h3 className="section-label section-label--flush">
+        "Change password"
+      <p className="note">
+        "On success every session — including this one — is signed out. There is still no password reset: keep the new password in a password manager."
+      <details className="disclose">
+        <summary>
+          "How the change works (atomic custody)"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            "Your new credential, re-wrapped sharing identity, and encrypted notes keyring commit together in one transaction. A lost response retries the same operation safely. No intermediate password or private-key state is published."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-1">
+          "Current password"
+        <input autoComplete="current-password" className="input" id="field-association-1" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-2">
+          "New password"
+        <input autoComplete="new-password" className="input" id="field-association-2" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-3">
+          "Repeat new password"
+        <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Change password"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Recover sharing key"
+      <p className="note">
+        "Repairs an interrupted password change: if the change failed after the sharing key was re-wrapped, this seals the same key back under the password you actually sign in with, so the account opens normally again."
+      <p className="note">
+        "No interrupted change is remembered for this account in this browser session (S-4: a change interrupted in another tab of the same session is repairable there). Anything older is not recoverable — an account with no recovery path stays that way (audit F-4)."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-4">
+          "Current password (the one you sign in with)"
+        <input autoComplete="current-password" className="input" id="field-association-4" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-5">
+          "The password you were changing to"
+        <input autoComplete="off" className="input" id="field-association-5" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Recover sharing key"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Rotate sharing key (suspected compromise)"
+      <p className="note">
+        "Publishes a brand-new sharing keypair sealed under your current password and revokes existing patient grants. Each patient must pair and share again with the replacement identity. Existing notes remain readable through independently encrypted notes custody. Copies already obtained cannot be recalled."
+      <details className="disclose">
+        <summary>
+          "What happens to existing patient grants"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            "Existing grants are revoked. Each patient must verify the new pairing fingerprint and share again. Your notes remain readable through an independently encrypted notes keyring, including older password-derived notes and all verified revisions. Existing ciphertext is preserved; retaining historical keys does not recall copies already obtained by someone else."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-6">
+          "Current password (to authorize rotation)"
+        <input autoComplete="current-password" className="input" id="field-association-6" type="password" value="">
+      <label className="confirm-label">
+        <input aria-label="Confirm sharing-key rotation" checked=false type="checkbox">
+        "I understand that existing grants will be revoked and patients must share again."
+      <button className="btn btn--danger btn--small" disabled=true type="button">
+        "Rotate sharing key"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Two-factor authentication (authenticator app)"
+      <p className="note">
+        "Two-factor authentication is required before patient-data access. Your password AND a 6-digit code from an authenticator app are required at sign-in. Enrollment mints single-use recovery codes (shown once) for a lost authenticator."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-7">
+          "Current password (to authorize setup)"
+        <input autoComplete="current-password" className="input" id="field-association-7" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Set up authenticator"
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Hide account security"
+    <div className="banner banner--error" role="alert">
+      "The current password did not unlock your sharing identity — nothing was changed."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`reports exhausted lost-response retries and preserves a bounded attempt count > bounded retry failure 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "F3EA 67E5 8DD3 DEF0 EA04 C676 CD80 7836"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <p className="note">
+    "No patients are sharing with you yet."
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "patienta"
+        <p className="note">
+          "access ended "
+          "2026-09-02"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="stack">
+      <h3 className="section-label section-label--flush">
+        "Change password"
+      <p className="note">
+        "On success every session — including this one — is signed out. There is still no password reset: keep the new password in a password manager."
+      <details className="disclose">
+        <summary>
+          "How the change works (atomic custody)"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            "Your new credential, re-wrapped sharing identity, and encrypted notes keyring commit together in one transaction. A lost response retries the same operation safely. No intermediate password or private-key state is published."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-1">
+          "Current password"
+        <input autoComplete="current-password" className="input" id="field-association-1" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-2">
+          "New password"
+        <input autoComplete="new-password" className="input" id="field-association-2" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-3">
+          "Repeat new password"
+        <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Change password"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Recover sharing key"
+      <p className="note">
+        "Repairs an interrupted password change: if the change failed after the sharing key was re-wrapped, this seals the same key back under the password you actually sign in with, so the account opens normally again."
+      <p className="note">
+        "No interrupted change is remembered for this account in this browser session (S-4: a change interrupted in another tab of the same session is repairable there). Anything older is not recoverable — an account with no recovery path stays that way (audit F-4)."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-4">
+          "Current password (the one you sign in with)"
+        <input autoComplete="current-password" className="input" id="field-association-4" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-5">
+          "The password you were changing to"
+        <input autoComplete="off" className="input" id="field-association-5" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Recover sharing key"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Rotate sharing key (suspected compromise)"
+      <p className="note">
+        "Publishes a brand-new sharing keypair sealed under your current password and revokes existing patient grants. Each patient must pair and share again with the replacement identity. Existing notes remain readable through independently encrypted notes custody. Copies already obtained cannot be recalled."
+      <details className="disclose">
+        <summary>
+          "What happens to existing patient grants"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            "Existing grants are revoked. Each patient must verify the new pairing fingerprint and share again. Your notes remain readable through an independently encrypted notes keyring, including older password-derived notes and all verified revisions. Existing ciphertext is preserved; retaining historical keys does not recall copies already obtained by someone else."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-6">
+          "Current password (to authorize rotation)"
+        <input autoComplete="current-password" className="input" id="field-association-6" type="password" value="">
+      <label className="confirm-label">
+        <input aria-label="Confirm sharing-key rotation" checked=false type="checkbox">
+        "I understand that existing grants will be revoked and patients must share again."
+      <button className="btn btn--danger btn--small" disabled=true type="button">
+        "Rotate sharing key"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Two-factor authentication (authenticator app)"
+      <p className="note">
+        "Two-factor authentication is required before patient-data access. Your password AND a 6-digit code from an authenticator app are required at sign-in. Enrollment mints single-use recovery codes (shown once) for a lost authenticator."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-7">
+          "Current password (to authorize setup)"
+        <input autoComplete="current-password" className="input" id="field-association-7" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Set up authenticator"
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Hide account security"
+    <div className="banner banner--error" role="alert">
+      "server is busy — try again"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`requires a confirmed blob before rotating the sharing identity > unconfirmed custody cannot rotate identity 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "F3EA 67E5 8DD3 DEF0 EA04 C676 CD80 7836"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <p className="note">
+    "No patients are sharing with you yet."
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "patienta"
+        <p className="note">
+          "access ended "
+          "2026-09-02"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="stack">
+      <h3 className="section-label section-label--flush">
+        "Change password"
+      <p className="note">
+        "On success every session — including this one — is signed out. There is still no password reset: keep the new password in a password manager."
+      <details className="disclose">
+        <summary>
+          "How the change works (atomic custody)"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            "Your new credential, re-wrapped sharing identity, and encrypted notes keyring commit together in one transaction. A lost response retries the same operation safely. No intermediate password or private-key state is published."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-1">
+          "Current password"
+        <input autoComplete="current-password" className="input" id="field-association-1" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-2">
+          "New password"
+        <input autoComplete="new-password" className="input" id="field-association-2" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-3">
+          "Repeat new password"
+        <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Change password"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Recover sharing key"
+      <p className="note">
+        "Repairs an interrupted password change: if the change failed after the sharing key was re-wrapped, this seals the same key back under the password you actually sign in with, so the account opens normally again."
+      <p className="note">
+        "No interrupted change is remembered for this account in this browser session (S-4: a change interrupted in another tab of the same session is repairable there). Anything older is not recoverable — an account with no recovery path stays that way (audit F-4)."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-4">
+          "Current password (the one you sign in with)"
+        <input autoComplete="current-password" className="input" id="field-association-4" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-5">
+          "The password you were changing to"
+        <input autoComplete="off" className="input" id="field-association-5" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Recover sharing key"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Rotate sharing key (suspected compromise)"
+      <p className="note">
+        "Publishes a brand-new sharing keypair sealed under your current password and revokes existing patient grants. Each patient must pair and share again with the replacement identity. Existing notes remain readable through independently encrypted notes custody. Copies already obtained cannot be recalled."
+      <details className="disclose">
+        <summary>
+          "What happens to existing patient grants"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            "Existing grants are revoked. Each patient must verify the new pairing fingerprint and share again. Your notes remain readable through an independently encrypted notes keyring, including older password-derived notes and all verified revisions. Existing ciphertext is preserved; retaining historical keys does not recall copies already obtained by someone else."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-6">
+          "Current password (to authorize rotation)"
+        <input autoComplete="current-password" className="input" id="field-association-6" type="password" value="">
+      <label className="confirm-label">
+        <input aria-label="Confirm sharing-key rotation" checked=false type="checkbox">
+        "I understand that existing grants will be revoked and patients must share again."
+      <button className="btn btn--danger btn--small" disabled=true type="button">
+        "Rotate sharing key"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Two-factor authentication (authenticator app)"
+      <p className="note">
+        "Two-factor authentication is required before patient-data access. Your password AND a 6-digit code from an authenticator app are required at sign-in. Enrollment mints single-use recovery codes (shown once) for a lost authenticator."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-7">
+          "Current password (to authorize setup)"
+        <input autoComplete="current-password" className="input" id="field-association-7" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Set up authenticator"
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Hide account security"
+    <div className="banner banner--error" role="alert">
+      "Notes custody was not confirmed — sharing identity was not changed."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`requires a confirmed version before rotating the sharing identity > unconfirmed custody cannot rotate identity 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "F3EA 67E5 8DD3 DEF0 EA04 C676 CD80 7836"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <p className="note">
+    "No patients are sharing with you yet."
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "patienta"
+        <p className="note">
+          "access ended "
+          "2026-09-02"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="stack">
+      <h3 className="section-label section-label--flush">
+        "Change password"
+      <p className="note">
+        "On success every session — including this one — is signed out. There is still no password reset: keep the new password in a password manager."
+      <details className="disclose">
+        <summary>
+          "How the change works (atomic custody)"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            "Your new credential, re-wrapped sharing identity, and encrypted notes keyring commit together in one transaction. A lost response retries the same operation safely. No intermediate password or private-key state is published."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-1">
+          "Current password"
+        <input autoComplete="current-password" className="input" id="field-association-1" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-2">
+          "New password"
+        <input autoComplete="new-password" className="input" id="field-association-2" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-3">
+          "Repeat new password"
+        <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Change password"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Recover sharing key"
+      <p className="note">
+        "Repairs an interrupted password change: if the change failed after the sharing key was re-wrapped, this seals the same key back under the password you actually sign in with, so the account opens normally again."
+      <p className="note">
+        "No interrupted change is remembered for this account in this browser session (S-4: a change interrupted in another tab of the same session is repairable there). Anything older is not recoverable — an account with no recovery path stays that way (audit F-4)."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-4">
+          "Current password (the one you sign in with)"
+        <input autoComplete="current-password" className="input" id="field-association-4" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-5">
+          "The password you were changing to"
+        <input autoComplete="off" className="input" id="field-association-5" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Recover sharing key"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Rotate sharing key (suspected compromise)"
+      <p className="note">
+        "Publishes a brand-new sharing keypair sealed under your current password and revokes existing patient grants. Each patient must pair and share again with the replacement identity. Existing notes remain readable through independently encrypted notes custody. Copies already obtained cannot be recalled."
+      <details className="disclose">
+        <summary>
+          "What happens to existing patient grants"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            "Existing grants are revoked. Each patient must verify the new pairing fingerprint and share again. Your notes remain readable through an independently encrypted notes keyring, including older password-derived notes and all verified revisions. Existing ciphertext is preserved; retaining historical keys does not recall copies already obtained by someone else."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-6">
+          "Current password (to authorize rotation)"
+        <input autoComplete="current-password" className="input" id="field-association-6" type="password" value="">
+      <label className="confirm-label">
+        <input aria-label="Confirm sharing-key rotation" checked=false type="checkbox">
+        "I understand that existing grants will be revoked and patients must share again."
+      <button className="btn btn--danger btn--small" disabled=true type="button">
+        "Rotate sharing key"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Two-factor authentication (authenticator app)"
+      <p className="note">
+        "Two-factor authentication is required before patient-data access. Your password AND a 6-digit code from an authenticator app are required at sign-in. Enrollment mints single-use recovery codes (shown once) for a lost authenticator."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-7">
+          "Current password (to authorize setup)"
+        <input autoComplete="current-password" className="input" id="field-association-7" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Set up authenticator"
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Hide account security"
+    <div className="banner banner--error" role="alert">
+      "Notes custody was not confirmed — sharing identity was not changed."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`rotates confirmed custody, retires all provider-held secrets and issues the session-end callback > confirmed rotation retires custody and authorization controls 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "F3EA 67E5 8DD3 DEF0 EA04 C676 CD80 7836"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <p className="note">
+    "No patients are sharing with you yet."
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "patienta"
+        <p className="note">
+          "access ended "
+          "2026-09-02"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="stack">
+      <h3 className="section-label section-label--flush">
+        "Change password"
+      <p className="note">
+        "On success every session — including this one — is signed out. There is still no password reset: keep the new password in a password manager."
+      <details className="disclose">
+        <summary>
+          "How the change works (atomic custody)"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            "Your new credential, re-wrapped sharing identity, and encrypted notes keyring commit together in one transaction. A lost response retries the same operation safely. No intermediate password or private-key state is published."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-1">
+          "Current password"
+        <input autoComplete="current-password" className="input" id="field-association-1" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-2">
+          "New password"
+        <input autoComplete="new-password" className="input" id="field-association-2" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-3">
+          "Repeat new password"
+        <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Change password"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Recover sharing key"
+      <p className="note">
+        "Repairs an interrupted password change: if the change failed after the sharing key was re-wrapped, this seals the same key back under the password you actually sign in with, so the account opens normally again."
+      <p className="note">
+        "No interrupted change is remembered for this account in this browser session (S-4: a change interrupted in another tab of the same session is repairable there). Anything older is not recoverable — an account with no recovery path stays that way (audit F-4)."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-4">
+          "Current password (the one you sign in with)"
+        <input autoComplete="current-password" className="input" id="field-association-4" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-5">
+          "The password you were changing to"
+        <input autoComplete="off" className="input" id="field-association-5" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Recover sharing key"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Rotate sharing key (suspected compromise)"
+      <p className="note">
+        "Publishes a brand-new sharing keypair sealed under your current password and revokes existing patient grants. Each patient must pair and share again with the replacement identity. Existing notes remain readable through independently encrypted notes custody. Copies already obtained cannot be recalled."
+      <details className="disclose">
+        <summary>
+          "What happens to existing patient grants"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            "Existing grants are revoked. Each patient must verify the new pairing fingerprint and share again. Your notes remain readable through an independently encrypted notes keyring, including older password-derived notes and all verified revisions. Existing ciphertext is preserved; retaining historical keys does not recall copies already obtained by someone else."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-6">
+          "Current password (to authorize rotation)"
+        <input autoComplete="current-password" className="input" id="field-association-6" type="password" value="">
+      <label className="confirm-label">
+        <input aria-label="Confirm sharing-key rotation" checked=false type="checkbox">
+        "I understand that existing grants will be revoked and patients must share again."
+      <button className="btn btn--danger btn--small" disabled=true type="button">
+        "Rotate sharing key"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Two-factor authentication (authenticator app)"
+      <p className="note">
+        "Two-factor authentication is required before patient-data access. Your password AND a 6-digit code from an authenticator app are required at sign-in. Enrollment mints single-use recovery codes (shown once) for a lost authenticator."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-7">
+          "Current password (to authorize setup)"
+        <input autoComplete="current-password" className="input" id="field-association-7" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Set up authenticator"
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Hide account security"
+    <p className="note note--ok" role="status">
+      "Sharing identity rotated. Existing patient grants were revoked. Sign in again. Each patient must verify the new pairing fingerprint and share again; historical notes remain readable through independent encrypted custody."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`rotates confirmed custody, retires all provider-held secrets and issues the sign-out callback > confirmed rotation retires custody and authorization controls 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "F3EA 67E5 8DD3 DEF0 EA04 C676 CD80 7836"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <p className="note">
+    "No patients are sharing with you yet."
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "patienta"
+        <p className="note">
+          "access ended "
+          "2026-09-02"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="stack">
+      <h3 className="section-label section-label--flush">
+        "Change password"
+      <p className="note">
+        "On success every session — including this one — is signed out. There is still no password reset: keep the new password in a password manager."
+      <details className="disclose">
+        <summary>
+          "How the change works (atomic custody)"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            "Your new credential, re-wrapped sharing identity, and encrypted notes keyring commit together in one transaction. A lost response retries the same operation safely. No intermediate password or private-key state is published."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-1">
+          "Current password"
+        <input autoComplete="current-password" className="input" id="field-association-1" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-2">
+          "New password"
+        <input autoComplete="new-password" className="input" id="field-association-2" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-3">
+          "Repeat new password"
+        <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Change password"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Recover sharing key"
+      <p className="note">
+        "Repairs an interrupted password change: if the change failed after the sharing key was re-wrapped, this seals the same key back under the password you actually sign in with, so the account opens normally again."
+      <p className="note">
+        "No interrupted change is remembered for this account in this browser session (S-4: a change interrupted in another tab of the same session is repairable there). Anything older is not recoverable — an account with no recovery path stays that way (audit F-4)."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-4">
+          "Current password (the one you sign in with)"
+        <input autoComplete="current-password" className="input" id="field-association-4" type="password" value="">
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-5">
+          "The password you were changing to"
+        <input autoComplete="off" className="input" id="field-association-5" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Recover sharing key"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Rotate sharing key (suspected compromise)"
+      <p className="note">
+        "Publishes a brand-new sharing keypair sealed under your current password and revokes existing patient grants. Each patient must pair and share again with the replacement identity. Existing notes remain readable through independently encrypted notes custody. Copies already obtained cannot be recalled."
+      <details className="disclose">
+        <summary>
+          "What happens to existing patient grants"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            "Existing grants are revoked. Each patient must verify the new pairing fingerprint and share again. Your notes remain readable through an independently encrypted notes keyring, including older password-derived notes and all verified revisions. Existing ciphertext is preserved; retaining historical keys does not recall copies already obtained by someone else."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-6">
+          "Current password (to authorize rotation)"
+        <input autoComplete="current-password" className="input" id="field-association-6" type="password" value="">
+      <label className="confirm-label">
+        <input aria-label="Confirm sharing-key rotation" checked=false type="checkbox">
+        "I understand that existing grants will be revoked and patients must share again."
+      <button className="btn btn--danger btn--small" disabled=true type="button">
+        "Rotate sharing key"
+    <div className="stack">
+      <hr className="divider">
+      <h3 className="section-label section-label--flush">
+        "Two-factor authentication (authenticator app)"
+      <p className="note">
+        "Two-factor authentication is required before patient-data access. Your password AND a 6-digit code from an authenticator app are required at sign-in. Enrollment mints single-use recovery codes (shown once) for a lost authenticator."
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-7">
+          "Current password (to authorize setup)"
+        <input autoComplete="current-password" className="input" id="field-association-7" type="password" value="">
+      <button className="btn btn--small" disabled=true type="button">
+        "Set up authenticator"
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Hide account security"
+    <p className="note note--ok" role="status">
+      "Sharing identity rotated. Existing patient grants were revoked. Sign in again. Each patient must verify the new pairing fingerprint and share again; historical notes remain readable through independent encrypted custody."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;

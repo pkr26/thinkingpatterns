@@ -1,0 +1,185 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`keeps resource actions before the unlocked plan link and submits both dialog actions 1`] = `
+"<div className="dialog-backdrop">
+  <div aria-label="Get help now" aria-modal="true" className="dialog" ref={"current":null} role="dialog">
+    <h2 className="dialog__title">
+      "Get help now"
+    <p className="note note--danger" style={"whiteSpace":"pre-wrap"}>
+      "If you are in immediate danger, call 911 (or your local emergency number)."
+    <div className="stack" style={"gap":"var(--space-2)"}>
+      <a className="btn" href="tel:911" style={"justifyContent":"flex-start","textDecoration":"none"}>
+        <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+          <path d="M6 3.5h3l1.5 4-2 1.5a11.5 11.5 0 0 0 5 5l1.5-2 4 1.5v3a2 2 0 0 1-2 2A14 14 0 0 1 4 5.5a2 2 0 0 1 2-2z">
+        <span className="stack" style={"gap":0,"textAlign":"left"}>
+          <span>
+            "Call 911"
+          <span style={"fontSize":12,"fontWeight":600,"opacity":0.85}>
+            "If you are in immediate danger or have already hurt yourself"
+      <a className="btn" href="tel:988" style={"justifyContent":"flex-start","textDecoration":"none"}>
+        <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+          <path d="M6 3.5h3l1.5 4-2 1.5a11.5 11.5 0 0 0 5 5l1.5-2 4 1.5v3a2 2 0 0 1-2 2A14 14 0 0 1 4 5.5a2 2 0 0 1 2-2z">
+        <span className="stack" style={"gap":0,"textAlign":"left"}>
+          <span>
+            "Call or text 988"
+          <span style={"fontSize":12,"fontWeight":600,"opacity":0.85}>
+            "988 Suicide & Crisis Lifeline — call 988 or text it, any time"
+      <a className="btn" href="sms:741741?body=HOME" style={"justifyContent":"flex-start","textDecoration":"none"}>
+        <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+          <path d="M6 3.5h3l1.5 4-2 1.5a11.5 11.5 0 0 0 5 5l1.5-2 4 1.5v3a2 2 0 0 1-2 2A14 14 0 0 1 4 5.5a2 2 0 0 1 2-2z">
+        <span className="stack" style={"gap":0,"textAlign":"left"}>
+          <span>
+            "Text HOME to 741741"
+          <span style={"fontSize":12,"fontWeight":600,"opacity":0.85}>
+            "Crisis Text Line — text conversation with a trained counselor"
+      <a className="btn" href="https://988lifeline.org/chat" rel="noreferrer" style={"justifyContent":"flex-start","textDecoration":"none"} target="_blank">
+        <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+          <circle cx="11" cy="11" r="6.5">
+          <path d="M15.8 15.8 21 21">
+        <span className="stack" style={"gap":0,"textAlign":"left"}>
+          <span>
+            "Chat online at 988lifeline.org"
+          <span style={"fontSize":12,"fontWeight":600,"opacity":0.85}>
+            "The same lifeline, in your browser — no phone call needed"
+      <a className="btn" href="https://findahelpline.com" rel="noreferrer" style={"justifyContent":"flex-start","textDecoration":"none"} target="_blank">
+        <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+          <circle cx="11" cy="11" r="6.5">
+          <path d="M15.8 15.8 21 21">
+        <span className="stack" style={"gap":0,"textAlign":"left"}>
+          <span>
+            "Open findahelpline.com"
+          <span style={"fontSize":12,"fontWeight":600,"opacity":0.85}>
+            "Outside the US: findahelpline.com lists local, free services in your country."
+    <div className="stack" style={"gap":"var(--space-2)"}>
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        <svg aria-hidden="true" fill="none" focusable="false" height=15 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=15>
+          <path d="M12 20s-7-4.3-9-8.5C1.6 8.6 3.6 5.5 6.8 5.5c1.9 0 3.6 1 4.2 2.6.6-1.6 2.3-2.6 4.2-2.6 3.2 0 5.2 3.1 3.8 6-2 4.2-7 8.5-7 8.5z">
+        "Make a safety plan"
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Your words, encrypted on this device — never synced or shared."
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "Talking to a real person helps. These services are confidential, subject to each service's privacy, safety, emergency, and legal policies."
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "You deserve support. Reaching out is a strong move."
+    <div className="dialog__actions">
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Close""
+`;
+
+exports[`renders accessible public resource actions and support copy in en without a session 1`] = `
+"<div className="dialog-backdrop">
+  <div aria-label="Get help now" aria-modal="true" className="dialog" ref={"current":null} role="dialog">
+    <h2 className="dialog__title">
+      "Get help now"
+    <p className="note note--danger" style={"whiteSpace":"pre-wrap"}>
+      "If you are in immediate danger, call 911 (or your local emergency number)."
+    <div className="stack" style={"gap":"var(--space-2)"}>
+      <a className="btn" href="tel:911" style={"justifyContent":"flex-start","textDecoration":"none"}>
+        <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+          <path d="M6 3.5h3l1.5 4-2 1.5a11.5 11.5 0 0 0 5 5l1.5-2 4 1.5v3a2 2 0 0 1-2 2A14 14 0 0 1 4 5.5a2 2 0 0 1 2-2z">
+        <span className="stack" style={"gap":0,"textAlign":"left"}>
+          <span>
+            "Call 911"
+          <span style={"fontSize":12,"fontWeight":600,"opacity":0.85}>
+            "If you are in immediate danger or have already hurt yourself"
+      <a className="btn" href="tel:988" style={"justifyContent":"flex-start","textDecoration":"none"}>
+        <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+          <path d="M6 3.5h3l1.5 4-2 1.5a11.5 11.5 0 0 0 5 5l1.5-2 4 1.5v3a2 2 0 0 1-2 2A14 14 0 0 1 4 5.5a2 2 0 0 1 2-2z">
+        <span className="stack" style={"gap":0,"textAlign":"left"}>
+          <span>
+            "Call or text 988"
+          <span style={"fontSize":12,"fontWeight":600,"opacity":0.85}>
+            "988 Suicide & Crisis Lifeline — call 988 or text it, any time"
+      <a className="btn" href="sms:741741?body=HOME" style={"justifyContent":"flex-start","textDecoration":"none"}>
+        <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+          <path d="M6 3.5h3l1.5 4-2 1.5a11.5 11.5 0 0 0 5 5l1.5-2 4 1.5v3a2 2 0 0 1-2 2A14 14 0 0 1 4 5.5a2 2 0 0 1 2-2z">
+        <span className="stack" style={"gap":0,"textAlign":"left"}>
+          <span>
+            "Text HOME to 741741"
+          <span style={"fontSize":12,"fontWeight":600,"opacity":0.85}>
+            "Crisis Text Line — text conversation with a trained counselor"
+      <a className="btn" href="https://988lifeline.org/chat" rel="noreferrer" style={"justifyContent":"flex-start","textDecoration":"none"} target="_blank">
+        <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+          <circle cx="11" cy="11" r="6.5">
+          <path d="M15.8 15.8 21 21">
+        <span className="stack" style={"gap":0,"textAlign":"left"}>
+          <span>
+            "Chat online at 988lifeline.org"
+          <span style={"fontSize":12,"fontWeight":600,"opacity":0.85}>
+            "The same lifeline, in your browser — no phone call needed"
+      <a className="btn" href="https://findahelpline.com" rel="noreferrer" style={"justifyContent":"flex-start","textDecoration":"none"} target="_blank">
+        <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+          <circle cx="11" cy="11" r="6.5">
+          <path d="M15.8 15.8 21 21">
+        <span className="stack" style={"gap":0,"textAlign":"left"}>
+          <span>
+            "Open findahelpline.com"
+          <span style={"fontSize":12,"fontWeight":600,"opacity":0.85}>
+            "Outside the US: findahelpline.com lists local, free services in your country."
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "Talking to a real person helps. These services are confidential, subject to each service's privacy, safety, emergency, and legal policies."
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "You deserve support. Reaching out is a strong move."
+    <div className="dialog__actions">
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Close""
+`;
+
+exports[`renders accessible public resource actions and support copy in es without a session 1`] = `
+"<div className="dialog-backdrop">
+  <div aria-label="Busque ayuda ahora" aria-modal="true" className="dialog" ref={"current":null} role="dialog">
+    <h2 className="dialog__title">
+      "Busque ayuda ahora"
+    <p className="note note--danger" style={"whiteSpace":"pre-wrap"}>
+      "Si está en peligro inmediato, llame al 911 (o al número de emergencias de su país)."
+    <div className="stack" style={"gap":"var(--space-2)"}>
+      <a className="btn" href="tel:911" style={"justifyContent":"flex-start","textDecoration":"none"}>
+        <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+          <path d="M6 3.5h3l1.5 4-2 1.5a11.5 11.5 0 0 0 5 5l1.5-2 4 1.5v3a2 2 0 0 1-2 2A14 14 0 0 1 4 5.5a2 2 0 0 1 2-2z">
+        <span className="stack" style={"gap":0,"textAlign":"left"}>
+          <span>
+            "Llamar al 911"
+          <span style={"fontSize":12,"fontWeight":600,"opacity":0.85}>
+            "Si está en peligro inmediato o ya se ha hecho daño"
+      <a className="btn" href="tel:988" style={"justifyContent":"flex-start","textDecoration":"none"}>
+        <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+          <path d="M6 3.5h3l1.5 4-2 1.5a11.5 11.5 0 0 0 5 5l1.5-2 4 1.5v3a2 2 0 0 1-2 2A14 14 0 0 1 4 5.5a2 2 0 0 1 2-2z">
+        <span className="stack" style={"gap":0,"textAlign":"left"}>
+          <span>
+            "Llame o envíe un mensaje de texto al 988"
+          <span style={"fontSize":12,"fontWeight":600,"opacity":0.85}>
+            "988 Suicide & Crisis Lifeline — llame al 988 o envíe un mensaje de texto, a cualquier hora"
+      <a className="btn" href="sms:741741?body=HOME" style={"justifyContent":"flex-start","textDecoration":"none"}>
+        <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+          <path d="M6 3.5h3l1.5 4-2 1.5a11.5 11.5 0 0 0 5 5l1.5-2 4 1.5v3a2 2 0 0 1-2 2A14 14 0 0 1 4 5.5a2 2 0 0 1 2-2z">
+        <span className="stack" style={"gap":0,"textAlign":"left"}>
+          <span>
+            "Envíe HOME por mensaje de texto al 741741"
+          <span style={"fontSize":12,"fontWeight":600,"opacity":0.85}>
+            "Crisis Text Line — conversación por mensaje de texto con una persona consejera capacitada"
+      <a className="btn" href="https://988lifeline.org/chat" rel="noreferrer" style={"justifyContent":"flex-start","textDecoration":"none"} target="_blank">
+        <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+          <circle cx="11" cy="11" r="6.5">
+          <path d="M15.8 15.8 21 21">
+        <span className="stack" style={"gap":0,"textAlign":"left"}>
+          <span>
+            "Chatear en 988lifeline.org"
+          <span style={"fontSize":12,"fontWeight":600,"opacity":0.85}>
+            "La misma línea de ayuda, en su navegador — sin necesidad de llamar"
+      <a className="btn" href="https://findahelpline.com" rel="noreferrer" style={"justifyContent":"flex-start","textDecoration":"none"} target="_blank">
+        <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+          <circle cx="11" cy="11" r="6.5">
+          <path d="M15.8 15.8 21 21">
+        <span className="stack" style={"gap":0,"textAlign":"left"}>
+          <span>
+            "Abrir findahelpline.com"
+          <span style={"fontSize":12,"fontWeight":600,"opacity":0.85}>
+            "Fuera de EE. UU.: findahelpline.com enumera servicios locales y gratuitos en su país."
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "Hablar con una persona real ayuda. Estos servicios son confidenciales, sujetos a las políticas de privacidad, seguridad, emergencias y obligaciones legales de cada servicio."
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "Usted merece apoyo. Buscarlo es un paso valiente."
+    <div className="dialog__actions">
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Cerrar""
+`;

@@ -201,7 +201,6 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
     };
     const sub = BackHandler.addEventListener("hardwareBackPress", onBack);
     return () => sub.remove();
-    // Stryker disable next-line ArrayDeclaration: the handlers read refs (planRef/savedPlanRef) and stable closures; loading/locked alone gate the listener — re-running for other renders only re-attaches an identical listener
   }, [loading, locked, readFailed, navigation]);
 
   // Native header back and iOS gestures must share the dirty-plan guard.

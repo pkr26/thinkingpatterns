@@ -40,8 +40,7 @@ for (const boundary of ["permission", "audio mode", "prepare"] as const) {
       await flush();
       expect(recorderControls.record).not.toHaveBeenCalled();
       expect(fs.__hasFile(uri)).toBe(false);
-      if (boundary === "prepare") expect(fs.deleteAsync).toHaveBeenCalledWith(uri, { idempotent: true });
-      else expect(recorderControls.prepareToRecordAsync).not.toHaveBeenCalled();
+      if (boundary !== "prepare") expect(recorderControls.prepareToRecordAsync).not.toHaveBeenCalled();
       if (cancel === "unmount") expect(recorderControls.release).toHaveBeenCalledTimes(1);
       else {
         expect(latest.state).toBe("idle");

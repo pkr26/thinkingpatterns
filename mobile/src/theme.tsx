@@ -34,7 +34,7 @@
  * Tone: the palette stays flat and calm on purpose — no gradients, no
  * celebration colors; the one loud accent is reserved for crisis help.
  */
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useRef, useState } from "react";
 import { useColorScheme } from "react-native";
 import { useLocale } from "./strings";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -202,12 +202,13 @@ export function useTheme(): Theme {
  *  setter that re-renders the tree, and persists every change. */
 export function ThemeProvider({ children }: { children: React.ReactNode }): React.JSX.Element {
   const [mode, setModeState] = useState<ThemeMode>("system");
+  const chosen = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
     AsyncStorage.getItem(THEME_STORAGE_KEY)
       .then((stored: string | null) => {
-        if (cancelled) return;
+        if (cancelled || chosen.current) return;
         if (stored === "dark" || stored === "light" || stored === "system") {
           setModeState(stored);
         }
@@ -219,6 +220,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }): Reac
   }, []);
 
   const setMode = (next: ThemeMode) => {
+    chosen.current = true;
     setModeState(next);
     AsyncStorage.setItem(THEME_STORAGE_KEY, next).catch(() => {});
   };

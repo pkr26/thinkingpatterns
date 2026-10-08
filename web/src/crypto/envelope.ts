@@ -242,6 +242,9 @@ export async function createRegistrationEnvelope(
     kek = await envelopeKek(masterKey, salt);
     const wrapped = await wrapDataKey(dataKey, kek, username, kdfParams);
     return { dataKey, kdfParams, wrappedDataKeyB64: toBase64(wrapped) };
+  } catch (error) {
+    zeroize(dataKey);
+    throw error;
   } finally {
     zeroize(kek);
   }

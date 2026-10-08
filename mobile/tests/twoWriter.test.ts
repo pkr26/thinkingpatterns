@@ -1,3 +1,4 @@
+import { runTestControl } from "./helpers/testControl";
 /**
  * Two-writer regression suite (WEB_PLAN P5.10, 2026-09-25): the web client
  * is now a full write peer, so the multi-device contract S-1..S-11 is a
@@ -70,7 +71,7 @@ describe("two-writer: the 410 account-death funnel (D-8 parity)", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     setUnauthorizedHandler(null);
-    __setLocaleForTests("en");
+    runTestControl(__setLocaleForTests, "en");
   });
 
   it("a 410 WITHOUT the account-death code does NOT lock (audit 2026-09-25)", async () => {

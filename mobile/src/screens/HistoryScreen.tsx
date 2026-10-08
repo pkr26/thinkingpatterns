@@ -211,7 +211,6 @@ function conflictSnippet(text: string): string {
  *  held the data key once (processing sessions) — treat the field like any
  *  other rendered value: type-check, clamp. */
 function sanitizeSentiment(value: unknown): number | null {
-  // Stryker disable next-line LogicalOperator,ConditionalExpression: value arrives JSON-parsed from the entry blob; Number.isFinite is false for every non-number, so || vs && and dropping the typeof arm differ only for NaN/Infinity numbers, which JSON cannot encode
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
   return Math.max(-1, Math.min(1, value));
 }
@@ -249,12 +248,9 @@ function sanitizeTags(value: unknown): string[] {
 export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.Element {
   const t = useTheme();
   const { touchActivity } = useSession();
-  // Stryker disable next-line ObjectLiteral,StringLiteral: nothing ever compares mode.kind to "list" — {} / {kind:""} fail the edit and detail checks identically and fall through to the same list return
   const [mode, setMode] = useState<Mode>({ kind: "list" });
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
-  // Stryker disable next-line BooleanLiteral: the pre-effect first commit is unobservable in tests — react-test-renderer defers the initial render to act's drain, where load()'s setLoading(true) lands in the same flush (outside act nothing commits at all)
   const [loading, setLoading] = useState(true);
-  // Stryker disable next-line BooleanLiteral: same test seam as loading — the load effect's setOffline(false) corrects the initial value in the very first act flush, so only that corrected value is ever observable
   const [offline, setOffline] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [unreadable, setUnreadable] = useState(0);
@@ -385,9 +381,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
   );
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
-  // Stryker disable next-line StringLiteral: status starts null (InlineStatus renders nothing) and every setStatus(message) in showStatus is batched with setStatusTone, so the initial tone value is never rendered
   const [statusTone, setStatusTone] = useState<InlineStatusTone>("neutral");
-  // Stryker disable next-line StringLiteral: every path into edit mode goes through startEdit, which sets draft first — the initial draft value is never rendered or read
   const [draft, setDraft] = useState("");
   /** Live mirror of `draft` for the Android hardware-back subscription: the
    *  back-handler effect re-runs only when mode.kind changes, so a closure
@@ -423,7 +417,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
    *  reachable without unbounded downloads. */
   const handleCalendarViewChange = useCallback((year: number, month: number) => {
     touchActivity();
-    const monthKey = `${year}-${String(month).padStart(2, "0")}`;
+    const monthKey = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}`;
     if (loadedMonthsRef.current.has(monthKey)) return;
     const monthStartISO = `${monthKey}-01`;
     if (
@@ -440,8 +434,10 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
         const userId = await api.getUserId();
         if (epoch !== monthFetchEpochRef.current || !userId || !vault.isUnlocked()) return;
         const next = month === 12 ? { y: year + 1, m: 1 } : { y: year, m: month + 1 };
-        const start = new Date(Date.UTC(year, month - 1, 1)).toISOString().slice(0, 10);
-        const end = new Date(Date.UTC(next.y, next.m - 1, 1)).toISOString().slice(0, 10);
+        // The calendar already supplies normalized months. Format those
+        // values directly: Date.UTC remaps years 0–99 into 1900–1999.
+        const start = monthStartISO;
+        const end = `${String(next.y).padStart(4, "0")}-${String(next.m).padStart(2, "0")}-01`;
         const rows = await api.listEntriesWindow(start, end);
         if (epoch !== monthFetchEpochRef.current) return;
         if (rows.length === 0) {
@@ -471,8 +467,8 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
         if (failed > 0) setUnreadable((n) => n + failed);
         showStatus(tr("history.monthLoaded", { count: decrypted.length }), "ok");
       } catch {
-        loadedMonthsRef.current.delete(monthKey);
         if (epoch !== monthFetchEpochRef.current) return;
+        loadedMonthsRef.current.delete(monthKey);
         showStatus(tr("history.monthLoadFailed"), "neutral");
       }
     })();
@@ -531,6 +527,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
       // rendered raw) and counted so the user knows the list is short by
       // exactly that many.
       const { decrypted, failed } = await decryptRowsWithVersions(userId, vault.get().dataKey, rows);
+      if (loadEpoch !== historyLoadEpochRef.current) return;
       // WEB_PLAN S-8 (2026-09-25): EVERY row failing to decrypt with a live
       // session is the remote-rekey signature — the data key changed on
       // another device. Audit 2026-09-28 (MEDIUM): route this to the
@@ -592,7 +589,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
         setLoading(false);
       }
     }
-    }, // Stryker disable next-line ArrayDeclaration: the literal dep never changes between renders and the callback closes over no render-scope values, so identity and behavior are identical
+    },
      []);
 
   useEffect(() => {
@@ -611,10 +608,9 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
       : undefined;
     return () => {
       focusSub?.();
-      // Stryker disable next-line ConditionalExpression,CallExpression: on an unmounted component the later setStatus(null) is a silent no-op in React 18 and clearTimeout(null) is a no-op, so skipping this cleanup has no observable effect
       if (statusTimer.current) clearTimeout(statusTimer.current);
     };
-    }, // Stryker disable next-line ArrayDeclaration: load is stable (useCallback over constant deps) and the navigation object identity is stable for the screen's lifetime, so the effect body runs exactly once either way
+    },
      [load, navigation]);
 
   // Android hardware back (2026-09-17): in detail/edit mode it must return
@@ -717,6 +713,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
         vault.get().dataKey,
         rows,
       );
+      if (loadEpoch !== historyLoadEpochRef.current) return;
       setEntries((previous) => {
         const byId = new Map(previous.map((entry) => [entry.clientEntryId, entry]));
         for (const entry of incoming) byId.set(entry.clientEntryId, entry);
@@ -773,10 +770,12 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
    *  removeMoodDay snapshots the key at ITS call time, and vault.get()
    *  throws when a lock landed mid-delete — both degrade quietly here. */
   const forgetLocalMoodDay = (entry: HistoryEntry) => {
+    const owner = vault.ownerUserId();
+    const scope = localWriteScopeEpoch();
     void (async () => {
       try {
         const userId = await api.getUserId();
-        if (!userId || !vault.isUnlocked()) return;
+        if (scope !== localWriteScopeEpoch() || !userId || userId !== owner || !vault.isUnlocked()) return;
         await removeMoodDay(vault.get().dataKey, userId, entry.entryDate);
       } catch {
         // Locked vault or dead storage: disposable metadata, not an error.
@@ -794,6 +793,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
 
   const runDelete = async (entry: HistoryEntry) => {
     if (busyRef.current) return;
+    const deleteScope = localWriteScopeEpoch();
     busyRef.current = true;
     setBusy(true);
     try {
@@ -808,9 +808,11 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
       // app logs nothing), and the cost of a skip is one false alarm on a
       // future recreate of the same id — never corrupted state.
       const deleteUserId = await api.getUserId().catch(() => null);
+      if (deleteScope !== localWriteScopeEpoch()) return;
       if (deleteUserId) {
         await forgetEntryVersion(deleteUserId, vault.get().dataKey, entry.clientEntryId).catch(() => {});
       }
+      if (deleteScope !== localWriteScopeEpoch()) return;
       // L-67: this device just moved the collection revision; the walk's
       // token must be re-acquired or the next "Load older" 409-restarts
       // and wipes the filters.
@@ -818,19 +820,16 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
       // L-68: the local mood log stops counting the deleted day.
       forgetLocalMoodDay(entry);
       setEntries((prev) => prev.filter((e) => e.clientEntryId !== entry.clientEntryId));
-      // Stryker disable next-line ObjectLiteral,StringLiteral: nothing compares mode.kind to "list" — the mutated state fails the edit/detail checks and falls through to the identical list return
       setMode({ kind: "list" });
-      // Stryker disable next-line StringLiteral: InlineStatus only branches on tone === "ok"; tone "" colors exactly like "neutral"
       showStatus(tr("history.entryDeleted"), "neutral");
     } catch (err) {
+      if (deleteScope !== localWriteScopeEpoch()) return;
       if (err instanceof ApiError && err.status === 404) {
         // Already gone server-side: the end state the user asked for.
         invalidateEntriesRevision(); // the server state moved all the same
         forgetLocalMoodDay(entry);
         setEntries((prev) => prev.filter((e) => e.clientEntryId !== entry.clientEntryId));
-        // Stryker disable next-line ObjectLiteral,StringLiteral: nothing compares mode.kind to "list" — the mutated state falls through to the identical list return
         setMode({ kind: "list" });
-        // Stryker disable next-line StringLiteral: InlineStatus only branches on tone === "ok"; tone "" colors exactly like "neutral"
         showStatus(tr("history.entryDeleted"), "neutral");
       } else if (err instanceof ApiError && err.status === 0) {
         Alert.alert(tr("history.needsConnectionTitle"), tr("history.deleteOfflineBody"));
@@ -965,10 +964,12 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
       // of it — stale list, no revision invalidation, and worst, no H-6
       // crisis detection on the newly-saved text).
       const finishEdit = async (text: string, version: number): Promise<void> => {
+        if (submitEpoch !== localWriteScopeEpoch()) return;
         entry.contentVersion = version;
         await observeEntryVersions(userId, vault.get().dataKey, [
           { clientEntryId: entry.clientEntryId, contentVersion: version },
         ]).catch(() => {});
+        if (submitEpoch !== localWriteScopeEpoch()) return;
         // L-67: the replacement moved the collection revision on the server;
         // drop the walk's token so the next "Load older" re-acquires it
         // instead of 409-restarting (which would wipe the filters).
@@ -997,8 +998,10 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
         if (detectCrisisLanguage(text)) {
           const today = localDateISO();
           const flagged = await crisisDialogShownOn(userId, today).catch(() => false);
+          if (submitEpoch !== localWriteScopeEpoch()) return;
           if (!flagged) {
             await recordCrisisDialogShown(userId, today).catch(() => {});
+            if (submitEpoch !== localWriteScopeEpoch()) return;
             Alert.alert(tr("entry.crisisAlertTitle"), tr("entry.crisisAlertBody"), [
               // Resources first; the safety plan (2026-09-27) rides beside.
               { text: tr("entry.crisisViewResources"), onPress: () => navigation.navigate("Crisis") },
@@ -1072,6 +1075,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
           }
         }
       } catch (err) {
+        if (submitEpoch !== localWriteScopeEpoch()) return;
         if (err instanceof ApiError && err.status === 0) {
           Alert.alert(tr("history.needsConnectionTitle"), tr("history.updateOfflineBody"));
         } else {
@@ -1084,6 +1088,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
       }
       await finishEdit(trimmed, nextVersion);
     } catch (err) {
+      if (submitEpoch !== localWriteScopeEpoch()) return;
       Alert.alert(tr("history.couldNotUpdateTitle"), requestFailureCopy(err));
     } finally {
       busyRef.current = false;
@@ -1190,7 +1195,6 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
         <PrimaryButton label={tr("history.editThisEntry")} onPress={() => startEdit(entry)} disabled={busy} />
         <PrimaryButton label={tr("history.deleteThisEntry")} onPress={() => confirmDelete(entry)} busy={busy} danger />
         <GhostButton
-          // Stryker disable next-line ObjectLiteral, StringLiteral: nothing compares mode.kind to "list" — the mutated state falls through to the identical list return
           onPress={() => setMode({ kind: "list" })}
           label={tr("history.backToHistory")}
           disabled={busy}

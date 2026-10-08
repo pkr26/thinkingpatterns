@@ -3,6 +3,7 @@
  *  palette-change notification that keeps JS-drawn charts in sync. */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { runInNewContext } from "node:vm";
 import { describe, expect, it, vi } from "vitest";
 import { currentPaletteVersion, notifyPaletteChanged, subscribePalette } from "../src/tokens";
 import { resolveTheme, THEME_STORAGE_KEY, type ThemePref , applyThemePref, initTheme, readThemePref, writeThemePref } from "../src/theme";
@@ -40,13 +41,55 @@ describe("readThemePref default", () => {
 describe("pre-paint script stays in sync with the module", () => {
   const script = readFileSync(join(__dirname, "../public/theme-init.js"), "utf8");
 
-  it("references the same storage key as THEME_STORAGE_KEY", () => {
-    expect(script).toContain(`"${THEME_STORAGE_KEY}"`);
+  // Executing the actual early script in a browser-like global also needs
+  // the mutation runner's activation context, just as an imported module does.
+  function runBoot(context: Record<string, unknown>) {
+    const runnerGlobals = Object.fromEntries(Object.getOwnPropertyNames(globalThis)
+      .filter((key) => key.startsWith("__stryker"))
+      .map((key) => [key, (globalThis as Record<string, unknown>)[key]]));
+    return runInNewContext(script, { process, ...runnerGlobals, ...context });
+  }
+
+  function boot(pref: string | null, prefersDark: boolean, withMedia = true) {
+    const dataset: Record<string, string> = {};
+    const getItem = vi.fn((key: string) => key === THEME_STORAGE_KEY ? pref : null);
+    const matchMedia = vi.fn((query: string) => ({ matches: query === "(prefers-color-scheme: dark)" && prefersDark }));
+    runBoot({
+      localStorage: { getItem },
+      window: withMedia ? { matchMedia } : {},
+      document: { documentElement: { dataset } },
+    });
+    return { dataset, getItem, matchMedia };
+  }
+
+  it.each([
+    ["dark", false, "dark"], ["dark", true, "dark"],
+    ["light", false, "light"], ["light", true, "light"],
+    ["auto", false, "light"], ["auto", true, "dark"],
+    [null, false, "light"], [null, true, "dark"],
+    ["invalid", true, "light"],
+  ] as const)("boots preference %s with OS dark %s to %s", (pref, osDark, expected) => {
+    const { dataset, getItem } = boot(pref, osDark);
+    expect(getItem).toHaveBeenCalledWith(THEME_STORAGE_KEY);
+    expect(dataset.theme).toBe(expected);
   });
 
-  it("writes the same attribute the CSS keys off", () => {
-    expect(script).toContain('dataset.theme');
-    expect(script).toMatch(/"dark" : "light"/);
+  it("boots in light when matchMedia is unavailable", () => {
+    expect(boot("auto", true, false).dataset.theme).toBe("light");
+  });
+
+  it("keeps boot available when preference storage or the OS query throws", () => {
+    const dataset = {};
+    expect(() => runBoot({
+      localStorage: { getItem: () => { throw new Error("private mode"); } },
+      window: {}, document: { documentElement: { dataset } },
+    })).not.toThrow();
+    expect(dataset).toEqual({});
+    expect(() => runBoot({
+      localStorage: { getItem: () => "auto" },
+      window: { matchMedia: () => { throw new Error("unavailable"); } },
+      document: { documentElement: { dataset } },
+    })).not.toThrow();
   });
 
   it("index.html loads it before the stylesheet (pre-paint)", () => {

@@ -1,3 +1,4 @@
+import { runTestControl } from "./helpers/testControl";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import storage from "./helpers/storageMock";
 import * as fs from "./helpers/expoFsMock";
@@ -17,7 +18,7 @@ async function seed(id = "saved") {
   await enqueueAudio({ userId: USER, clientEntryId: id, ...encryptAudio({ dataKey: KEY }, USER, id, Buffer.from("private recording")), mime: "audio/m4a", durationSeconds: 4 });
 }
 beforeEach(async () => {
-  vi.restoreAllMocks(); storage.__reset(); fs.__resetFiles(); __resetLocalKeyLifecycleForTests(); setSecureStoreBackend(null);
+  vi.restoreAllMocks(); storage.__reset(); fs.__resetFiles(); runTestControl(__resetLocalKeyLifecycleForTests); runTestControl(setSecureStoreBackend, null);
   Sharing.shareAsync.mockClear(); Sharing.isAvailableAsync.mockResolvedValue(true);
   await api.setSession("owner-token", USER, "alice");
   await api.cacheKeyEnvelope("alice", { scheme: "v1", saltB64: SALT, kdfParams: null, wrappedB64: null });

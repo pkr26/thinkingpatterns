@@ -1,3 +1,4 @@
+import { runTestControl } from "./helpers/testControl";
 /**
  * Frontend mutation campaign 2026-09-22 — survivor pins (mobile).
  *
@@ -374,7 +375,7 @@ describe("mutation pins 2026-09-22: password rotation stages", () => {
     mockedCrypto.decryptEntry.mockReset();
     resetEntryVersionMirrors();
     storage.__reset();
-    (await import("../src/localRekey")).__resetLocalKeyLifecycleForTests();
+    runTestControl((await import("../src/localRekey")).__resetLocalKeyLifecycleForTests);
     (await import("../src/vault")).vault.unlock({
       masterKey: Buffer.alloc(32, 0),
       authKey: Buffer.alloc(32, 1),

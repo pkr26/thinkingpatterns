@@ -88,16 +88,23 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
 
   useEffect(() => {
     let cancelled = false;
-    void api.getUserId().then(async userId => { if (userId && !cancelled) setRotationPending(await pendingLocalRekey(userId)); }).catch(() => {});
+    const probeScope = localWriteScopeEpoch();
+    const ownsProbe = () => !cancelled && probeScope === localWriteScopeEpoch();
+    void (async () => {
+      const userId = await api.getUserId();
+      if (!userId || !ownsProbe()) return;
+      const pending = await pendingLocalRekey(userId);
+      if (ownsProbe()) setRotationPending(pending);
+    })().catch(() => {});
     void (async () => {
       // Quiet probe: unsupported device, no stored wrap, or no session
       // account all leave the screen exactly as it was — password only.
       try {
-        if (!(await biometricsSupported())) return;
+        if (!(await biometricsSupported()) || !ownsProbe()) return;
         const userId = await api.getUserId();
-        if (!userId || cancelled) return;
+        if (!userId || !ownsProbe()) return;
         if (await hasBiometricUnlock(userId)) {
-          if (!cancelled) setShowBiometric(true);
+          if (ownsProbe()) setShowBiometric(true);
         }
       } catch {
         /* the password path needs nothing from this probe */
@@ -106,7 +113,6 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
     return () => {
       cancelled = true;
     };
-    // Stryker disable next-line ArrayDeclaration: a string-literal element is reference-stable, so React's Object.is dep comparison never sees a change — identical to []
   }, []);
 
   const unlockWithBiometrics = async () => {
@@ -222,7 +228,6 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
         if (res.reason === "tamper") {
           // S-5: the envelope did not open under this password — the same
           // funnel as the sealed proof's "wrong" (401 → escalating pause).
-          // Stryker disable next-line StringLiteral: dead message — the catch maps ANY 401 to the constant "Wrong password." dialog, so this thrown text is never read
           throw new ApiError(401, tr("common.wrongPassword"));
         }
         throw new Error(tr("unlock.envelopeFailed"));
@@ -262,8 +267,10 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
           if (fetched.status === "ok") {
             const envelope = fetched.envelope;
             if (envelope.scheme === "v2") {
+              envelopeRefusal = tr("unlock.envelopeFailed");
               const dataKey = await unwrapFor(envelope);
               sessionDataKey = dataKey;
+              envelopeRefusal = null;
               // Verified online AND by the envelope's own authentication:
               // refresh the sealed proof so a future offline unlock (and the
               // biometric path) checks against this very key.
@@ -285,8 +292,10 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
             // GCM proof) may proceed; a stale v1 marker may not.
             const cached = await wait(() => cachedEnvelope(username!));
             if (cached !== null && cached.scheme === "v2") {
+              envelopeRefusal = tr("unlock.envelopeFailed");
               const dataKey = await unwrapFor(cached);
               sessionDataKey = dataKey;
+              envelopeRefusal = null;
               await wait(() => storeUnlockProof(dataKey, body.user_id));
             } else {
               envelopeRefusal = tr(fetched.status === "invalid" ? "login.envelopeUnrecognized" : "unlock.schemeUnconfirmed");
@@ -329,7 +338,6 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
             // into the catch's single escalating record+pause — one failure,
             // one increment, one delay. First failure pays the historical
             // 500 ms exactly; subsequent ones double up to 30 s, durably.
-            // Stryker disable next-line StringLiteral: dead message — the catch maps ANY 401 to the constant "Wrong password." dialog, so this thrown text is never read
             throw new ApiError(401, tr("common.wrongPassword"));
           }
         }
@@ -463,7 +471,7 @@ export function UnlockScreen({ navigation }: { navigation: any }): React.JSX.Ele
         <GhostButton label={tr("unlock.finishRotation")} disabled={busy} onPress={() => void finishInterruptedRotation()} />
       </>}
       <PrimaryButton label={tr("unlock.button")} onPress={unlock} disabled={!password} busy={busy} />
-      <GhostButton label={tr("unlock.signOutInstead")} onPress={() => { attempt.current++; submitting.current = false; void signOut(); }} />
+      <GhostButton label={tr("unlock.signOutInstead")} onPress={() => { attempt.current++; submitting.current = true; void signOut(); }} />
       {/* Crisis help needs no unlock and no network — the locked state is
           exactly when it must be one tap away. */}
       <CrisisHelpButton onPress={() => navigation.navigate("Crisis")} />

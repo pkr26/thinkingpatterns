@@ -1,3 +1,4 @@
+import { runTestControl } from "./helpers/testControl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import storage from "./helpers/storageMock";
 import { api, DEFAULT_BASE_URL, getBaseUrl, setBaseUrl, setOriginChangeHandler } from "../src/api/client";
@@ -20,8 +21,8 @@ beforeEach(() => {
   storage.__reset();
   FileSystem.__resetFiles();
   keychainMock.__reset();
-  __resetLocalKeyLifecycleForTests();
-  setSecureStoreBackend(null);
+  runTestControl(__resetLocalKeyLifecycleForTests);
+  runTestControl(setSecureStoreBackend, null);
   setOriginChangeHandler(null);
   vi.stubGlobal("fetch", vi.fn(async () => response({}, DEFAULT_BASE_URL)));
 });

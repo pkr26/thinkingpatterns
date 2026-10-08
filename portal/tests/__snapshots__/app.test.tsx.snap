@@ -1,0 +1,153 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`drops a late unlock's keys after the browser restores and locks the tab > restored tab remains locked after a late unlock 1`] = `
+"<div className="banner banner--info banner--flush" role="status">
+  "Restored from the browser cache — sign in again."
+<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Sign in"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-1" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="current-password" className="input" id="field-association-2" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <button className="btn" disabled=true type="submit">
+          "Sign in"
+        <button className="btn btn--small" disabled=false type="button">
+          "Create a therapist account instead"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`shows exact initial, unlocked and signed-out shell output > initial sign-in shell 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Sign in"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-1" placeholder="dromega" type="text" value="">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="current-password" className="input" id="field-association-2" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <button className="btn" disabled=true type="submit">
+          "Sign in"
+        <button className="btn btn--small" disabled=false type="button">
+          "Create a therapist account instead"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`shows exact initial, unlocked and signed-out shell output > signed-out shell and key custody notice 1`] = `
+"<div className="banner banner--info banner--flush" role="status">
+  "Signed out. Your in-memory keys were cleared."
+<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Sign in"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-1" placeholder="dromega" type="text" value="">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="current-password" className="input" id="field-association-2" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <button className="btn" disabled=true type="submit">
+          "Sign in"
+        <button className="btn btn--small" disabled=false type="button">
+          "Create a therapist account instead"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`shows exact initial, unlocked and signed-out shell output > unlocked caseload shell 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "F3EA 67E5 8DD3 DEF0 EA04 C676 CD80 7836"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <p className="note">
+    "No patients are sharing with you yet."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="row row--wrap">
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Show account security"
+      <span className="hint">
+        "Change your password, recover your sharing key after an interrupted change, or rotate a compromised sharing key — nothing runs until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;

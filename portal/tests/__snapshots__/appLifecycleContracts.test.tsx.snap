@@ -1,0 +1,69 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`clears the previous unlock error while a fresh sign-in unlock is still pending > fresh pending unlock has no previous error 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Sign in"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-1" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="current-password" className="input" id="field-association-2" type="password" value="retry password">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <button className="btn" disabled=true type="submit">
+          "Signing in…"
+        <button className="btn btn--small" disabled=true type="button">
+          "Create a therapist account instead"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`opens with a clean public sign-in surface > empty authenticated shell sign-in 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Sign in"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-1" placeholder="dromega" type="text" value="">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="current-password" className="input" id="field-association-2" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <button className="btn" disabled=true type="submit">
+          "Sign in"
+        <button className="btn btn--small" disabled=false type="button">
+          "Create a therapist account instead"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;

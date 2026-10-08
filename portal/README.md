@@ -147,4 +147,41 @@ Key material lives in memory only. Closing the tab forgets everything.
 npm test           # vitest + coverage (global quality thresholds)
 npm run typecheck
 npm run build      # typecheck + production bundle
+npm run test:mutation:full -- --concurrency 4 --report-dir reports/full-mutation
 ```
+
+The mutation runner copies the portal and shared fixtures into a disposable
+workspace, installs its own locked dependencies, and checks known-kill and
+deliberate-survivor controls for both static and runtime mutations before
+testing production source. It uses Vitest 4.1.10 inside that workspace because
+Stryker 10's native runner does not execute mutant tests correctly with the
+project's Vitest 5. The working source and dependency versions stay intact.
+
+Every production TypeScript/TSX file and mutation operator from
+`stryker.config.json` remains in scope. Complete-file shards select direct
+consumer tests through Vitest's `include` setting; `--all-tests` uses the whole
+suite in each shard. The report directory retains source/test hashes,
+individual JSON reports, their full-scope union, runner controls and logs.
+Timeouts and runner failures need separate review and are not behavioral
+kills. The original global mutation threshold is checked on the report union.
+Snapshot updates are disabled; a snapshot-only static mutation must fail while
+the external oracle bytes stay unchanged. Consumer selection deliberately uses
+Vitest include rather than Stryker testFiles, which can activate static operators
+after their module initialization.
+
+`--concurrency` selects simultaneous file shards; `--workers-per-file` selects
+mutation workers inside each shard. Their product is the maximum mutation-worker
+budget. A saved current-source report can be replayed with `--replay-report` and
+`--only-files`; overlapping ranges retain all operators and are deduplicated by
+exact source/operator identity. `--test-glob` selects a bounded public consumer
+suite for a specific replay. Tests invoking fixture-only lifecycle exports do
+not supply runtime mutation credit; those operators remain in scope and require
+individual production-callgraph review.
+
+The October 2026 therapist campaign independently audited 16 current production
+files and 6,224 operators: 5,761 behavioral kills, 443 causal equivalents,
+20 separately reviewed nontermination cases, and zero unresolved operators.
+Final verification passed 1,458 tests, 263 unchanged snapshots, typecheck, production
+build and SRI checks. Detailed raw reports, exact reviews and source validation
+are retained under `reports/mutation-2026-10-05`; the repository-wide frontend
+report records the coordinated web, mobile and therapist results.

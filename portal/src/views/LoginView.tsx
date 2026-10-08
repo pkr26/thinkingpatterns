@@ -3,7 +3,7 @@
  * it is stretched into the auth key (sent) and the portal wrap KEK (kept
  * in memory) exactly like the patient apps.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, auth, ApiError, clearSession, MINIMUM_AGE_ATTESTATION, normalizeApiBaseUrl, setSession, type TokenResponse } from "../api";
 import { deriveMasterKey, derivePortalKeys, fromBase64, generateTherapistKeyPair, toBase64 } from "../crypto";
 import { Button, Card, Disclosure, ErrorBanner, Field, Note, PasswordStrengthMeter } from "../ui";
@@ -108,6 +108,11 @@ function friendlyRegistrationError(err: unknown): string {
 }
 
 export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenResponse, baseUrl: string) => void | Promise<void> }): React.JSX.Element {
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   const [mode, setMode] = useState<"login" | "register">("login");
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -200,6 +205,12 @@ export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenRespo
         verifier,
         code === undefined ? undefined : code,
       );
+      // A retired form no longer owns the shared bearer slot or a handoff.
+      // Revoke its own late token without touching a replacement session.
+      if (!mounted.current) {
+        void auth.logoutBearer(baseUrl, token.token).catch(() => undefined);
+        return;
+      }
       if (token.role !== "therapist") {
         // S-12 (pentest 2026-09-26): the server has already minted a 24 h
         // bearer. Dropping it locally left it live server-side; revoke it
@@ -214,6 +225,10 @@ export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenRespo
       };
       if (token.mfa_enrollment_required === true) {
         const setup = await api.totpSetup(verifier);
+        if (!mounted.current) {
+          void auth.logoutBearer(baseUrl, token.token).catch(() => undefined);
+          return;
+        }
         derivedKeys.authKey.fill(0);
         setMfaEnrollment({
           keys: portalKeys,
@@ -253,8 +268,9 @@ export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenRespo
       // stage ends (success, non-TOTP error, or leaving the form).
       if (!keepPassword) setPassword("");
       if (!transferred) {
-        wipeKeys(portalKeys ?? derivedKeys);
-        clearSession();
+        wipeKeys(portalKeys);
+        wipeKeys(derivedKeys);
+        if (mounted.current) clearSession();
       }
       setBusy(false);
     }
@@ -316,12 +332,20 @@ export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenRespo
       const token = enrollmentToken.trim()
         ? await auth.registerTherapist(baseUrl, registration, enrollmentToken)
         : await auth.registerTherapist(baseUrl, registration);
+      if (!mounted.current) {
+        void auth.logoutBearer(baseUrl, token.token).catch(() => undefined);
+        return;
+      }
       setSession(token.token, baseUrl);
       portalKeys = {
         username, userId: token.user_id, wrapKek: derivedKeys.wrapKek, noteKey: derivedKeys.noteKey,
       };
       if (token.mfa_enrollment_required === true) {
         const setup = await api.totpSetup(verifier);
+        if (!mounted.current) {
+          void auth.logoutBearer(baseUrl, token.token).catch(() => undefined);
+          return;
+        }
         derivedKeys.authKey.fill(0);
         setMfaEnrollment({
           keys: portalKeys,
@@ -346,8 +370,9 @@ export function LoginView(props: { onReady: (keys: PortalKeys, token: TokenRespo
       setEnrollmentToken("");
       setAgeConfirmed(false);
       if (!transferred) {
-        wipeKeys(portalKeys ?? derivedKeys);
-        clearSession();
+        wipeKeys(portalKeys);
+        wipeKeys(derivedKeys);
+        if (mounted.current) clearSession();
       }
       setBusy(false);
     }

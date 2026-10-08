@@ -75,6 +75,7 @@ export const FlatList: React.FC<FlatListProps> = ({
 FlatList.displayName = "FlatList";
 
 export const StyleSheet = {
+  absoluteFill: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0 },
   create: <T,>(styles: T): T => styles,
   flatten: (...styles: unknown[]): Record<string, unknown> =>
     Object.assign({}, ...styles.filter((s): s is Record<string, unknown> => Boolean(s) && typeof s === "object")),
@@ -86,7 +87,7 @@ export const Platform = {
   // healthkit iOS-18 capability gate) assign a different Version.
   Version: 18.5,
   select: <T,>(opts: { ios?: T; android?: T; native?: T; default?: T }): T =>
-    opts.ios ?? opts.native ?? (opts.default as T),
+    opts[Platform.OS as "ios" | "android"] ?? opts.native ?? (opts.default as T),
 };
 
 export const Alert = { alert: vi.fn() };
@@ -104,17 +105,46 @@ export const Vibration = { vibrate: vi.fn() };
 
 /** BackHandler stub: HistoryScreen's Android hardware-back handling
  *  registers here; tests capture the subscription to fire it. */
+const activeBackSubscriptions = new WeakMap<object, boolean>();
 export const BackHandler = {
-  addEventListener: vi.fn((_event: string, _handler: () => boolean) => ({ remove: vi.fn() })),
+  addEventListener: vi.fn((_event: string, _handler: () => boolean) => {
+    const subscription = { remove: vi.fn(() => activeBackSubscriptions.set(subscription, false)) };
+    activeBackSubscriptions.set(subscription, true);
+    return subscription;
+  }),
   exitApp: vi.fn(),
 };
 
 /** AppState stub: listeners are captured so tests can fire background /
  *  inactive transitions and assert the vault auto-lock. */
+const activeStateSubscriptions = new WeakMap<object, boolean>();
 export const AppState = {
   currentState: "active" as string,
-  addEventListener: vi.fn((_type: string, _listener: (state: string) => void) => ({ remove: vi.fn() })),
+  addEventListener: vi.fn((_type: string, _listener: (state: string) => void) => {
+    const subscription = { remove: vi.fn(() => activeStateSubscriptions.set(subscription, false)) };
+    activeStateSubscriptions.set(subscription, true);
+    return subscription;
+  }),
 };
+
+/** Dispatch only to subscriptions for the native change event. */
+export function emitAppState(state: string): void {
+  AppState.currentState = state;
+  for (const [index, [event, listener]] of AppState.addEventListener.mock.calls.entries()) {
+    const subscription = AppState.addEventListener.mock.results[index]?.value;
+    if (event === "change" && subscription && activeStateSubscriptions.get(subscription)) listener(state);
+  }
+}
+
+/** Native Android dispatches to the latest live subscriber first. */
+export function emitBackPress(): boolean {
+  for (let index = BackHandler.addEventListener.mock.calls.length - 1; index >= 0; index--) {
+    const [event, listener] = BackHandler.addEventListener.mock.calls[index]!;
+    const subscription = BackHandler.addEventListener.mock.results[index]?.value;
+    if (event === "hardwareBackPress" && subscription && activeBackSubscriptions.get(subscription) && listener()) return true;
+  }
+  return false;
+}
 
 /** Pressable host: the ErrorBoundary fallback's buttons (and any future
  *  Pressable call sites) keep their handler props reachable for tests. */

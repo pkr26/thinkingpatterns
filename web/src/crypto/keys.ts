@@ -27,15 +27,20 @@ export interface PatientKeys {
   dataKey: Bytes;
 }
 
-/** Derive both patient subkeys from the master key. The caller owns the
- *  master key's lifecycle: zeroize it immediately after this call (the
- *  vault takes over auth/data). */
+/** Derive both patient subkeys from the master key. On success the caller
+ *  owns the returned master key: zeroize it immediately (the vault takes
+ *  over auth/data). If derivation fails, no key material is transferred
+ *  back, so erase the master and any completed sibling before rejecting. */
 export async function derivePatientKeys(master: Bytes): Promise<PatientKeys> {
-  const [authKey, dataKey] = await Promise.all([
+  const [auth, data] = await Promise.allSettled([
     hkdfSha256(master, ZERO_SALT, AUTH_INFO, KEY_SIZE),
     hkdfSha256(master, ZERO_SALT, DATA_INFO, KEY_SIZE),
   ]);
-  return { masterKey: master, authKey, dataKey };
+  if (auth.status === "rejected" || data.status === "rejected") {
+    zeroize(master, auth.status === "fulfilled" ? auth.value : null, data.status === "fulfilled" ? data.value : null);
+    throw auth.status === "rejected" ? auth.reason : (data as PromiseRejectedResult).reason;
+  }
+  return { masterKey: master, authKey: auth.value, dataKey: data.value };
 }
 
 export { zeroize };

@@ -1,3 +1,4 @@
+import { runTestControl } from "./helpers/testControl";
 /**
  * The MBC measures module (2026-09-19): PHQ-9 scoring/safety semantics,
  * the crypto envelope (patient-side encrypt → server → decrypt), and the
@@ -48,7 +49,7 @@ function measureRow(id: string, score: number, date: string): { client_measure_i
 }
 
 beforeEach(() => {
-  __resetLocalKeyLifecycleForTests();
+  runTestControl(__resetLocalKeyLifecycleForTests);
   resetApi(api as never);
   Alert.alert.mockClear();
   touchActivity.mockClear();
@@ -252,7 +253,7 @@ describe("MeasuresScreen", () => {
   // to be hardcoded English; everything resolves through t() now.
   it("renders the questionnaire in Spanish under the es locale (M-16)", async () => {
     const { __setLocaleForTests } = await import("../src/strings");
-    __setLocaleForTests("es");
+    runTestControl(__setLocaleForTests, "es");
     try {
       const nav = { navigate: vi.fn(), goBack: vi.fn() };
       const root = await render(<MeasuresScreen navigation={nav} />);
@@ -284,7 +285,7 @@ describe("MeasuresScreen", () => {
       );
       expect(nav.navigate).not.toHaveBeenCalledWith("Crisis"); // dismissible, not auto
     } finally {
-      __setLocaleForTests("en");
+      runTestControl(__setLocaleForTests, "en");
     }
   });
 

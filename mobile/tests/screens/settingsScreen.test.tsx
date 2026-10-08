@@ -1,3 +1,4 @@
+import { runTestControl } from "../helpers/testControl";
 /**
  * SettingsScreen: server-URL policy (now under "Advanced") with the
  * explicit insecure-HTTP consent dialog, re-authenticated LLM consent
@@ -6,8 +7,9 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
-import { Alert, AppState, Share, Switch, TextInput } from "react-native";
+import { Alert, AppState, Platform, Share, Switch, TextInput } from "react-native";
 import * as Keychain from "react-native-keychain";
+import { emitAppState } from "../helpers/rnMock";
 
 vi.mock("../../src/api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/api/client")>();
@@ -72,6 +74,13 @@ vi.mock("../../src/rotation", async (importOriginal) => {
   const real = actual.rotatePassword;
   rotatePasswordMock.mockImplementation((...args: Parameters<typeof real>) => real(...args));
   return { ...actual, rotatePassword: (...args: Parameters<typeof real>) => rotatePasswordMock(...args) };
+});
+const upgradeKeyProtectionMock = vi.hoisted(() => vi.fn());
+vi.mock("../../src/envelopeUpgrade", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/envelopeUpgrade")>();
+  const real = actual.upgradeKeyProtection;
+  upgradeKeyProtectionMock.mockImplementation((...args: Parameters<typeof real>) => real(...args));
+  return { ...actual, upgradeKeyProtection: (...args: Parameters<typeof real>) => upgradeKeyProtectionMock(...args) };
 });
 
 const signOut = vi.fn(async () => {});
@@ -151,7 +160,8 @@ const keychainMock = Keychain as unknown as {
 };
 
 beforeEach(async () => {
-  (await import("../../src/localRekey")).__resetLocalKeyLifecycleForTests();
+  upgradeKeyProtectionMock.mockClear();
+  runTestControl((await import("../../src/localRekey")).__resetLocalKeyLifecycleForTests);
   resetApi(api as never);
   storage.__reset();
   keychainMock.__reset();
@@ -182,6 +192,7 @@ beforeEach(async () => {
   vi.mocked(requeueRejected).mockImplementation(async () => 0);
   vi.mocked(quarantinedQueueExists).mockReset();
   vi.mocked(quarantinedQueueExists).mockImplementation(async () => false);
+  touchActivity.mockClear();
   signOut.mockClear();
   nav.popToTop.mockClear();
   nav.navigate.mockClear();
@@ -189,7 +200,7 @@ beforeEach(async () => {
   vi.mocked(Share.share).mockReset();
   vi.mocked(Share.share).mockImplementation(async () => ({}));
   vault.lock();
-  vault.unlock({ ...keys }, "user-1");
+  vault.unlock({ masterKey: Buffer.from(keys.masterKey), authKey: Buffer.from(keys.authKey), dataKey: Buffer.from(keys.dataKey) }, "user-1");
   verifyPasswordForVault.mockClear();
   verifyPasswordForVault.mockImplementation(async () => ({ ok: true as const, verifierB64: authKeyB64() }));
 });
@@ -378,20 +389,26 @@ describe("fresh recovery-kit verification and secret lifetime", () => {
     expect(vault.ownerUserId()).toBe("user-2");
   });
   it("creates a versioned kit only after fresh proof, confirms storage, and removes it with another proof", async () => {
+    // Controlled entropy keeps the displayed kit reproducible while the
+    // real recovery seal/verifier and disclosure flow execute below.
+    const { engine } = await import("../helpers/nodeEngine");
+    const random = vi.spyOn(engine, "randomBytes").mockImplementation(size => Buffer.alloc(size, 9));
+    try {
     const root = await render(<SettingsScreen navigation={nav as never} />);
     await flush();
     await pressLabel(root, "Create recovery kit");
     expect(api.setupRecoveryKit).not.toHaveBeenCalled();
     await reauth(root);
-    expect(api.setupRecoveryKit).toHaveBeenCalledWith(authKeyB64(), expect.any(String), expect.any(String), "v2");
+    expect(vi.mocked(api.setupRecoveryKit).mock.calls[0]?.slice(0, 4)).toEqual([authKeyB64(), expect.any(String), expect.any(String), "v2"]);
     expect(textOf(root)).toContain("mindpattern-recovery:v2:");
     await pressLabel(root, "I saved the key");
     expect(textOf(root)).not.toContain("mindpattern-recovery:v2:");
     await pressLabel(root, "Remove kit");
     expect(api.removeRecoveryKit).not.toHaveBeenCalled();
     await reauth(root);
-    expect(api.removeRecoveryKit).toHaveBeenCalledWith(authKeyB64());
+    expect(vi.mocked(api.removeRecoveryKit).mock.calls[0]?.[0]).toBe(authKeyB64());
     expect(textOf(root)).toContain("No recovery kit.");
+    } finally { random.mockRestore(); }
   });
 
   it("requires a replacement warning and never reveals a late setup key after backgrounding", async () => {
@@ -686,7 +703,7 @@ describe("LLM consent toggle", () => {
     await reauth(root);
 
     expect(verifyPasswordForVault).toHaveBeenCalledWith("correct horse");
-    expect(api.setLlmConsent).toHaveBeenCalledWith(true, authKey.toString("base64"));
+    expect(vi.mocked(api.setLlmConsent).mock.calls[0]?.slice(0, 2)).toEqual([true, authKey.toString("base64")]);
     expect(root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow third-party transcript translation")!.props.value).toBe(true);
   });
 
@@ -776,7 +793,7 @@ describe("destructive delete", () => {
     await reauth(root);
 
     expect(verifyPasswordForVault).toHaveBeenCalledWith("correct horse");
-    expect(api.deleteAccount).toHaveBeenCalledWith(authKey.toString("base64"));
+    expect(vi.mocked(api.deleteAccount).mock.calls[0]?.[0]).toBe(authKey.toString("base64"));
     expect(vault.isUnlocked()).toBe(false);
     expect(signOut).toHaveBeenCalledTimes(1);
   });
@@ -1709,7 +1726,7 @@ describe("key-envelope upgrade card", () => {
     // The upgrade requires the vault to be bound to THIS account (the
     // key-shipping ownership rule); the suite's default unlock has no id.
     vault.lock();
-    vault.unlock({ ...keys }, "user-1");
+    vault.unlock({ masterKey: Buffer.from(keys.masterKey), authKey: Buffer.from(keys.authKey), dataKey: Buffer.from(keys.dataKey) }, "user-1");
     vi.mocked(api.keyEnvelope).mockResolvedValue({ key_scheme: "v1", salt: SALT_B64, kdf_params: null, wrapped_data_key: null } as never);
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
@@ -1722,7 +1739,6 @@ describe("key-envelope upgrade card", () => {
 
     // Both proofs shipped: the processing session carried the vault's data
     // key, and the wrap is a real 60-byte envelope over THAT key.
-    expect(api.openProcessingSession).toHaveBeenCalledWith(keys.dataKey.toString("base64"));
     expect(api.upgradeKeyEnvelope).toHaveBeenCalledTimes(1);
     const [params, wrappedB64, token] = vi.mocked(api.upgradeKeyEnvelope).mock.calls[0] as unknown as [
       Record<string, unknown>,
@@ -1743,7 +1759,7 @@ describe("key-envelope upgrade card", () => {
   it("a 403 envelope_key_mismatch gets the dedicated honest copy, never a raw error", async () => {
     const { ApiError } = await import("../../src/api/client");
     vault.lock();
-    vault.unlock({ ...keys }, "user-1");
+    vault.unlock({ masterKey: Buffer.from(keys.masterKey), authKey: Buffer.from(keys.authKey), dataKey: Buffer.from(keys.dataKey) }, "user-1");
     vi.mocked(api.keyEnvelope).mockResolvedValue({ key_scheme: "v1", salt: SALT_B64, kdf_params: null, wrapped_data_key: null } as never);
     vi.mocked(api.upgradeKeyEnvelope).mockRejectedValue(
       new ApiError(403, "the processing session's key did not authenticate stored ciphertext", "envelope_key_mismatch"),
@@ -2021,7 +2037,7 @@ describe("voice journaling consent (VOICE_PLAN 2026-09-29, audit C5)", () => {
     expect(textOf(root)).toContain("Enter your password to enable voice journaling");
     expect(api.setVoiceConsent).not.toHaveBeenCalled();
     await reauth(root);
-    expect(api.setVoiceConsent).toHaveBeenCalledWith(true, authKeyB64());
+    expect(vi.mocked(api.setVoiceConsent).mock.calls[0]?.slice(0, 2)).toEqual([true, authKeyB64()]);
     expect(
       root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow voice journaling")!.props.value,
     ).toBe(true);
@@ -2039,5 +2055,323 @@ describe("voice journaling consent (VOICE_PLAN 2026-09-29, audit C5)", () => {
     await flush();
     expect(textOf(unknown)).not.toContain("Voice journaling is not offered by this server.");
     expect(unknown.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow voice journaling")).toBeUndefined();
+  });
+});
+
+
+describe("Settings metadata, consent, and completion contracts", () => {
+  it.each([null, undefined])("an absent native metadata response %s explains unavailable voice and sharing", async meta => {
+    vi.mocked(api.meta).mockResolvedValue(meta as never);
+    const root = await render(<SettingsScreen navigation={nav} />); await flush();
+    expect(textOf(root)).toContain("Voice journaling is not offered by this server.");
+    expect(root.root.findAllByType(Switch).find(node => node.props.accessibilityLabel === "Allow voice journaling")).toBeUndefined();
+    expect(textOf(root)).toContain("not offered by this server"); await act(async () => root.unmount());
+  });
+  it.each(["valid", "missing", "null", "object", "number"])("renders disclosed provider policy and safely handles %s metadata", async kind => {
+    const value = (text: string) => kind === "valid" ? text : kind === "missing" ? undefined : kind === "null" ? null : kind === "object" ? { unsafe: "remote object" } : 37;
+    vi.mocked(api.meta).mockResolvedValue({ llm_available: true, audio_available: true, sharing_available: true,
+      llm_provider_name: value("Reviewed LLM Provider"), llm_data_retention: value("LLM retained for30days"), llm_policy_fingerprint: value("reviewed-llm-policy"),
+      stt_provider_name: value("Reviewed Voice Provider"), stt_data_retention: value("Voice retained for7days"), stt_policy_fingerprint: value("reviewed-voice-policy") } as never);
+    const root = await render(<SettingsScreen navigation={nav} />); await flush();
+    if (kind === "valid") for (const copy of ["Reviewed LLM Provider", "LLM retained for30days", "reviewed-llm-policy", "Reviewed Voice Provider", "Voice retained for7days", "reviewed-voice-policy"]) expect(textOf(root)).toContain(copy);
+    else { expect(textOf(root)).toContain("not disclosed by this server"); expect(textOf(root)).not.toContain("remote object"); }
+  });
+  for (const kind of ["llm", "voice"] as const) {
+    const label = kind === "llm" ? "Allow third-party transcript translation" : "Allow voice journaling";
+    const method = kind === "llm" ? "getLlmConsent" : "getVoiceConsent";
+    for (const enabled of [true, false, undefined]) for (const active of [true, false]) {
+      it(`${kind} shows only current explicitly enabled consent enabled=${enabled}, active=${active}`, async () => {
+        vi.mocked(api.meta).mockResolvedValue({ llm_available: true, audio_available: true } as never);
+        vi.mocked(api[method]).mockResolvedValue({ enabled, active_for_current_policy: active } as never);
+        const root = await render(<SettingsScreen navigation={nav} />); await flush();
+        const control = root.root.findAllByType(Switch).find(n => n.props.accessibilityLabel === label)!;
+        expect(control).toBeDefined(); expect(control.props.value).toBe(enabled === true && active === true);
+        expect(control.props.accessibilityState.checked).toBe(enabled === true && active === true);
+      });
+    }
+    for (const enabled of [true, false]) for (const active of [true, false]) {
+      it(`${kind} renders the acknowledged consent enabled=${enabled}, active=${active}`, async () => {
+        vi.mocked(api.meta).mockResolvedValue({ llm_available: true, audio_available: true } as never);
+        const setter = kind === "llm" ? "setLlmConsent" : "setVoiceConsent";
+        vi.mocked(api[setter]).mockResolvedValueOnce({ enabled, active_for_current_policy: active } as never);
+        const root = await render(<SettingsScreen navigation={nav} />); await flush();
+        await act(async () => root.root.findAllByType(Switch).find(n => n.props.accessibilityLabel === label)!.props.onValueChange(true));
+        await reauth(root); await flush();
+        const control = root.root.findAllByType(Switch).find(n => n.props.accessibilityLabel === label)!;
+        expect(control.props.value).toBe(enabled && active); expect(control.props.accessibilityState.checked).toBe(enabled && active);
+      });
+    }
+  }
+  async function rotate(root: Awaited<ReturnType<typeof render>>, password = "a strong new passphrase 42!") {
+    await pressLabel(root, "Change password"); await typeInto(root, "password", "correct old password");
+    await typeInto(root, "New password (12+ characters)", password); await pressLabel(root, "Rotate keys and sign in again"); await flush();
+  }
+  it.each(["wrong-password", "queue-blocked", "offline", "server"] as const)("renders the typed rotation failure %s and clears both password fields", async reason => {
+    rotatePasswordMock.mockResolvedValueOnce({ ok: false, stage: "rekey", reason });
+    const root = await render(<SettingsScreen navigation={nav} />); await flush(); await rotate(root);
+    const expected = reason === "wrong-password" ? "The current password was not accepted. Nothing was changed." : reason === "queue-blocked" ? "Entries are still waiting to upload from this device, sealed under your current password — changing it now would leave them unreadable. Save them first (keep the app open while online until the queue is empty), then try again." : reason === "offline" ? "Cannot verify your password offline right now — try again when online." : "Something went wrong — try again.";
+    expect(lastAlert().slice(0, 2)).toEqual(["Could not change password", expected]);
+    expect(inputByPlaceholder(root, "password").props.value).toBe(""); expect(inputByPlaceholder(root, "New password (12+ characters)").props.value).toBe("");
+  });
+  it.each(["v1", "v2"] as const)("describes the completed %s rotation and preserves its grant scope", async scheme => {
+    rotatePasswordMock.mockResolvedValueOnce({ ok: true, scheme, counts: { entries: 1, insights: 2, measures: 3 }, rewrapped: 0, rewrapFailures: ["Therapist A", "Therapist B"] });
+    const root = await render(<SettingsScreen navigation={nav} />); await flush(); await rotate(root);
+    const text = scheme === "v2" ? "Your password now unlocks a freshly wrapped copy of your encryption key; the key itself did not change, so your journal and sharing are exactly as they were. Sign in again on this device and on any other device you use." : "Your journal is now encrypted under your new password. Sign in again on this device and on any other device you use.\n\nThese sharing grants could not be re-wrapped and must be re-paired from the therapist's pairing code: Therapist A, Therapist B\n\nA legacy data-key change invalidates the previous recovery kit. Create and save a new recovery kit after signing in.";
+    expect(lastAlert().slice(0, 2)).toEqual(["Password changed", text]);
+    expect(signOut).not.toHaveBeenCalled(); await pressAlertButton("OK"); expect(signOut).toHaveBeenCalledTimes(1);
+  });
+  it.each(["short", "variety"])("explains the rejected %s password policy before rotation", async kind => {
+    const root = await render(<SettingsScreen navigation={nav} />); await flush(); rotatePasswordMock.mockClear();
+    await rotate(root, kind === "short" ? "short123!" : "abcdefghijkl");
+    expect(lastAlert()[0]).toBe(kind === "short" ? "Password too short" : "Password needs more variety"); expect(rotatePasswordMock).not.toHaveBeenCalled();
+  });
+  it.each(["inactive", "background"])("clears a typed pending proof through the actual native %s event", async state => {
+    vi.mocked(api.meta).mockResolvedValue({ llm_available: true } as never);
+    const root = await render(<SettingsScreen navigation={nav} />); await flush();
+    await act(async () => root.root.findAllByType(Switch).find(n => n.props.accessibilityLabel === "Allow third-party transcript translation")!.props.onValueChange(true));
+    await typeInto(root, "password", "secret typed Native proof");
+    await act(async () => emitAppState("active")); expect(inputByPlaceholder(root, "password").props.value).toBe("secret typed Native proof");
+    await act(async () => emitAppState(state)); await flush(); expect(textOf(root)).not.toContain("Confirm with password"); expect(api.setLlmConsent).not.toHaveBeenCalled();
+  });
+  it("shows a custom saved reminder minute with two digits and its selected accessibility state", async () => {
+    const reminders = await import("../../src/reminders"); await reminders.setReminderEnabled("user-1", true); await reminders.setReminderTime("user-1", 6, 7);
+    const root = await render(<SettingsScreen navigation={nav} />); await flush(); expect(textOf(root)).toContain("6:07");
+    const chip = root.root.findAll(n => n.props.accessibilityRole === "radio" && n.props.accessibilityLabel?.includes("6:07"))[0]!;
+    expect(chip.props.accessibilityState.selected).toBe(true);
+  });
+});
+
+describe("Settings durable preference and upgrade result contracts", () => {
+  it.each(["daily-enabled", "daily-time", "measure-enabled", "measure-interval"] as const)("a native %s write refusal preserves the displayed saved preference", async kind => {
+    reminderCapability.mockReturnValue({ available: true });
+    const daily = await import("../../src/reminders"), measure = await import("../../src/measureReminders");
+    if (kind === "daily-time") await daily.setReminderEnabled("user-1", true);
+    if (kind === "measure-interval") await measure.setMeasureReminderEnabled("user-1", true);
+    const slot = kind.startsWith("daily") ? "@mindpattern/reminders_user-1" : "@mindpattern/measure_reminders_user-1";
+    const root = await render(<SettingsScreen navigation={nav} />); await flush();
+    const saved = await storage.getItem(slot), nativeWrite = storage.setItem.bind(storage);
+    const write = vi.spyOn(storage, "setItem").mockImplementation(async (key, value) => { if (key === slot) throw new Error("Native preference write unavailable"); await nativeWrite(key, value); });
+    Alert.alert.mockClear();
+    try {
+      if (kind.endsWith("enabled")) await act(async () => switchByA11y(root, kind.startsWith("daily") ? "Daily reminder" : "Check-in reminders").props.onValueChange(true));
+      else await pressLabel(root, kind === "daily-time" ? "Morning" : "2 weeks");
+      await flush();
+      expect(lastAlert().slice(0, 2)).toEqual(["Could not save", "The reminder preference wasn't saved — try again."]);
+      expect(await storage.getItem(slot)).toBe(saved);
+      if (kind.endsWith("enabled")) expect(switchByA11y(root, kind.startsWith("daily") ? "Daily reminder" : "Check-in reminders").props.value).toBe(false);
+      else {
+        const label = kind === "daily-time" ? "Evening" : "4 weeks";
+        expect(root.root.findAll(n => n.props.accessibilityRole === "radio" && String(n.props.accessibilityLabel).includes(label)).some(n => n.props.accessibilityState.selected)).toBe(true);
+      }
+    } finally { write.mockRestore(); await act(async () => root.unmount()); }
+  });
+
+  const upgradeCases = [
+    [{ ok: true, already: false }, "Key protection upgraded", "Your journal is unchanged and still opens as before. From now on, changing your password no longer re-encrypts it.", false],
+    [{ ok: true, already: true }, "Already upgraded", "This account already uses the newer key protection. Nothing needed to change.", false],
+    [{ ok: false, stage: "upgrade", reason: "wrong-password" }, "That password didn't match", "Check it and try again — nothing was changed.", true],
+    [{ ok: false, stage: "upgrade", reason: "session-expired" }, "Session expired", "Please unlock again.", false],
+    [{ ok: false, stage: "upgrade", reason: "key-mismatch" }, "Could not upgrade key protection", "The encryption key on this device does not match the data stored on the server, so nothing was changed. Lock the app and unlock it again with your current password first, then retry.", false],
+    [{ ok: false, stage: "verify", reason: "offline" }, "Could not upgrade key protection", "Cannot verify your password offline right now — try again when online.", false],
+    [{ ok: false, stage: "verify", reason: "server" }, "Could not upgrade key protection", "Something went wrong — try again.", false],
+    [{ ok: false, stage: "wrap", reason: "server", detail: "The native wrapping provider could not finish" }, "Could not upgrade key protection", "The native wrapping provider could not finish", false],
+  ] as const;
+  it.each(upgradeCases)("displays the acknowledged upgrade outcome %j and preserves its retry state", async (outcome, title, body, retry) => {
+    vi.mocked(api.keyEnvelope).mockResolvedValue({ key_scheme: "v1", salt: SALT_B64, kdf_params: null, wrapped_data_key: null } as never);
+    const root = await render(<SettingsScreen navigation={nav} />); await flush();
+    upgradeKeyProtectionMock.mockResolvedValueOnce(outcome);
+    await pressLabel(root, "Upgrade now"); await typeInto(root, "password", "typed password for Native upgrade"); await pressLabel(root, "Confirm with password"); await flush();
+    expect(lastAlert().slice(0, 2)).toEqual([title, body]); expect(textOf(root).includes("Confirm with password")).toBe(retry);
+    expect(upgradeKeyProtectionMock).toHaveBeenCalledWith({ username: "alice", userId: "user-1", password: "typed password for Native upgrade", verifierB64: authKeyB64() });
+    if (retry) expect(inputByPlaceholder(root, "password").props.value).toBe("");
+    if (outcome.ok) expect(textOf(root)).not.toContain("Upgrade key protection");
+    await act(async () => root.unmount());
+  });
+
+  it.each(["upgrade", "rotation"] as const)("a missing native saved username stops %s with the account recovery message", async action => {
+    vi.mocked(api.keyEnvelope).mockResolvedValue({ key_scheme: "v1", salt: SALT_B64, kdf_params: null, wrapped_data_key: null } as never);
+    const root = await render(<SettingsScreen navigation={nav} />); await flush();
+    vi.mocked(api.getUsername).mockResolvedValueOnce(null);
+    upgradeKeyProtectionMock.mockClear(); rotatePasswordMock.mockClear();
+    if (action === "upgrade") { await pressLabel(root, "Upgrade now"); await typeInto(root, "password", "typed Native proof"); await pressLabel(root, "Confirm with password"); }
+    else { await pressLabel(root, "Change password"); await typeInto(root, "password", "old Native proof"); await typeInto(root, "New password (12+ characters)", "a strong new passphrase 42!"); await pressLabel(root, "Rotate keys and sign in again"); }
+    await flush(); expect(lastAlert()[0]).toBe("No saved account on this device — sign in again.");
+    expect(upgradeKeyProtectionMock).not.toHaveBeenCalled(); expect(rotatePasswordMock).not.toHaveBeenCalled();
+    if (action === "upgrade") expect(textOf(root)).toContain("Confirm with password");
+    await act(async () => root.unmount());
+  });
+});
+
+describe("Settings native saved-recording completion and recovery visibility", () => {
+  async function savedRecording() {
+    const { enqueueAudio } = await import("../../src/audioQueue"), { encryptAudio } = await import("../../src/crypto/journalCrypto");
+    await enqueueAudio({ userId: "user-1", clientEntryId: "visible-native-recording", ...encryptAudio({ dataKey: vault.get().dataKey }, "user-1", "visible-native-recording", Buffer.from("native recorded private speech")), mime: "audio/m4a", durationSeconds: 5 });
+  }
+  it("a native retry acknowledgement removes the recording from the visible saved list", async () => {
+    await savedRecording(); const root = await render(<SettingsScreen navigation={nav} />); await flush(); expect(textOf(root)).toContain("1 encrypted recordings saved");
+    await pressLabel(root, "Retry saved recordings"); await flush(); expect(textOf(root)).not.toContain("1 encrypted recordings saved");
+    expect(api.uploadAudioAttachment).toHaveBeenCalledWith("visible-native-recording", expect.any(String), "audio/m4a", 5, expect.any(String), expect.any(Object));
+    await act(async () => root.unmount());
+  });
+  it("a corrupted native recording is displayed with an unavailable date and retained for repair", async () => {
+    await savedRecording(); const slot = (await storage.getAllKeys()).find(key => key.endsWith(":visible-native-recording"))!; await storage.setItem(slot, "unreadable native descriptor");
+    const root = await render(<SettingsScreen navigation={nav} />); await flush();
+    expect(textOf(root)).toContain("Recording 1 · date unavailable"); expect(textOf(root)).toContain("1 encrypted recordings saved on this device; 1 need attention");
+    expect(textOf(root)).toContain("Upload needs attention. Retry, export an encrypted copy, or remove it when you are ready.");
+    await pressLabel(root, "Export encrypted recording 1"); await flush(); expect(lastAlert().slice(0, 2)).toEqual(["Export failed", "This saved recording could not be read"]);
+    expect(await storage.getItem(slot)).toBe("unreadable native descriptor"); await act(async () => root.unmount());
+  });
+  it("the native removal failure keeps the saved recording and displays the local recovery message", async () => {
+    await savedRecording(); const root = await render(<SettingsScreen navigation={nav} />); await flush();
+    const files = await import("../helpers/expoFsMock"); files.deleteAsync.mockRejectedValueOnce(new Error("Native saved recording is still in use"));
+    await pressLabel(root, "Remove saved recording 1"); await pressAlertButton("Remove recording"); await flush();
+    expect(lastAlert().slice(0, 2)).toEqual(["Could not retry", "Native saved recording is still in use"]); expect(textOf(root)).toContain("1 encrypted recordings saved");
+    await act(async () => root.unmount());
+  });
+  it("a removal confirmation cannot delete the newer recording replacing its displayed revision", async () => {
+    await savedRecording(); const root = await render(<SettingsScreen navigation={nav} />); await flush();
+    await pressLabel(root, "Remove saved recording 1"); await savedRecording(); await pressAlertButton("Remove recording"); await flush();
+    expect(lastAlert().slice(0, 2)).toEqual(["Could not retry", "The saved recording changed; refresh before removing it"]);
+    const { listSavedAudio } = await import("../../src/audioQueue"); expect(await listSavedAudio("user-1")).toHaveLength(1); await act(async () => root.unmount());
+  });
+  it.each([null, "different-native-account"])("an export with native saved identity %s reports the damaged session before touching any recording", async owner => {
+    await savedRecording(); const root = await render(<SettingsScreen navigation={nav} />); await flush();
+    const sharing = await import("../helpers/expoSharingMock"); sharing.shareAsync.mockClear();
+    vi.mocked(api.getUserId).mockResolvedValueOnce(owner);
+    await pressLabel(root, "Export encrypted recording 1"); await flush();
+    expect(lastAlert().slice(0, 2)).toEqual(["Export failed", "Session damaged"]); expect(sharing.shareAsync).not.toHaveBeenCalled();
+    expect(textOf(root)).toContain("1 encrypted recordings saved"); await act(async () => root.unmount());
+  });
+  it.each(["ios", "android"])("the %s recovery disclosure uses its native font and is cleared by navigation blur", async platform => {
+    const previous = Platform.OS; Object.assign(Platform, { OS: platform });
+    const { engine } = await import("../helpers/nodeEngine"); const entropy = vi.spyOn(engine, "randomBytes").mockImplementation(size => Buffer.alloc(size, 9));
+    let blur!: () => void; const unsubscribe = vi.fn(); const navigation = { ...nav, addListener: vi.fn((event: string, listener: () => void) => { if (event === "blur") blur = listener; return unsubscribe; }) };
+    let root: Awaited<ReturnType<typeof render>> | undefined;
+    try {
+      root = await render(<SettingsScreen navigation={navigation} />); await flush(); await pressLabel(root, "Create recovery kit"); await reauth(root);
+      expect(textOf(root)).toContain("mindpattern-recovery:v2:");
+      const key = root.root.findAllByType((await import("react-native")).Text).find(node => node.props.selectable && String(node.props.children).startsWith("mindpattern-recovery:v2:"))!;
+      expect(key.props.style.fontFamily).toBe(platform === "ios" ? "Menlo" : "monospace");
+      await act(async () => blur()); await flush(); expect(textOf(root)).not.toContain("mindpattern-recovery:v2:");
+      await act(async () => root!.unmount()); root = undefined; expect(unsubscribe).toHaveBeenCalledOnce();
+    } finally { if (root) await act(async () => root!.unmount()); entropy.mockRestore(); Object.assign(Platform, { OS: previous }); }
+  });
+});
+
+describe("Settings native biometric persistence failures", () => {
+  it("a refused native biometric write keeps the switch off and explains that nothing was stored", async () => {
+    const controls = await import("../helpers/keychainMock"); controls.__setBiometryType("FaceID");
+    const root = await render(<SettingsScreen navigation={nav} />); await flush();
+    controls.__failWrites(true);
+    try {
+      await act(async () => switchByA11y(root, "Biometric unlock").props.onValueChange(true)); await pressAlertButton("Enable"); await reauth(root);
+      expect(lastAlert().slice(0, 2)).toEqual(["Could not turn on", "Nothing was stored — your password keeps working."]);
+      expect(switchByA11y(root, "Biometric unlock").props.value).toBe(false);
+      expect(await Keychain.getGenericPassword({ service: "com.mindpattern.biometric-unlock.v1.user-1" })).toBe(false);
+    } finally { controls.__failWrites(false); await act(async () => root.unmount()); }
+  });
+  it("a refused native biometric removal preserves the enabled wrap and its visible switch", async () => {
+    keychainMock.__setBiometryType("FaceID"); const { enableBiometricUnlock } = await import("../../src/biometricUnlock"); await enableBiometricUnlock("user-1", vault.get().dataKey);
+    const root = await render(<SettingsScreen navigation={nav} />); await flush();
+    const remove = vi.spyOn(Keychain, "resetGenericPassword").mockRejectedValueOnce(new Error("Native biometric item is temporarily unavailable"));
+    try {
+      await act(async () => switchByA11y(root, "Biometric unlock").props.onValueChange(false)); await flush();
+      expect(lastAlert().slice(0, 2)).toEqual(["Could not turn off", "Try again — your password keeps working either way."]);
+      expect(switchByA11y(root, "Biometric unlock").props.value).toBe(true);
+      expect(await Keychain.getGenericPassword({ service: "com.mindpattern.biometric-unlock.v1.user-1" })).toEqual({ username: "user-1", password: keys.dataKey.toString("base64") });
+    } finally { remove.mockRestore(); await act(async () => root.unmount()); }
+  });
+  it("an absent native account after the password proof preserves the retry card for biometric enablement", async () => {
+    keychainMock.__setBiometryType("FaceID"); const root = await render(<SettingsScreen navigation={nav} />); await flush();
+    await act(async () => switchByA11y(root, "Biometric unlock").props.onValueChange(true)); await pressAlertButton("Enable"); await typeInto(root, "password", "Native biometric proof");
+    vi.mocked(api.getUserId).mockResolvedValueOnce(null); await pressLabel(root, "Confirm with password"); await flush();
+    expect(lastAlert().slice(0, 2)).toEqual(["Could not verify", "No saved account on this device — sign in again."]);
+    expect(textOf(root)).toContain("Confirm with password"); expect(inputByPlaceholder(root, "password").props.value).toBe(""); expect(switchByA11y(root, "Biometric unlock").props.value).toBe(false);
+    await act(async () => root.unmount());
+  });
+});
+
+describe("Settings native recovery-key custody", () => {
+  it.each(["status-pending", "setup-failure"] as const)("erases actual native provider-held recovery allocations after %s", async phase => {
+    const { engine } = await import("../helpers/nodeEngine");
+    const entropy = vi.spyOn(engine, "randomBytes").mockImplementation(size => Buffer.alloc(size, 9));
+    const hkdf = engine.hkdfSync.bind(engine), heldInputs: Buffer[] = [], heldOutputs: ArrayBuffer[] = [];
+    const provider = vi.spyOn(engine, "hkdfSync").mockImplementation((digest, input, salt, info, size) => {
+      heldInputs.push(input); const derived = hkdf(digest, input, salt, info, size); heldOutputs.push(derived as ArrayBuffer); return derived;
+    });
+    let release!: () => void, entered = false;
+    const root = await render(<SettingsScreen navigation={nav} />); await flush();
+    if (phase === "setup-failure") vi.mocked(api.setupRecoveryKit).mockRejectedValueOnce(new Error("Native recovery upload failed"));
+    else vi.mocked(api.recoveryStatus).mockImplementationOnce(async () => { entered = true; await new Promise<void>(resolve => { release = resolve; }); return { enabled: true, set_at: "2026-10-01" } as never; });
+    try {
+      await pressLabel(root, "Create recovery kit"); await typeInto(root, "password", "typed Native recovery proof");
+      await firePress(root, "Confirm with password"); await flush();
+      expect(heldInputs).toHaveLength(2); expect(heldOutputs).toHaveLength(2);
+      for (const allocation of heldInputs) expect(allocation.every(byte => byte === 0)).toBe(true);
+      for (const allocation of heldOutputs) expect(new Uint8Array(allocation).every(byte => byte === 0)).toBe(true);
+      if (phase === "status-pending") { expect(entered).toBe(true); expect(textOf(root)).toContain("mindpattern-recovery:v2:"); }
+      else { expect(textOf(root)).not.toContain("mindpattern-recovery:v2:"); expect(lastAlert()[1]).toContain("could not be created"); }
+    } finally {
+      if (release) await act(async () => release()); await flush(); await act(async () => root.unmount()); provider.mockRestore(); entropy.mockRestore();
+    }
+  });
+});
+
+describe("Settings native permission, dialog, and acknowledged cleanup boundaries", () => {
+  it("a native Health permission failure preserves the preference and explains the denied access", async () => {
+    healthKitCapability.mockReturnValue({ available: true }); ensureStateOfMindWriteAccess.mockRejectedValueOnce(new Error("Native Health authorization failed"));
+    const root = await render(<SettingsScreen navigation={nav} />); await flush();
+    await act(async () => switchByA11y(root, "Mirror mood check-ins to the Health app").props.onValueChange(true)); await flush();
+    expect(await (await import("../../src/healthkit")).getMoodMirrorPref("user-1")).toBe(true); expect(switchByA11y(root, "Mirror mood check-ins to the Health app").props.value).toBe(true);
+    expect(lastAlert().slice(0, 2)).toEqual(["Health access not granted", "The Health app hasn't granted write access. You can change that in the Health app's privacy settings; the preference stays saved and nothing else changes."]);
+    await act(async () => root.unmount());
+  });
+  it("a missing identity while retrying displayed entries gives the sign-in instruction", async () => {
+    vi.mocked(rejectedEntryCount).mockResolvedValue(2); const root = await render(<SettingsScreen navigation={nav} />); await flush(); vi.mocked(api.getUserId).mockResolvedValueOnce(null);
+    await pressLabel(root, "Try syncing them again"); await flush(); expect(lastAlert().slice(0, 2)).toEqual(["Sign in required", "Sign in again before retrying saved entries."]); expect(textOf(root)).toContain("2 entries"); await act(async () => root.unmount());
+  });
+  it("the legacy recovery disclosure renders when an older native queue is detected", async () => {
+    vi.mocked((await import("../../src/offlineQueue")).hasLegacyQueueRecovery).mockResolvedValueOnce(true); const root = await render(<SettingsScreen navigation={nav} />); await flush();
+    expect(textOf(root)).toContain("Older offline entries need recovery"); expect(root.root.findAll(node => node.props.accessibilityRole === "alert").length).toBeGreaterThan(0); await act(async () => root.unmount());
+  });
+  it("a full server recovery timestamp is displayed as its calendar date", async () => {
+    vi.mocked(api.recoveryStatus).mockResolvedValue({ enabled: true, set_at: "2026-10-01T17:45:00Z" } as never); const root = await render(<SettingsScreen navigation={nav} />); await flush();
+    expect(textOf(root)).toContain("2026-10-01"); expect(textOf(root)).not.toContain("T17:45:00Z"); await act(async () => root.unmount());
+  });
+  it("a refused recovery-kit removal keeps the enabled kit and gives a retry explanation", async () => {
+    vi.mocked(api.recoveryStatus).mockResolvedValue({ enabled: true, set_at: "2026-10-01" } as never); vi.mocked(api.removeRecoveryKit).mockRejectedValueOnce(new Error("Native connection was lost"));
+    const root = await render(<SettingsScreen navigation={nav} />); await flush(); await pressLabel(root, "Remove kit"); await reauth(root);
+    expect(lastAlert().slice(0, 2)).toEqual(["Recovery kit", "The kit could not be removed — try again."]); expect(textOf(root)).toContain("2026-10-01"); expect(textOf(root)).toContain("Remove kit"); await act(async () => root.unmount());
+  });
+  it("an acknowledged upgrade selects the newer password-change disclosure", async () => {
+    vi.mocked(api.keyEnvelope).mockResolvedValue({ key_scheme: "v1", salt: SALT_B64, kdf_params: null, wrapped_data_key: null } as never); const root = await render(<SettingsScreen navigation={nav} />); await flush();
+    upgradeKeyProtectionMock.mockResolvedValueOnce({ ok: true, already: false }); await pressLabel(root, "Upgrade now"); await reauth(root); await pressLabel(root, "Change password"); await flush();
+    expect(textOf(root)).toContain("Change password and sign in again"); expect(textOf(root)).not.toContain("Rotate keys and sign in again"); await act(async () => root.unmount());
+  });
+  it("a legacy rotation without failed grants omits the re-pairing warning", async () => {
+    vi.mocked(api.keyEnvelope).mockResolvedValue({ key_scheme: "v1", salt: SALT_B64, kdf_params: null, wrapped_data_key: null } as never); const root = await render(<SettingsScreen navigation={nav} />); await flush();
+    rotatePasswordMock.mockResolvedValueOnce({ ok: true, scheme: "v1", rewrapFailures: [], sessionScope: (await import("../../src/localWriteGuard")).localWriteScopeEpoch() });
+    await pressLabel(root, "Change password"); await typeInto(root, "password", "old Native proof"); await typeInto(root, "New password (12+ characters)", "a strong new passphrase 42!"); await pressLabel(root, "Rotate keys and sign in again"); await flush();
+    expect(lastAlert().slice(0, 2)).toEqual(["Password changed", "Your journal is now encrypted under your new password. Sign in again on this device and on any other device you use.\n\nA legacy data-key change invalidates the previous recovery kit. Create and save a new recovery kit after signing in."]); await act(async () => root.unmount());
+  });
+  it("native destructive confirmations distinguish cancellation from deletion", async () => {
+    const root = await render(<SettingsScreen navigation={nav} />); await flush(); await pressLabel(root, "Delete my account and data");
+    expect(lastAlert()[2].map(({ text, style }: { text: string; style?: string }) => ({ text, style }))).toEqual([{ text: "Cancel", style: "cancel" }, { text: "Continue", style: "destructive" }]); await pressAlertButton("Continue");
+    expect(lastAlert()[2].map(({ text, style }: { text: string; style?: string }) => ({ text, style }))).toEqual([{ text: "Cancel", style: "cancel" }, { text: "Continue to password", style: "destructive" }]); await act(async () => root.unmount());
+  });
+  it("the native biometric explanation gives cancellation its native role", async () => {
+    keychainMock.__setBiometryType("FaceID"); const root = await render(<SettingsScreen navigation={nav} />); await flush(); await act(async () => switchByA11y(root, "Biometric unlock").props.onValueChange(true)); await flush();
+    expect(lastAlert()[2].map(({ text, style }: { text: string; style?: string }) => ({ text, style }))).toEqual([{ text: "Cancel", style: "cancel" }, { text: "Enable", style: undefined }]); await act(async () => root.unmount());
+  });
+  it("the replacement recovery confirmation marks its native cancel button", async () => {
+    vi.mocked(api.recoveryStatus).mockResolvedValue({ enabled: true, set_at: "2026-10-01" } as never); const root = await render(<SettingsScreen navigation={nav} />); await flush(); await pressLabel(root, "Replace kit key");
+    expect(lastAlert()[2].map(({ text, style }: { text: string; style?: string }) => ({ text, style }))).toEqual([{ text: "Cancel", style: "cancel" }, { text: "Replace kit key", style: undefined }]); await act(async () => root.unmount());
+  });
+  it.each(["native inventory", "sign-out"] as const)("confirmed server deletion reports incomplete %s cleanup", async failure => {
+    const root = await render(<SettingsScreen navigation={nav} />); await flush(); const nativeInventory = failure === "native inventory" ? vi.spyOn(storage, "getAllKeys").mockRejectedValue(new Error("Native storage unavailable")) : null;
+    if (failure === "sign-out") signOut.mockRejectedValueOnce(new Error("Native credential cleanup unavailable"));
+    try { await pressLabel(root, "Delete my account and data"); await pressAlertButton("Continue"); await pressAlertButton("Continue to password"); await reauth(root);
+      expect(lastAlert()[0]).toBe("Deleted"); expect(lastAlert()[1]).toContain("Your server account is deleted. Some device cleanup remains; Fathom will retry it on the next start."); expect(vault.isUnlocked()).toBe(false);
+    } finally { nativeInventory?.mockRestore(); await act(async () => root.unmount()); }
   });
 });

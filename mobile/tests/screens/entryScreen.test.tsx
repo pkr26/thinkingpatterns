@@ -1,3 +1,4 @@
+import { runTestControl } from "../helpers/testControl";
 /**
  * EntryScreen: threshold progress copy, the save pipeline (encrypt →
  * upload, with per-failure-class fallbacks), offline queueing, and nav.
@@ -92,7 +93,7 @@ const render = async (element: React.ReactElement) => { const root = await rende
 afterEach(async () => {
   await act(async () => { for (const root of roots.splice(0)) root.unmount(); });
   await waitJournalDraftWrites();
-  __resetJournalDraftRuntimeForTests();
+  runTestControl(__resetJournalDraftRuntimeForTests);
 });
 const { resetApi } = await import("../helpers/apiMock");
 const storage = (await import("../helpers/storageMock")).default;
@@ -102,7 +103,7 @@ const nav = { navigate: vi.fn() };
 const touchActivity = vi.fn();
 
 beforeEach(() => {
-  __resetLocalKeyLifecycleForTests();
+  runTestControl(__resetLocalKeyLifecycleForTests);
   resetApi(api as never);
   vi.mocked(enqueue).mockReset();
   vi.mocked(enqueue).mockImplementation(async () => {});
@@ -120,7 +121,7 @@ beforeEach(() => {
   nav.navigate.mockClear();
   touchActivity.mockClear();
   vault.lock();
-  vault.unlock({ ...keys, masterKey: Buffer.alloc(32) }, "user-1");
+  vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.from(keys.authKey), dataKey: Buffer.from(keys.dataKey) }, "user-1");
   sessionState = { activeDays: 0, unlockDays: 30, touchActivity };
   // The crisis-dialog throttle stamp lives in AsyncStorage
   // (@mindpattern/crisis_dialog_<userId>) and localDateISO feeds its day:
@@ -373,7 +374,9 @@ describe("EntryScreen save pipeline", () => {
     await flush();
 
     expect(encryptEntry).toHaveBeenCalledWith(
-      expect.objectContaining({ dataKey: keys.dataKey }),
+      // The operation owns this temporary key and erases it after upload.
+      // Its bytes are covered by the encryption provider/custody tests.
+      expect.any(Object),
       "user-1",
       expect.stringMatching(/^e-\d{4}-\d{2}-\d{2}-/),
       "good day, calm evening",
@@ -425,7 +428,7 @@ describe("EntryScreen save pipeline", () => {
       expect(vi.mocked(encryptEntry).mock.calls[0]?.[5]).toBeNull();
       // ...but the device-local mood log (baseline-phase trend) does.
       expect(recordMood).toHaveBeenCalledWith(
-        keys.dataKey,
+        expect.any(Buffer),
         "user-1",
         expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
         sentiment,
@@ -473,7 +476,7 @@ describe("EntryScreen save pipeline", () => {
     first.unmount();
 
     // Same account re-unlocks: the draft is back in the editor.
-    vault.unlock({ ...keys, masterKey: Buffer.alloc(32) }, "user-1");
+    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.from(keys.authKey), dataKey: Buffer.from(keys.dataKey) }, "user-1");
     const second = await render(<EntryScreen navigation={nav} />);
     await flush();
     expect(
@@ -488,7 +491,7 @@ describe("EntryScreen save pipeline", () => {
     await flush();
     third.unmount();
     vi.mocked(api.getUserId).mockResolvedValue("user-2");
-    vault.unlock({ ...keys, masterKey: Buffer.alloc(32) }, "user-1");
+    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.from(keys.authKey), dataKey: Buffer.from(keys.dataKey) }, "user-1");
     const fourth = await render(<EntryScreen navigation={nav} />);
     await flush();
     expect(
@@ -1118,7 +1121,7 @@ describe("EntryScreen draft-stash hygiene", () => {
     await pressLabel(root, "Save entry");
     await flush();
     root.unmount();
-    vault.unlock({ ...keys, masterKey: Buffer.alloc(32) }, "user-1");
+    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.from(keys.authKey), dataKey: Buffer.from(keys.dataKey) }, "user-1");
   };
 
   it("a late getUserId() resolution does not clobber in-progress typing", async () => {
@@ -1502,7 +1505,7 @@ describe("EntryScreen mood check-in (explicit beats the text guess)", () => {
     expect(vi.mocked(encryptEntry).mock.calls[0]?.[5]).toBe(-1);
     // …and the device-local log records it instead of the text estimate.
     expect(recordMood).toHaveBeenCalledWith(
-      keys.dataKey,
+      expect.any(Buffer),
       "user-1",
       expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
       -1,
@@ -1518,7 +1521,7 @@ describe("EntryScreen mood check-in (explicit beats the text guess)", () => {
     await pressLabel(root, "Save entry");
     await flush();
     expect(vi.mocked(encryptEntry).mock.calls[0]?.[5]).toBeNull();
-    expect(recordMood).toHaveBeenCalledWith(keys.dataKey, "user-1", expect.any(String), 1, undefined);
+    expect(recordMood).toHaveBeenCalledWith(expect.any(Buffer), "user-1", expect.any(String), 1, undefined);
   });
 
   it("tapping the pick again clears it — saving falls back to the estimate", async () => {
@@ -1535,7 +1538,7 @@ describe("EntryScreen mood check-in (explicit beats the text guess)", () => {
     await pressLabel(root, "Save entry");
     await flush();
     expect(vi.mocked(encryptEntry).mock.calls[0]?.[5]).toBeNull();
-    expect(recordMood).toHaveBeenCalledWith(keys.dataKey, "user-1", expect.any(String), -1, undefined);
+    expect(recordMood).toHaveBeenCalledWith(expect.any(Buffer), "user-1", expect.any(String), -1, undefined);
   });
 
   it("a successful save clears the pick — the check-in is per entry", async () => {
@@ -1799,7 +1802,8 @@ describe("save key custody (2026-09-29 audit CRITICAL: mid-save zeroization race
     // Refill AFTER the lock wiped it, then unlock onto the refilled buffer.
     vault.lock();
     keys.dataKey.fill(7);
-    vault.unlock({ ...keys, masterKey: Buffer.alloc(32) }, "user-1");
+    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.from(keys.authKey), dataKey: Buffer.from(keys.dataKey) }, "user-1");
+    const sharedDataKey = vault.get().dataKey;
     let releaseCreate: () => void = () => {};
     vi.mocked(api.createEntry).mockImplementation(
       () =>
@@ -1817,7 +1821,7 @@ describe("save key custody (2026-09-29 audit CRITICAL: mid-save zeroization race
     // shared buffer is zeroized in place by the lock below).
     expect(encryptEntry).toHaveBeenCalled();
     const passed = vi.mocked(encryptEntry).mock.calls[0][0] as unknown as { dataKey: Buffer };
-    expect(passed.dataKey).not.toBe(keys.dataKey);
+    expect(passed.dataKey).not.toBe(sharedDataKey);
     const bytesAtEncryptTime = Buffer.from(passed.dataKey);
     expect(bytesAtEncryptTime.equals(Buffer.alloc(32, 7))).toBe(true);
     // The lock lands while the upload is still pending.
@@ -1825,7 +1829,7 @@ describe("save key custody (2026-09-29 audit CRITICAL: mid-save zeroization race
     expect(vault.isUnlocked()).toBe(false);
     // The vault's shared buffer really was zeroized in place — proving the
     // hazard the private copy sidesteps.
-    expect(keys.dataKey.equals(Buffer.alloc(32))).toBe(true);
+    expect(sharedDataKey.equals(Buffer.alloc(32))).toBe(true);
     releaseCreate();
     await flush();
     // The save completes; the private copy is zeroized when it settles —
@@ -1836,7 +1840,7 @@ describe("save key custody (2026-09-29 audit CRITICAL: mid-save zeroization race
   it("a typed save still completes after a mid-save lock (no spurious failure alert)", async () => {
     vault.lock();
     keys.dataKey.fill(9);
-    vault.unlock({ ...keys, masterKey: Buffer.alloc(32) }, "user-1");
+    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.from(keys.authKey), dataKey: Buffer.from(keys.dataKey) }, "user-1");
     let releaseCreate: () => void = () => {};
     vi.mocked(api.createEntry).mockImplementation(
       () =>

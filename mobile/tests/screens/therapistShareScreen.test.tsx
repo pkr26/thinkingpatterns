@@ -8,6 +8,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
 import nodeCrypto from "node:crypto";
+import { readFileSync } from "node:fs";
 import { Alert } from "react-native";
 import { deriveWrapKek, WRAP_CONTEXT } from "../../src/crypto/sharing";
 import { buildAad, decrypt } from "../../src/crypto/envelope";
@@ -47,7 +48,9 @@ const { resetApi, ApiError } = await import("../helpers/apiMock");
 
 // A REAL therapist keypair so the screen's genuine wrap path succeeds and
 // the produced envelope can be unwrapped in-test.
-const therapistPriv = nodeCrypto.generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+const vectors = JSON.parse(readFileSync(new URL("../../../shared/vectors.json", import.meta.url), "utf8")) as { wrap_vectors: { therapist_priv_pkcs8: string }[] };
+const privateKey = nodeCrypto.createPrivateKey({ key: Buffer.from(vectors.wrap_vectors[0]!.therapist_priv_pkcs8, "base64"), format: "der", type: "pkcs8" });
+const therapistPriv = { privateKey, publicKey: nodeCrypto.createPublicKey(privateKey) };
 const THERAPIST_PUB = therapistPriv.publicKey.export({ format: "der", type: "spki" }).toString("base64");
 const THERAPIST_ID = "t".repeat(32);
 
@@ -101,7 +104,7 @@ beforeEach(() => {
   Alert.alert.mockClear();
   nav.navigate.mockClear();
   vault.lock();
-  vault.unlock({ ...keys });
+  vault.unlock({ masterKey: Buffer.from(keys.masterKey), authKey: Buffer.from(keys.authKey), dataKey: Buffer.from(keys.dataKey) });
   verifyPasswordForVault.mockClear();
   verifyPasswordForVault.mockImplementation(async () => ({ ok: true as const, verifierB64: authKeyB64() }));
 });
@@ -795,5 +798,54 @@ describe("share-voice toggle (VOICE_PLAN 2026-09-29, audit C5)", () => {
     // The row flips only on the server's own answer.
     expect(textOf(root)).toContain("Therapist can hear my recordings");
     expect(textOf(root)).toContain("tone can carry what text does not");
+  });
+});
+
+describe("sharing native dialog and response boundaries", () => {
+  async function grantCard(root: Awaited<ReturnType<typeof render>>, code = "7X2KQM4N") {
+    await typeInto(root, "e.g. 7X2KQM4N", code); await pressLabel(root, "Find my therapist"); await flush(); await pressLabel(root, "Share with Dr. Real");
+  }
+  it.each(["prefix 123 456", "123 456 suffix", 123456, null])("rejects the invalid server match code %j through the rendered pairing consumer", async sas => {
+    vi.mocked(api.pairingLookup).mockResolvedValue({ therapist_id: THERAPIST_ID, display_name: "Dr. Real", wrap_pub_key: THERAPIST_PUB, sas } as never);
+    const root = await render(<TherapistShareScreen navigation={nav} />); await flush(); await grantCard(root);
+    expect(textOf(root)).not.toContain("Match code:"); expect(lastAlert()[1]).not.toContain("Match code:");
+    await (await import("../helpers/rtr")).act(async () => root.unmount());
+  });
+  it("passes only the trimmed pairing code through lookup and the reauthenticated grant", async () => {
+    const root = await render(<TherapistShareScreen navigation={nav} />); await flush(); await grantCard(root, " 7X2KQM4N ");
+    expect(api.pairingLookup).toHaveBeenCalledWith("7X2KQM4N"); await pressAlertButton("Fingerprints match — continue"); await reauth(root);
+    expect(api.grantConsent.mock.calls.at(-1)![0]).toBe("7X2KQM4N"); expect(unwrapGrant(api.grantConsent.mock.calls.at(-1)![2], api.grantConsent.mock.calls.at(-1)![1]).equals(dataKey)).toBe(true);
+    expect(lastAlert().slice(0,2)).toEqual(["Sharing started", "Dr. Real can now read your entries, patterns and wellbeing measures from their portal."]);
+    await (await import("../helpers/rtr")).act(async () => root.unmount());
+  });
+  it("native grant and revocation dialogs preserve their cancellation and destructive roles", async () => {
+    vi.mocked(api.listConsents).mockResolvedValue([activeConsent] as never); const root = await render(<TherapistShareScreen navigation={nav} />); await flush(); await grantCard(root);
+    expect(lastAlert()[2].map(({ text, style }: {text:string;style?:string})=>({text,style}))).toEqual([{text:"Cancel",style:"cancel"},{text:"They don’t match",style:"destructive"},{text:"Fingerprints match — continue",style:undefined}]);
+    await pressAlertButton("They don’t match"); expect(lastAlert().slice(0,2)).toEqual(["Do not continue", "If the fingerprints do not match, the pairing may have been intercepted. Contact your therapist on a channel you already trust before sharing anything."]);
+    await pressLabel(root,"Stop sharing"); expect(lastAlert()[0]).toBe("Stop sharing with Dr. Active?");
+    expect(lastAlert()[2].map(({ text, style }: {text:string;style?:string})=>({text,style}))).toEqual([{text:"Cancel",style:"cancel"},{text:"Stop sharing",style:"destructive"}]);
+    await (await import("../helpers/rtr")).act(async () => root.unmount());
+  });
+  it.each([null, undefined])("missing native metadata %j renders the authoritative unavailable state", async meta => {
+    vi.mocked(api.meta).mockResolvedValue(meta as never); const back=vi.fn(); const root=await render(<TherapistShareScreen navigation={{...nav,goBack:back}} />); await flush();
+    expect(textOf(root)).toContain("Therapist sharing unavailable"); await pressLabel(root,"Back"); expect(back).toHaveBeenCalledOnce();
+    await (await import("../helpers/rtr")).act(async () => root.unmount());
+  });
+  it("an unavailable native server offers a working back action", async () => {
+    vi.mocked(api.meta).mockRejectedValueOnce(new Error("Native connection lost")); const back=vi.fn(); const root=await render(<TherapistShareScreen navigation={{...nav,goBack:back}} />); await flush(); await pressLabel(root,"Back"); expect(back).toHaveBeenCalledOnce();
+    await (await import("../helpers/rtr")).act(async () => root.unmount());
+  });
+  it("renders a malformed server consent date through the documented raw-date fallback", async () => {
+    vi.mocked(api.listConsents).mockResolvedValue([{...activeConsent,granted_at:"unavailable native date"},{...revokedConsent,revoked_at:null}] as never); const root=await render(<TherapistShareScreen navigation={nav} />); await flush();
+    expect(textOf(root)).toContain("Sharing since unavailable native date"); expect(textOf(root)).toContain("Stopped"); expect(textOf(root)).not.toContain("Stopped null");
+    await (await import("../helpers/rtr")).act(async () => root.unmount());
+  });
+  it.each([new RealApiError(400,"disclosure_outdated","disclosure_outdated"),new Error("disclosure_outdated")])("a non-disclosure-gate failure remains an ordinary completion failure: %j", async error => {
+    vi.mocked(api.grantConsent).mockRejectedValueOnce(error); const root=await render(<TherapistShareScreen navigation={nav} />); await flush(); await grantCard(root); await pressAlertButton("Fingerprints match — continue"); await reauth(root);
+    expect(lastAlert()[0]).toBe("Could not complete"); expect(textOf(root)).not.toContain("Confirm with password"); await (await import("../helpers/rtr")).act(async () => root.unmount());
+  });
+  it.each([new RealApiError(503,"Native server unavailable"),new Error("Native server unavailable")])("an ordinary native lookup failure never claims the code is wrong: %j", async error => {
+    vi.mocked(api.pairingLookup).mockRejectedValueOnce(error); const root=await render(<TherapistShareScreen navigation={nav} />); await flush(); await typeInto(root,"e.g. 7X2KQM4N","7X2KQM4N"); await pressLabel(root,"Find my therapist"); await flush();
+    expect(lastAlert().slice(0,2)).toEqual(["Couldn’t look up the code",error instanceof RealApiError ? "The server hit a problem — try again in a moment." : "Something went wrong — try again."]); await (await import("../helpers/rtr")).act(async () => root.unmount());
   });
 });

@@ -18,6 +18,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import storage from "./helpers/storageMock";
+import { secureStore } from "../src/secureStore";
 import {
   api,
   DEFAULT_BASE_URL,
@@ -45,13 +46,17 @@ afterEach(() => {
   setUnauthorizedHandler(null);
 });
 
-describe("client pins: session storage key names", () => {
-  it("user id and username land under their exact AsyncStorage keys (encrypted wrappers)", async () => {
-    await api.setSession("tok", "abababababababababababababababab", "kim");
-    // secureStore wraps the values, but they must exist under the canonical
-    // keys — an emptied key constant would store them under "" instead.
-    expect(await storage.getItem("@mindpattern/user_id")).not.toBeNull();
-    expect(await storage.getItem("@mindpattern/username")).not.toBeNull();
+describe("installed-client session compatibility", () => {
+  it("restores an existing native credential tuple and uses its bearer for the next request", async () => {
+    // Historical installed-client slots are inputs, consumed through the real public API.
+    await secureStore.setItem("@mindpattern/token", "installed-client-token");
+    await secureStore.setItem("@mindpattern/user_id", "abababababababababababababababab");
+    await secureStore.setItem("@mindpattern/username", "kim");
+    expect(await api.isLoggedIn()).toBe(true);
+    expect(await api.getUserId()).toBe("abababababababababababababababab");
+    expect(await api.getUsername()).toBe("kim");
+    await api.meta();
+    expect((vi.mocked(fetch).mock.calls[0]![1]?.headers as Record<string, string>).Authorization).toBe("Bearer installed-client-token");
   });
 });
 

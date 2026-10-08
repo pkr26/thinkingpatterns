@@ -149,7 +149,10 @@ export function storageKeyOwner(key: string): string | null {
   }
   const queue = /^@mindpattern\/queue\.v2\.(?:items|rejected|quarantine)\.([A-Za-z0-9_-]+)$/.exec(key);
   if (queue) return decodedScopeOwner(queue[1]!);
-  const audio = /^@mindpattern\/audioqueue\.v1:(?:https?:\/\/.*):([^:]+):[^:]*$/.exec(key);
+  // The origin is an authority (including an optional port/IPv6 literal).
+  // Entry ids may contain colons; never consume owner/id segments as part
+  // of a greedy origin and infer a different account from an entry id.
+  const audio = /^@mindpattern\/audioqueue\.v1:https?:\/\/(?:\[[^\]]+\]|[^\/:]+)(?::\d{1,5})?:([^:]+):[\s\S]*$/.exec(key);
   return audio?.[1] ?? null;
 }
 

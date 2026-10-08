@@ -176,7 +176,7 @@ export function measureReminderDue(
   now: Date,
 ): boolean {
   if (lastCompletedISO === null) return false;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(lastCompletedISO)) return false;
+  if (!isValidLocalDate(lastCompletedISO)) return false;
   if (!Number.isInteger(intervalWeeks) || intervalWeeks <= 0) return false;
   const last = localMidnight(lastCompletedISO);
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -195,7 +195,7 @@ export function measureReminderDue(
  * discipline: a slot already past rolls to tomorrow.
  */
 export function nextMeasureReminderFireTime(now: Date, lastCompletedISO?: string | null, intervalWeeks = DEFAULT_MEASURE_INTERVAL_WEEKS): Date {
-  if (lastCompletedISO && /^\d{4}-\d{2}-\d{2}$/.test(lastCompletedISO) && MEASURE_INTERVAL_WEEKS.includes(intervalWeeks)) {
+  if (lastCompletedISO && isValidLocalDate(lastCompletedISO) && MEASURE_INTERVAL_WEEKS.includes(intervalWeeks)) {
     const due = localMidnight(lastCompletedISO);
     due.setDate(due.getDate() + intervalWeeks * 7);
     due.setHours(20, 0, 0, 0);

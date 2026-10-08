@@ -67,13 +67,18 @@ export async function deriveMasterKey(
         `(got ${iterations}; the cross-platform contract is ${KDF_ITERATIONS})`,
     );
   }
-  const key = await subtle().importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
-  const bits = await subtle().deriveBits(
-    { name: "PBKDF2", hash: "SHA-256", salt, iterations },
-    key,
-    KEY_SIZE * 8,
-  );
-  return new Uint8Array(bits);
+  const passwordBytes = new TextEncoder().encode(password);
+  try {
+    const key = await subtle().importKey("raw", passwordBytes, "PBKDF2", false, ["deriveBits"]);
+    const bits = await subtle().deriveBits(
+      { name: "PBKDF2", hash: "SHA-256", salt, iterations },
+      key,
+      KEY_SIZE * 8,
+    );
+    return new Uint8Array(bits);
+  } finally {
+    zeroize(passwordBytes);
+  }
 }
 
 // --- AES-256-GCM envelope: nonce(12) || ct || tag — backend crypto.py ------

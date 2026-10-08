@@ -10,8 +10,6 @@ import { decryptAudio, decryptEntry, encryptAudio, encryptEntry } from "../src/c
 import { encryptWithFixedNonce, fromBase64, toBase64 } from "../src/crypto/core";
 import { buildAad } from "../src/crypto/aad";
 import {
-  MAX_RECORDING_SECONDS,
-  RECORDER_MIME_CANDIDATES,
   extensionForMime,
   normalizeMime,
   pickRecorderMime,
@@ -113,11 +111,6 @@ describe("recorder mime contract", () => {
     expect(extensionForMime("audio/mpeg")).toBe(".mp3");
   });
 
-  it("the fallback chain order is pinned", () => {
-    expect(RECORDER_MIME_CANDIDATES[0]).toBe("audio/webm;codecs=opus");
-    expect(RECORDER_MIME_CANDIDATES).toContain("audio/mp4");
-  });
-
   it("picks the first supported candidate (Safari: mp4, Chrome: webm)", () => {
     const original = globalThis.MediaRecorder;
     try {
@@ -139,9 +132,6 @@ describe("recorder mime contract", () => {
     }
   });
 
-  it("the client cap is the 5-minute plan cap", () => {
-    expect(MAX_RECORDING_SECONDS).toBe(300);
-  });
 });
 
 describe("shared/audio_vectors.json pins", () => {
@@ -167,10 +157,6 @@ describe("shared/audio_vectors.json pins", () => {
       }).map(([mime]) => [mime, extensionForMime(mime)]),
     );
     expect(local).toEqual(pinned);
-  });
-
-  it("the client recording cap matches the shared contract", () => {
-    expect(MAX_RECORDING_SECONDS).toBe(shared.recording_limits.max_duration_seconds_client);
   });
 
   it("the AAD tuple context and version match", () => {

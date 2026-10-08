@@ -5,6 +5,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
+import { publicSurface } from "./helpers/publicSurface";
 
 vi.mock("../src/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/api")>();
@@ -87,6 +88,74 @@ beforeEach(() => {
   window.localStorage.clear();
   window.sessionStorage.clear();
   clearSession();
+  window.location.hash = "";
+});
+
+it("shows exact initial, unlocked and signed-out shell output", async () => {
+  const root = await render(<App />);
+  await flush(); expect(publicSurface(root.toJSON())).toMatchSnapshot("initial sign-in shell");
+  await typeInto(root,"Username","drportal"); await typeInto(root,"Password","pw"); await press(root,"Sign in");
+  await vi.waitFor(()=>expect(textOf(root)).toContain("Patients — Dr. Portal"));
+  expect(publicSurface(root.toJSON())).toMatchSnapshot("unlocked caseload shell");
+  await press(root,"Sign out"); await flush();
+  expect(publicSurface(root.toJSON())).toMatchSnapshot("signed-out shell and key custody notice");
+});
+
+it("preserves historical note custody through adoption and wipes every provider-held key at sign-out", async () => {
+  const real = await vi.importActual<typeof import("../src/crypto")>("../src/crypto");
+  const provider = vi.mocked(await import("../src/crypto"));
+  const legacy=new Uint8Array(32).fill(3),wrap=new Uint8Array(32).fill(2),active=new Uint8Array(32).fill(42),historical=new Uint8Array(32).fill(7),identity=new Uint8Array(32).fill(9);
+  provider.derivePortalKeys.mockResolvedValueOnce({authKey:new Uint8Array(32).fill(1),wrapKek:wrap,noteKey:legacy});
+  provider.unlockWrapPrivateKeyWithNotesKey.mockResolvedValueOnce({privateKey:{} as CryptoKey,noteKeyV2:identity});
+  const ring=vi.spyOn(provider,"openNotesKeyring").mockResolvedValueOnce({active,historical:[historical]});
+  vi.mocked(api.me).mockResolvedValueOnce({username:"drportal",display_name:"Dr. Portal",wrap_pub_key:"public",wrap_key_blob:"sealed",notes_keyring_blob:"sealed-custody",custody_version:4});
+  const patient={user_id:"custody-patient",username:"custodypatient",status:"revoked",granted_at:"2026-09-01",revoked_at:"2026-09-02",ephemeral_pub:null,wrapped_key:null};
+  const old=await real.encryptNote(historical,"therapist-1",patient.user_id,"old","Older clinical custody note");
+  const previousIdentity=await real.encryptNote(identity,"therapist-1",patient.user_id,"identity","Preserved identity custody note");
+  vi.mocked(api.patients).mockResolvedValueOnce([patient]);
+  vi.mocked(api.notes).mockResolvedValueOnce({notes:[old,previousIdentity].map((row,index)=>({id:`saved-${index}`,client_note_id:row.clientNoteId,blob:row.blobB64,created_at:"2026-09-01",updated_at:"2026-09-01",version:1,pattern_pid:null})),nextOffset:null});
+  const open=provider.decryptNoteAny;open.mockImplementationOnce(real.decryptNoteAny).mockImplementationOnce(real.decryptNoteAny);
+  try {
+    const root=await login();await press(root,"Open my notes");
+    await vi.waitFor(()=>expect(textOf(root)).toContain("Preserved identity custody note"));
+    expect(textOf(root)).toContain("Older clinical custody note");
+    expect(active).toEqual(new Uint8Array(32).fill(42));expect(historical).toEqual(new Uint8Array(32).fill(7));expect(identity).toEqual(new Uint8Array(32).fill(9));
+    await press(root,"Sign out");await flush();
+    for(const held of [legacy,wrap,active,historical,identity])expect(held).toEqual(new Uint8Array(32));
+  } finally {ring.mockRestore();}
+});
+
+it("drops a late unlock's keys after the browser restores and locks the tab", async () => {
+  const provider=vi.mocked(await import("../src/crypto"));
+  const note=new Uint8Array(32).fill(7),wrap=new Uint8Array(32).fill(9),identity=new Uint8Array(32).fill(11);
+  provider.derivePortalKeys.mockResolvedValueOnce({authKey:new Uint8Array(32).fill(1),wrapKek:wrap,noteKey:note});
+  let release!: (value:{privateKey:CryptoKey;noteKeyV2:Uint8Array<ArrayBuffer>})=>void;
+  provider.unlockWrapPrivateKeyWithNotesKey.mockImplementationOnce(()=>new Promise(resolve=>{release=resolve;}));
+  const root=await login();await flush();
+  try {
+    await act(async()=>window.dispatchEvent({type:"pageshow",persisted:true} as unknown as Event));await flush();
+    expect(textOf(root)).toContain("Restored from the browser cache — sign in again.");
+    release({privateKey:{} as CryptoKey,noteKeyV2:identity});await flush(10);
+    expect(textOf(root)).not.toContain("Patients — Dr. Portal");expect(hasSession()).toBe(false);
+    for(const held of [note,wrap,identity])expect(held).toEqual(new Uint8Array(32));
+    expect(publicSurface(root.toJSON())).toMatchSnapshot("restored tab remains locked after a late unlock");
+  } finally {release({privateKey:{} as CryptoKey,noteKeyV2:identity});await flush();}
+});
+
+it("rejects an obsolete chart lookup after a newer browser-history lookup completes", async () => {
+  const first={user_id:"old-route",username:"obsoletepatient",status:"revoked",granted_at:"2026-09-01",revoked_at:"2026-09-02",ephemeral_pub:null,wrapped_key:null};
+  const second={...first,user_id:"new-route",username:"currentpatient"};
+  const root=await login();await flush();
+  let release!:(rows:typeof first[])=>void;
+  const lookup=vi.mocked(api.patients);lookup.mockImplementationOnce(()=>new Promise(resolve=>{release=resolve;})).mockResolvedValueOnce([second]);
+  window.location.hash="#/patient/old-route";await act(async()=>window.dispatchEvent(new Event("popstate")));await flush();
+  try {
+    window.location.hash="#/patient/new-route";await act(async()=>window.dispatchEvent(new Event("hashchange")));await flush(8);
+    expect(textOf(root)).toContain("currentpatient");
+    release([first]);await flush(8);expect(textOf(root)).toContain("currentpatient");expect(textOf(root)).not.toContain("obsoletepatient");
+    window.location.hash="#/patients";await act(async()=>window.dispatchEvent(new Event("popstate")));await flush(8);
+    expect(textOf(root)).toContain("Patients — Dr. Portal");expect(textOf(root)).not.toContain("That patient is not available to this account.");
+  } finally {release([first]);await flush();}
 });
 
 async function login() {

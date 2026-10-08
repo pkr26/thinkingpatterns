@@ -349,12 +349,23 @@ export function sentimentComponents(text: string, language?: string): [number, n
  *  the on-device estimate classifies the single text, which converges
  *  to the same answer for monolingual journals. */
 export function detectLanguage(text: string): "en" | "es" | "other" {
+  if (text.length === 0) return "en";
+  // The tokenizer only understands folded Latin letters. A short supported
+  // quotation in predominantly other-script writing must not enable scoring.
+  const folded = foldSentimentText(text.toLowerCase());
+  let letters = 0;
+  let latinLetters = 0;
+  for (const character of folded) {
+    if (/\p{L}/u.test(character)) letters += 1;
+    if (character >= "a" && character <= "z") latinLetters += 1;
+  }
+  if (letters === 0 || latinLetters / letters <= 0.5) return "other";
   const scored = tokenize(text).filter((t) => t.length >= 3);
   const det = T().languageDetection;
   // Empty corpus (no tokens at all): the historical English default —
   // nothing is being suppressed there. Any raw text with zero SCORED
   // tokens is an unknown language, never a guessed English.
-  if (scored.length === 0) return text.length === 0 ? "en" : "other";
+  if (scored.length === 0) return "other";
   let enHits = 0;
   let esHits = 0;
   for (const t of scored) {

@@ -68,7 +68,7 @@ beforeEach(() => {
   storage.__reset();
   void storage.setItem(CONSENT_KEY, "1");
   vault.lock();
-  vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey }, "user-1");
+  vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.from(dataKey) }, "user-1");
   takeStashedDraft("user-1");
   takeStashedDraft("user-2");
 });

@@ -78,7 +78,7 @@ function stubRecorderGlobals(): void {
 beforeEach(() => {
   resetTestState();
   installSession(USER);
-  vault.unlock({ authKey: DATA_KEY, dataKey: DATA_KEY }, USER);
+  vault.unlock({ authKey: DATA_KEY.slice(), dataKey: DATA_KEY.slice() }, USER);
   TinyRecorder.instances.length = 0;
   stubRecorderGlobals();
   // The mic flow's preflight: audio stack available + voice consent on.

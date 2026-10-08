@@ -1,0 +1,100 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Sign in renders a safe public surface after its vault is locked 1`] = `
+"<div className="login-wrap">
+  <div className="login-hero">
+    <svg aria-hidden="true" focusable="false" height=56 viewBox="0 0 32 32" width=56>
+      <circle cx="16" cy="16" fill="var(--primary-soft)" r="16">
+      <path d="M16 24c-5 0-8-3.2-8-8 4.8 0 7.8 3 8 8z" fill="var(--primary)">
+      <path d="M16 24c5 0 8-3.2 8-8-4.8 0-7.8 3-8 8z" fill="var(--primary)" opacity="0.72">
+      <path d="M16 8v16" stroke="var(--primary-strong)" strokeLinecap="round" strokeWidth="1.8">
+    <span className="login-hero__title">
+      "Fathom"
+    <span className="login-hero__tagline">
+      "A journal only you can read."
+  <section className="card">
+    <h2 className="card__title">
+      "Sign in"
+    <form style={"display":"flex","flexDirection":"column","gap":"var(--space-3)"}>
+      <button aria-hidden="true" style={"position":"absolute","left":-9999,"width":1,"height":1,"opacity":0} tabIndex=-1 type="submit">
+      <label className="field">
+        <span className="field__label">
+          "Username"
+        <input autoComplete="username" className="input" placeholder="e.g. quiet.morning" type="text" value="">
+      <label className="field">
+        <span className="field__label">
+          "Password"
+        <input autoComplete="current-password" className="input" type="password" value="">
+      <button className="btn btn--block" disabled=false type="button">
+        "Sign in"
+      <button className="btn btn--ghost btn--small btn--block" disabled=false type="button">
+        "Create an account"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "Your password never leaves this device. Only a derived verifier is sent — the server cannot read your journal.""
+`;
+
+exports[`Sign in renders its settled public empty-account surface in en 1`] = `
+"<div className="login-wrap">
+  <div className="login-hero">
+    <svg aria-hidden="true" focusable="false" height=56 viewBox="0 0 32 32" width=56>
+      <circle cx="16" cy="16" fill="var(--primary-soft)" r="16">
+      <path d="M16 24c-5 0-8-3.2-8-8 4.8 0 7.8 3 8 8z" fill="var(--primary)">
+      <path d="M16 24c5 0 8-3.2 8-8-4.8 0-7.8 3-8 8z" fill="var(--primary)" opacity="0.72">
+      <path d="M16 8v16" stroke="var(--primary-strong)" strokeLinecap="round" strokeWidth="1.8">
+    <span className="login-hero__title">
+      "Fathom"
+    <span className="login-hero__tagline">
+      "A journal only you can read."
+  <section className="card">
+    <h2 className="card__title">
+      "Sign in"
+    <form style={"display":"flex","flexDirection":"column","gap":"var(--space-3)"}>
+      <button aria-hidden="true" style={"position":"absolute","left":-9999,"width":1,"height":1,"opacity":0} tabIndex=-1 type="submit">
+      <label className="field">
+        <span className="field__label">
+          "Username"
+        <input autoComplete="username" className="input" placeholder="e.g. quiet.morning" type="text" value="">
+      <label className="field">
+        <span className="field__label">
+          "Password"
+        <input autoComplete="current-password" className="input" type="password" value="">
+      <button className="btn btn--block" disabled=false type="button">
+        "Sign in"
+      <button className="btn btn--ghost btn--small btn--block" disabled=false type="button">
+        "Create an account"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "Your password never leaves this device. Only a derived verifier is sent — the server cannot read your journal.""
+`;
+
+exports[`Sign in renders its settled public empty-account surface in es 1`] = `
+"<div className="login-wrap">
+  <div className="login-hero">
+    <svg aria-hidden="true" focusable="false" height=56 viewBox="0 0 32 32" width=56>
+      <circle cx="16" cy="16" fill="var(--primary-soft)" r="16">
+      <path d="M16 24c-5 0-8-3.2-8-8 4.8 0 7.8 3 8 8z" fill="var(--primary)">
+      <path d="M16 24c5 0 8-3.2 8-8-4.8 0-7.8 3-8 8z" fill="var(--primary)" opacity="0.72">
+      <path d="M16 8v16" stroke="var(--primary-strong)" strokeLinecap="round" strokeWidth="1.8">
+    <span className="login-hero__title">
+      "Fathom"
+    <span className="login-hero__tagline">
+      "Un diario que solo tú puedes leer."
+  <section className="card">
+    <h2 className="card__title">
+      "Iniciar sesión"
+    <form style={"display":"flex","flexDirection":"column","gap":"var(--space-3)"}>
+      <button aria-hidden="true" style={"position":"absolute","left":-9999,"width":1,"height":1,"opacity":0} tabIndex=-1 type="submit">
+      <label className="field">
+        <span className="field__label">
+          "Usuario"
+        <input autoComplete="username" className="input" placeholder="p. ej. manana-tranquila" type="text" value="">
+      <label className="field">
+        <span className="field__label">
+          "Contraseña"
+        <input autoComplete="current-password" className="input" type="password" value="">
+      <button className="btn btn--block" disabled=false type="button">
+        "Iniciar sesión"
+      <button className="btn btn--ghost btn--small btn--block" disabled=false type="button">
+        "Crear una cuenta"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "Su contraseña nunca sale de este dispositivo. Solo se envía un verificador derivado — el servidor no puede leer su diario.""
+`;

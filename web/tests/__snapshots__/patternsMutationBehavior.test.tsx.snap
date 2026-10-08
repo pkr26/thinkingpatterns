@@ -1,0 +1,1304 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`a pending encrypted mood read keeps the public baseline loading placeholder visible > mood read pending 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Patterns"
+  <p className="note" role="status" style={"whiteSpace":"pre-wrap"}>
+    "Building your baseline: 2 active days, 28 to go before patterns surface."
+  <div className="stack">
+    <div aria-label="2 active days, 28 remaining" aria-valuemax=100 aria-valuemin=0 aria-valuenow=7 className="progress-track" role="progressbar">
+      <div className="progress-fill" style={"width":"7%"}>
+  <div aria-hidden="true" className="stack">
+    <div className="skeleton skeleton--line">
+    <div className="skeleton skeleton--line-short">
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "This trend is computed on this device from your entries and is never synced. Patterns need 30 active days — honest data takes time.""
+`;
+
+exports[`a visible legacy pattern without a persistent pid cannot create a mute or feedback record 1`] = `
+"<p className="note note--ok" role="status" style={"whiteSpace":"pre-wrap"}>
+  "Your patterns are live — thirty honest days of data, computed only from your own writing. Every card shows its evidence."
+<section className="card">
+  <h2 className="card__title">
+    "Patterns"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "Observations, not verdicts — computed only from your own writing. Every card shows its evidence."
+<section className="card">
+  <h2 className="card__title">
+    "A repeated topic observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated topic observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "seen 1 time"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "Why am I seeing this?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Distinct writing days: —. Window entries: —. Mentions: 1. Evidence heuristic: 73% (not a diagnostic probability). Method: Found a word or phrase taking up more space in your writing than it used to. First seen: —."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "No advice, no diagnosis, no prediction — an observation with its evidence. Mute it below if it is not useful."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Mute""
+`;
+
+exports[`evidence only announces writing days when entry counts accompany them, and otherwise uses the missing-data marker 1`] = `
+"<p className="note note--ok" role="status" style={"whiteSpace":"pre-wrap"}>
+  "Your patterns are live — thirty honest days of data, computed only from your own writing. Every card shows its evidence."
+<section className="card">
+  <h2 className="card__title">
+    "Patterns"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "Observations, not verdicts — computed only from your own writing. Every card shows its evidence."
+<section className="card">
+  <h2 className="card__title">
+    "A repeated topic observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated topic observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "seen 1 time"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "Why am I seeing this?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Distinct writing days: —. Window entries: —. Mentions: 1. Evidence heuristic: 73% (not a diagnostic probability). Method: Found a word or phrase taking up more space in your writing than it used to. First seen: —."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "No advice, no diagnosis, no prediction — an observation with its evidence. Mute it below if it is not useful."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Mute"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated link observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated link observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "seen 1 time"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "Why am I seeing this?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Distinct writing days: —. Window entries: 4. Mentions: 1. Evidence heuristic: 73% (not a diagnostic probability). Method: Compared how you write the DAY AFTER this appears against your own baseline days. First seen: —."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "No advice, no diagnosis, no prediction — an observation with its evidence. Mute it below if it is not useful."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Mute""
+`;
+
+exports[`renders 0 encrypted local mood days with honest baseline geometry and accessible data 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Patterns"
+  <p className="note" role="status" style={"whiteSpace":"pre-wrap"}>
+    "Building your baseline: 0 active days, 0 to go before patterns surface."
+  <div className="stack">
+    <div aria-label="0 active days, 0 remaining" aria-valuemax=100 aria-valuemin=0 aria-valuenow=0 className="progress-track" role="progressbar">
+      <div className="progress-fill" style={"width":"0%"}>
+  <div aria-hidden="true" className="stack">
+    <div className="skeleton skeleton--line">
+    <div className="skeleton skeleton--line-short">
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "This trend is computed on this device from your entries and is never synced. Patterns need 30 active days — honest data takes time.""
+`;
+
+exports[`renders 1 encrypted local mood days with honest baseline geometry and accessible data 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Patterns"
+  <p className="note" role="status" style={"whiteSpace":"pre-wrap"}>
+    "Building your baseline: 1 active day, 22 to go before patterns surface."
+  <div className="stack">
+    <div aria-label="1 active days, 22 remaining" aria-valuemax=100 aria-valuemin=0 aria-valuenow=4 className="progress-track" role="progressbar">
+      <div className="progress-fill" style={"width":"4%"}>
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "This trend is computed on this device from your entries and is never synced. Patterns need 30 active days — honest data takes time.""
+`;
+
+exports[`renders 3 encrypted local mood days with honest baseline geometry and accessible data 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Patterns"
+  <p className="note" role="status" style={"whiteSpace":"pre-wrap"}>
+    "Building your baseline: 8 active days, 22 to go before patterns surface."
+  <div className="stack">
+    <div aria-label="8 active days, 22 remaining" aria-valuemax=100 aria-valuemin=0 aria-valuenow=27 className="progress-track" role="progressbar">
+      <div className="progress-fill" style={"width":"27%"}>
+  <svg aria-label="Your local mood trend" className="chart" role="img" style={"maxWidth":520} viewBox="0 0 120 104">
+    <line className="chart__baseline" x1=0 x2=120 y1=44 y2=44>
+    <rect className="chart__bar" height=34 rx=2.5 style={"fill":"#cd8f82"} width=10 x=0 y=44>
+      <title>
+        "2026-09-01: -1.00"
+    <rect className="chart__bar" height=2 rx=2.5 style={"fill":"#ebe5d9"} width=10 x=14 y=42>
+      <title>
+        "2026-09-02: 0.00"
+    <rect className="chart__bar" height=27.200000000000003 rx=2.5 style={"fill":"#8fb98d"} width=10 x=28 y=16.799999999999997>
+      <title>
+        "2026-09-03: 0.80"
+    <text className="chart__axis" x=0 y=100>
+      "09-01"
+    <text className="chart__axis" textAnchor="end" x=120 y=100>
+      "09-03"
+  <details className="disclosure">
+    <summary>
+      "Mood chart data"
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">
+            "Date"
+          <th scope="col">
+            "Recorded mood"
+      <tbody>
+        <tr>
+          <th scope="row">
+            "2026-09-01"
+          <td>
+            "-1.00"
+        <tr>
+          <th scope="row">
+            "2026-09-02"
+          <td>
+            "0.00"
+        <tr>
+          <th scope="row">
+            "2026-09-03"
+          <td>
+            "0.80"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "This trend is computed on this device from your entries and is never synced. Patterns need 30 active days — honest data takes time.""
+`;
+
+exports[`renders 12 encrypted local mood days with honest baseline geometry and accessible data 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Patterns"
+  <p className="note" role="status" style={"whiteSpace":"pre-wrap"}>
+    "Building your baseline: 8 active days, 22 to go before patterns surface."
+  <div className="stack">
+    <div aria-label="8 active days, 22 remaining" aria-valuemax=100 aria-valuemin=0 aria-valuenow=27 className="progress-track" role="progressbar">
+      <div className="progress-fill" style={"width":"27%"}>
+  <svg aria-label="Your local mood trend" className="chart" role="img" style={"maxWidth":520} viewBox="0 0 168 104">
+    <line className="chart__baseline" x1=0 x2=168 y1=44 y2=44>
+    <rect className="chart__bar" height=34 rx=2.5 style={"fill":"#cd8f82"} width=10 x=0 y=44>
+      <title>
+        "2026-09-01: -1.00"
+    <rect className="chart__bar" height=2 rx=2.5 style={"fill":"#ebe5d9"} width=10 x=14 y=42>
+      <title>
+        "2026-09-02: 0.00"
+    <rect className="chart__bar" height=27.200000000000003 rx=2.5 style={"fill":"#8fb98d"} width=10 x=28 y=16.799999999999997>
+      <title>
+        "2026-09-03: 0.80"
+    <rect className="chart__bar" height=34 rx=2.5 style={"fill":"#cd8f82"} width=10 x=42 y=44>
+      <title>
+        "2026-09-04: -1.00"
+    <rect className="chart__bar" height=2 rx=2.5 style={"fill":"#ebe5d9"} width=10 x=56 y=42>
+      <title>
+        "2026-09-05: 0.00"
+    <rect className="chart__bar" height=27.200000000000003 rx=2.5 style={"fill":"#8fb98d"} width=10 x=70 y=16.799999999999997>
+      <title>
+        "2026-09-06: 0.80"
+    <rect className="chart__bar" height=34 rx=2.5 style={"fill":"#cd8f82"} width=10 x=84 y=44>
+      <title>
+        "2026-09-07: -1.00"
+    <rect className="chart__bar" height=2 rx=2.5 style={"fill":"#ebe5d9"} width=10 x=98 y=42>
+      <title>
+        "2026-09-08: 0.00"
+    <rect className="chart__bar" height=27.200000000000003 rx=2.5 style={"fill":"#8fb98d"} width=10 x=112 y=16.799999999999997>
+      <title>
+        "2026-09-09: 0.80"
+    <rect className="chart__bar" height=34 rx=2.5 style={"fill":"#cd8f82"} width=10 x=126 y=44>
+      <title>
+        "2026-09-10: -1.00"
+    <rect className="chart__bar" height=2 rx=2.5 style={"fill":"#ebe5d9"} width=10 x=140 y=42>
+      <title>
+        "2026-09-11: 0.00"
+    <rect className="chart__bar" height=27.200000000000003 rx=2.5 style={"fill":"#8fb98d"} width=10 x=154 y=16.799999999999997>
+      <title>
+        "2026-09-12: 0.80"
+    <text className="chart__axis" x=0 y=100>
+      "09-01"
+    <text className="chart__axis" textAnchor="end" x=168 y=100>
+      "09-12"
+  <details className="disclosure">
+    <summary>
+      "Mood chart data"
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">
+            "Date"
+          <th scope="col">
+            "Recorded mood"
+      <tbody>
+        <tr>
+          <th scope="row">
+            "2026-09-01"
+          <td>
+            "-1.00"
+        <tr>
+          <th scope="row">
+            "2026-09-02"
+          <td>
+            "0.00"
+        <tr>
+          <th scope="row">
+            "2026-09-03"
+          <td>
+            "0.80"
+        <tr>
+          <th scope="row">
+            "2026-09-04"
+          <td>
+            "-1.00"
+        <tr>
+          <th scope="row">
+            "2026-09-05"
+          <td>
+            "0.00"
+        <tr>
+          <th scope="row">
+            "2026-09-06"
+          <td>
+            "0.80"
+        <tr>
+          <th scope="row">
+            "2026-09-07"
+          <td>
+            "-1.00"
+        <tr>
+          <th scope="row">
+            "2026-09-08"
+          <td>
+            "0.00"
+        <tr>
+          <th scope="row">
+            "2026-09-09"
+          <td>
+            "0.80"
+        <tr>
+          <th scope="row">
+            "2026-09-10"
+          <td>
+            "-1.00"
+        <tr>
+          <th scope="row">
+            "2026-09-11"
+          <td>
+            "0.00"
+        <tr>
+          <th scope="row">
+            "2026-09-12"
+          <td>
+            "0.80"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "This trend is computed on this device from your entries and is never synced. Patterns need 30 active days — honest data takes time.""
+`;
+
+exports[`renders a verified minimal analysis without inventing a pattern card or repeating the threshold notice 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Patterns"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "Observations, not verdicts — computed only from your own writing. Every card shows its evidence."
+<section className="card">
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "No patterns surfaced yet — the engine only speaks when the evidence clears its statistical bars.""
+`;
+
+exports[`renders authored methods, lifecycle, disclosure and sensitive output in en 1`] = `
+"<p className="note note--ok" role="status" style={"whiteSpace":"pre-wrap"}>
+  "Your patterns are live — thirty honest days of data, computed only from your own writing. Every card shows its evidence."
+<section className="card">
+  <h2 className="card__title">
+    "Patterns"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "Observations, not verdicts — computed only from your own writing. Every card shows its evidence."
+<section className="card">
+  <h2 className="card__title">
+    "A repeated temporal observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated temporal observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "evidence: early evidence · · new"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "seen 1 time"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "last: 2026-09-30"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "Why am I seeing this?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Distinct writing days: 0. Window entries: 0. Mentions: 1. Evidence heuristic: 73% (not a diagnostic probability). Method: Compared how often this word appears on each weekday against your own writing schedule, with multiple-testing correction across every claim. First seen: 2026-08-01."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "No advice, no diagnosis, no prediction — an observation with its evidence. Mute it below if it is not useful."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Mute"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated mood_correlation observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated mood_correlation observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "evidence: early evidence"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "seen 1 time"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "Why am I seeing this?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Distinct writing days: 3. Window entries: 4. Mentions: 1. Evidence heuristic: 73% (not a diagnostic probability). Method: Compared your mood on days this appears versus days it doesn't — always against your own baseline, never anyone else's. First seen: —."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "No advice, no diagnosis, no prediction — an observation with its evidence. Mute it below if it is not useful."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Mute"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated link observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated link observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "evidence: established · · new"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "seen 1 time"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "Why am I seeing this?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Distinct writing days: —. Window entries: —. Mentions: 1. Evidence heuristic: 73% (not a diagnostic probability). Method: Compared how you write the DAY AFTER this appears against your own baseline days. First seen: —."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "No advice, no diagnosis, no prediction — an observation with its evidence. Mute it below if it is not useful."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Mute"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated inertia observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated inertia observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "evidence: fading"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "seen 1 time"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "last: 2026-09-30"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "Why am I seeing this?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Distinct writing days: 0. Window entries: 0. Mentions: 1. Evidence heuristic: 73% (not a diagnostic probability). Method: Measured how strongly your mood carries over from one day to the next, compared with your own earlier norm. First seen: 2026-08-01."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "No advice, no diagnosis, no prediction — an observation with its evidence. Mute it below if it is not useful."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Mute"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated energy_inertia observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated energy_inertia observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "evidence: fading · · new"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "seen 1 time"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "Why am I seeing this?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Distinct writing days: 3. Window entries: 4. Mentions: 1. Evidence heuristic: 73% (not a diagnostic probability). Method: Measured how strongly your energy carries over day to day, compared with your own earlier norm. First seen: —."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "No advice, no diagnosis, no prediction — an observation with its evidence. Mute it below if it is not useful."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Mute"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated pa_inertia observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated pa_inertia observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "evidence: future_state"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "seen 1 time"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "Why am I seeing this?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Distinct writing days: —. Window entries: —. Mentions: 1. Evidence heuristic: 73% (not a diagnostic probability). Method: Measured how strongly your positive feelings carry over day to day, compared with your own earlier norm. First seen: —."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "No advice, no diagnosis, no prediction — an observation with its evidence. Mute it below if it is not useful."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Mute"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated na_inertia observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated na_inertia observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "seen 1 time"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "last: 2026-09-30"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "Why am I seeing this?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Distinct writing days: 0. Window entries: 0. Mentions: 1. Evidence heuristic: 73% (not a diagnostic probability). Method: Measured how strongly your negative feelings carry over day to day, compared with your own earlier norm. First seen: 2026-08-01."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "No advice, no diagnosis, no prediction — an observation with its evidence. Mute it below if it is not useful."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Mute"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated energy_mood_coupling observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated energy_mood_coupling observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "evidence: early evidence"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "seen 1 time"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "Why am I seeing this?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Distinct writing days: 3. Window entries: 4. Mentions: 1. Evidence heuristic: 73% (not a diagnostic probability). Method: Measured how much your energy and mood move together, compared with your own earlier norm. First seen: —."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "No advice, no diagnosis, no prediction — an observation with its evidence. Mute it below if it is not useful."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Mute"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated sense_making observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated sense_making observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "evidence: early evidence · · new"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "seen 1 time"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "Why am I seeing this?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Distinct writing days: —. Window entries: —. Mentions: 1. Evidence heuristic: 73% (not a diagnostic probability). Method: Measured how much your writing leans on cause-and-effect and insight words, compared with your own earlier norm. First seen: —."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "No advice, no diagnosis, no prediction — an observation with its evidence. Mute it below if it is not useful."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Mute"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated activity_diversity observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated activity_diversity observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "evidence: established"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "seen 1 time"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "last: 2026-09-30"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "Why am I seeing this?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Distinct writing days: 0. Window entries: 0. Mentions: 1. Evidence heuristic: 73% (not a diagnostic probability). Method: Measured the variety of your tagged activities per week, compared with your own earlier weeks. First seen: 2026-08-01."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "No advice, no diagnosis, no prediction — an observation with its evidence. Mute it below if it is not useful."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Mute"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated instability observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated instability observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "evidence: fading · · new"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "seen 1 time"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "Why am I seeing this?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Distinct writing days: 3. Window entries: 4. Mentions: 1. Evidence heuristic: 73% (not a diagnostic probability). Method: Measured the size of your day-to-day mood swings, compared with your own earlier norm. First seen: —."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "No advice, no diagnosis, no prediction — an observation with its evidence. Mute it below if it is not useful."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Mute"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated mood_shift observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated mood_shift observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "evidence: fading"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "seen 1 time"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "Why am I seeing this?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Distinct writing days: —. Window entries: —. Mentions: 1. Evidence heuristic: 73% (not a diagnostic probability). Method: Watched your mood against your personal baseline with a control chart that flags sustained shifts. First seen: —."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "No advice, no diagnosis, no prediction — an observation with its evidence. Mute it below if it is not useful."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Mute"
+<section className="card card--sensitive">
+  <h2 className="card__title">
+    "A difficult thought has been returning"
+  <p className="note note--warn" style={"whiteSpace":"pre-wrap"}>
+    "Something heavy shows up repeatedly in your writing. It is not quoted here — you deserve to decide when to look at it."
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Get support"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "evidence: future_state · · new"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "seen 1 time"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "last: 2026-09-30"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "Why am I seeing this?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Distinct writing days: 0. Window entries: 0. Mentions: 1. Evidence heuristic: 73% (not a diagnostic probability). Method: Found a negative thought-phrase that keeps returning in near-identical form. First seen: 2026-08-01."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "No advice, no diagnosis, no prediction — an observation with its evidence. Mute it below if it is not useful."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Mute"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated topic observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated topic observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "seen 1 time"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "Why am I seeing this?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Distinct writing days: 3. Window entries: 4. Mentions: 1. Evidence heuristic: 73% (not a diagnostic probability). Method: Found a word or phrase taking up more space in your writing than it used to. First seen: —."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "No advice, no diagnosis, no prediction — an observation with its evidence. Mute it below if it is not useful."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Mute"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated recurring_phrase observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated recurring_phrase observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "evidence: early evidence · · new"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "seen 1 time"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "Why am I seeing this?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Distinct writing days: —. Window entries: —. Mentions: 1. Evidence heuristic: 73% (not a diagnostic probability). Method: Found a phrase that keeps returning in near-identical form. First seen: —."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "No advice, no diagnosis, no prediction — an observation with its evidence. Mute it below if it is not useful."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Mute"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated avoidance observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated avoidance observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "evidence: early evidence"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "seen 1 time"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "last: 2026-09-30"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "Why am I seeing this?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Distinct writing days: 0. Window entries: 0. Mentions: 1. Evidence heuristic: 73% (not a diagnostic probability). Method: Noticed you tend to go quiet the day after this comes up, compared with your own usual rhythm. First seen: 2026-08-01."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "No advice, no diagnosis, no prediction — an observation with its evidence. Mute it below if it is not useful."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Mute"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated cadence observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated cadence observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "evidence: established · · new"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "seen 1 time"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "Why am I seeing this?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Distinct writing days: 3. Window entries: 4. Mentions: 1. Evidence heuristic: 73% (not a diagnostic probability). Method: Compared how regular your writing rhythm is against your own earlier norm. First seen: —."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "No advice, no diagnosis, no prediction — an observation with its evidence. Mute it below if it is not useful."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Mute"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated future_kind observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated future_kind observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "evidence: fading"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "seen 1 time"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "Why am I seeing this?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Distinct writing days: —. Window entries: —. Mentions: 1. Evidence heuristic: 73% (not a diagnostic probability). Method: Computed within your own journal, against your own baseline. First seen: —."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "No advice, no diagnosis, no prediction — an observation with its evidence. Mute it below if it is not useful."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Mute""
+`;
+
+exports[`renders authored methods, lifecycle, disclosure and sensitive output in es 1`] = `
+"<p className="note note--ok" role="status" style={"whiteSpace":"pre-wrap"}>
+  "Sus patrones están activos — treinta días honestos de datos, calculados solo a partir de su propia escritura. Cada tarjeta muestra su evidencia."
+<section className="card">
+  <h2 className="card__title">
+    "Patrones"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "Observaciones, no veredictos — calculadas únicamente a partir de su propia escritura. Cada tarjeta muestra su evidencia."
+<section className="card">
+  <h2 className="card__title">
+    "A repeated temporal observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated temporal observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "evidencia: evidencia temprana · · nuevo"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "visto 1 vez"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "último: 2026-09-30"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "¿Por qué veo esto?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Días distintos: 0. Entradas de la ventana: 0. Menciones: 1. Heurística de evidencia: 73% (no es una probabilidad diagnóstica). Método: Se comparó la frecuencia de esta palabra en cada día de la semana contra su propio calendario de escritura, con corrección por comparaciones múltiples en cada afirmación. Primera aparición: 2026-08-01."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Sin consejos, sin diagnósticos, sin predicciones — una observación con su evidencia. Silencie abajo si no le resulta útil."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Silenciar"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated mood_correlation observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated mood_correlation observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "evidencia: evidencia temprana"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "visto 1 vez"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "¿Por qué veo esto?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Días distintos: 3. Entradas de la ventana: 4. Menciones: 1. Heurística de evidencia: 73% (no es una probabilidad diagnóstica). Método: Se comparó su ánimo en los días en que aparece frente a los días en que no — siempre contra su propia línea base, nunca la de nadie más. Primera aparición: —."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Sin consejos, sin diagnósticos, sin predicciones — una observación con su evidencia. Silencie abajo si no le resulta útil."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Silenciar"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated link observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated link observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "evidencia: establecido · · nuevo"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "visto 1 vez"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "¿Por qué veo esto?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Días distintos: —. Entradas de la ventana: —. Menciones: 1. Heurística de evidencia: 73% (no es una probabilidad diagnóstica). Método: Se comparó cómo escribe al DÍA SIGUIENTE de que aparece esto contra sus propios días de línea base. Primera aparición: —."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Sin consejos, sin diagnósticos, sin predicciones — una observación con su evidencia. Silencie abajo si no le resulta útil."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Silenciar"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated inertia observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated inertia observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "evidencia: desvaneciéndose"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "visto 1 vez"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "último: 2026-09-30"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "¿Por qué veo esto?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Días distintos: 0. Entradas de la ventana: 0. Menciones: 1. Heurística de evidencia: 73% (no es una probabilidad diagnóstica). Método: Se midió cuánto se arrastra su ánimo de un día al siguiente, comparado con su propia norma anterior. Primera aparición: 2026-08-01."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Sin consejos, sin diagnósticos, sin predicciones — una observación con su evidencia. Silencie abajo si no le resulta útil."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Silenciar"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated energy_inertia observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated energy_inertia observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "evidencia: desvaneciéndose · · nuevo"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "visto 1 vez"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "¿Por qué veo esto?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Días distintos: 3. Entradas de la ventana: 4. Menciones: 1. Heurística de evidencia: 73% (no es una probabilidad diagnóstica). Método: Se midió cuánto se arrastra su energía de un día al otro, comparada con su propia norma anterior. Primera aparición: —."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Sin consejos, sin diagnósticos, sin predicciones — una observación con su evidencia. Silencie abajo si no le resulta útil."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Silenciar"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated pa_inertia observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated pa_inertia observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "evidencia: future_state"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "visto 1 vez"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "¿Por qué veo esto?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Días distintos: —. Entradas de la ventana: —. Menciones: 1. Heurística de evidencia: 73% (no es una probabilidad diagnóstica). Método: Se midió cuánto se arrastran sus sentimientos positivos de un día al otro, comparados con su propia norma anterior. Primera aparición: —."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Sin consejos, sin diagnósticos, sin predicciones — una observación con su evidencia. Silencie abajo si no le resulta útil."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Silenciar"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated na_inertia observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated na_inertia observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "visto 1 vez"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "último: 2026-09-30"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "¿Por qué veo esto?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Días distintos: 0. Entradas de la ventana: 0. Menciones: 1. Heurística de evidencia: 73% (no es una probabilidad diagnóstica). Método: Se midió cuánto se arrastran sus sentimientos negativos de un día al otro, comparados con su propia norma anterior. Primera aparición: 2026-08-01."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Sin consejos, sin diagnósticos, sin predicciones — una observación con su evidencia. Silencie abajo si no le resulta útil."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Silenciar"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated energy_mood_coupling observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated energy_mood_coupling observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "evidencia: evidencia temprana"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "visto 1 vez"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "¿Por qué veo esto?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Días distintos: 3. Entradas de la ventana: 4. Menciones: 1. Heurística de evidencia: 73% (no es una probabilidad diagnóstica). Método: Se midió cuánto se mueven juntas su energía y su ánimo, comparado con su propia norma anterior. Primera aparición: —."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Sin consejos, sin diagnósticos, sin predicciones — una observación con su evidencia. Silencie abajo si no le resulta útil."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Silenciar"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated sense_making observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated sense_making observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "evidencia: evidencia temprana · · nuevo"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "visto 1 vez"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "¿Por qué veo esto?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Días distintos: —. Entradas de la ventana: —. Menciones: 1. Heurística de evidencia: 73% (no es una probabilidad diagnóstica). Método: Se midió cuánto se apoya lo que escribe en palabras de causa-efecto y de descubrimiento, comparado con su propia norma anterior. Primera aparición: —."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Sin consejos, sin diagnósticos, sin predicciones — una observación con su evidencia. Silencie abajo si no le resulta útil."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Silenciar"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated activity_diversity observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated activity_diversity observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "evidencia: establecido"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "visto 1 vez"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "último: 2026-09-30"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "¿Por qué veo esto?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Días distintos: 0. Entradas de la ventana: 0. Menciones: 1. Heurística de evidencia: 73% (no es una probabilidad diagnóstica). Método: Se midió la variedad de sus actividades etiquetadas por semana, comparada con sus propias semanas anteriores. Primera aparición: 2026-08-01."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Sin consejos, sin diagnósticos, sin predicciones — una observación con su evidencia. Silencie abajo si no le resulta útil."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Silenciar"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated instability observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated instability observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "evidencia: desvaneciéndose · · nuevo"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "visto 1 vez"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "¿Por qué veo esto?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Días distintos: 3. Entradas de la ventana: 4. Menciones: 1. Heurística de evidencia: 73% (no es una probabilidad diagnóstica). Método: Se midió la magnitud de sus altibajos de ánimo de un día al otro, comparada con su propia norma anterior. Primera aparición: —."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Sin consejos, sin diagnósticos, sin predicciones — una observación con su evidencia. Silencie abajo si no le resulta útil."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Silenciar"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated mood_shift observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated mood_shift observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "evidencia: desvaneciéndose"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "visto 1 vez"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "¿Por qué veo esto?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Días distintos: —. Entradas de la ventana: —. Menciones: 1. Heurística de evidencia: 73% (no es una probabilidad diagnóstica). Método: Se observó su ánimo contra su línea base personal con un gráfico de control que señala cambios sostenidos. Primera aparición: —."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Sin consejos, sin diagnósticos, sin predicciones — una observación con su evidencia. Silencie abajo si no le resulta útil."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Silenciar"
+<section className="card card--sensitive">
+  <h2 className="card__title">
+    "Un pensamiento difícil ha estado volviendo"
+  <p className="note note--warn" style={"whiteSpace":"pre-wrap"}>
+    "Algo pesado aparece repetidamente en lo que escribe. No se cita aquí — usted merece decidir cuándo mirarlo."
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Buscar apoyo"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "evidencia: future_state · · nuevo"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "visto 1 vez"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "último: 2026-09-30"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "¿Por qué veo esto?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Días distintos: 0. Entradas de la ventana: 0. Menciones: 1. Heurística de evidencia: 73% (no es una probabilidad diagnóstica). Método: Se encontró un pensamiento negativo que vuelve en forma casi idéntica. Primera aparición: 2026-08-01."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Sin consejos, sin diagnósticos, sin predicciones — una observación con su evidencia. Silencie abajo si no le resulta útil."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Silenciar"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated topic observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated topic observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "visto 1 vez"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "¿Por qué veo esto?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Días distintos: 3. Entradas de la ventana: 4. Menciones: 1. Heurística de evidencia: 73% (no es una probabilidad diagnóstica). Método: Se encontró una palabra o frase que ocupa más espacio en lo que escribe que antes. Primera aparición: —."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Sin consejos, sin diagnósticos, sin predicciones — una observación con su evidencia. Silencie abajo si no le resulta útil."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Silenciar"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated recurring_phrase observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated recurring_phrase observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "evidencia: evidencia temprana · · nuevo"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "visto 1 vez"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "¿Por qué veo esto?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Días distintos: —. Entradas de la ventana: —. Menciones: 1. Heurística de evidencia: 73% (no es una probabilidad diagnóstica). Método: Se encontró una frase que vuelve en forma casi idéntica. Primera aparición: —."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Sin consejos, sin diagnósticos, sin predicciones — una observación con su evidencia. Silencie abajo si no le resulta útil."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Silenciar"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated avoidance observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated avoidance observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "evidencia: evidencia temprana"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "visto 1 vez"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "último: 2026-09-30"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "¿Por qué veo esto?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Días distintos: 0. Entradas de la ventana: 0. Menciones: 1. Heurística de evidencia: 73% (no es una probabilidad diagnóstica). Método: Se notó que tiende a guardar silencio al día siguiente de que aparece esto, comparado con su propio ritmo habitual. Primera aparición: 2026-08-01."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Sin consejos, sin diagnósticos, sin predicciones — una observación con su evidencia. Silencie abajo si no le resulta útil."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Silenciar"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated cadence observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated cadence observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "evidencia: establecido · · nuevo"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "visto 1 vez"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "¿Por qué veo esto?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Días distintos: 3. Entradas de la ventana: 4. Menciones: 1. Heurística de evidencia: 73% (no es una probabilidad diagnóstica). Método: Se comparó la regularidad de su ritmo de escritura contra su propia norma anterior. Primera aparición: —."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Sin consejos, sin diagnósticos, sin predicciones — una observación con su evidencia. Silencie abajo si no le resulta útil."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Silenciar"
+<section className="card">
+  <h2 className="card__title">
+    "A repeated future_kind observation"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "A repeated future_kind observation"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "evidencia: desvaneciéndose"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "visto 1 vez"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "¿Por qué veo esto?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Días distintos: —. Entradas de la ventana: —. Menciones: 1. Heurística de evidencia: 73% (no es una probabilidad diagnóstica). Método: Calculado dentro de su propio diario, contra su propia línea base. Primera aparición: —."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Sin consejos, sin diagnósticos, sin predicciones — una observación con su evidencia. Silencie abajo si no le resulta útil."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Silenciar""
+`;
+
+exports[`renders the public offline failure without leaking transport content 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Patterns"
+  <p className="note" role="status" style={"whiteSpace":"pre-wrap"}>
+    "Reading your baseline…"
+  <div aria-hidden="true" className="stack">
+    <div className="skeleton skeleton--line">
+    <div className="skeleton skeleton--line-short">
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "This trend is computed on this device from your entries and is never synced. Patterns need 30 active days — honest data takes time."
+  <div className="banner banner--error" role="alert">
+    "Offline — patterns need a connection to refresh.""
+`;
+
+exports[`renders the public server failure without leaking transport content 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Patterns"
+  <p className="note" role="status" style={"whiteSpace":"pre-wrap"}>
+    "Reading your baseline…"
+  <div aria-hidden="true" className="stack">
+    <div className="skeleton skeleton--line">
+    <div className="skeleton skeleton--line-short">
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "This trend is computed on this device from your entries and is never synced. Patterns need 30 active days — honest data takes time."
+  <div className="banner banner--error" role="alert">
+    "The server hit a problem — try again in a moment.""
+`;
+
+exports[`renders the public tampered failure without leaking transport content 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Patterns"
+  <p className="note" role="status" style={"whiteSpace":"pre-wrap"}>
+    "Reading your baseline…"
+  <div aria-hidden="true" className="stack">
+    <div className="skeleton skeleton--line">
+    <div className="skeleton skeleton--line-short">
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "This trend is computed on this device from your entries and is never synced. Patterns need 30 active days — honest data takes time."
+  <div className="banner banner--error" role="alert">
+    "Your session ended — sign in again.""
+`;
+
+exports[`renders the public unknown failure without leaking transport content 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Patterns"
+  <p className="note" role="status" style={"whiteSpace":"pre-wrap"}>
+    "Reading your baseline…"
+  <div aria-hidden="true" className="stack">
+    <div className="skeleton skeleton--line">
+    <div className="skeleton skeleton--line-short">
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "This trend is computed on this device from your entries and is never synced. Patterns need 30 active days — honest data takes time."
+  <div className="banner banner--error" role="alert">
+    "server reported an unknown insights phase""
+`;
+
+exports[`shows 1 muted patterns and restores one through its authored control 1`] = `
+"<p className="note note--ok" role="status" style={"whiteSpace":"pre-wrap"}>
+  "Your patterns are live — thirty honest days of data, computed only from your own writing. Every card shows its evidence."
+<section className="card">
+  <h2 className="card__title">
+    "Patterns"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "Observations, not verdicts — computed only from your own writing. Every card shows its evidence."
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "1 pattern muted — they stay muted on this browser and in future analyses after your next refresh."
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Unmute: A repeated topic observation"
+<section className="card card--sensitive">
+  <h2 className="card__title">
+    "A difficult thought has been returning"
+  <p className="note note--warn" style={"whiteSpace":"pre-wrap"}>
+    "Something heavy shows up repeatedly in your writing. It is not quoted here — you deserve to decide when to look at it."
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Get support"
+  <div className="row row--wrap">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "seen 1 time"
+  <details className="disclosure">
+    <summary>
+      <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+        <path d="M6 9.5l6 6 6-6">
+      "Why am I seeing this?"
+    <div className="disclosure__body">
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "Distinct writing days: —. Window entries: —. Mentions: 1. Evidence heuristic: 73% (not a diagnostic probability). Method: Compared how you write the DAY AFTER this appears against your own baseline days. First seen: —."
+      <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+        "No advice, no diagnosis, no prediction — an observation with its evidence. Mute it below if it is not useful."
+  <div className="row">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Mute""
+`;
+
+exports[`shows 2 muted patterns and restores one through its authored control 1`] = `
+"<p className="note note--ok" role="status" style={"whiteSpace":"pre-wrap"}>
+  "Your patterns are live — thirty honest days of data, computed only from your own writing. Every card shows its evidence."
+<section className="card">
+  <h2 className="card__title">
+    "Patterns"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "Observations, not verdicts — computed only from your own writing. Every card shows its evidence."
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "2 patterns muted — they stay muted on this browser and in future analyses after your next refresh."
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Unmute: A repeated topic observation"
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Unmute: a private pattern"
+<section className="card">
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "No patterns surfaced yet — the engine only speaks when the evidence clears its statistical bars.""
+`;

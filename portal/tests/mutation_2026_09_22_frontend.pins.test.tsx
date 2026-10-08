@@ -963,8 +963,9 @@ describe("mutation pins 2026-09-22: PatientView", () => {
 
   it("history cannot be requested twice concurrently; empty history says so", async () => {
     let slow = false;
+    let releaseHistory!: () => void;
     mockedApi.noteRevisions.mockImplementation(async () => {
-      if (slow) await new Promise((resolve) => setTimeout(resolve, 50));
+      if (slow) return new Promise<[]>(resolve => { releaseHistory = () => resolve([]); });
       return [];
     });
     mockedApi.notes.mockResolvedValue({
@@ -980,9 +981,12 @@ describe("mutation pins 2026-09-22: PatientView", () => {
     expect(historyButtons).toHaveLength(1); // only the edited note carries one
     slow = true;
     await press(root, "View history");
-    await press(root, "Loading history…"); // inert while busy
-    await vi.waitFor(() => expect(textOf(root)).toContain("no earlier text recorded"), { timeout: 4000 });
-    expect(mockedApi.noteRevisions.mock.calls.length).toBe(1);
+    try {
+      const loading = root.root.findAllByType("button").find(node => (node.children as unknown[]).join("") === "Loading history…")!;
+      expect(loading.props.disabled).toBe(true);
+      expect(mockedApi.noteRevisions.mock.calls.length).toBe(1);
+    } finally { releaseHistory(); await flush(); }
+    expect(textOf(root)).toContain("no earlier text recorded");
   });
 
   it("note drafts are trimmed and blank drafts never reach the API — including edits", async () => {
@@ -993,7 +997,8 @@ describe("mutation pins 2026-09-22: PatientView", () => {
     const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
     await flush(6);
     await typeTextarea(root, "Note about this patient…", "   ");
-    await press(root, "Save note");
+    const saveBlank = root.root.findAllByType("button").find(node => (node.children as unknown[]).join("") === "Save note")!;
+    expect(saveBlank.props.disabled).toBe(true);
     await flush();
     expect(mockedApi.createNote).not.toHaveBeenCalled();
     await typeTextarea(root, "Note about this patient…", "  real text  ");

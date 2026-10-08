@@ -23,7 +23,9 @@ export const writeAsStringAsync = vi.fn(async (uri: string, content: string) => 
   files.set(uri, content);
 });
 
-export const deleteAsync = vi.fn(async (uri: string) => {
+export const deleteAsync = vi.fn(async (uri: string, options?: { idempotent?: boolean }) => {
+  const exists = [...files.keys()].some(file => file === uri || (uri.endsWith("/") && file.startsWith(uri)));
+  if (!exists && !options?.idempotent) throw new Error("file not found");
   for (const file of files.keys()) if (file === uri || (uri.endsWith("/") && file.startsWith(uri))) files.delete(file);
 });
 

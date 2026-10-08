@@ -108,7 +108,6 @@ function scopeId(origin: string, userId: string): string {
   // AsyncStorage keys are observable metadata, so avoid putting a readable
   // username or host in them. This is an identifier, not cryptographic
   // secrecy; ciphertext remains encrypted independently.
-  // Stryker disable next-line StringLiteral: the NUL separator is defense-in-depth against (origin,userId) pairs that CONCATENATE to the same string; no real origin contains NUL, so every mutant only swaps one unambiguous separator for another and stays collision-free for all testable inputs
   return Buffer.from(`${origin}\u0000${userId}`, "utf8").toString("base64url");
 }
 
@@ -126,7 +125,6 @@ async function currentOrigin(): Promise<string> {
   // `getBaseUrl` is always present in production. The fallback makes this
   // module usable by old isolated test mocks while retaining a safe concrete
   // local-only origin there.
-  // Stryker disable next-line ConditionalExpression,StringLiteral: the fallback arm exists only for test mocks that omit getBaseUrl entirely; the production suite always provides it, so mutants of the dead arm are unobservable by construction
   const base = typeof getBaseUrl === "function" ? await getBaseUrl() : "http://localhost:8000";
   return canonicalOrigin(new URL(base).origin);
 }
@@ -162,7 +160,6 @@ let legacyMigration: Promise<void> | null = null;
  * opaque retained record after the owner identifies the original server.
  */
 async function migrateUnscopedLegacyData(): Promise<void> {
-  // Stryker disable next-line ConditionalExpression: while a migration is in flight every caller MUST share it; the mutation (concurrent re-run) is only distinguishable with deliberate interleaving that the public API cannot produce
   if (legacyMigration) return legacyMigration;
   legacyMigration = (async () => {
     const entries = await Promise.all(
@@ -215,7 +212,7 @@ function normalizeEntry(raw: unknown): QueuedEntry | null {
   return normalized;
 }
 
-function parseItems(raw: string): QueuedEntry[] | null {
+function parseItems(raw: string): { items: QueuedEntry[]; malformed: boolean } | null {
   const parsed: unknown = JSON.parse(raw);
   const slots = Array.isArray(parsed)
     ? parsed
@@ -223,7 +220,8 @@ function parseItems(raw: string): QueuedEntry[] | null {
       ? (parsed as { items?: unknown }).items
       : null;
   if (!Array.isArray(slots)) return null;
-  return slots.map(normalizeEntry).filter((entry): entry is QueuedEntry => entry !== null);
+  const normalized = slots.map(normalizeEntry);
+  return { items: normalized.filter((entry): entry is QueuedEntry => entry !== null), malformed: normalized.some(entry => entry === null) };
 }
 
 function serializeItems(items: QueuedEntry[]): string {
@@ -271,43 +269,32 @@ async function appendQuarantine(scope: QueueScope, raw: string, generation: numb
 }
 
 async function readItems(key: string, scope: QueueScope, generation: number): Promise<QueuedEntry[]> {
-  // M-13: the getItem lives INSIDE the try. Android refuses to hand an
-  // oversize AsyncStorage row through the cursor window — a throw escaping
-  // readItems would reject every enqueue/flushQueue/queueLength call on
-  // this scope forever (the "wedged scope" failure mode). The bytes are
-  // unreadable through this API, so the catch records an honest marker in
-  // quarantine and clears the key instead of wedging the scope.
-  let raw: string | null = null;
+  // A transient native read failure does not establish corruption. Preserve
+  // the original ciphertext and allow the caller to retry. Android's explicit
+  // oversized-row failure remains recoverable through an unreadable marker.
+  let raw: string | null;
   try {
     raw = await AsyncStorage.getItem(key);
-    if (!raw) return [];
-    const parsed = parseItems(raw);
-    if (parsed === null) {
-      // A parseable but unrecognized shape gets the SAME custody as
-      // unparseable bytes: quarantine it. Returning [] while leaving the
-      // bytes in place would only delay the loss — the next write to this
-      // key overwrites them, silently destroying the retained record the
-      // old comment promised to keep for manual repair.
-      await appendQuarantine(scope, raw, generation);
-      if (!wipedSince(generation)) await AsyncStorage.removeItem(key);
-      return [];
-    }
-    const own = parsed.filter((item) => item.userId === scope.userId);
-    const foreign = parsed.filter((item) => item.userId !== scope.userId);
-    if (foreign.length > 0) {
-      // L-52: a well-formed record carrying a FOREIGN userId inside this
-      // scope key (tampering or a restored backup) must not be silently
-      // dropped by the next rewrite — quarantine it verbatim, exactly like
-      // corrupt bytes, and persist the scope-owned remainder. This scope
-      // can never upload the foreign record; preservation, not delivery,
-      // is the point.
-      for (const item of foreign) {
-        await appendQuarantine(scope, serializeItems([item]), generation);
-      }
-      if (!wipedSince(generation)) await writeItems(key, own);
-    }
-    return own;
-  } catch {
+  } catch (cause) {
+    if (!(cause instanceof Error) || !/\bRow too (?:big|large)\b.*\bCursorWindow\b/i.test(cause.message)) throw cause;
+    return recoverUnreadableItems(key, scope, generation, null);
+  }
+  if (!raw) return [];
+  let parsed: ReturnType<typeof parseItems>;
+  try { parsed = parseItems(raw); }
+  catch { return recoverUnreadableItems(key, scope, generation, raw); }
+  if (parsed === null) return recoverUnreadableItems(key, scope, generation, raw);
+  const own = parsed.items.filter((item) => item.userId === scope.userId);
+  const foreign = parsed.items.filter((item) => item.userId !== scope.userId);
+  // Preserve the original mixed envelope so malformed records retain their
+  // opaque evidence, including values not representable after JSON parsing.
+  if (parsed.malformed) await appendQuarantine(scope, raw, generation);
+  for (const item of foreign) await appendQuarantine(scope, serializeItems([item]), generation);
+  if ((parsed.malformed || foreign.length > 0) && !wipedSince(generation)) await writeItems(key, own);
+  return own;
+}
+
+async function recoverUnreadableItems(key: string, scope: QueueScope, generation: number, raw: string | null): Promise<QueuedEntry[]> {
     // 2026-09-26 audit M-M2: the quarantine append itself must never escape
     // readItems. An oversize/unreadable QUARANTINE row made getItem throw
     // here too, so the recovery catch wedged every queue op for the scope —
@@ -329,8 +316,7 @@ async function readItems(key: string, scope: QueueScope, generation: number): Pr
       /* the unreadable row stays; readItems still resolves, and the next
          write to this key replaces it (recovery on first enqueue). */
     }
-    return [];
-  }
+  return [];
 }
 
 async function writeItems(key: string, items: QueuedEntry[]): Promise<void> {
@@ -346,7 +332,6 @@ async function rejectedFor(scope: QueueScope, generation = queueGeneration): Pro
 }
 
 async function appendRejected(scope: QueueScope, items: QueuedEntry[], generation: number): Promise<void> {
-  // Stryker disable next-line ConditionalExpression: the empty-list arm is a cheap guard for future callers; every current caller passes a non-empty list, so flipping it changes nothing observable
   if (items.length === 0 || wipedSince(generation)) return;
   const existing = await rejectedFor(scope, generation);
   if (wipedSince(generation)) return;
@@ -411,9 +396,7 @@ export async function enqueue(item: QueuedEntry, source?: LocalWritePermit): Pro
 }
 
 function retryDelayMs(attempts: number): number {
-  // Stryker disable next-line ArithmeticOperator: the inner Math.min(attempts, 10) cap is redundant with the outer RETRY_MAX_MS clamp for every attempts value (2**10*30s and 2**1000 both clamp to RETRY_MAX_MS); it exists only to avoid computing 2**huge
   const exponential = Math.min(RETRY_MAX_MS, RETRY_BASE_MS * 2 ** Math.min(attempts, 10));
-  // Stryker disable next-line ArithmeticOperator: floor vs ceil differs by at most 1ms of backoff jitter — indistinguishable from Date.now() scheduling granularity by any assertion that is not inherently flaky
   return Math.floor(exponential / 2 + Math.random() * (exponential / 2));
 }
 
@@ -578,7 +561,7 @@ export async function flushQueue(currentUserId: string): Promise<number> {
           // the same upstream one-hour ceiling.
           const delay =
             outcome.retryAfterMs !== undefined
-              ? Math.min(outcome.retryAfterMs, SERVER_ADVISORY_MAX_MS)
+              ? Math.max(1000, Math.min(outcome.retryAfterMs, SERVER_ADVISORY_MAX_MS))
               : retryDelayMs(attempts);
           queue[index] = {
             ...item,
@@ -603,7 +586,6 @@ export async function flushQueue(currentUserId: string): Promise<number> {
 /** Sign-out/origin switch fences in-flight writes but keeps ciphertext for
  * the correct account scope. Account deletion calls clearQueue instead. */
 export function abortInFlightFlush(): void {
-  // Stryker disable next-line AssignmentOperator: the fence only needs generation CHANGES, never their direction; +=1 vs -=1 is indistinguishable through wipedSince's strict inequality
   queueGeneration += 1;
 }
 
@@ -616,7 +598,6 @@ export async function requeueRejected(userId?: string): Promise<number> {
       readItems(scope.queue, scope, generation),
       rejectedFor(scope, generation),
     ]);
-    // Stryker disable next-line ConditionalExpression: with an empty rejected list the loop below is a no-op that returns the same 0; the short-circuit is a cheap guard, not observable behavior
     if (wipedSince(generation) || rejected.length === 0) return 0;
     const ids = new Set(queue.map((item) => item.clientEntryId));
     const stillRejected: QueuedEntry[] = [];
@@ -669,7 +650,6 @@ export async function clearQueue(userId?: string): Promise<void> {
   // the bump and the multiRemove — resurrecting a queue the wipe had already
   // promised to empty (account deletion leaving ciphertext behind).
   return serialized(async () => {
-    // Stryker disable next-line AssignmentOperator: same rationale as abortInFlightFlush — direction of the generation change is unobservable through the inequality fence
     queueGeneration += 1;
     await AsyncStorage.multiRemove([scope.queue, scope.rejected, scope.quarantine, LEGACY_RECOVERY_KEY]);
   });
@@ -787,9 +767,9 @@ export async function prepareQueueRekey(userId: string, oldKey: Buffer, newKey: 
       const before = await AsyncStorage.getItem(key);
       if (before === null) continue;
       const items = parseItems(before);
-      if (!items) throw new Error("Retained entries require repair before rotation");
+      if (!items || items.malformed) throw new Error("Retained entries require repair before rotation");
       const next: QueuedEntry[] = [];
-      for (const item of items) {
+      for (const item of items.items) {
         const blobB64 = await rewrapEntryBlob(item, oldKey, newKey);
         if (!blobB64) throw new Error("A retained entry did not authenticate before rotation");
         next.push({ ...item, blobB64 });

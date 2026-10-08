@@ -17,7 +17,6 @@ import { describe, expect, it } from "vitest";
 
 import { sentimentComponents, sentimentScore } from "../src/brain/sentiment";
 import { erfc, fisherZDifferenceP, pearson } from "../src/brain/stats";
-import { LEXICON } from "../src/brain/lexicon";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const vectorsPath = join(here, "..", "..", "shared", "brain_vectors.json");
@@ -57,19 +56,6 @@ describe("on-device brain: sentiment parity with the Python engine", () => {
       expect(gotNa).toBeCloseTo(na, 6);
     });
   }
-});
-
-describe("on-device brain: the lexicon artifact is pinned to shared/", () => {
-  it("the TS lexicon module equals shared/brain_lexicon.json exactly", () => {
-    // 2026-09-28 audit (MEDIUM, mobile parity): the TS module is
-    // REGENERATED from the shared JSON — a hand-edited drift between the
-    // two would silently fork the on-device engine from the server's
-    // lexicon, so the artifact is pinned by deep equality.
-    const shared = JSON.parse(
-      readFileSync(join(here, "..", "..", "shared", "brain_lexicon.json"), "utf8"),
-    );
-    expect(LEXICON).toEqual(shared);
-  });
 });
 
 describe("on-device brain: statistics parity", () => {

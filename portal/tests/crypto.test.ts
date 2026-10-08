@@ -292,6 +292,9 @@ describe("therapist key custody", () => {
     await expect(unlockWrapPrivateKey(keys.wrapKek, pair.wrapKeyBlobB64, "other-name")).rejects.toThrow(TamperError);
     const unlocked = await unlockWrapPrivateKey(keys.wrapKek, pair.wrapKeyBlobB64, "drportal");
     expect(unlocked.algorithm.name).toBe("ECDH");
+    expect(unlocked.extractable).toBe(false);
+    expect(unlocked.usages).toEqual(["deriveBits"]);
+    await expect(crypto.subtle.exportKey("pkcs8", unlocked)).rejects.toThrow();
   });
 
   it("P-1 (2026-09-20): the verifier comes back as zeroizable bytes, never a string field", async () => {

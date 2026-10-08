@@ -12,7 +12,7 @@ import { toBase64,zeroize } from "../crypto/core";
 import { decryptQuestion } from "../crypto/patient";
 import { genericQuestionForDate } from "../genericQuestions";
 import { localDateISO } from "../dates";
-import { buildFeedbackBlob, clearFeedback, recordFeedbackTap } from "../questionFeedback";
+import { buildFeedbackBlob, clearFeedback, recordFeedbackTap, type FeedbackReceipt } from "../questionFeedback";
 import { reconcile } from "../sync";
 import { isOnline } from "../platform";
 import { getLocale, t } from "../strings";
@@ -31,6 +31,7 @@ export function QuestionView(props: { onRefreshed: (message: string) => void }):
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const generation = useRef(0);
+  const lastQuestionIdentity = useRef<string | null>(null);
 
   const load = useCallback(async (): Promise<void> => {
     const run = generation.current + 1;
@@ -51,7 +52,10 @@ export function QuestionView(props: { onRefreshed: (message: string) => void }):
       const today = await api.questionToday();
       if (generation.current !== run || !operation.current()) return;
       const payload = await decryptQuestion(keys.dataKey, owner, today.for_date, today.blob);
-      if (!operation.current()) return;
+      if (generation.current !== run || !operation.current()) return;
+      const identity = JSON.stringify([today.for_date, payload.question, payload.pattern_pid ?? null]);
+      if (lastQuestionIdentity.current !== identity) setAnswered(null);
+      lastQuestionIdentity.current = identity;
       setQuestion({ text: payload.question, pid: payload.pattern_pid, forDate: today.for_date });
       setGeneric(null);
     } catch (err) {
@@ -109,11 +113,12 @@ export function QuestionView(props: { onRefreshed: (message: string) => void }):
       // TTL-bounded processing session opened by this explicit button.
       const session = await api.openProcessingSession(toBase64(dataKey));
       if (!operation.current()) return;
-      const feedback = await buildFeedbackBlob(dataKey, owner).catch(() => null);
+      let feedbackReceipt: FeedbackReceipt | null = null;
+      const feedback = await buildFeedbackBlob(dataKey, owner, receipt => { feedbackReceipt = receipt; }).catch(() => null);
       if (!operation.current()) return;
       const result = await api.recompute(session.session_token, feedback ?? undefined);
       if (!operation.current()) return;
-      if (feedback) await clearFeedback(owner,permit).catch(() => undefined);
+      if (feedback && feedbackReceipt) await clearFeedback(owner,permit,{dataKey,receipt:feedbackReceipt}).catch(() => undefined);
       if (!operation.current()) return;
       await reconcile().catch(() => undefined);
       if (!operation.current()) return;

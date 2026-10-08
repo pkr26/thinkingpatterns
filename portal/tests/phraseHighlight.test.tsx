@@ -39,6 +39,12 @@ describe("rawMatchSpans", () => {
     expect(rawMatchSpans("nothing relevant here", "quiet phrase")).toEqual([]);
     expect(rawMatchSpans("anything at all", "!!!")).toEqual([]);
   });
+
+  it.each(["cafe\u0301", "cafe\u0301\u0308", "\u0301cafe\u0301", "cafe\u0301!"])("keeps decomposed accents inside the raw highlighted phrase %j", text => {
+    const spans = rawMatchSpans(text, "café");
+    expect(spans).toEqual([[text.startsWith("\u0301") ? 1 : 0, text.endsWith("!") ? text.length - 1 : text.length]]);
+    expect(text.slice(...spans[0]!)).toBe(text.startsWith("\u0301") ? text.slice(1) : text.endsWith("!") ? text.slice(0, -1) : text);
+  });
 });
 
 describe("HighlightedEntry rendering", () => {

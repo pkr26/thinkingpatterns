@@ -1,0 +1,2980 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`clears a cancelled mandatory MFA code before a new enrollment starts > new mandatory enrollment begins with an empty code 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Set up two-factor authentication to continue"
+      <p className="note note--danger">
+        "Patient data stays locked until two-factor authentication is enabled."
+      <p className="note">
+        "Add this account to your authenticator app, then enter its current 6-digit code."
+      <div className="totp-secret">
+        <code>
+          "JBSWY3DPEHPK3PXP"
+      <details className="disclose">
+        <summary>
+          "Can’t scan a QR code? Show the setup URI"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            <code>
+              "otpauth://totp/Fathom:test"
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-1">
+          "Authenticator code"
+        <input autoComplete="one-time-code" className="input" id="field-association-1" placeholder="123456" type="text" value="">
+      <button className="btn" disabled=true type="button">
+        "Enable two-factor authentication"
+      <button className="btn btn--small" disabled=false type="button">
+        "Cancel and sign out""
+`;
+
+exports[`clears every provider-held registration key after a failed handoff > failed handoff leaves no live credentials 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Create a therapist account"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Your name (shown to patients)"
+          <input autoComplete="name" className="input" id="field-association-1" placeholder="Dr. Jane Omega" type="text" value="Dr. Example">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-2" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-4">
+            "Repeat password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-4" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-5">
+            "Clinician enrollment token (if issued)"
+          <input autoComplete="one-time-code" className="input" id="field-association-5" placeholder="Organization-issued token" type="password" value="">
+        <label className="row">
+          <input checked=false type="checkbox">
+          <span>
+            "I confirm that I am 18 or older."
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note">
+          "Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters."
+        <p className="note">
+          "If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal's same-origin secure API connection and is never stored by this portal."
+        <p className="note note--danger">
+          "There is no password reset and no account recovery. Your sharing key is wrapped to this password alone: if you forget it, your account and every shared note become permanently unreadable. Save the password in a password manager before you continue."
+        <div className="banner banner--error" role="alert">
+          "local handoff rejected"
+        <button className="btn" disabled=true type="submit">
+          "Create account"
+        <button className="btn btn--small" disabled=false type="button">
+          "Back to sign in"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`enables mandatory MFA for register and hands off complete acknowledged credentials > backup codes await acknowledgement 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Set up two-factor authentication to continue"
+      <p className="note note--danger">
+        "Patient data stays locked until two-factor authentication is enabled."
+      <p className="note note--danger">
+        "Save these one-time recovery codes now. They will not be shown again."
+      <div className="totp-codes">
+        <code>
+          "ABCDEF1234"
+        <code>
+          "GHIJKL5678"
+      <button className="btn" disabled=false type="button">
+        "I saved the codes — continue"
+      <button className="btn btn--small" disabled=false type="button">
+        "Cancel and sign out""
+`;
+
+exports[`enables mandatory MFA for register and hands off complete acknowledged credentials > completed enrollment clears setup surface 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Create a therapist account"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Your name (shown to patients)"
+          <input autoComplete="name" className="input" id="field-association-1" placeholder="Dr. Jane Omega" type="text" value="Dr. Example">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-2" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-4">
+            "Repeat password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-4" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-5">
+            "Clinician enrollment token (if issued)"
+          <input autoComplete="one-time-code" className="input" id="field-association-5" placeholder="Organization-issued token" type="password" value="">
+        <label className="row">
+          <input checked=false type="checkbox">
+          <span>
+            "I confirm that I am 18 or older."
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note">
+          "Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters."
+        <p className="note">
+          "If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal's same-origin secure API connection and is never stored by this portal."
+        <p className="note note--danger">
+          "There is no password reset and no account recovery. Your sharing key is wrapped to this password alone: if you forget it, your account and every shared note become permanently unreadable. Save the password in a password manager before you continue."
+        <button className="btn" disabled=true type="submit">
+          "Create account"
+        <button className="btn btn--small" disabled=false type="button">
+          "Back to sign in"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`enables mandatory MFA for register and hands off complete acknowledged credentials > enrollment confirmation pending 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Set up two-factor authentication to continue"
+      <p className="note note--danger">
+        "Patient data stays locked until two-factor authentication is enabled."
+      <p className="note">
+        "Add this account to your authenticator app, then enter its current 6-digit code."
+      <div className="totp-secret">
+        <code>
+          "JBSWY3DPEHPK3PXP"
+      <details className="disclose">
+        <summary>
+          "Can’t scan a QR code? Show the setup URI"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            <code>
+              "otpauth://totp/Fathom:test"
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-1">
+          "Authenticator code"
+        <input autoComplete="one-time-code" className="input" id="field-association-1" placeholder="123456" type="text" value="123456">
+      <button className="btn" disabled=true type="button">
+        "Enabling…"
+      <button className="btn btn--small" disabled=true type="button">
+        "Cancel and sign out""
+`;
+
+exports[`enables mandatory MFA for register and hands off complete acknowledged credentials > portal handoff pending 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Set up two-factor authentication to continue"
+      <p className="note note--danger">
+        "Patient data stays locked until two-factor authentication is enabled."
+      <p className="note note--danger">
+        "Save these one-time recovery codes now. They will not be shown again."
+      <div className="totp-codes">
+        <code>
+          "ABCDEF1234"
+        <code>
+          "GHIJKL5678"
+      <button className="btn" disabled=true type="button">
+        "Opening portal…"
+      <button className="btn btn--small" disabled=true type="button">
+        "Cancel and sign out""
+`;
+
+exports[`enables mandatory MFA for signin and hands off complete acknowledged credentials > backup codes await acknowledgement 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Set up two-factor authentication to continue"
+      <p className="note note--danger">
+        "Patient data stays locked until two-factor authentication is enabled."
+      <p className="note note--danger">
+        "Save these one-time recovery codes now. They will not be shown again."
+      <div className="totp-codes">
+        <code>
+          "ABCDEF1234"
+        <code>
+          "GHIJKL5678"
+      <button className="btn" disabled=false type="button">
+        "I saved the codes — continue"
+      <button className="btn btn--small" disabled=false type="button">
+        "Cancel and sign out""
+`;
+
+exports[`enables mandatory MFA for signin and hands off complete acknowledged credentials > completed enrollment clears setup surface 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Sign in"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-1" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="current-password" className="input" id="field-association-2" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <button className="btn" disabled=true type="submit">
+          "Sign in"
+        <button className="btn btn--small" disabled=false type="button">
+          "Create a therapist account instead"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`enables mandatory MFA for signin and hands off complete acknowledged credentials > enrollment confirmation pending 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Set up two-factor authentication to continue"
+      <p className="note note--danger">
+        "Patient data stays locked until two-factor authentication is enabled."
+      <p className="note">
+        "Add this account to your authenticator app, then enter its current 6-digit code."
+      <div className="totp-secret">
+        <code>
+          "JBSWY3DPEHPK3PXP"
+      <details className="disclose">
+        <summary>
+          "Can’t scan a QR code? Show the setup URI"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            <code>
+              "otpauth://totp/Fathom:test"
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-1">
+          "Authenticator code"
+        <input autoComplete="one-time-code" className="input" id="field-association-1" placeholder="123456" type="text" value="123456">
+      <button className="btn" disabled=true type="button">
+        "Enabling…"
+      <button className="btn btn--small" disabled=true type="button">
+        "Cancel and sign out""
+`;
+
+exports[`enables mandatory MFA for signin and hands off complete acknowledged credentials > portal handoff pending 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Set up two-factor authentication to continue"
+      <p className="note note--danger">
+        "Patient data stays locked until two-factor authentication is enabled."
+      <p className="note note--danger">
+        "Save these one-time recovery codes now. They will not be shown again."
+      <div className="totp-codes">
+        <code>
+          "ABCDEF1234"
+        <code>
+          "GHIJKL5678"
+      <button className="btn" disabled=true type="button">
+        "Opening portal…"
+      <button className="btn btn--small" disabled=true type="button">
+        "Cancel and sign out""
+`;
+
+exports[`ignores an older abandoned enrollment-policy reject after a new policy succeeds > new confirmed policy survives old response 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Create a therapist account"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Your name (shown to patients)"
+          <input autoComplete="name" className="input" id="field-association-1" placeholder="Dr. Jane Omega" type="text" value="">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-2" placeholder="dromega" type="text" value="">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-4">
+            "Repeat password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-4" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-5">
+            "Clinician enrollment token (if issued)"
+          <input autoComplete="one-time-code" className="input" id="field-association-5" placeholder="Organization-issued token" type="password" value="">
+        <label className="row">
+          <input checked=false type="checkbox">
+          <span>
+            "I confirm that I am 18 or older."
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note">
+          "Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters."
+        <p className="note">
+          "If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal's same-origin secure API connection and is never stored by this portal."
+        <p className="note note--danger">
+          "There is no password reset and no account recovery. Your sharing key is wrapped to this password alone: if you forget it, your account and every shared note become permanently unreadable. Save the password in a password manager before you continue."
+        <button className="btn" disabled=true type="submit">
+          "Create account"
+        <button className="btn btn--small" disabled=false type="button">
+          "Back to sign in"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`ignores an older abandoned enrollment-policy resolve after a new policy succeeds > new confirmed policy survives old response 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Create a therapist account"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Your name (shown to patients)"
+          <input autoComplete="name" className="input" id="field-association-1" placeholder="Dr. Jane Omega" type="text" value="">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-2" placeholder="dromega" type="text" value="">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-4">
+            "Repeat password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-4" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-5">
+            "Clinician enrollment token (if issued)"
+          <input autoComplete="one-time-code" className="input" id="field-association-5" placeholder="Organization-issued token" type="password" value="">
+        <label className="row">
+          <input checked=false type="checkbox">
+          <span>
+            "I confirm that I am 18 or older."
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note">
+          "Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters."
+        <p className="note">
+          "If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal's same-origin secure API connection and is never stored by this portal."
+        <p className="note note--danger">
+          "There is no password reset and no account recovery. Your sharing key is wrapped to this password alone: if you forget it, your account and every shared note become permanently unreadable. Save the password in a password manager before you continue."
+        <button className="btn" disabled=true type="submit">
+          "Create account"
+        <button className="btn btn--small" disabled=false type="button">
+          "Back to sign in"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`keeps an unresolved policy visible and abandons it when returning to sign-in > abandoned policy cannot affect sign-in 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Sign in"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-1" placeholder="dromega" type="text" value="">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="current-password" className="input" id="field-association-2" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <button className="btn" disabled=true type="submit">
+          "Sign in"
+        <button className="btn btn--small" disabled=false type="button">
+          "Create a therapist account instead"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`keeps an unresolved policy visible and abandons it when returning to sign-in > checking policy 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Create a therapist account"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Your name (shown to patients)"
+          <input autoComplete="name" className="input" id="field-association-1" placeholder="Dr. Jane Omega" type="text" value="">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-2" placeholder="dromega" type="text" value="">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-4">
+            "Repeat password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-4" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-5">
+            "Clinician enrollment token (if issued)"
+          <input autoComplete="one-time-code" className="input" id="field-association-5" placeholder="Organization-issued token" type="password" value="">
+        <p className="note" role="status">
+          "Checking this server's clinician enrollment policy…"
+        <label className="row">
+          <input checked=false type="checkbox">
+          <span>
+            "I confirm that I am 18 or older."
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note">
+          "Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters."
+        <p className="note">
+          "If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal's same-origin secure API connection and is never stored by this portal."
+        <p className="note note--danger">
+          "There is no password reset and no account recovery. Your sharing key is wrapped to this password alone: if you forget it, your account and every shared note become permanently unreadable. Save the password in a password manager before you continue."
+        <button className="btn" disabled=true type="submit">
+          "Create account"
+        <button className="btn btn--small" disabled=false type="button">
+          "Back to sign in"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`keeps pending sign-in and account-creation actions visible while the provider is working > sign-in pending 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Sign in"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-1" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="current-password" className="input" id="field-association-2" type="password" value="Strong!pass123">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <button className="btn" disabled=true type="submit">
+          "Signing in…"
+        <button className="btn btn--small" disabled=true type="button">
+          "Create a therapist account instead"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`preserves bounded authenticator or recovery input " 123456 " > second-factor input and verification gate 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Sign in"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-1" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="current-password" className="input" id="field-association-2" type="password" value="Strong!pass123">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Authenticator code (or recovery code)"
+          <input autoComplete="one-time-code" className="input" id="field-association-3" placeholder="123456" type="text" value="123456">
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <div className="banner banner--error" role="alert">
+          "Enter the 6-digit code from your authenticator app — or one of your recovery codes."
+        <button className="btn" disabled=false type="submit">
+          "Verify code"
+        <button className="btn btn--small" disabled=false type="button">
+          "Create a therapist account instead"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`preserves bounded authenticator or recovery input "123456!" > second-factor input and verification gate 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Sign in"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-1" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="current-password" className="input" id="field-association-2" type="password" value="Strong!pass123">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Authenticator code (or recovery code)"
+          <input autoComplete="one-time-code" className="input" id="field-association-3" placeholder="123456" type="text" value="123456!">
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <div className="banner banner--error" role="alert">
+          "Enter the 6-digit code from your authenticator app — or one of your recovery codes."
+        <button className="btn" disabled=true type="submit">
+          "Verify code"
+        <button className="btn btn--small" disabled=false type="button">
+          "Create a therapist account instead"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`preserves bounded authenticator or recovery input "ABCDEFGHIJ" > second-factor input and verification gate 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Sign in"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-1" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="current-password" className="input" id="field-association-2" type="password" value="Strong!pass123">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Authenticator code (or recovery code)"
+          <input autoComplete="one-time-code" className="input" id="field-association-3" placeholder="123456" type="text" value="ABCDEFGHIJ">
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <div className="banner banner--error" role="alert">
+          "Enter the 6-digit code from your authenticator app — or one of your recovery codes."
+        <button className="btn" disabled=false type="submit">
+          "Verify code"
+        <button className="btn btn--small" disabled=false type="button">
+          "Create a therapist account instead"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`preserves bounded authenticator or recovery input "abc1234567" > second-factor input and verification gate 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Sign in"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-1" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="current-password" className="input" id="field-association-2" type="password" value="Strong!pass123">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Authenticator code (or recovery code)"
+          <input autoComplete="one-time-code" className="input" id="field-association-3" placeholder="123456" type="text" value="abc1234567">
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <div className="banner banner--error" role="alert">
+          "Enter the 6-digit code from your authenticator app — or one of your recovery codes."
+        <button className="btn" disabled=false type="submit">
+          "Verify code"
+        <button className="btn btn--small" disabled=false type="button">
+          "Create a therapist account instead"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`preserves bounded authenticator or recovery input "xyz123456" > second-factor input and verification gate 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Sign in"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-1" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="current-password" className="input" id="field-association-2" type="password" value="Strong!pass123">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Authenticator code (or recovery code)"
+          <input autoComplete="one-time-code" className="input" id="field-association-3" placeholder="123456" type="text" value="xyz123456">
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <div className="banner banner--error" role="alert">
+          "Enter the 6-digit code from your authenticator app — or one of your recovery codes."
+        <button className="btn" disabled=true type="submit">
+          "Verify code"
+        <button className="btn btn--small" disabled=false type="button">
+          "Create a therapist account instead"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`renders an unconfigured host without collecting credentials > host origin rejected 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Sign in"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-1" placeholder="dromega" type="text" value="">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="current-password" className="input" id="field-association-2" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note note--danger" role="status">
+          "This portal must be served from its configured HTTPS origin (or a loopback development origin)."
+        <button className="btn" disabled=true type="submit">
+          "Sign in"
+        <button className="btn btn--small" disabled=false type="button">
+          "Create a therapist account instead"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`renders empty login, registration and all missing-field gates > age missing 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Create a therapist account"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Your name (shown to patients)"
+          <input autoComplete="name" className="input" id="field-association-1" placeholder="Dr. Jane Omega" type="text" value="">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-2" placeholder="dromega" type="text" value="doctor">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="Strong!pass123">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div aria-label="Password strength: Good" className="pw-meter" role="status">
+          <span className="pw-meter__bar pw-meter__bar--3">
+          <span className="pw-meter__bar pw-meter__bar--3">
+          <span className="pw-meter__bar pw-meter__bar--3">
+          <span className="pw-meter__bar">
+          <span className="pw-meter__label pw-meter__label--3">
+            "Good"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-4">
+            "Repeat password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-4" type="password" value="Strong!pass123">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-5">
+            "Clinician enrollment token (if issued)"
+          <input autoComplete="one-time-code" className="input" id="field-association-5" placeholder="Organization-issued token" type="password" value="">
+        <label className="row">
+          <input checked=false type="checkbox">
+          <span>
+            "I confirm that I am 18 or older."
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note">
+          "Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters."
+        <p className="note">
+          "If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal's same-origin secure API connection and is never stored by this portal."
+        <p className="note note--danger">
+          "There is no password reset and no account recovery. Your sharing key is wrapped to this password alone: if you forget it, your account and every shared note become permanently unreadable. Save the password in a password manager before you continue."
+        <button className="btn" disabled=true type="submit">
+          "Create account"
+        <button className="btn btn--small" disabled=false type="button">
+          "Back to sign in"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`renders empty login, registration and all missing-field gates > confirmation and age missing 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Create a therapist account"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Your name (shown to patients)"
+          <input autoComplete="name" className="input" id="field-association-1" placeholder="Dr. Jane Omega" type="text" value="">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-2" placeholder="dromega" type="text" value="doctor">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="Strong!pass123">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div aria-label="Password strength: Good" className="pw-meter" role="status">
+          <span className="pw-meter__bar pw-meter__bar--3">
+          <span className="pw-meter__bar pw-meter__bar--3">
+          <span className="pw-meter__bar pw-meter__bar--3">
+          <span className="pw-meter__bar">
+          <span className="pw-meter__label pw-meter__label--3">
+            "Good"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-4">
+            "Repeat password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-4" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-5">
+            "Clinician enrollment token (if issued)"
+          <input autoComplete="one-time-code" className="input" id="field-association-5" placeholder="Organization-issued token" type="password" value="">
+        <label className="row">
+          <input checked=false type="checkbox">
+          <span>
+            "I confirm that I am 18 or older."
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note">
+          "Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters."
+        <p className="note">
+          "If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal's same-origin secure API connection and is never stored by this portal."
+        <p className="note note--danger">
+          "There is no password reset and no account recovery. Your sharing key is wrapped to this password alone: if you forget it, your account and every shared note become permanently unreadable. Save the password in a password manager before you continue."
+        <button className="btn" disabled=true type="submit">
+          "Create account"
+        <button className="btn btn--small" disabled=false type="button">
+          "Back to sign in"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`renders empty login, registration and all missing-field gates > empty login 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Sign in"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-1" placeholder="dromega" type="text" value="">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="current-password" className="input" id="field-association-2" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <button className="btn" disabled=true type="submit">
+          "Sign in"
+        <button className="btn btn--small" disabled=false type="button">
+          "Create a therapist account instead"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`renders empty login, registration and all missing-field gates > empty registration 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Create a therapist account"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Your name (shown to patients)"
+          <input autoComplete="name" className="input" id="field-association-1" placeholder="Dr. Jane Omega" type="text" value="">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-2" placeholder="dromega" type="text" value="">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-4">
+            "Repeat password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-4" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-5">
+            "Clinician enrollment token (if issued)"
+          <input autoComplete="one-time-code" className="input" id="field-association-5" placeholder="Organization-issued token" type="password" value="">
+        <label className="row">
+          <input checked=false type="checkbox">
+          <span>
+            "I confirm that I am 18 or older."
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note">
+          "Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters."
+        <p className="note">
+          "If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal's same-origin secure API connection and is never stored by this portal."
+        <p className="note note--danger">
+          "There is no password reset and no account recovery. Your sharing key is wrapped to this password alone: if you forget it, your account and every shared note become permanently unreadable. Save the password in a password manager before you continue."
+        <button className="btn" disabled=true type="submit">
+          "Create account"
+        <button className="btn btn--small" disabled=false type="button">
+          "Back to sign in"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`renders empty login, registration and all missing-field gates > username alone 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Create a therapist account"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Your name (shown to patients)"
+          <input autoComplete="name" className="input" id="field-association-1" placeholder="Dr. Jane Omega" type="text" value="">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-2" placeholder="dromega" type="text" value="doctor">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-4">
+            "Repeat password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-4" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-5">
+            "Clinician enrollment token (if issued)"
+          <input autoComplete="one-time-code" className="input" id="field-association-5" placeholder="Organization-issued token" type="password" value="">
+        <label className="row">
+          <input checked=false type="checkbox">
+          <span>
+            "I confirm that I am 18 or older."
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note">
+          "Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters."
+        <p className="note">
+          "If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal's same-origin secure API connection and is never stored by this portal."
+        <p className="note note--danger">
+          "There is no password reset and no account recovery. Your sharing key is wrapped to this password alone: if you forget it, your account and every shared note become permanently unreadable. Save the password in a password manager before you continue."
+        <button className="btn" disabled=true type="submit">
+          "Create account"
+        <button className="btn btn--small" disabled=false type="button">
+          "Back to sign in"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`renders exact password strength and allows the authored passphrase aaQwerty0123! > complete registration with exact valid password 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Create a therapist account"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Your name (shown to patients)"
+          <input autoComplete="name" className="input" id="field-association-1" placeholder="Dr. Jane Omega" type="text" value="Dr. Example">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-2" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="aaQwerty0123!">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div aria-label="Password strength: Good" className="pw-meter" role="status">
+          <span className="pw-meter__bar pw-meter__bar--3">
+          <span className="pw-meter__bar pw-meter__bar--3">
+          <span className="pw-meter__bar pw-meter__bar--3">
+          <span className="pw-meter__bar">
+          <span className="pw-meter__label pw-meter__label--3">
+            "Good"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-4">
+            "Repeat password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-4" type="password" value="aaQwerty0123!">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-5">
+            "Clinician enrollment token (if issued)"
+          <input autoComplete="one-time-code" className="input" id="field-association-5" placeholder="Organization-issued token" type="password" value="">
+        <label className="row">
+          <input checked=true type="checkbox">
+          <span>
+            "I confirm that I am 18 or older."
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note">
+          "Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters."
+        <p className="note">
+          "If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal's same-origin secure API connection and is never stored by this portal."
+        <p className="note note--danger">
+          "There is no password reset and no account recovery. Your sharing key is wrapped to this password alone: if you forget it, your account and every shared note become permanently unreadable. Save the password in a password manager before you continue."
+        <button className="btn" disabled=false type="submit">
+          "Create account"
+        <button className="btn btn--small" disabled=false type="button">
+          "Back to sign in"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`renders exact password strength and allows the authored passphrase sixteenlettersaa > complete registration with exact valid password 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Create a therapist account"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Your name (shown to patients)"
+          <input autoComplete="name" className="input" id="field-association-1" placeholder="Dr. Jane Omega" type="text" value="Dr. Example">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-2" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="sixteenlettersaa">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div aria-label="Password strength: Strong" className="pw-meter" role="status">
+          <span className="pw-meter__bar pw-meter__bar--4">
+          <span className="pw-meter__bar pw-meter__bar--4">
+          <span className="pw-meter__bar pw-meter__bar--4">
+          <span className="pw-meter__bar pw-meter__bar--4">
+          <span className="pw-meter__label pw-meter__label--4">
+            "Strong"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-4">
+            "Repeat password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-4" type="password" value="sixteenlettersaa">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-5">
+            "Clinician enrollment token (if issued)"
+          <input autoComplete="one-time-code" className="input" id="field-association-5" placeholder="Organization-issued token" type="password" value="">
+        <label className="row">
+          <input checked=true type="checkbox">
+          <span>
+            "I confirm that I am 18 or older."
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note">
+          "Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters."
+        <p className="note">
+          "If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal's same-origin secure API connection and is never stored by this portal."
+        <p className="note note--danger">
+          "There is no password reset and no account recovery. Your sharing key is wrapped to this password alone: if you forget it, your account and every shared note become permanently unreadable. Save the password in a password manager before you continue."
+        <button className="btn" disabled=false type="submit">
+          "Create account"
+        <button className="btn btn--small" disabled=false type="button">
+          "Back to sign in"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`renders the isolated missing registration age gate > complete registration except isolated gate 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Create a therapist account"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Your name (shown to patients)"
+          <input autoComplete="name" className="input" id="field-association-1" placeholder="Dr. Jane Omega" type="text" value="Dr. Example">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-2" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="Strong!pass123">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div aria-label="Password strength: Good" className="pw-meter" role="status">
+          <span className="pw-meter__bar pw-meter__bar--3">
+          <span className="pw-meter__bar pw-meter__bar--3">
+          <span className="pw-meter__bar pw-meter__bar--3">
+          <span className="pw-meter__bar">
+          <span className="pw-meter__label pw-meter__label--3">
+            "Good"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-4">
+            "Repeat password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-4" type="password" value="Strong!pass123">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-5">
+            "Clinician enrollment token (if issued)"
+          <input autoComplete="one-time-code" className="input" id="field-association-5" placeholder="Organization-issued token" type="password" value="">
+        <label className="row">
+          <input checked=false type="checkbox">
+          <span>
+            "I confirm that I am 18 or older."
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note">
+          "Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters."
+        <p className="note">
+          "If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal's same-origin secure API connection and is never stored by this portal."
+        <p className="note note--danger">
+          "There is no password reset and no account recovery. Your sharing key is wrapped to this password alone: if you forget it, your account and every shared note become permanently unreadable. Save the password in a password manager before you continue."
+        <button className="btn" disabled=true type="submit">
+          "Create account"
+        <button className="btn btn--small" disabled=false type="button">
+          "Back to sign in"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`renders the isolated missing registration confirmation gate > complete registration except isolated gate 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Create a therapist account"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Your name (shown to patients)"
+          <input autoComplete="name" className="input" id="field-association-1" placeholder="Dr. Jane Omega" type="text" value="Dr. Example">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-2" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="Strong!pass123">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div aria-label="Password strength: Good" className="pw-meter" role="status">
+          <span className="pw-meter__bar pw-meter__bar--3">
+          <span className="pw-meter__bar pw-meter__bar--3">
+          <span className="pw-meter__bar pw-meter__bar--3">
+          <span className="pw-meter__bar">
+          <span className="pw-meter__label pw-meter__label--3">
+            "Good"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-4">
+            "Repeat password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-4" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-5">
+            "Clinician enrollment token (if issued)"
+          <input autoComplete="one-time-code" className="input" id="field-association-5" placeholder="Organization-issued token" type="password" value="">
+        <label className="row">
+          <input checked=true type="checkbox">
+          <span>
+            "I confirm that I am 18 or older."
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note">
+          "Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters."
+        <p className="note">
+          "If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal's same-origin secure API connection and is never stored by this portal."
+        <p className="note note--danger">
+          "There is no password reset and no account recovery. Your sharing key is wrapped to this password alone: if you forget it, your account and every shared note become permanently unreadable. Save the password in a password manager before you continue."
+        <button className="btn" disabled=true type="submit">
+          "Create account"
+        <button className="btn btn--small" disabled=false type="button">
+          "Back to sign in"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`renders the isolated missing registration password gate > complete registration except isolated gate 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Create a therapist account"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Your name (shown to patients)"
+          <input autoComplete="name" className="input" id="field-association-1" placeholder="Dr. Jane Omega" type="text" value="Dr. Example">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-2" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-4">
+            "Repeat password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-4" type="password" value="Strong!pass123">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-5">
+            "Clinician enrollment token (if issued)"
+          <input autoComplete="one-time-code" className="input" id="field-association-5" placeholder="Organization-issued token" type="password" value="">
+        <label className="row">
+          <input checked=true type="checkbox">
+          <span>
+            "I confirm that I am 18 or older."
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note">
+          "Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters."
+        <p className="note">
+          "If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal's same-origin secure API connection and is never stored by this portal."
+        <p className="note note--danger">
+          "There is no password reset and no account recovery. Your sharing key is wrapped to this password alone: if you forget it, your account and every shared note become permanently unreadable. Save the password in a password manager before you continue."
+        <button className="btn" disabled=true type="submit">
+          "Create account"
+        <button className="btn btn--small" disabled=false type="button">
+          "Back to sign in"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`renders the isolated missing registration policy unavailable gate > complete registration except isolated gate 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Create a therapist account"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Your name (shown to patients)"
+          <input autoComplete="name" className="input" id="field-association-1" placeholder="Dr. Jane Omega" type="text" value="Dr. Example">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-2" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="Strong!pass123">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div aria-label="Password strength: Good" className="pw-meter" role="status">
+          <span className="pw-meter__bar pw-meter__bar--3">
+          <span className="pw-meter__bar pw-meter__bar--3">
+          <span className="pw-meter__bar pw-meter__bar--3">
+          <span className="pw-meter__bar">
+          <span className="pw-meter__label pw-meter__label--3">
+            "Good"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-4">
+            "Repeat password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-4" type="password" value="Strong!pass123">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-5">
+            "Clinician enrollment token (if issued)"
+          <input autoComplete="one-time-code" className="input" id="field-association-5" placeholder="Organization-issued token" type="password" value="">
+        <p className="note note--danger" role="status">
+          "New clinician enrollment is unavailable on this server. Contact your organization administrator."
+        <label className="row">
+          <input checked=true type="checkbox">
+          <span>
+            "I confirm that I am 18 or older."
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note">
+          "Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters."
+        <p className="note">
+          "If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal's same-origin secure API connection and is never stored by this portal."
+        <p className="note note--danger">
+          "There is no password reset and no account recovery. Your sharing key is wrapped to this password alone: if you forget it, your account and every shared note become permanently unreadable. Save the password in a password manager before you continue."
+        <button className="btn" disabled=true type="submit">
+          "Create account"
+        <button className="btn btn--small" disabled=false type="button">
+          "Back to sign in"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`renders the isolated missing registration username gate > complete registration except isolated gate 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Create a therapist account"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Your name (shown to patients)"
+          <input autoComplete="name" className="input" id="field-association-1" placeholder="Dr. Jane Omega" type="text" value="Dr. Example">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-2" placeholder="dromega" type="text" value="">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="Strong!pass123">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div aria-label="Password strength: Good" className="pw-meter" role="status">
+          <span className="pw-meter__bar pw-meter__bar--3">
+          <span className="pw-meter__bar pw-meter__bar--3">
+          <span className="pw-meter__bar pw-meter__bar--3">
+          <span className="pw-meter__bar">
+          <span className="pw-meter__label pw-meter__label--3">
+            "Good"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-4">
+            "Repeat password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-4" type="password" value="Strong!pass123">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-5">
+            "Clinician enrollment token (if issued)"
+          <input autoComplete="one-time-code" className="input" id="field-association-5" placeholder="Organization-issued token" type="password" value="">
+        <label className="row">
+          <input checked=true type="checkbox">
+          <span>
+            "I confirm that I am 18 or older."
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note">
+          "Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters."
+        <p className="note">
+          "If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal's same-origin secure API connection and is never stored by this portal."
+        <p className="note note--danger">
+          "There is no password reset and no account recovery. Your sharing key is wrapped to this password alone: if you forget it, your account and every shared note become permanently unreadable. Save the password in a password manager before you continue."
+        <button className="btn" disabled=true type="submit">
+          "Create account"
+        <button className="btn btn--small" disabled=false type="button">
+          "Back to sign in"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`reports unavailable enrollment-policy lookup and disables registration > policy unavailable 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Create a therapist account"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Your name (shown to patients)"
+          <input autoComplete="name" className="input" id="field-association-1" placeholder="Dr. Jane Omega" type="text" value="">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-2" placeholder="dromega" type="text" value="">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-4">
+            "Repeat password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-4" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-5">
+            "Clinician enrollment token (if issued)"
+          <input autoComplete="one-time-code" className="input" id="field-association-5" placeholder="Organization-issued token" type="password" value="">
+        <p className="note note--danger" role="status">
+          "Could not confirm this server's clinician enrollment policy. Contact its administrator."
+        <label className="row">
+          <input checked=false type="checkbox">
+          <span>
+            "I confirm that I am 18 or older."
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note">
+          "Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters."
+        <p className="note">
+          "If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal's same-origin secure API connection and is never stored by this portal."
+        <p className="note note--danger">
+          "There is no password reset and no account recovery. Your sharing key is wrapped to this password alone: if you forget it, your account and every shared note become permanently unreadable. Save the password in a password manager before you continue."
+        <button className="btn" disabled=true type="submit">
+          "Create account"
+        <button className="btn btn--small" disabled=false type="button">
+          "Back to sign in"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`retires caller-held mandatory MFA custody on cancel after failure > cancelled enrollment returns to clean sign-in 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Sign in"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-1" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="current-password" className="input" id="field-association-2" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <button className="btn" disabled=true type="submit">
+          "Sign in"
+        <button className="btn btn--small" disabled=false type="button">
+          "Create a therapist account instead"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`retires caller-held mandatory MFA custody on cancel after failure > failed handoff preserves only recovery codes 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Set up two-factor authentication to continue"
+      <p className="note note--danger">
+        "Patient data stays locked until two-factor authentication is enabled."
+      <p className="note note--danger">
+        "Save these one-time recovery codes now. They will not be shown again."
+      <div className="totp-codes">
+        <code>
+          "ABCDE12345"
+        <code>
+          "FGHIJ67890"
+      <button className="btn" disabled=false type="button">
+        "I saved the codes — return to sign in"
+      <div className="banner banner--error" role="alert">
+        "Two-factor authentication is enabled, but the portal could not finish opening. Try signing in again."
+      <button className="btn btn--small" disabled=false type="button">
+        "Cancel and sign out""
+`;
+
+exports[`retires caller-held mandatory MFA custody on cancel setup > cancelled enrollment returns to clean sign-in 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Sign in"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-1" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="current-password" className="input" id="field-association-2" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <button className="btn" disabled=true type="submit">
+          "Sign in"
+        <button className="btn btn--small" disabled=false type="button">
+          "Create a therapist account instead"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`retires caller-held mandatory MFA custody on failed handoff > failed handoff preserves only recovery codes 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Set up two-factor authentication to continue"
+      <p className="note note--danger">
+        "Patient data stays locked until two-factor authentication is enabled."
+      <p className="note note--danger">
+        "Save these one-time recovery codes now. They will not be shown again."
+      <div className="totp-codes">
+        <code>
+          "ABCDE12345"
+        <code>
+          "FGHIJ67890"
+      <button className="btn" disabled=false type="button">
+        "I saved the codes — return to sign in"
+      <div className="banner banner--error" role="alert">
+        "Two-factor authentication is enabled, but the portal could not finish opening. Try signing in again."
+      <button className="btn btn--small" disabled=false type="button">
+        "Cancel and sign out""
+`;
+
+exports[`shows a failed mandatory enrollment confirmation without retaining a submitted code > digits-only bounded code 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Set up two-factor authentication to continue"
+      <p className="note note--danger">
+        "Patient data stays locked until two-factor authentication is enabled."
+      <p className="note">
+        "Add this account to your authenticator app, then enter its current 6-digit code."
+      <div className="totp-secret">
+        <code>
+          "JBSWY3DPEHPK3PXP"
+      <details className="disclose">
+        <summary>
+          "Can’t scan a QR code? Show the setup URI"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            <code>
+              "otpauth://totp/Fathom:test"
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-1">
+          "Authenticator code"
+        <input autoComplete="one-time-code" className="input" id="field-association-1" placeholder="123456" type="text" value="123456">
+      <button className="btn" disabled=false type="button">
+        "Enable two-factor authentication"
+      <button className="btn btn--small" disabled=false type="button">
+        "Cancel and sign out""
+`;
+
+exports[`shows a failed mandatory enrollment confirmation without retaining a submitted code > enrollment starts without a submitted code 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Set up two-factor authentication to continue"
+      <p className="note note--danger">
+        "Patient data stays locked until two-factor authentication is enabled."
+      <p className="note">
+        "Add this account to your authenticator app, then enter its current 6-digit code."
+      <div className="totp-secret">
+        <code>
+          "JBSWY3DPEHPK3PXP"
+      <details className="disclose">
+        <summary>
+          "Can’t scan a QR code? Show the setup URI"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            <code>
+              "otpauth://totp/Fathom:test"
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-1">
+          "Authenticator code"
+        <input autoComplete="one-time-code" className="input" id="field-association-1" placeholder="123456" type="text" value="">
+      <button className="btn" disabled=true type="button">
+        "Enable two-factor authentication"
+      <button className="btn btn--small" disabled=false type="button">
+        "Cancel and sign out""
+`;
+
+exports[`shows a failed mandatory enrollment confirmation without retaining a submitted code > failed confirmation and wiped code 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Set up two-factor authentication to continue"
+      <p className="note note--danger">
+        "Patient data stays locked until two-factor authentication is enabled."
+      <p className="note">
+        "Add this account to your authenticator app, then enter its current 6-digit code."
+      <div className="totp-secret">
+        <code>
+          "JBSWY3DPEHPK3PXP"
+      <details className="disclose">
+        <summary>
+          "Can’t scan a QR code? Show the setup URI"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            <code>
+              "otpauth://totp/Fathom:test"
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-1">
+          "Authenticator code"
+        <input autoComplete="one-time-code" className="input" id="field-association-1" placeholder="123456" type="text" value="123456">
+      <button className="btn" disabled=false type="button">
+        "Enable two-factor authentication"
+      <div className="banner banner--error" role="alert">
+        "That authenticator code was not accepted. Enter the current 6-digit code and try again."
+      <button className="btn btn--small" disabled=false type="button">
+        "Cancel and sign out""
+`;
+
+exports[`shows actionable registration failure 0 and clears submission secrets > registration failure 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Create a therapist account"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Your name (shown to patients)"
+          <input autoComplete="name" className="input" id="field-association-1" placeholder="Dr. Jane Omega" type="text" value="Dr. Example">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-2" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-4">
+            "Repeat password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-4" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-5">
+            "Clinician enrollment token (if issued)"
+          <input autoComplete="one-time-code" className="input" id="field-association-5" placeholder="Organization-issued token" type="password" value="">
+        <label className="row">
+          <input checked=false type="checkbox">
+          <span>
+            "I confirm that I am 18 or older."
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note">
+          "Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters."
+        <p className="note">
+          "If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal's same-origin secure API connection and is never stored by this portal."
+        <p className="note note--danger">
+          "There is no password reset and no account recovery. Your sharing key is wrapped to this password alone: if you forget it, your account and every shared note become permanently unreadable. Save the password in a password manager before you continue."
+        <div className="banner banner--error" role="alert">
+          "Could not reach the server — check your connection."
+        <button className="btn" disabled=true type="submit">
+          "Create account"
+        <button className="btn btn--small" disabled=false type="button">
+          "Back to sign in"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`shows actionable registration failure 400 and clears submission secrets > registration failure 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Create a therapist account"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Your name (shown to patients)"
+          <input autoComplete="name" className="input" id="field-association-1" placeholder="Dr. Jane Omega" type="text" value="Dr. Example">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-2" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-4">
+            "Repeat password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-4" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-5">
+            "Clinician enrollment token (if issued)"
+          <input autoComplete="one-time-code" className="input" id="field-association-5" placeholder="Organization-issued token" type="password" value="">
+        <label className="row">
+          <input checked=false type="checkbox">
+          <span>
+            "I confirm that I am 18 or older."
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note">
+          "Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters."
+        <p className="note">
+          "If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal's same-origin secure API connection and is never stored by this portal."
+        <p className="note note--danger">
+          "There is no password reset and no account recovery. Your sharing key is wrapped to this password alone: if you forget it, your account and every shared note become permanently unreadable. Save the password in a password manager before you continue."
+        <div className="banner banner--error" role="alert">
+          "Registration failed — check the form and try again."
+        <button className="btn" disabled=true type="submit">
+          "Create account"
+        <button className="btn btn--small" disabled=false type="button">
+          "Back to sign in"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`shows actionable registration failure 403 and clears submission secrets > registration failure 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Create a therapist account"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Your name (shown to patients)"
+          <input autoComplete="name" className="input" id="field-association-1" placeholder="Dr. Jane Omega" type="text" value="Dr. Example">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-2" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-4">
+            "Repeat password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-4" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-5">
+            "Clinician enrollment token (if issued)"
+          <input autoComplete="one-time-code" className="input" id="field-association-5" placeholder="Organization-issued token" type="password" value="">
+        <label className="row">
+          <input checked=false type="checkbox">
+          <span>
+            "I confirm that I am 18 or older."
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note">
+          "Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters."
+        <p className="note">
+          "If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal's same-origin secure API connection and is never stored by this portal."
+        <p className="note note--danger">
+          "There is no password reset and no account recovery. Your sharing key is wrapped to this password alone: if you forget it, your account and every shared note become permanently unreadable. Save the password in a password manager before you continue."
+        <div className="banner banner--error" role="alert">
+          "This server did not authorize clinician enrollment. Contact your organization administrator."
+        <button className="btn" disabled=true type="submit">
+          "Create account"
+        <button className="btn btn--small" disabled=false type="button">
+          "Back to sign in"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`shows actionable registration failure 409 and clears submission secrets > registration failure 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Create a therapist account"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Your name (shown to patients)"
+          <input autoComplete="name" className="input" id="field-association-1" placeholder="Dr. Jane Omega" type="text" value="Dr. Example">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-2" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-4">
+            "Repeat password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-4" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-5">
+            "Clinician enrollment token (if issued)"
+          <input autoComplete="one-time-code" className="input" id="field-association-5" placeholder="Organization-issued token" type="password" value="">
+        <label className="row">
+          <input checked=false type="checkbox">
+          <span>
+            "I confirm that I am 18 or older."
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note">
+          "Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters."
+        <p className="note">
+          "If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal's same-origin secure API connection and is never stored by this portal."
+        <p className="note note--danger">
+          "There is no password reset and no account recovery. Your sharing key is wrapped to this password alone: if you forget it, your account and every shared note become permanently unreadable. Save the password in a password manager before you continue."
+        <div className="banner banner--error" role="alert">
+          "That username is already in use. Choose another username."
+        <button className="btn" disabled=true type="submit">
+          "Create account"
+        <button className="btn btn--small" disabled=false type="button">
+          "Back to sign in"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`shows actionable registration failure 429 and clears submission secrets > registration failure 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Create a therapist account"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Your name (shown to patients)"
+          <input autoComplete="name" className="input" id="field-association-1" placeholder="Dr. Jane Omega" type="text" value="Dr. Example">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-2" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-4">
+            "Repeat password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-4" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-5">
+            "Clinician enrollment token (if issued)"
+          <input autoComplete="one-time-code" className="input" id="field-association-5" placeholder="Organization-issued token" type="password" value="">
+        <label className="row">
+          <input checked=false type="checkbox">
+          <span>
+            "I confirm that I am 18 or older."
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note">
+          "Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters."
+        <p className="note">
+          "If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal's same-origin secure API connection and is never stored by this portal."
+        <p className="note note--danger">
+          "There is no password reset and no account recovery. Your sharing key is wrapped to this password alone: if you forget it, your account and every shared note become permanently unreadable. Save the password in a password manager before you continue."
+        <div className="banner banner--error" role="alert">
+          "Too many registration attempts — wait a moment and try again."
+        <button className="btn" disabled=true type="submit">
+          "Create account"
+        <button className="btn btn--small" disabled=false type="button">
+          "Back to sign in"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`shows actionable registration failure 500 and clears submission secrets > registration failure 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Create a therapist account"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Your name (shown to patients)"
+          <input autoComplete="name" className="input" id="field-association-1" placeholder="Dr. Jane Omega" type="text" value="Dr. Example">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-2" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-4">
+            "Repeat password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-4" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-5">
+            "Clinician enrollment token (if issued)"
+          <input autoComplete="one-time-code" className="input" id="field-association-5" placeholder="Organization-issued token" type="password" value="">
+        <label className="row">
+          <input checked=false type="checkbox">
+          <span>
+            "I confirm that I am 18 or older."
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note">
+          "Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters."
+        <p className="note">
+          "If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal's same-origin secure API connection and is never stored by this portal."
+        <p className="note note--danger">
+          "There is no password reset and no account recovery. Your sharing key is wrapped to this password alone: if you forget it, your account and every shared note become permanently unreadable. Save the password in a password manager before you continue."
+        <div className="banner banner--error" role="alert">
+          "The server could not create the account — try again in a moment."
+        <button className="btn" disabled=true type="submit">
+          "Create account"
+        <button className="btn btn--small" disabled=false type="button">
+          "Back to sign in"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`shows actionable registration failure 501 and clears submission secrets > registration failure 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Create a therapist account"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Your name (shown to patients)"
+          <input autoComplete="name" className="input" id="field-association-1" placeholder="Dr. Jane Omega" type="text" value="Dr. Example">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-2" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-4">
+            "Repeat password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-4" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-5">
+            "Clinician enrollment token (if issued)"
+          <input autoComplete="one-time-code" className="input" id="field-association-5" placeholder="Organization-issued token" type="password" value="">
+        <label className="row">
+          <input checked=false type="checkbox">
+          <span>
+            "I confirm that I am 18 or older."
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note">
+          "Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters."
+        <p className="note">
+          "If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal's same-origin secure API connection and is never stored by this portal."
+        <p className="note note--danger">
+          "There is no password reset and no account recovery. Your sharing key is wrapped to this password alone: if you forget it, your account and every shared note become permanently unreadable. Save the password in a password manager before you continue."
+        <div className="banner banner--error" role="alert">
+          "The server could not create the account — try again in a moment."
+        <button className="btn" disabled=true type="submit">
+          "Create account"
+        <button className="btn btn--small" disabled=false type="button">
+          "Back to sign in"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`shows actionable sign-in failure 0 and clears the submitted password > sign-in failure 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Sign in"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-1" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="current-password" className="input" id="field-association-2" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <div className="banner banner--error" role="alert">
+          "Could not reach the server — check your connection."
+        <button className="btn" disabled=true type="submit">
+          "Sign in"
+        <button className="btn btn--small" disabled=false type="button">
+          "Create a therapist account instead"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`shows actionable sign-in failure 400 and clears the submitted password > sign-in failure 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Sign in"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-1" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="current-password" className="input" id="field-association-2" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <div className="banner banner--error" role="alert">
+          "Sign-in failed — check your details and try again."
+        <button className="btn" disabled=true type="submit">
+          "Sign in"
+        <button className="btn btn--small" disabled=false type="button">
+          "Create a therapist account instead"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`shows actionable sign-in failure 429 and clears the submitted password > sign-in failure 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Sign in"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-1" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="current-password" className="input" id="field-association-2" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <div className="banner banner--error" role="alert">
+          "Too many sign-in attempts — wait a moment and try again."
+        <button className="btn" disabled=true type="submit">
+          "Sign in"
+        <button className="btn btn--small" disabled=false type="button">
+          "Create a therapist account instead"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`shows actionable sign-in failure 500 and clears the submitted password > sign-in failure 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Sign in"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-1" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="current-password" className="input" id="field-association-2" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <div className="banner banner--error" role="alert">
+          "The server could not complete sign-in — try again in a moment."
+        <button className="btn" disabled=true type="submit">
+          "Sign in"
+        <button className="btn btn--small" disabled=false type="button">
+          "Create a therapist account instead"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`shows actionable sign-in failure 501 and clears the submitted password > sign-in failure 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Sign in"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-1" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="current-password" className="input" id="field-association-2" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <div className="banner banner--error" role="alert">
+          "The server could not complete sign-in — try again in a moment."
+        <button className="btn" disabled=true type="submit">
+          "Sign in"
+        <button className="btn btn--small" disabled=false type="button">
+          "Create a therapist account instead"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`shows an empty second-factor field when the server first requires it and retires it when changing form modes > first second-factor challenge keeps password and empty code 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Sign in"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-1" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="current-password" className="input" id="field-association-2" type="password" value="Strong!pass123">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Authenticator code (or recovery code)"
+          <input autoComplete="one-time-code" className="input" id="field-association-3" placeholder="123456" type="text" value="">
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <div className="banner banner--error" role="alert">
+          "Enter the 6-digit code from your authenticator app — or one of your recovery codes."
+        <button className="btn" disabled=true type="submit">
+          "Verify code"
+        <button className="btn btn--small" disabled=false type="button">
+          "Create a therapist account instead"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`shows an empty second-factor field when the server first requires it and retires it when changing form modes > registration retires the sign-in factor and error 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Create a therapist account"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Your name (shown to patients)"
+          <input autoComplete="name" className="input" id="field-association-1" placeholder="Dr. Jane Omega" type="text" value="">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-2" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="Strong!pass123">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div aria-label="Password strength: Good" className="pw-meter" role="status">
+          <span className="pw-meter__bar pw-meter__bar--3">
+          <span className="pw-meter__bar pw-meter__bar--3">
+          <span className="pw-meter__bar pw-meter__bar--3">
+          <span className="pw-meter__bar">
+          <span className="pw-meter__label pw-meter__label--3">
+            "Good"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-4">
+            "Repeat password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-4" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-5">
+            "Clinician enrollment token (if issued)"
+          <input autoComplete="one-time-code" className="input" id="field-association-5" placeholder="Organization-issued token" type="password" value="">
+        <label className="row">
+          <input checked=false type="checkbox">
+          <span>
+            "I confirm that I am 18 or older."
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note">
+          "Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters."
+        <p className="note">
+          "If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal's same-origin secure API connection and is never stored by this portal."
+        <p className="note note--danger">
+          "There is no password reset and no account recovery. Your sharing key is wrapped to this password alone: if you forget it, your account and every shared note become permanently unreadable. Save the password in a password manager before you continue."
+        <button className="btn" disabled=true type="submit">
+          "Create account"
+        <button className="btn btn--small" disabled=false type="button">
+          "Back to sign in"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`shows an empty second-factor field when the server first requires it and retires it when changing form modes > return from registration keeps no old sign-in factor 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Sign in"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-1" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="current-password" className="input" id="field-association-2" type="password" value="Strong!pass123">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <button className="btn" disabled=false type="submit">
+          "Sign in"
+        <button className="btn btn--small" disabled=false type="button">
+          "Create a therapist account instead"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`shows password strength for "" > registration strength and policy 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Create a therapist account"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Your name (shown to patients)"
+          <input autoComplete="name" className="input" id="field-association-1" placeholder="Dr. Jane Omega" type="text" value="">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-2" placeholder="dromega" type="text" value="">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-4">
+            "Repeat password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-4" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-5">
+            "Clinician enrollment token (if issued)"
+          <input autoComplete="one-time-code" className="input" id="field-association-5" placeholder="Organization-issued token" type="password" value="">
+        <label className="row">
+          <input checked=false type="checkbox">
+          <span>
+            "I confirm that I am 18 or older."
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note">
+          "Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters."
+        <p className="note">
+          "If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal's same-origin secure API connection and is never stored by this portal."
+        <p className="note note--danger">
+          "There is no password reset and no account recovery. Your sharing key is wrapped to this password alone: if you forget it, your account and every shared note become permanently unreadable. Save the password in a password manager before you continue."
+        <button className="btn" disabled=true type="submit">
+          "Create account"
+        <button className="btn btn--small" disabled=false type="button">
+          "Back to sign in"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`shows password strength for "123456" > registration strength and policy 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Create a therapist account"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Your name (shown to patients)"
+          <input autoComplete="name" className="input" id="field-association-1" placeholder="Dr. Jane Omega" type="text" value="">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-2" placeholder="dromega" type="text" value="">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="123456">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div aria-label="Password strength: Weak" className="pw-meter" role="status">
+          <span className="pw-meter__bar pw-meter__bar--1">
+          <span className="pw-meter__bar">
+          <span className="pw-meter__bar">
+          <span className="pw-meter__bar">
+          <span className="pw-meter__label pw-meter__label--1">
+            "Weak"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-4">
+            "Repeat password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-4" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-5">
+            "Clinician enrollment token (if issued)"
+          <input autoComplete="one-time-code" className="input" id="field-association-5" placeholder="Organization-issued token" type="password" value="">
+        <label className="row">
+          <input checked=false type="checkbox">
+          <span>
+            "I confirm that I am 18 or older."
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note">
+          "Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters."
+        <p className="note">
+          "If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal's same-origin secure API connection and is never stored by this portal."
+        <p className="note note--danger">
+          "There is no password reset and no account recovery. Your sharing key is wrapped to this password alone: if you forget it, your account and every shared note become permanently unreadable. Save the password in a password manager before you continue."
+        <button className="btn" disabled=true type="submit">
+          "Create account"
+        <button className="btn btn--small" disabled=false type="button">
+          "Back to sign in"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`shows password strength for "Aa0!Aa0!Aa0!" > registration strength and policy 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Create a therapist account"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Your name (shown to patients)"
+          <input autoComplete="name" className="input" id="field-association-1" placeholder="Dr. Jane Omega" type="text" value="">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-2" placeholder="dromega" type="text" value="">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="Aa0!Aa0!Aa0!">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div aria-label="Password strength: Good" className="pw-meter" role="status">
+          <span className="pw-meter__bar pw-meter__bar--3">
+          <span className="pw-meter__bar pw-meter__bar--3">
+          <span className="pw-meter__bar pw-meter__bar--3">
+          <span className="pw-meter__bar">
+          <span className="pw-meter__label pw-meter__label--3">
+            "Good"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-4">
+            "Repeat password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-4" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-5">
+            "Clinician enrollment token (if issued)"
+          <input autoComplete="one-time-code" className="input" id="field-association-5" placeholder="Organization-issued token" type="password" value="">
+        <label className="row">
+          <input checked=false type="checkbox">
+          <span>
+            "I confirm that I am 18 or older."
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note">
+          "Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters."
+        <p className="note">
+          "If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal's same-origin secure API connection and is never stored by this portal."
+        <p className="note note--danger">
+          "There is no password reset and no account recovery. Your sharing key is wrapped to this password alone: if you forget it, your account and every shared note become permanently unreadable. Save the password in a password manager before you continue."
+        <button className="btn" disabled=true type="submit">
+          "Create account"
+        <button className="btn btn--small" disabled=false type="button">
+          "Back to sign in"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`shows password strength for "OneStrongPass!123" > registration strength and policy 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Create a therapist account"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Your name (shown to patients)"
+          <input autoComplete="name" className="input" id="field-association-1" placeholder="Dr. Jane Omega" type="text" value="">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-2" placeholder="dromega" type="text" value="">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="OneStrongPass!123">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div aria-label="Password strength: Strong" className="pw-meter" role="status">
+          <span className="pw-meter__bar pw-meter__bar--4">
+          <span className="pw-meter__bar pw-meter__bar--4">
+          <span className="pw-meter__bar pw-meter__bar--4">
+          <span className="pw-meter__bar pw-meter__bar--4">
+          <span className="pw-meter__label pw-meter__label--4">
+            "Strong"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-4">
+            "Repeat password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-4" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-5">
+            "Clinician enrollment token (if issued)"
+          <input autoComplete="one-time-code" className="input" id="field-association-5" placeholder="Organization-issued token" type="password" value="">
+        <label className="row">
+          <input checked=false type="checkbox">
+          <span>
+            "I confirm that I am 18 or older."
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note">
+          "Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters."
+        <p className="note">
+          "If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal's same-origin secure API connection and is never stored by this portal."
+        <p className="note note--danger">
+          "There is no password reset and no account recovery. Your sharing key is wrapped to this password alone: if you forget it, your account and every shared note become permanently unreadable. Save the password in a password manager before you continue."
+        <button className="btn" disabled=true type="submit">
+          "Create account"
+        <button className="btn btn--small" disabled=false type="button">
+          "Back to sign in"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`shows password strength for "lowercaselettersx" > registration strength and policy 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Create a therapist account"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Your name (shown to patients)"
+          <input autoComplete="name" className="input" id="field-association-1" placeholder="Dr. Jane Omega" type="text" value="">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-2" placeholder="dromega" type="text" value="">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="lowercaselettersx">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div aria-label="Password strength: Strong" className="pw-meter" role="status">
+          <span className="pw-meter__bar pw-meter__bar--4">
+          <span className="pw-meter__bar pw-meter__bar--4">
+          <span className="pw-meter__bar pw-meter__bar--4">
+          <span className="pw-meter__bar pw-meter__bar--4">
+          <span className="pw-meter__label pw-meter__label--4">
+            "Strong"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-4">
+            "Repeat password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-4" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-5">
+            "Clinician enrollment token (if issued)"
+          <input autoComplete="one-time-code" className="input" id="field-association-5" placeholder="Organization-issued token" type="password" value="">
+        <label className="row">
+          <input checked=false type="checkbox">
+          <span>
+            "I confirm that I am 18 or older."
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note">
+          "Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters."
+        <p className="note">
+          "If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal's same-origin secure API connection and is never stored by this portal."
+        <p className="note note--danger">
+          "There is no password reset and no account recovery. Your sharing key is wrapped to this password alone: if you forget it, your account and every shared note become permanently unreadable. Save the password in a password manager before you continue."
+        <button className="btn" disabled=true type="submit">
+          "Create account"
+        <button className="btn btn--small" disabled=false type="button">
+          "Back to sign in"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`shows pending account creation and clears the host's registration salt before credential handoff > registration request pending 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Create a therapist account"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Your name (shown to patients)"
+          <input autoComplete="name" className="input" id="field-association-1" placeholder="Dr. Jane Omega" type="text" value="Dr. Example">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-2" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="Strong!pass123">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div aria-label="Password strength: Good" className="pw-meter" role="status">
+          <span className="pw-meter__bar pw-meter__bar--3">
+          <span className="pw-meter__bar pw-meter__bar--3">
+          <span className="pw-meter__bar pw-meter__bar--3">
+          <span className="pw-meter__bar">
+          <span className="pw-meter__label pw-meter__label--3">
+            "Good"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-4">
+            "Repeat password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-4" type="password" value="Strong!pass123">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-5">
+            "Clinician enrollment token (if issued)"
+          <input autoComplete="one-time-code" className="input" id="field-association-5" placeholder="Organization-issued token" type="password" value="">
+        <label className="row">
+          <input checked=true type="checkbox">
+          <span>
+            "I confirm that I am 18 or older."
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note">
+          "Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters."
+        <p className="note">
+          "If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal's same-origin secure API connection and is never stored by this portal."
+        <p className="note note--danger">
+          "There is no password reset and no account recovery. Your sharing key is wrapped to this password alone: if you forget it, your account and every shared note become permanently unreadable. Save the password in a password manager before you continue."
+        <button className="btn" disabled=true type="submit">
+          "Creating…"
+        <button className="btn btn--small" disabled=true type="button">
+          "Back to sign in"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;

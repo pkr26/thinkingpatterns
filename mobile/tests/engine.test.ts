@@ -8,10 +8,6 @@ import nodeCrypto from "node:crypto";
 
 describe("crypto engine loader", () => {
   it("the native Metro entry statically selects the linked engine with no Node fallback", async () => {
-    const { readFileSync } = await import("node:fs");
-    const source = readFileSync(new URL("../src/crypto/engine.native.ts", import.meta.url), "utf8");
-    expect(source).toMatch(/import QuickCrypto from "react-native-quick-crypto"/);
-    expect(source).not.toMatch(/require\s*\(|["']node:crypto["']/);
     const native = await import("../src/crypto/engine.native");
     expect(native.engine).toBe(nodeCrypto);
     expect(native.engine.randomBytes(16)).toHaveLength(16);

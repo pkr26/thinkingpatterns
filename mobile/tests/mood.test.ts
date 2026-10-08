@@ -1,3 +1,4 @@
+import { runTestControl } from "./helpers/testControl";
 /**
  * src/mood.ts: the five-point check-in scale, the nearest-label mapping
  * behind the history badges, and the quick text estimate (moved out of
@@ -59,7 +60,7 @@ describe("check-in localization (audit fix 21, 2026-09-21)", () => {
     const { __setLocaleForTests, t } = await import("../src/strings");
     const { ENERGY_OPTIONS, SLEEP_OPTIONS, ACTIVITY_TAGS, activityTagLabel } = await import("../src/mood");
 
-    __setLocaleForTests("es");
+    runTestControl(__setLocaleForTests, "es");
     try {
       expect(moodLabel(-0.9)).toBe("Pesado"); // the History badge path localizes too
       expect(MOOD_OPTIONS.map((o) => t(o.labelKey))).toEqual(["Pesado", "Bajo", "Normal", "Bien", "Ligero"]);
@@ -70,7 +71,7 @@ describe("check-in localization (audit fix 21, 2026-09-21)", () => {
         "Descanso", "Creatividad", "Salud", "Dinero", "Viaje",
       ]);
     } finally {
-      __setLocaleForTests("en");
+      runTestControl(__setLocaleForTests, "en");
     }
 
     // The wire contract is locale-independent: numeric values and English

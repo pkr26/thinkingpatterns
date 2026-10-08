@@ -112,9 +112,7 @@ export function envelopeAad(username: string, params: KdfParams): Buffer {
     kdf_params: params,
     username,
   });
-  // Stryker disable StringLiteral
 return Buffer.from(jsonEnsureAscii(payload), "utf8");
-  // Stryker restore StringLiteral
 }
 
 /** HKDF info labels are rebuilt at call time (same discipline as kdf.ts):

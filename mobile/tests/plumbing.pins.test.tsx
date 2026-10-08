@@ -14,7 +14,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
-import { Text, View } from "react-native";
+import { ActivityIndicator, Text, View } from "react-native";
 
 vi.mock("../src/api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/api/client")>();
@@ -139,9 +139,20 @@ describe("navigation pins: inMain conjunction and pending onboarding", () => {
     await flush();
 
     // …so entering the main flow NOW must consume the still-pending flag.
+    // Match the vault domain of that published unlocked state. Child
+    // screens retain their current owner checks while the navigator's
+    // branch and pending-onboarding contract remain under observation.
+    vault.unlock({ masterKey: Buffer.alloc(32, 31), authKey: Buffer.alloc(32, 32), dataKey: Buffer.alloc(32, 33) }, "user-1");
     sessionState = { authStatus: "loggedIn", unlocked: true };
     await act(async () => {
       root.update(<AppNavigator />);
+    });
+    // The stack transport renders its public child screens too. Wait for
+    // their visible initial loading indicators before the settled surface
+    // assertion; three timer turns do not define Native storage completion.
+    await vi.waitFor(async () => {
+      await act(async () => { await new Promise<void>(setImmediate); });
+      expect(root.root.findAllByType(ActivityIndicator)).toHaveLength(0);
     });
     await flush();
     expect(screenNames(root)[0]).toBe("Onboarding");

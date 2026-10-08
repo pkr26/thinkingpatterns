@@ -1,3 +1,4 @@
+import { runTestControl } from "../helpers/testControl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
 import { AppState, Alert } from "react-native";
@@ -40,7 +41,7 @@ async function background() {
 }
 const value = (root: Awaited<ReturnType<typeof render>>) => inputByPlaceholder(root, placeholder).props.value;
 beforeEach(async () => {
-  vi.restoreAllMocks(); await waitJournalDraftWrites(); __resetJournalDraftRuntimeForTests(); __resetLocalKeyLifecycleForTests();
+  vi.restoreAllMocks(); await waitJournalDraftWrites(); runTestControl(__resetJournalDraftRuntimeForTests); runTestControl(__resetLocalKeyLifecycleForTests);
   storage.__reset(); resetApi(api as never); AppState.addEventListener.mockClear(); Alert.alert.mockClear();
   takeStashedDraft(user); vault.lock(); key = Buffer.alloc(32, 7);
   vault.unlock({ masterKey: Buffer.alloc(32, 1), authKey: Buffer.alloc(32, 2), dataKey: key }, user); scope = await journalDraftScope(user);
@@ -81,7 +82,7 @@ describe("EntryScreen persistent typed journal draft", () => {
     expect(textOf(root)).toContain("Encrypted draft saved on this device");
     const draft = (await loadJournalDraft(key, scope))!.draft;
     expect(draft).toMatchObject({ text: value(root), mood: 1, energy: 1, sleep: 5, tags: ["work"] });
-    await close(root); takeStashedDraft(user); __resetJournalDraftRuntimeForTests();
+    await close(root); takeStashedDraft(user); runTestControl(__resetJournalDraftRuntimeForTests);
     const next = await render(); expect(value(next)).toBe(draft.text);
     await pressLabel(next, "Details added:");
     for (const label of ["Light", "Energized", "Rested"]) expect(touchableByLabel(next, label).props.accessibilityState.selected).toBe(true);
@@ -163,14 +164,14 @@ describe("EntryScreen persistent typed journal draft", () => {
     const call = vi.mocked(api.createEntry).mock.calls[0];
     expect(decryptEntry({ dataKey: key }, user, call[0], call[1], 1)).toMatchObject({ text: "the snapshot that is saved", sentiment: -1 });
     expect((await loadJournalDraft(key, scope))?.draft).toMatchObject({ text: value(root), mood: 1, energy: 1 });
-    await close(root); takeStashedDraft(user); __resetJournalDraftRuntimeForTests();
+    await close(root); takeStashedDraft(user); runTestControl(__resetJournalDraftRuntimeForTests);
     expect(value(await render())).toBe("newer unfinished words during upload");
   });
   it("ACK clears only a matching revision after durable save, so restart does not offer a duplicate draft", async () => {
     const root = await render(); await typeInto(root, placeholder, "successfully acknowledged editor"); await background();
     expect(await loadJournalDraft(key, scope)).not.toBeNull(); await pressLabel(root, "Save entry"); await flush();
     expect(value(root)).toBe(""); expect(await loadJournalDraft(key, scope)).toBeNull();
-    await close(root); takeStashedDraft(user); __resetJournalDraftRuntimeForTests();
+    await close(root); takeStashedDraft(user); runTestControl(__resetJournalDraftRuntimeForTests);
     expect(value(await render())).toBe("");
   });
   it("an unchanged text value with a newer mood revision is not cleared by the older save", async () => {

@@ -84,13 +84,17 @@ export function wrapDataKeyForTherapist(
     privateKey: ephemeral.privateKey,
     publicKey: engine.createPublicKey({ key: therapistPubDer, format: "der", type: "spki" }),
   });
-  const kek = deriveWrapKek(shared, ephemeralSpki, therapistPubDer);
-  const wrapped = encrypt(kek, dataKey, buildAad(WRAP_CONTEXT, userId, therapistId));
-  zeroize(shared, kek);
-  return {
-    ephemeralPubB64: ephemeralSpki.toString("base64"),
-    wrappedKeyB64: wrapped.toString("base64"),
-  };
+  let kek: Buffer | undefined;
+  try {
+    kek = deriveWrapKek(shared, ephemeralSpki, therapistPubDer);
+    const wrapped = encrypt(kek, dataKey, buildAad(WRAP_CONTEXT, userId, therapistId));
+    return {
+      ephemeralPubB64: ephemeralSpki.toString("base64"),
+      wrappedKeyB64: wrapped.toString("base64"),
+    };
+  } finally {
+    zeroize(shared, kek);
+  }
 }
 
 /** Human-verifiable fingerprint of a therapist's public wrap key:

@@ -100,7 +100,6 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
   const [mode, setMode] = useState<"login" | "register">("login");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  // Stryker disable next-line StringLiteral: dead initializer — register mode is reachable only through the toggle (which clears confirm in the same batch) and login mode never reads confirm
   const [confirm, setConfirm] = useState("");
   // AGE GATE (2026-09-27, clinical): registration requires an explicit
   // "I am 18 or older" self-declaration. It gates the Create-account button
@@ -123,8 +122,15 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
   const [serverDraft, setServerDraft] = useState("");
 
   React.useEffect(() => {
-    void api.originPinChanged().then(setServerChanged).catch(() => setServerChanged(false));
-    void getBaseUrl().then((url) => setServerUrl(url ?? "")).catch(() => {});
+    const initialScope = localWriteScopeEpoch();
+    void api.originPinChanged().then((changed) => {
+      if (initialScope === localWriteScopeEpoch()) setServerChanged(changed);
+    }).catch(() => {
+      if (initialScope === localWriteScopeEpoch()) setServerChanged(false);
+    });
+    void getBaseUrl().then((url) => {
+      if (initialScope === localWriteScopeEpoch()) setServerUrl(url ?? "");
+    }).catch(() => {});
   }, []);
 
   const submit = async () => {
@@ -179,7 +185,6 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
     let accountCreated = false;
     let credentialsVerified = false;
     try {
-      // Stryker disable next-line StringLiteral: dead initializer — both branches assign body.user_id before the only read at vault.unlock
     let verifiedUserId = "";
       if (mode === "register") {
         // Buffer.from() copies: quick-crypto's Buffer type differs from
@@ -347,7 +352,6 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
   };
 
   const strength = mode === "register" && password.length > 0 ? passwordStrength(password) : null;
-  // Stryker disable next-line ConditionalExpression: confirm.length > 0 implies register mode (the confirm field is register-only and every exit to login clears it), so the mode check is redundant — the same-line whole-condition mutant is killable and pinned in loginScreen.pins.test.tsx
   const mismatch = mode === "register" && confirm.length > 0 && confirm !== password;
 
   return (
@@ -382,12 +386,12 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
           void (async () => {
             try {
               const parsed = parseServerUrl(serverDraft);
-              if (!parsed) throw new Error(tr("settings.serverInvalid"));
+              if (!parsed) throw new Error(tr("settings.invalidUrlBody"));
               const error = await setBaseUrl(parsed.url);
               if (error) throw new Error(error);
               setServerUrl(await getBaseUrl()); setServerChanged(await api.originPinChanged()); setEditingServer(false);
               setPassword(""); setConfirm("");
-            } catch { Alert.alert(tr("settings.serverInvalidTitle"), tr("settings.serverInvalid")); }
+            } catch { Alert.alert(tr("settings.invalidUrlTitle"), tr("settings.invalidUrlBody")); }
           })();
         }} />
       </>}

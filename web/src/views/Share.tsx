@@ -114,9 +114,11 @@ export function ShareView(): React.JSX.Element {
 
   const copyFingerprint = async (): Promise<void> => {
     if (!lookup) return;
+    const operation = pairingGeneration.current;
     try {
-      await navigator.clipboard?.writeText(lookup.fingerprint);
-      setCopied(true);
+      if (!navigator.clipboard) return;
+      await navigator.clipboard.writeText(lookup.fingerprint);
+      if (mounted.current && operation === pairingGeneration.current) setCopied(true);
     } catch {
       // Clipboard unavailable (permissions, non-secure context): the
       // fingerprint stays selectable on screen either way.
@@ -196,12 +198,14 @@ export function ShareView(): React.JSX.Element {
       } else {
         setError(t("share.voiceToggleFailed"));
         const rows = await api.listConsents().catch(() => null);
-        if (rows) setConsents(rows);
+        if (current() && rows) setConsents(rows);
       }
     } finally {
       zeroize(dataKey);
-      setReauthPassword("");
-      if (current()) setBusy(false);
+      if (current()) {
+        setReauthPassword("");
+        setBusy(false);
+      }
     }
   };
 
@@ -232,7 +236,7 @@ export function ShareView(): React.JSX.Element {
           title={pendingSensitive.kind === "grant"
             ? t("share.reauthGrantTitle", { name: pendingSensitive.lookup.name })
             : pendingSensitive.kind === "voice"
-              ? t("share.reauthShareVoiceTitle", { name: pendingSensitive.consent.display_name })
+              ? t("share.reauthShareVoiceTitle", { name: pendingSensitive.consent.display_name || pendingSensitive.consent.username })
               : t("share.reauthRevokeTitle")}
           tone={pendingSensitive.kind === "revoke" ? "danger" : undefined}
         >
@@ -262,7 +266,7 @@ export function ShareView(): React.JSX.Element {
       )}
       <Card title={t("share.webTitle")}>
         <Note tone="muted">{t("share.webZeroKnowledge")}</Note>
-        <Field label={t("share.webPairingCode")} value={code} onChange={(value) => { pairingGeneration.current += 1; setBusy(false); setCode(value); setLookup(null); setCopied(false); setFingerprintVerified(false); setDisclosureAccepted(false); }} placeholder={t("share.webPairingPlaceholder")} />
+        <Field label={t("share.webPairingCode")} value={code} onChange={(value) => { pairingGeneration.current += 1; setBusy(false); setCode(value); setLookup(null); setPendingSensitive(null); setReauthPassword(""); setCopied(false); setFingerprintVerified(false); setDisclosureAccepted(false); }} placeholder={t("share.webPairingPlaceholder")} />
         <Button label={busy ? t("settings.working") : t("share.webLookUp")} onPress={() => void doLookup()} disabled={busy} small variant="ghost" />
         {lookup && (
           <>

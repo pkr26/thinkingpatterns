@@ -1,3 +1,4 @@
+import { runTestControl } from "./helpers/testControl";
 import { beforeEach, expect, it, vi } from "vitest";
 vi.mock("../src/api/client", async importOriginal => {
   const actual = await importOriginal<typeof import("../src/api/client")>();
@@ -15,7 +16,7 @@ const fs = await import("./helpers/expoFsMock");
 const Sharing = await import("./helpers/expoSharingMock");
 const password = "export fixture password";
 const key = (await deriveKeysAsync(password, Buffer.from(SALT_B64, "base64"))).dataKey, user = "user-1";
-beforeEach(() => { __resetLocalKeyLifecycleForTests(); resetApi(api as never); storage.__reset(); fs.__resetFiles(); Sharing.shareAsync.mockClear(); Sharing.isAvailableAsync.mockResolvedValue(true); });
+beforeEach(() => { runTestControl(__resetLocalKeyLifecycleForTests); resetApi(api as never); storage.__reset(); fs.__resetFiles(); Sharing.shareAsync.mockClear(); Sharing.isAvailableAsync.mockResolvedValue(true); });
 it("a recording acquired before parent commit stays encrypted and never uploads without its parent", async () => {
   const blob = encryptAudio({ dataKey: key }, user, "parent:one", Buffer.from("my spoken words"));
   await enqueueAudio({ userId: user, clientEntryId: "parent:one", ...blob, mime: "audio/m4a", durationSeconds: 4, parentPending: true });

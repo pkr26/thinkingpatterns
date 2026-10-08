@@ -38,7 +38,7 @@ export function RecoveryScreen({ navigation }: { navigation: any }): React.JSX.E
   const [status, setStatus] = useState<string | null>(null);
   const [statusTone, setStatusTone] = useState<InlineStatusTone>("neutral");
   const [done, setDone] = useState(false);
-  const mounted = useRef(true), attempt = useRef(0), submitting = useRef(false);
+  const mounted = useRef(true), attempt = useRef(0), submitting = useRef(false), completed = useRef(false);
   const navigationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => { mounted.current = true; return () => {
     mounted.current = false; attempt.current++;
@@ -51,7 +51,7 @@ export function RecoveryScreen({ navigation }: { navigation: any }): React.JSX.E
   };
 
   const run = async () => {
-    if (busy || done || submitting.current) return;
+    if (busy || completed.current || submitting.current) return;
     if (!username.trim() || !recoveryKey.trim()) {
       showStatus(tr("recovery.missingFields"), "neutral");
       return;
@@ -93,6 +93,7 @@ export function RecoveryScreen({ navigation }: { navigation: any }): React.JSX.E
         { authKeyKnown: false },
       );
       ownedKey = null;
+      completed.current = true; // a native tap retained before completion must stay retired
       markLoggedIn(); // the vault subscription flips `unlocked` on unlock
       setDone(true);
       setRecoveryKey(""); setNewPassword(""); setConfirm("");
@@ -198,7 +199,7 @@ export function RecoveryScreen({ navigation }: { navigation: any }): React.JSX.E
         </View>
         <InlineStatus message={status} tone={statusTone} />
         <PrimaryButton
-          label={busy ? tr("common.working") : tr("recovery.action")}
+          label={busy ? tr("common.verifying") : tr("recovery.action")}
           onPress={() => void run()}
           disabled={busy || done}
         />

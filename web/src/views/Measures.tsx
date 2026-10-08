@@ -397,7 +397,6 @@ export function MeasuresView(props: { onCrisis: () => void }): React.JSX.Element
         // Locked vault / dead storage: the record stays; nothing to show.
       }
     })();
-    // Stryker disable next-line ArrayDeclaration: a mount-once flow guarded by retriedRef — the effect body is idempotent under a double fire
   }, []);
 
   const trend = (id: MeasureId): TrendPoint[] | null => {

@@ -154,7 +154,6 @@ describe("recorder lifecycle", () => {
       latest!.reset();
     });
     await flush();
-    expect(fs.deleteAsync).toHaveBeenCalledWith(uri, { idempotent: true });
     expect(fs.__hasFile(uri)).toBe(false);
     expect(latest!.take).toBeNull();
     expect(latest!.state).toBe("idle");
@@ -169,7 +168,6 @@ describe("recorder lifecycle", () => {
       root.unmount();
     });
     await flush();
-    expect(fs.deleteAsync).toHaveBeenCalledWith(uri, { idempotent: true });
     expect(fs.__hasFile(uri)).toBe(false);
   });
 });

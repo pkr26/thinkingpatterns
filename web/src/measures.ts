@@ -79,7 +79,7 @@ export function measureScore(id: MeasureId, responses: readonly (number | null)[
 /** True when every item has a pick — the submit button's enabled gate. */
 export function measureComplete(id: MeasureId, responses: readonly (number | null)[]): boolean {
   const instrument = instrumentOf(id);
-  return responses.length === instrument.items && responses.every((r) => typeof r === "number");
+  return responses.length === instrument.items && Array.from(responses).every((r) => typeof r === "number" && instrument.options.includes(r));
 }
 
 /** The chip-selection contract (audit 2026-09-26 LOW): a stored response
@@ -150,5 +150,5 @@ export function measurePayload(
  *  return null so callers skip the row rather than mis-scale it. */
 export function maxScoreForMeasure(measure: unknown): number | null {
   if (typeof measure !== "string") return null;
-  return (measure as MeasureId) in INSTRUMENTS ? INSTRUMENTS[measure as MeasureId].maxScore : null;
+  return Object.hasOwn(INSTRUMENTS, measure) ? INSTRUMENTS[measure as MeasureId].maxScore : null;
 }

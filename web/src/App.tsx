@@ -322,8 +322,11 @@ export function App(): React.JSX.Element {
   }), []);
 
   const onOnboardingDone = useCallback(async () => {
+    const attempt = adoptionGeneration.current;
     const userId = vault.ownerUserId();
-    if (userId) await markOnboardingSeen(userId).catch(() => undefined);
+    if (!userId || !vault.isUnlocked()) return;
+    await markOnboardingSeen(userId).catch(() => undefined);
+    if (attempt !== adoptionGeneration.current || !vault.isUnlocked() || vault.ownerUserId() !== userId) return;
     setView({ kind: readBrowserView() as View["kind"] });
   }, []);
 
@@ -351,7 +354,7 @@ export function App(): React.JSX.Element {
       await clearOnboardingSeen(owner);
       await kv.removeItem(`mindpattern.rekeyHint.${owner}`);
     }).catch(error => {
-      setErrorNote(error instanceof Error ? error.message : t("app.erasureIncomplete"));
+      setView({ kind: "login", notice: error instanceof Error ? error.message : t("app.erasureIncomplete") });
     }).finally(() => setAccountTransitioning(false));
   }, [lockDown]);
 

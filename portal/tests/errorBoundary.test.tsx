@@ -2,7 +2,7 @@
  *  crash used to unmount the whole portal mid-review. Pins: calm fallback
  *  copy (no raw error text), the view boundary's recovery on retry, and
  *  reset on view change. */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import React from "react";
 import { act } from "react";
 
@@ -22,12 +22,29 @@ describe("ErrorBoundary (top level)", () => {
     );
     const text = textOf(root);
     expect(text).toContain("Something went wrong");
-    expect(text).toContain("Saved records stay encrypted");
+    expect(text).toContain("The portal hit an unexpected error. Saved records stay encrypted. Unsaved edits may not have finished saving; retry this view before reloading.");
     expect(text).not.toContain("render exploded");
+    expect(root.root.findByType("main").props.style).toEqual({ maxWidth: 560, margin: "10vh auto", padding: "0 24px" });
+    expect(root.root.findByType("section").props.className).toBe("card card--danger");
+    expect(root.root.findByType("p").props.role).toBe("alert");
+    const reload = vi.fn();
+    vi.stubGlobal("window", { location: { reload } });
+    try { await press(root, "Reload the page"); } finally { vi.unstubAllGlobals(); }
+    expect(reload).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("ViewBoundary (per view)", () => {
+  it("renders a healthy view immediately and keeps a failed view gated until retry or navigation", async () => {
+    const healthy = await render(<ViewBoundary resetKey="patient"><p>healthy chart</p></ViewBoundary>);
+    expect(textOf(healthy)).toBe("healthy chart");
+    const root = await render(<ViewBoundary resetKey="patient"><Boom /></ViewBoundary>);
+    await act(async () => { root.update(<ViewBoundary resetKey="patient"><p>replacement chart</p></ViewBoundary>); });
+    expect(textOf(root)).toContain("Something went wrong");
+    expect(textOf(root)).not.toContain("replacement chart");
+    await press(root, "Try again");
+    expect(textOf(root)).toBe("replacement chart");
+  });
   it("recovers via Try again without a reload", async () => {
     let explode = true;
     function MaybeBoom(): React.JSX.Element | null {

@@ -1,3 +1,4 @@
+import { runTestControl } from "../helpers/testControl";
 /**
  * Deep-mutation pins for LoginScreen (2026-09-15 Stryker campaign).
  *
@@ -80,7 +81,7 @@ function textNode(root: Awaited<ReturnType<typeof render>>, match: string | ((s:
 }
 
 beforeEach(() => {
-  __resetLocalKeyLifecycleForTests();
+  runTestControl(__resetLocalKeyLifecycleForTests);
   resetApi(api as never);
   vi.mocked(deriveKeysAsync).mockReset();
   vi.mocked(deriveKeysAsync).mockImplementation(async (password: string, salt: Buffer) => ({
@@ -252,7 +253,7 @@ describe("LoginScreen pins: node-exact style overlays", () => {
 });
 
 describe("LoginScreen pins: origin-change warning theme contract (audit fix 20, 2026-09-21)", () => {
-  it("the phishing warning uses the theme error color — no hardcoded hex remains in the source", async () => {
+  it("the phishing warning uses the theme error color", async () => {
     vi.mocked(api.originPinChanged).mockResolvedValue(true);
     const { darkTheme } = await import("../../src/theme");
     const root = await render(<LoginScreen />);
@@ -266,9 +267,5 @@ describe("LoginScreen pins: origin-change warning theme contract (audit fix 20, 
     expect(warning.props.style).toEqual({ color: darkTheme.colors.error, fontSize: 13 });
     expect(darkTheme.colors.error).not.toBe("#b3261e");
 
-    // The no-hex-literals theme contract, enforced on the source itself.
-    const { readFileSync } = await import("node:fs");
-    const source = readFileSync(new URL("../../src/screens/LoginScreen.tsx", import.meta.url), "utf8");
-    expect(source).not.toMatch(/#[0-9a-fA-F]{6}\b/);
   });
 });

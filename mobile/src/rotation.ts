@@ -216,20 +216,24 @@ async function rotatePasswordV2(input: {
     // absent, so wrapping under anything else would desynchronize the blob
     // from the AAD and brick the next unlock. A params change is a separate
     // future action, deliberately not smuggled into a password change.
-    // Re-audit 2026-09-27 (L): the KEK must be derived at the SAME
-    // iteration count the AAD declares — the old call used the 600k default
-    // unconditionally, so a non-default-params account (e.g. 800k) produced
-    // a KEK the next unlock (which derives at the envelope's own count)
-    // could never reproduce. The params and the KEK now come from one
-    // source: the envelope.
+    // Authentication keeps the shipped 600k derivation used by fresh login.
+    // The envelope KEK separately uses its declared cost, preserving both
+    // a non-default wrap profile and a usable password after this change.
     const newSalt = freshSalt();
-    scope.assert(); newKeys = await deriveKeysAsync(newPassword, newSalt, params.iterations); scope.assert();
-    const newKek = envelopeKek(newKeys.masterKey, newSalt);
+    scope.assert(); newKeys = await deriveKeysAsync(newPassword, newSalt); scope.assert();
+    let wrappingMaster: Buffer | null = null;
     let wrappedB64: string;
     try {
-      wrappedB64 = wrapDataKey(dataKey, newKek, username, params).toString("base64");
+      wrappingMaster = await deriveMasterKeyAsync(newPassword, newSalt, params.iterations);
+      scope.assert();
+      const newKek = envelopeKek(wrappingMaster, newSalt);
+      try {
+        wrappedB64 = wrapDataKey(dataKey, newKek, username, params).toString("base64");
+      } finally {
+        zeroize(newKek);
+      }
     } finally {
-      zeroize(newKek);
+      zeroize(wrappingMaster);
     }
 
     // --- v2.3. possession probe + one transaction: credential + envelope ---
@@ -364,6 +368,7 @@ async function rotatePasswordV2(input: {
     // H-2 discipline: a LOCAL failure (derivation, the CSPRNG seam, an
     // unexpected internal error) must be a typed outcome, never an
     // escaped throw.
+    if (!scope.current()) return { ok: false, stage: "verify", reason: "server", detail: undefined };
     return {
       ok: false,
       stage: "verify",
@@ -573,10 +578,9 @@ async function rotatePasswordOwned(input: {
     // Full completion: the pending rotation salt has done its job.
     await scope.localCommit(() => clearPendingSalt(userId));
 
-    // The registered journal has already rekeyed authored data and guards.
-    // Drop stale in-memory mirrors; ciphertext high-water marks remain.
-    const { resetEntryVersionMirrors } = await scope.run(() => import("./entryVersions"));
-    resetEntryVersionMirrors();
+    // Version numbers and v2 bindings survive the data-key change. Keep
+    // process observations too: a prior native persistence failure can
+    // leave a stricter rollback floor here than in the encrypted journal.
     // Audit fix 7 (2026-09-21): the rotation must SELF-COMPLETE. Locking the
     // vault and dropping the biometric wrap happen HERE, inside the flow —
     // they used to hang off the success alert's OK button, which Android
@@ -592,6 +596,7 @@ async function rotatePasswordOwned(input: {
     // H-2: a LOCAL failure before/outside the staged server flow (key
     // derivation, the CSPRNG seam, unexpected internal errors) must be a
     // typed outcome like every other failure — never an escaped throw.
+    if (!scope.current()) return { ok: false, stage: "verify", reason: "server", detail: undefined };
     return {
       ok: false,
       stage: "verify",
@@ -610,6 +615,10 @@ async function rotatePasswordOwned(input: {
       zeroize(oldKeys.masterKey, oldKeys.authKey, oldKeys.dataKey);
     }
     if (newKeys) zeroize(newKeys.masterKey, newKeys.authKey, newKeys.dataKey);
+    // A captured success receipt still waits for native cleanup in finally.
+    // Retire it if that wait admitted a replacement account or vault, after
+    // erasing every derivation allocation owned by this attempt.
+    if (oldKeys) scope.assert();
   }
 }
 

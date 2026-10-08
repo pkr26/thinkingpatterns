@@ -43,7 +43,9 @@ function parse(raw: string | null, expectedScope?: string): QueuedAudio | Descri
   try {
     const x = raw && JSON.parse(raw);
     if (!x || typeof x.mime !== "string" || !Number.isFinite(x.durationSeconds) || x.durationSeconds < 0 || !Number.isFinite(x.queuedAt)) return null;
-    if (x.v === 2 && typeof x.uri === "string" && typeof x.revision === "string" && typeof x.scope === "string" && (!expectedScope || x.scope === expectedScope) && validUri(x.uri, x.scope)) return x;
+    if (x.v === 2) {
+      return typeof x.uri === "string" && typeof x.revision === "string" && typeof x.scope === "string" && (!expectedScope || x.scope === expectedScope) && validUri(x.uri, x.scope) ? x : null;
+    }
     return typeof x.blobB64 === "string" && x.blobB64.length <= MAX_TAKE_BYTES ? x : null;
   } catch { return null; }
 }
@@ -96,7 +98,7 @@ export async function enqueueAudio(p: { userId: string; clientEntryId: string; b
       if (epoch !== generation) throw new Error("Recording save was cancelled by account cleanup");
       await commitLocalWrite(permit, () => AsyncStorage.setItem(key, JSON.stringify(row)));
     } catch (err) { await removeFile(row).catch(() => {}); throw err; }
-    await removeFile(parse(oldRaw)).catch(() => {});
+    await removeFile(parse(oldRaw, fileScope(origin, p.userId))).catch(() => {});
   });
 }
 export async function audioQueueCount(userId?: string): Promise<number> {
@@ -137,6 +139,7 @@ async function flush(origin: string, userId: string, epoch: number, permit: Loca
   let uploaded = 0;
   for (const key of await scopeKeys(origin, userId)) {
     if (epoch !== generation) break;
+    try { assertLocalWritePermit(permit); } catch { break; }
     const id = key.slice(keyFor(origin, userId, "").length);
     if (parents.has(id)) continue;
     try {
@@ -172,8 +175,13 @@ async function flush(origin: string, userId: string, epoch: number, permit: Loca
       try { await api.uploadAudioAttachment(id, blob, item.mime, item.durationSeconds, origin, permit); }
       catch (err) { failure = err; }
       await serialized(async () => {
-        if (epoch !== generation || await AsyncStorage.getItem(erasedKey(origin, userId)) !== eraseEpoch || await AsyncStorage.getItem(key) !== snapshot) return;
+        if (epoch !== generation) return;
+        const currentEraseEpoch = await AsyncStorage.getItem(erasedKey(origin, userId));
         assertLocalWritePermit(permit);
+        if (epoch !== generation || currentEraseEpoch !== eraseEpoch) return;
+        const currentRaw = await AsyncStorage.getItem(key);
+        assertLocalWritePermit(permit);
+        if (epoch !== generation || currentRaw !== snapshot) return;
         if (!failure) {
           await commitLocalWrite(permit, async () => { await AsyncStorage.removeItem(key); await removeFile(item).catch(() => {}); }); uploaded++;
         } else if (failure instanceof ApiError && failure.status === 401) {
@@ -196,6 +204,7 @@ export async function releaseAudioParent(userId: string, id: string, source?: Lo
     if (epoch !== generation) return;
     assertLocalWritePermit(permit);
     const key = keyFor(origin, userId, id); const row = parse(await AsyncStorage.getItem(key), fileScope(origin, userId));
+    if (epoch !== generation) return;
     if (!row) return;
     delete row.parentPending;
     await commitLocalWrite(permit, () => AsyncStorage.setItem(key, JSON.stringify(row)));

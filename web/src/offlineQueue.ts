@@ -10,7 +10,7 @@ import { ApiError, api, sessionAbortSignal, sessionUserId } from "./api/client";
 import { buildAad } from "./crypto/aad";
 import { decrypt, encrypt, fromBase64, toBase64, zeroize, type Bytes } from "./crypto/core";
 import { currentOrigin, withLock } from "./platform";
-import { kv,StorageCommitError,type WritePermit } from "./kvstore";
+import { kv,StorageCommitError,StorageReadError,type WritePermit } from "./kvstore";
 
 /** The single Web Lock name for EVERY queue operation (audit 2026-09-26
  *  MEDIUM): the flush path already serialized drains cross-tab; the
@@ -286,7 +286,11 @@ async function readItems(key: string, scope: QueueScope, generation: number): Pr
       if (!wipedSince(generation)) await writeItems(key, own,scope.permit);
     }
     return own;
-  } catch {
+  } catch (cause) {
+    // A failed device read is not evidence that the ciphertext is corrupt.
+    // Retain the original slot for a retry; failed repair commits must also
+    // propagate instead of being mistaken for malformed queue contents.
+    if (cause instanceof StorageReadError || cause instanceof StorageCommitError) throw cause;
     await appendQuarantine(scope, raw ?? JSON.stringify({ v: 1, unreadable: true, key }), generation);
     if (!wipedSince(generation)) await kv.removeItem(key,scope.permit);
     return [];

@@ -15,5 +15,5 @@ export function displayError(error: unknown, localizedFallback: string): string 
     if (error.status >= 500) return t("errors.serverError");
     return localizedFallback;
   }
-  return error instanceof Error ? error.message : localizedFallback;
+  return error instanceof Error && error.message.trim() ? error.message : localizedFallback;
 }

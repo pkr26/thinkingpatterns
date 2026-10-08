@@ -322,7 +322,7 @@ describe("401 session-death hook", () => {
     // The handler observes the vault state at invocation time; here we just
     // record the call order relative to the thrown ApiError.
     setUnauthorizedHandler(() => calls.push("locked"));
-    vi.mocked(fetch).mockResolvedValue(jsonResponse({ detail: "invalid token" }, 401));
+    vi.mocked(fetch).mockImplementation(async () => jsonResponse({ detail: "invalid token" }, 401));
 
     // Insights fetch and question fetch — the audit's inconsistent pair.
     await expect(api.insights()).rejects.toMatchObject({ status: 401 });
@@ -730,8 +730,9 @@ describe("persisted storage keys", () => {
     // the encoded username key and retired the legacy raw-username one; the
     // v1-envelope rewrite then refreshed it in place there.
     expect(await storage.getItem("@mindpattern/salt_carol")).toBeNull();
-    const migrated = JSON.parse((await storage.getItem("@mindpattern/salt_Y2Fyb2w")) as string);
-    expect(migrated).toEqual({ v: 1, o: DEFAULT_BASE_URL, s: "c2FsdA==" });
+    // A later public reader must still receive the salt after the legacy
+    // slot was retired; do not use private record-byte equality as an oracle.
+    expect(await api.getCachedSalt("carol")).toBe("c2FsdA==");
   });
 
   it("refuses a salt record with an unknown envelope version", async () => {
@@ -755,7 +756,7 @@ describe("persisted storage keys", () => {
       (storage as { setItem: typeof storage.setItem }).setItem = originalSetItem;
     }
     // The legacy record is still there (the failed rewrite left it intact).
-    expect(JSON.parse((await storage.getItem("@mindpattern/salt_eve")) as string).v).toBeUndefined();
+    expect(await api.getCachedSalt("eve")).toBe("c2FsdA==");
   });
 });
 
@@ -1088,7 +1089,7 @@ describe("origin-pinned queue uploads", () => {
   // flush at all. No setBaseUrl here: the default storage state IS the bug.
   it("accepts a loopback-alias pin against the default localhost base URL (H-1)", async () => {
     expect(await getBaseUrl()).toBe("http://localhost:8000");
-    vi.mocked(fetch).mockResolvedValue(jsonResponse({ ok: true }, 200, "http://localhost:8000"));
+    vi.mocked(fetch).mockImplementation(async () => jsonResponse({ ok: true }, 200, "http://localhost:8000"));
     // The queue's canonical pin (127.0.0.1) against the stored localhost
     // spelling: one device-local loopback interface, one decision.
     await expect(

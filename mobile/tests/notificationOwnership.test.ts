@@ -1,3 +1,4 @@
+import { runTestControl } from "./helpers/testControl";
 /** MOB-02: real reconciliation/native adapter with controlled native completion order. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import storage from "./helpers/storageMock";
@@ -27,9 +28,13 @@ const { setMeasureReminderEnabled, recordMeasureCompleted, getMeasureReminderPre
 const migrationKey = "@mindpattern/reminder.migration.v2.done";
 const dailyId = "mindpattern-daily-reminder";
 const measureId = "mindpattern-measure-reminder";
+const pendingNativeReceipts = new Set<() => void>();
 function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>(done => { resolve = done; });
+  let done!: (value: T) => void;
+  const promise = new Promise<T>(finish => { done = finish; });
+  const cleanup = () => done(undefined as T);
+  pendingNativeReceipts.add(cleanup);
+  const resolve = (value: T) => { pendingNativeReceipts.delete(cleanup); done(value); };
   return { promise, resolve };
 }
 async function seed(user = "a") {
@@ -39,7 +44,7 @@ async function seed(user = "a") {
 }
 const tick = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 beforeEach(async () => {
-  __resetLocalKeyLifecycleForTests(); changeLocalSessionOwner("a"); storage.__reset();
+  runTestControl(__resetLocalKeyLifecycleForTests); changeLocalSessionOwner("a"); storage.__reset();
   await storage.setItem(migrationKey, "1");
   live.clear(); events.length = 0;
   requestPermission.mockReset().mockResolvedValue({ authorizationStatus: 1 });
@@ -48,7 +53,186 @@ beforeEach(async () => {
   cancelNotification.mockReset().mockImplementation(async id => { live.delete(id); events.push(`cancel:${id}`); });
   cancelAllNotifications.mockReset().mockImplementation(async () => { live.clear(); events.push("cancel:all"); });
 });
-afterEach(() => { vi.restoreAllMocks(); });
+afterEach(async () => {
+  for (const release of pendingNativeReceipts) release();
+  pendingNativeReceipts.clear();
+  await tick(); await tick();
+  vi.restoreAllMocks();
+});
+
+for (const kind of ["daily", "measure"] as const) {
+  it(`${kind}: cancellation followed by a newer disable cannot revive an older captured enable`, async () => {
+    await seed();
+    const slot = kind === "daily" ? "@mindpattern/reminders_a" : "@mindpattern/measure_reminders_a";
+    const read = storage.getItem.bind(storage);
+    const gate = deferred<void>();
+    let captured = false;
+    vi.spyOn(storage, "getItem").mockImplementation(async key => {
+      const value = await read(key);
+      if (key === slot && !captured) { captured = true; await gate.promise; }
+      return value;
+    });
+    const sync = kind === "daily" ? syncReminderSchedule : syncMeasureReminderSchedule;
+    const disabled = kind === "daily" ? setReminderEnabled : setMeasureReminderEnabled;
+    const old = sync("a");
+    await vi.waitFor(() => expect(captured).toBe(true));
+    await (kind === "daily" ? native.cancelDailyReminder() : native.cancelMeasureReminder());
+    await disabled("a", false);
+    await sync("a");
+    gate.resolve();
+    await old;
+    expect(live.has(kind === "daily" ? dailyId : measureId)).toBe(false);
+  });
+}
+
+it("a queued administrative cancellation superseded for one kind preserves the other live reminder", async () => {
+  await seed();
+  await syncReminderSchedule("a");
+  const permission = deferred<{ authorizationStatus: number }>();
+  let entered = false;
+  requestPermission.mockImplementationOnce(async () => { entered = true; return permission.promise; });
+  const occupied = syncReminderSchedule("a");
+  await vi.waitFor(() => expect(entered).toBe(true));
+  const oldCancel = native.cancelOriginNotifications();
+  await setMeasureReminderEnabled("a", false);
+  const newest = syncMeasureReminderSchedule("a");
+  permission.resolve({ authorizationStatus: 1 });
+  await Promise.all([occupied, oldCancel, newest]);
+  expect(live.has(dailyId)).toBe(true);
+  expect(live.has(measureId)).toBe(false);
+});
+
+it("a queued administrative cancellation cannot remove reminders retained by a renewed same-account session", async () => {
+  await seed();
+  await syncReminderSchedule("a");
+  await syncMeasureReminderSchedule("a");
+  const permission = deferred<{ authorizationStatus: number }>();
+  let occupied = false;
+  requestPermission.mockImplementationOnce(async () => { occupied = true; return permission.promise; });
+  const first = syncReminderSchedule("a");
+  await vi.waitFor(() => expect(occupied).toBe(true));
+  const obsolete = native.cancelOriginNotifications();
+  changeLocalSessionOwner("a");
+  permission.resolve({ authorizationStatus: 1 });
+  await Promise.all([first, obsolete]);
+  expect(live.has(dailyId)).toBe(true);
+  expect(live.has(measureId)).toBe(true);
+});
+
+it("an already-retired queued migration cannot reserve a Native receipt and obstruct the replacement reminder", async () => {
+  await seed();
+  const permission = deferred<{ authorizationStatus: number }>();
+  let occupied = false;
+  requestPermission.mockImplementationOnce(async () => { occupied = true; return permission.promise; });
+  const first = syncReminderSchedule("a");
+  await vi.waitFor(() => expect(occupied).toBe(true));
+  const old = native.migrateOrphanedReminderNotifications("a");
+  changeLocalSessionOwner("b");
+  await storage.setItem("@mindpattern/reminders_b", JSON.stringify({ enabled: true, hour: 19, minute: 0 }));
+  const delayedReceipt = deferred<void>();
+  let holdDispatch = true;
+  const read = storage.getItem.bind(storage);
+  vi.spyOn(storage, "getItem").mockImplementation(async key => {
+    const value = await read(key);
+    // This Native request window closes before the replacement action.
+    // A receipt already dispatched during it stays pending independently.
+    if (holdDispatch && key === migrationKey) await delayedReceipt.promise;
+    return value;
+  });
+  permission.resolve({ authorizationStatus: 1 });
+  await tick(); await tick();
+  holdDispatch = false;
+  const replacement = syncReminderSchedule("b");
+  try {
+    await vi.waitFor(() => expect(live.has(dailyId)).toBe(true), { timeout: 1000 });
+  } finally {
+    delayedReceipt.resolve();
+    await Promise.all([first, old, replacement]);
+  }
+});
+
+it("a superseded daily reconciliation reports refusal while an unrelated admitted Native action is still pending", async () => {
+  await seed();
+  const receipt = deferred<void>();
+  let captured = false;
+  const read = storage.getItem.bind(storage);
+  vi.spyOn(storage, "getItem").mockImplementation(async key => {
+    const value = await read(key);
+    if (!captured && key === "@mindpattern/reminders_a") { captured = true; await receipt.promise; }
+    return value;
+  });
+  let refusalPublished = false;
+  // Settings' concrete capability consumer uses !scheduled.
+  const old = syncReminderSchedule("a").then(value => { refusalPublished = !value; });
+  await vi.waitFor(() => expect(captured).toBe(true));
+  const permission = deferred<{ authorizationStatus: number }>();
+  let occupied = false;
+  requestPermission.mockImplementationOnce(async () => { occupied = true; return permission.promise; });
+  const newest = syncReminderSchedule("a");
+  await vi.waitFor(() => expect(occupied).toBe(true));
+  receipt.resolve();
+  try {
+    await vi.waitFor(() => expect(refusalPublished).toBe(true), { timeout: 1000 });
+    expect(live.has(dailyId)).toBe(false);
+  } finally {
+    permission.resolve({ authorizationStatus: 1 });
+    await Promise.all([old, newest]);
+  }
+});
+
+it("a superseded measure preference does not wait for a Native cadence receipt it no longer owns", async () => {
+  await seed();
+  const prefsReceipt = deferred<void>(), cadenceReceipt = deferred<void>();
+  let captured = false, holdCadence = false;
+  const read = storage.getItem.bind(storage);
+  vi.spyOn(storage, "getItem").mockImplementation(async key => {
+    const value = await read(key);
+    if (!captured && key === "@mindpattern/measure_reminders_a") { captured = true; await prefsReceipt.promise; }
+    if (holdCadence && key === "@mindpattern/last_measure_a") await cadenceReceipt.promise;
+    return value;
+  });
+  let settled = false;
+  const old = syncMeasureReminderSchedule("a").then(() => { settled = true; });
+  await vi.waitFor(() => expect(captured).toBe(true));
+  await setMeasureReminderEnabled("a", false);
+  await syncMeasureReminderSchedule("a");
+  holdCadence = true;
+  prefsReceipt.resolve();
+  try {
+    await vi.waitFor(() => expect(settled).toBe(true), { timeout: 1000 });
+    expect(live.has(measureId)).toBe(false);
+  } finally { cadenceReceipt.resolve(); await old; }
+});
+
+it("a superseded measure cadence reports refusal without waiting behind unrelated Native work", async () => {
+  await seed();
+  const permission = deferred<{ authorizationStatus: number }>();
+  let occupied = false;
+  requestPermission.mockImplementationOnce(async () => { occupied = true; return permission.promise; });
+  const first = syncReminderSchedule("a");
+  await vi.waitFor(() => expect(occupied).toBe(true));
+  const receipt = deferred<void>();
+  let captured = false;
+  const read = storage.getItem.bind(storage);
+  vi.spyOn(storage, "getItem").mockImplementation(async key => {
+    const value = await read(key);
+    if (!captured && key === "@mindpattern/last_measure_a") { captured = true; await receipt.promise; }
+    return value;
+  });
+  let settled = false;
+  const old = syncMeasureReminderSchedule("a").then(() => { settled = true; });
+  await vi.waitFor(() => expect(captured).toBe(true));
+  await setMeasureReminderEnabled("a", false);
+  const newest = syncMeasureReminderSchedule("a");
+  receipt.resolve();
+  try {
+    await vi.waitFor(() => expect(settled).toBe(true), { timeout: 1000 });
+    expect(live.has(measureId)).toBe(false);
+  } finally {
+    permission.resolve({ authorizationStatus: 1 });
+    await Promise.all([first, old, newest]);
+  }
+});
 
 for (const kind of ["daily", "measure"] as const) {
   const slot = kind === "daily" ? "@mindpattern/reminders_a" : "@mindpattern/measure_reminders_a";

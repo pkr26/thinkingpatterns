@@ -217,10 +217,12 @@ export function useRecorder(i18n: {
     // finalizes immediately — finalize's guarded stop() means teardown
     // always runs, so the mic never stays live behind a dead take.
     recorder.onerror = (): void => {
+      if (recorderRef.current !== recorder) return;
       setError(i18n.failed);
       finalize();
     };
     recorder.onstop = (): void => {
+      if (!alive.current || operation !== acquisition.current) return;
       const fullMime = recorder.mimeType || mime;
       const normalized = normalizeMime(fullMime);
       const durationSeconds = Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000));
@@ -232,6 +234,7 @@ export function useRecorder(i18n: {
         durationSeconds,
       });
       setState("stopped");
+      teardown(true);
     };
     try { recorder.start(1000); } catch { recorder.onstop = null; teardown(); setError(i18n.failed); return; }
     setState("recording");

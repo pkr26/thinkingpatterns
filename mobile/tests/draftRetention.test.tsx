@@ -1,3 +1,4 @@
+import { runTestControl } from "./helpers/testControl";
 /** Real session/storage lifecycle for the documented draft retention rules. */
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import React from "react";
@@ -19,7 +20,7 @@ vi.mock("../src/nativeFeatures", () => ({
 let session: ReturnType<typeof useSession>;
 function Probe() { session = useSession(); return null; }
 beforeEach(async () => {
-  await waitJournalDraftWrites(); storage.__reset(); setSecureStoreBackend(null); vault.lock();
+  await waitJournalDraftWrites(); storage.__reset(); runTestControl(setSecureStoreBackend, null); vault.lock();
   vi.spyOn(api, "logout").mockResolvedValue(undefined);
   vi.spyOn(api, "meta").mockResolvedValue({ unlock_days: 30 } as never);
   await setBaseUrl("http://localhost:8000");

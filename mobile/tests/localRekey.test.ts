@@ -1,3 +1,4 @@
+import { runTestControl } from "./helpers/testControl";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import storage from "./helpers/storageMock";
 import { setSecureStoreBackend } from "../src/secureStore";
@@ -12,7 +13,7 @@ const user = "local-rekey-owner";
 const oldKey = Buffer.alloc(32, 5), newKey = Buffer.alloc(32, 9);
 beforeEach(async () => {
   await clearLocalRekey(user).catch(() => {});
-  storage.__reset(); fs.__resetFiles(); setSecureStoreBackend(null); resetEntryVersionMirrors();
+  storage.__reset(); fs.__resetFiles(); runTestControl(setSecureStoreBackend, null); resetEntryVersionMirrors();
 });
 describe("durable registered local rekey", () => {
   it("a prepared proof alone cannot apply local replacements before credential commit", async () => {
@@ -64,7 +65,7 @@ describe("durable registered local rekey", () => {
     });
     await expect(resumeLocalRekey(user, newKey)).rejects.toThrow("disk");
     spy.mockRestore();
-    setSecureStoreBackend(null); // process restart reopens the same device key
+    runTestControl(setSecureStoreBackend, null); // process restart reopens the same device key
     expect(await pendingLocalRekey(user)).toBe(true);
     await markLocalRekeyPhase(user, "credential");
     await resumeLocalRekey(user, newKey);

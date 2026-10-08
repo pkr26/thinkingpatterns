@@ -87,10 +87,11 @@ export function measureScore(id: MeasureId, responses: readonly (number | null)[
   return Math.min(instrument.maxScore, total);
 }
 
-/** True when every item has a pick — the submit button's enabled gate. */
+/** True when every item has a standard frequency pick — the submit button's enabled gate. */
 export function measureComplete(id: MeasureId, responses: readonly (number | null)[]): boolean {
   const instrument = instrumentOf(id);
-  return responses.length === instrument.items && responses.every((r) => typeof r === "number");
+  return responses.length === instrument.items && Array.from(responses).every((r) =>
+    typeof r === "number" && instrument.options.includes(r));
 }
 
 /** True when the instrument's safety item (if any) was endorsed at any

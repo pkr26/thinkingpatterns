@@ -1,3 +1,4 @@
+import { drainPortalDraftWritesForTests, runTestControl } from "./testControl";
 import "fake-indexeddb/auto";
 /** Node-runtime window shim: the views read location.origin,
  *  localStorage and sessionStorage through the platform seam; tests need
@@ -79,10 +80,10 @@ if (typeof (globalThis as { document?: unknown }).document === "undefined") {
 
 // Keep encrypted draft slots isolated per test; production has durable IndexedDB only.
 import { beforeEach } from "vitest";
-import { drainPortalDraftWritesForTests } from "../../src/noteDrafts";
+
 import { setKvBackendForTests } from "../../src/kvstore";
 beforeEach(async () => {
   await drainPortalDraftWritesForTests();
   const drafts = new Map<string,string>();
-  setKvBackendForTests({ getItem: async key => drafts.get(key) ?? null, setItem: async (key,value) => { drafts.set(key,value); }, removeItem: async key => { drafts.delete(key); }, keys: async () => [...drafts.keys()] });
+  runTestControl(setKvBackendForTests, { getItem: async key => drafts.get(key) ?? null, setItem: async (key,value) => { drafts.set(key,value); }, removeItem: async key => { drafts.delete(key); }, keys: async () => [...drafts.keys()] });
 });

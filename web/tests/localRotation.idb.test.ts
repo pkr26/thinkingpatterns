@@ -112,14 +112,17 @@ describe("transactional migration custody",()=>{
   await expect(loadSafetyPlan(nextKey,owner)).rejects.toThrow("authenticated");expect(await loadSafetyPlan(newKey,owner)).toEqual(plan);
   await kv.setItem("guarded","before");await expect(kv.compareAndSetForMigration("guarded","before","after",undefined,()=>false)).rejects.toThrow("not saved atomically");expect(await kv.getItem("guarded")).toBe("before");
  });
- it("durably upgrades legacy checkpoints before generation advancement and keeps completed resumes idempotent",async()=>{
+ it.each(["both", "before", "after"])("durably upgrades legacy checkpoints missing %s generation fields before advancement and keeps completed resumes idempotent",async missing=>{
   await kv.setItem(draft,await ciphertext("legacy checkpoint words"));await stageLocalRotation(owner,oldKey,newKey,credential);
   const slot=`mindpattern.localRotation.${owner}`,raw=(await kv.getItem(slot))!,plain=await decrypt(newKey,fromBase64(raw),buildAad("local-rotation",owner));
-  const legacy=JSON.parse(new TextDecoder().decode(plain));plain.fill(0);delete legacy.generationBefore;delete legacy.generationAfter;
+  const legacy=JSON.parse(new TextDecoder().decode(plain));plain.fill(0);if(missing!=="after")delete legacy.generationBefore;if(missing!=="before")delete legacy.generationAfter;
   await kv.setItem(slot,toBase64(await encrypt(newKey,new TextEncoder().encode(JSON.stringify(legacy)),buildAad("local-rotation",owner))));
   await resumeLocalRotation(owner,newKey,credential.new_salt);await resumeLocalRotation(owner,newKey,credential.new_salt);
   expect(new TextDecoder().decode(await decrypt(newKey,fromBase64((await kv.getItem(draft))!),buildAad("draft",owner)))).toBe("legacy checkpoint words");
   await expect(kv.captureWritePermit(owner,oldKey)).rejects.toThrow("old account key");
+  expect((await kv.captureWritePermit(owner,newKey)).keyBound).toBe(true);
+  await saveSafetyPlan(newKey,owner,{...EMPTY_SAFETY_PLAN,coping:"Current-key writing remains usable after legacy recovery"});
+  expect((await loadSafetyPlan(newKey,owner))?.coping).toBe("Current-key writing remains usable after legacy recovery");
  });
  it("preserves a legacy competing writer injected after the preliminary read and before migration comparison",async()=>{
   const original=await ciphertext("original"),competing=await ciphertext("newer writing");await kv.setItem(draft,original);await stageLocalRotation(owner,oldKey,newKey,credential);

@@ -1272,6 +1272,7 @@ export const es: Record<string, string> = {
   "share.voiceOn": "Mi terapeuta puede escuchar mis grabaciones",
   "share.voiceOff": "Mi terapeuta no puede escuchar mis grabaciones",
   "share.voiceToggleFailed": "No se pudo cambiar lo que este terapeuta puede escuchar — inténtelo de nuevo.",
+  "share.reauthShareVoiceTitle": "Escriba su contraseña para cambiar lo que {name} puede escuchar",
   "app.erasureTitle": "Eliminación local pendiente",
   "app.erasureExplanation": "Todavía deben eliminarse de este navegador registros cifrados de una solicitud de eliminación de cuenta. Se conservan las otras cuentas. Las solicitudes confirmadas se reintentan automáticamente.",
   "app.erasureRetry": "Reintentar limpieza local",

@@ -6,16 +6,33 @@
 import ReactTestRenderer, { act, ReactTestInstance } from "react-test-renderer";
 import React from "react";
 import { Text, TouchableOpacity, Alert, TextInput, Switch } from "./rnMock";
+import { publicSurface } from "./publicSurface";
+import { assertPublicSurface } from "./publicSurfaceOracle";
+
+let rendered: ReactTestRenderer[] = [];
+let surfaceStage = 0;
+let scenario = -1;
+function currentScenario(): void {
+  const next = (globalThis as Record<symbol, number>)[Symbol.for("mindpattern.test.publicSurfaceScenario")] ?? 0;
+  if (next !== scenario) { scenario = next; rendered = []; surfaceStage = 0; }
+}
+function inspectPublicSurfaces(): void {
+  currentScenario();
+  for (const renderer of rendered) assertPublicSurface(publicSurface(renderer), ++surfaceStage);
+}
 
 export { act };
 
 export type Root = ReactTestRenderer;
 
 export async function render(ui: React.ReactElement): Promise<ReactTestRenderer> {
+  currentScenario();
   let renderer!: ReactTestRenderer;
   await act(async () => {
     renderer = ReactTestRenderer.create(ui);
   });
+  rendered.push(renderer);
+  inspectPublicSurfaces();
   return renderer;
 }
 
@@ -25,6 +42,7 @@ export async function flush(times = 3): Promise<void> {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
   }
+  inspectPublicSurfaces();
 }
 
 function flattenChildren(c: unknown): string {
@@ -63,6 +81,7 @@ export async function pressLabel(root: ReactTestRenderer, label: string): Promis
   await act(async () => {
     await (button.props as { onPress?: (event: unknown) => unknown }).onPress?.({ nativeEvent: { timestamp: Date.now() }, currentTarget: 1, target: 1 });
   });
+  inspectPublicSurfaces();
 }
 
 /** Fire onPress WITHOUT awaiting its promise — for tests that keep the
@@ -72,6 +91,7 @@ export async function firePress(root: ReactTestRenderer, label: string): Promise
   await act(async () => {
     void (button.props as { onPress?: (event: unknown) => unknown }).onPress?.({ nativeEvent: { timestamp: Date.now() }, currentTarget: 1, target: 1 });
   });
+  inspectPublicSurfaces();
 }
 
 export function inputByPlaceholder(root: ReactTestRenderer, placeholder: string): ReactTestInstance {
@@ -85,6 +105,7 @@ export async function typeInto(root: ReactTestRenderer, placeholder: string, val
   await act(async () => {
     (input.props as { onChangeText?: (t: string) => void }).onChangeText?.(value);
   });
+  inspectPublicSurfaces();
 }
 
 export async function submitInput(root: ReactTestRenderer, placeholder: string): Promise<void> {
@@ -92,6 +113,7 @@ export async function submitInput(root: ReactTestRenderer, placeholder: string):
   await act(async () => {
     (input.props as { onSubmitEditing?: () => unknown }).onSubmitEditing?.();
   });
+  inspectPublicSurfaces();
 }
 
 export function switchByValue(root: ReactTestRenderer, value: boolean): ReactTestInstance {
@@ -105,6 +127,7 @@ export async function toggleSwitch(root: ReactTestRenderer, value: boolean, next
   await act(async () => {
     (sw.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(next);
   });
+  inspectPublicSurfaces();
 }
 
 export function lastAlert(): [string, string?, Array<{ text: string; onPress?: () => unknown }>?] {
@@ -123,6 +146,7 @@ export async function pressAlertButton(label: string): Promise<void> {
   await act(async () => {
     await button.onPress?.();
   });
+  inspectPublicSurfaces();
 }
 
 /** Screen names currently mounted as Stack.Screen children. */

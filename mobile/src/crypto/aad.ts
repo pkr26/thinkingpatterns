@@ -41,7 +41,5 @@ export function buildAad(...parts: string[]): Buffer {
   // string contents could contain non-ASCII, and JSON.stringify escapes
   // structural characters itself, so escaping the WHOLE serialization is
   // safe: nothing outside string literals can be >= 0x7F.
-  // Stryker disable StringLiteral
 return Buffer.from(jsonEnsureAscii(arrayJson), "utf8");
-  // Stryker restore StringLiteral
 }

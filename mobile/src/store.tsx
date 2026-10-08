@@ -35,6 +35,14 @@ let stashedDraft: { userId: string; text: string; journal?: JournalDraft; origin
  * permits a draft restore after the same account re-unlocks. */
 let mayStashDraft = true;
 
+/** Process memory must retire even if an admitted server change outlives
+ * the screen tree, for example while the render-error fallback is visible. */
+function retireOriginMemory(): void {
+  abortInFlightFlush(); abortInFlightAudioFlush();
+  mayStashDraft = false; stashedDraft = null;
+  vault.lock();
+}
+
 /** Stash an in-progress draft before a vault lock unmounts the editor. */
 export function stashDraft(userId: string, text: string, journal?: JournalDraft, origin?: string): void {
   if (mayStashDraft) stashedDraft = { userId, text, journal: journal ? { ...journal, tags: [...journal.tags] } : undefined, origin };
@@ -88,7 +96,6 @@ const IDLE_LOCK_MS = 5 * 60_000;
 /** Server-reported unlock_days is attacker-controllable text from the
  *  network: only a sane positive integer is adopted. */
 function sanitizeUnlockDays(value: unknown): number | null {
-  // Stryker disable next-line ConditionalExpression: Number.isInteger returns false for every non-number, so the typeof arm is fully subsumed by !Number.isInteger
   if (typeof value !== "number" || !Number.isInteger(value)) return null;
   if (value < 1 || value > 365) return null;
   return value;
@@ -156,13 +163,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
    *  countdown, but only while the vault is actually unlocked. */
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchActivity = useCallback((): void => {
-    // Stryker disable next-line ConditionalExpression: clearTimeout(null) is a documented no-op, so the guard is unobservable
     if (idleTimer.current) clearTimeout(idleTimer.current);
-    // Stryker disable next-line ConditionalExpression: with the guard skipped, a locked vault arms a timer whose fire re-locks an already-locked vault — vault.lock() is idempotent and notifies the same (false) state
     if (vault.isUnlocked()) {
       idleTimer.current = setTimeout(() => vault.lock(), IDLE_LOCK_MS);
     }
-  }, // Stryker disable next-line ArrayDeclaration: a string-literal element is reference-stable, so React's Object.is dep comparison never sees a change — identical to []
+  },
      []);
 
   useEffect(() => {
@@ -175,7 +180,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     setUnauthorizedHandler((death) => {
       vault.lock();
       if (!death.accountDeleted) return;
-      accountGeneration.current++;
+      const deletionGeneration = ++accountGeneration.current;
       abortInFlightFlush(); abortInFlightAudioFlush();
       mayStashDraft = false; stashedDraft = null;
       setAuthStatus("loggedOut");
@@ -183,8 +188,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       setActiveDaysKnown(false); setActiveDaysLoading(false);
       if (death.userId) {
         void eraseDeletedAccountLocals(death.userId, death.username, { origin: death.origin })
-          .then(failures => setErasureIncomplete(failures.length > 0))
-          .catch(() => setErasureIncomplete(true));
+          .then(failures => { if (deletionGeneration === accountGeneration.current) setErasureIncomplete(failures.length > 0); })
+          .catch(() => { if (deletionGeneration === accountGeneration.current) setErasureIncomplete(true); });
       } else {
         void api.clearSession().catch(() => {});
       }
@@ -195,13 +200,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     // suppress editor-unmount draft persistence before the new URL lands.
     setOriginChangeHandler(() => {
       accountGeneration.current++;
-      abortInFlightFlush();
-      // 2026-10-01 audit H1: an in-flight AUDIO flush must stop too — its
-      // rows are origin-pinned and would otherwise refuse item-by-item.
-      abortInFlightAudioFlush();
-      mayStashDraft = false;
-      stashedDraft = null;
-      vault.lock();
+      retireOriginMemory();
       setAuthStatus("loggedOut");
       setActiveDays(0);
       progressOwner.current = null; setActiveDaysKnown(false); setActiveDaysLoading(false);
@@ -263,10 +262,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       setUnlocked(vault.isUnlocked());
       touchActivity(); // a fresh unlock starts the inactivity countdown
     });
-    // Stryker disable next-line StringLiteral: the rnMock AppState stub ignores the event name (test seam — a real device would never deliver events on "")
     const appStateSub = AppState.addEventListener("change", (state) => {
       if (state === "background" || state === "inactive") {
-        // Stryker disable next-line ConditionalExpression,CallExpression: vault.lock() below notifies this store's own subscriber, whose touchActivity() clears the same idleTimer unconditionally — this explicit clear is redundant
         if (idleTimer.current) clearTimeout(idleTimer.current);
         vault.lock();
       } else if (state === "active") {
@@ -285,16 +282,14 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     });
     return () => {
       accountGeneration.current++;
-      // Stryker disable next-line BooleanLiteral: React 18 treats a post-unmount setState as a silent no-op, so never marking cancelled is unobservable
       cancelled = true;
       setUnauthorizedHandler(null);
-      setOriginChangeHandler(null);
-      // Stryker disable next-line ConditionalExpression: clearTimeout(null) is a documented no-op, so the guard is unobservable
+      setOriginChangeHandler(retireOriginMemory);
       if (idleTimer.current) clearTimeout(idleTimer.current);
       unsubscribe();
       appStateSub.remove();
     };
-  }, // Stryker disable next-line ArrayDeclaration: touchActivity is a stable useCallback([]) identity, so [] and [touchActivity] are behaviorally identical
+  },
      [touchActivity]);
 
   const markLoggedIn = useCallback((): void => {
@@ -303,7 +298,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     setAuthStatus("loggedIn");
     setErasureIncomplete(false);
   },
-  // Stryker disable next-line ArrayDeclaration: a string-literal element is reference-stable, so React's Object.is dep comparison never sees a change — identical to []
   []);
 
   const refreshActiveDays = useCallback(async (): Promise<void> => {
@@ -321,7 +315,6 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       const insights = await api.insights();
       const currentOwner = await api.getUserId();
       if (generation !== accountGeneration.current || request !== progressRequest.current || currentOwner !== owner) return;
-      // Stryker disable next-line LogicalOperator,OptionalChaining: Number.isFinite never coerces, so X || isFinite(X) agrees with X && isFinite(X) on every input; and with a nullish insights the mutant's TypeError is caught below, keeping the last value like the optional chain does
       if (typeof insights?.active_days === "number" && Number.isFinite(insights.active_days) && insights.active_days >= 0) {
         setActiveDays(Math.min(3650, Math.floor(insights.active_days)));
         setActiveDaysKnown(true);
@@ -331,7 +324,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     } finally {
       if (generation === accountGeneration.current && request === progressRequest.current) setActiveDaysLoading(false);
     }
-  }, // Stryker disable next-line ArrayDeclaration: a string-literal element is reference-stable, so React's Object.is dep comparison never sees a change — identical to []
+  },
      []);
 
   // A saved bearer may boot directly to Unlock. The provider owns progress
@@ -369,7 +362,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     progressRequest.current++;
     setActiveDays(Math.min(3650, Math.floor(days)));
     setActiveDaysKnown(true); setActiveDaysLoading(false);
-  }, // Stryker disable next-line ArrayDeclaration: a string-literal element is reference-stable, so React's Object.is dep comparison never sees a change — identical to []
+  },
      []);
 
   const signOut = useCallback(async (): Promise<void> => {
@@ -397,7 +390,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     // preference and device reminder traces are sign-out cleanup targets.
     const clean = async (operation: () => Promise<unknown>): Promise<boolean> => {
       if (!isCurrent()) return false;
-      await operation().catch(() => {});
+      try { await operation(); } catch { /* native admission may refuse synchronously */ }
       return isCurrent();
     };
     if (userId) {
@@ -419,7 +412,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     // clearSession itself serializes credential mutation and rejects if a
     // newer account/origin takes ownership while its native writes await.
     await api.clearSession();
-  }, // Stryker disable next-line ArrayDeclaration: a string-literal element is reference-stable, so React's Object.is dep comparison never sees a change — identical to []
+  },
      []);
 
   // Memoized value + stable callbacks: consumers' effects depend on these

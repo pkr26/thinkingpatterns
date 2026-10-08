@@ -1,3 +1,4 @@
+import { runTestControl } from "./helpers/testControl";
 /**
  * SessionProvider: the tri-state auth model, unlock-day discovery from
  * server meta, vault-observer wiring, active-day refresh, and the
@@ -83,7 +84,7 @@ function Probe() {
 }
 
 beforeEach(() => {
-  __resetLocalKeyLifecycleForTests();
+  runTestControl(__resetLocalKeyLifecycleForTests);
   // Fresh default implementations per test so per-test overrides cannot leak.
   resetApi(api as never);
   vi.mocked(setUnauthorizedHandler).mockClear();
@@ -493,7 +494,7 @@ describe("SessionProvider", () => {
     });
     expect(textOf(root)).toBe("loggedOut|true|0|30");
 
-    const listener = vi.mocked(AppState.addEventListener).mock.calls.at(-1)?.[1] as (s: string) => void;
+    const listener = vi.mocked(AppState.addEventListener).mock.calls.filter(([event]) => event === "change").at(-1)?.[1] as (s: string) => void;
     expect(listener).toBeTypeOf("function");
     await act(async () => {
       listener("background");
@@ -596,7 +597,7 @@ describe("SessionProvider", () => {
       </SessionProvider>,
     );
     await flush();
-    const listener = vi.mocked(AppState.addEventListener).mock.calls.at(-1)?.[1] as (s: string) => void;
+    const listener = vi.mocked(AppState.addEventListener).mock.calls.filter(([event]) => event === "change").at(-1)?.[1] as (s: string) => void;
     await act(async () => {
       vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, 2) });
     });
@@ -862,7 +863,7 @@ describe("reconnect flush wiring", () => {
       </SessionProvider>,
     );
     await flush();
-    const listener = vi.mocked(AppState.addEventListener).mock.calls.at(-1)?.[1] as (s: string) => void;
+    const listener = vi.mocked(AppState.addEventListener).mock.calls.filter(([event]) => event === "change").at(-1)?.[1] as (s: string) => void;
     await act(async () => {
       listener("active");
     });
@@ -893,7 +894,7 @@ describe("foreground activeDays refresh (E-10, audit round 2, 2026-09-21, F-11)"
     await flush();
     expect(textOf(root)).toBe("loggedOut|false|0|30"); // nothing fetched yet
 
-    const listener = vi.mocked(AppState.addEventListener).mock.calls.at(-1)?.[1] as (s: string) => void;
+    const listener = vi.mocked(AppState.addEventListener).mock.calls.filter(([event]) => event === "change").at(-1)?.[1] as (s: string) => void;
     await act(async () => {
       listener("active");
     });

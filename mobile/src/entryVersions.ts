@@ -37,15 +37,16 @@ async function loadV2Bound(userId: string, dataKey: Buffer): Promise<Set<string>
     return bound;
   }
   if (!raw) return bound;
+  let plaintext: Buffer | null = null;
   try {
-    const plaintext = decrypt(dataKey, Buffer.from(raw, "base64"), buildAad("entry-v2-bound", userId));
+    plaintext = decrypt(dataKey, Buffer.from(raw, "base64"), buildAad("entry-v2-bound", userId));
     const parsed = JSON.parse(plaintext.toString("utf8")) as unknown;
     if (Array.isArray(parsed)) {
       for (const id of parsed) if (typeof id === "string") bound.add(id);
     }
   } catch {
     // Corrupt/foreign ciphertext: treat as absent.
-  }
+  } finally { plaintext?.fill(0); }
   return bound;
 }
 
@@ -108,8 +109,9 @@ async function loadStored(userId: string, dataKey: Buffer): Promise<Map<string, 
     return mirror;
   }
   if (!raw) return mirror;
+  let plaintext: Buffer | null = null;
   try {
-    const plaintext = decrypt(dataKey, Buffer.from(raw, "base64"), buildAad("entry-versions", userId));
+    plaintext = decrypt(dataKey, Buffer.from(raw, "base64"), buildAad("entry-versions", userId));
     const parsed = JSON.parse(plaintext.toString("utf8")) as Record<string, unknown>;
     for (const [id, value] of Object.entries(parsed)) {
       if (typeof value === "number" && Number.isSafeInteger(value) && value >= 1) {
@@ -119,7 +121,7 @@ async function loadStored(userId: string, dataKey: Buffer): Promise<Map<string, 
     }
   } catch {
     // Corrupt/foreign ciphertext: treat as absent. The mirror stands.
-  }
+  } finally { plaintext?.fill(0); }
   return mirror;
 }
 
@@ -134,12 +136,15 @@ async function persist(userId: string, dataKey: Buffer, mirror: Map<string, numb
   }
   const record: Record<string, number> = {};
   for (const [id, version] of mirror) record[id] = version;
-  const blob = encrypt(dataKey, Buffer.from(JSON.stringify(record), "utf8"), buildAad("entry-versions", userId));
+  const plaintext = Buffer.from(JSON.stringify(record), "utf8");
   try {
-    await commitLocalWrite(permit, () => AsyncStorage.setItem(storageKey(userId), blob.toString("base64")));
-  } catch {
-    // best effort: the mirror holds for this session; next change retries.
-  }
+    const blob = encrypt(dataKey, plaintext, buildAad("entry-versions", userId));
+    try {
+      await commitLocalWrite(permit, () => AsyncStorage.setItem(storageKey(userId), blob.toString("base64")));
+    } catch {
+      // best effort: the mirror holds for this session; next change retries.
+    }
+  } finally { plaintext.fill(0); }
 }
 
 export interface VersionObservation {

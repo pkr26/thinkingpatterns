@@ -68,6 +68,14 @@ redteam/mutation_campaign_*/results/
 mobile/reports/
 portal/reports/
 
+# Raw frontend campaign executions stay local; compact reviewed results ship
+# under reports/frontend-mutation-2026-10-07/.
+reports/frontend-mutation-2026-10-05/
+reports/mutation-2026-10-07/
+reports/mutation-2026-10-05/history-january-pristine.json
+reports/mutation-2026-10-05/history-native-before.json
+reports/mutation-2026-10-05/insights-native-schema-current-baseline.json
+
 # October 4 raw audit evidence stays local. Curated findings, remediation,
 # and compact mutation results are published in docs/archive/audits/2026-10-04/.
 reports/independent-audit-2026-10-04/

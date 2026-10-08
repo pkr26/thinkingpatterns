@@ -160,7 +160,12 @@ export function EntryView(props: {
   const draftRef = useRef<EntryDraft>({ text, mood: moodPick, energy: energyPick, sleep: sleepPick, tags });
   draftRef.current = { text, mood: moodPick, energy: energyPick, sleep: sleepPick, tags };
   useEffect(() => {
-    const unregister = registerDraftSource(() => draftHydrated.current ? draftRef.current : null);
+    const owner = vault.ownerUserId();
+    const dataKey = vault.isUnlocked() ? vault.get().dataKey : null;
+    const unregister = registerDraftSource(() =>
+      draftHydrated.current && owner && dataKey && vault.ownerUserId() === owner &&
+      vault.isUnlocked() && vault.get().dataKey === dataKey ? draftRef.current : null,
+    );
     return () => { void preserveActiveDraft(); unregister(); };
   }, []);
   const draftHydrated = useRef(false);
@@ -173,7 +178,10 @@ export function EntryView(props: {
     const timer = setTimeout(() => {
       if (!operation?.current()) return;
       const key = new Uint8Array(vault.get().dataKey);
-      void saveActiveDraft(key,userId,draftRef.current).then(() => setDraftStatus(t("entry.draftSaved"))).catch(err => setDraftStatus(displayError(err, t("entry.draftFailed")))).finally(() => key.fill(0));
+      void saveActiveDraft(key,userId,draftRef.current)
+        .then(() => { if (operation.current()) setDraftStatus(t("entry.draftSaved")); })
+        .catch(err => { if (operation.current()) setDraftStatus(displayError(err, t("entry.draftFailed"))); })
+        .finally(() => key.fill(0));
     },300);
     return () => clearTimeout(timer);
   },[text,moodPick,energyPick,sleepPick,tags,userId]);
@@ -190,9 +198,12 @@ export function EntryView(props: {
 
   // The streak is device-local value (never synced) — load once per mount.
   useEffect(() => {
-    if (!userId || !vault.isUnlocked()) return;
-    void localStreak(vault.get().dataKey, userId).then(setStreak).catch(() => undefined);
-    void queueLength(userId).then(setQueuedCount).catch(() => undefined);
+    const operation = beginOperation();
+    if (!operation) return;
+    void localStreak(operation.keys.dataKey, operation.owner)
+      .then(value => { if (operation.current()) setStreak(value); }).catch(() => undefined);
+    void queueLength(operation.owner)
+      .then(value => { if (operation.current()) setQueuedCount(value); }).catch(() => undefined);
   }, [userId]);
 
   // Restore a draft sealed at lock time (audit 2026-09-26): the editor's
@@ -200,12 +211,13 @@ export function EntryView(props: {
   // deliberately stays until save/discard — switching views and back must
   // not lose the draft, and the next lock re-seals whatever is on screen.
   useEffect(() => {
-    const owner = vault.ownerUserId();
-    if (!owner || !vault.isUnlocked()) return;
+    const operation = beginOperation();
+    if (!operation) return;
+    const owner = operation.owner;
     let cancelled = false;
-    loadActiveDraft(vault.get().dataKey, owner)
+    loadActiveDraft(operation.keys.dataKey, owner)
       .then((draft) => {
-        if (cancelled) return;
+        if (cancelled || !operation.current()) return;
         draftHydrated.current = true; setDraftReady(true);
         if (!draft) return;
         // Never clobber typing that raced the restore: the slot keeps the
@@ -219,7 +231,7 @@ export function EntryView(props: {
         setTags(draft.tags);
         setDraftRestored(true);
       })
-      .catch(err => { if (!cancelled) setDraftStatus(displayError(err, t("entry.draftFailed"))); });
+      .catch(err => { if (!cancelled && operation.current()) setDraftStatus(displayError(err, t("entry.draftFailed"))); });
     return () => {
       cancelled = true;
     };
@@ -261,6 +273,11 @@ export function EntryView(props: {
           result = await api.transcribeAudio(toBase64(plain), take.normalizedMime, take.durationSeconds);
         } finally { zeroize(plain); }
         if (!current()) return;
+        if (result.original_text.length > MAX_ENTRY_CHARS) {
+          setVoiceError(t("entry.tooLongBody", { max: MAX_ENTRY_CHARS.toLocaleString(dateLocaleTag()) }));
+          recorder.reset();
+          return;
+        }
         setVoice({
           audioBlob: take.blob,
           normalizedMime: take.normalizedMime,
@@ -371,7 +388,7 @@ export function EntryView(props: {
     // mobile EntryScreen parity. entryDraft.ts silently rejects a sealed
     // draft over 100k, so an over-cap save would pass the server and then
     // lose its own lock-time draft; the cap keeps both sides consistent.
-    if (text.trim().length > MAX_ENTRY_CHARS) {
+    if (text.length > MAX_ENTRY_CHARS) {
       setError(t("entry.tooLongBody", { max: MAX_ENTRY_CHARS.toLocaleString(dateLocaleTag()) }));
       return;
     }
@@ -442,6 +459,7 @@ export function EntryView(props: {
             englishForSave = null;
           }
         }
+        if (!operation.current()) return;
         // H-5 (audit 2026-09-26): ONLY the explicit pick rides in the
         // encrypted payload's sentiment slot — null when no pick was made.
         // The machine estimate is never written where the backend/therapist
@@ -736,7 +754,11 @@ export function EntryView(props: {
         {recorder.error && !voiceError && <ErrorBanner message={recorder.error} />}
         <div className="row row--wrap">
           {chips.map((chip) => (
-            <Chip key={chip} label={chip} toggle={false} onPress={() => setText(`${text}${text && !text.endsWith(" ") ? " " : ""}${chip} `)} />
+            <Chip key={chip} label={chip} toggle={false} onPress={() => {
+              const combined = `${text}${text && !text.endsWith(" ") ? " " : ""}${chip} `;
+              if (combined.length > MAX_ENTRY_CHARS) { setError(t("entry.tooLongBody", { max: MAX_ENTRY_CHARS.toLocaleString(dateLocaleTag()) })); return; }
+              setText(combined);
+            }} />
           ))}
         </div>
         {sentiment !== null && (

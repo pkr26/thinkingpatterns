@@ -116,9 +116,14 @@ export async function buildRegistrationEnvelope(
     const kek = envelopeKek(master, salt);
     try {
       const dataKey = generateDataKey();
-      const kdfParams = defaultKdfParams();
-      const wrapped = wrapDataKey(dataKey, kek, username, kdfParams);
-      return { dataKey, kdfParams, wrappedB64: wrapped.toString("base64") };
+      try {
+        const kdfParams = defaultKdfParams();
+        const wrapped = wrapDataKey(dataKey, kek, username, kdfParams);
+        return { dataKey, kdfParams, wrappedB64: wrapped.toString("base64") };
+      } catch (error) {
+        zeroize(dataKey);
+        throw error;
+      }
     } finally {
       zeroize(kek);
     }

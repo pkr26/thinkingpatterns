@@ -284,6 +284,7 @@ export function LoginView(props: { onSuccess: (success: LoginSuccess) => void })
         const saltBytes = randomBytes(16);
         const saltB64 = toBase64(saltBytes);
         const keys = await derivePatientKeys(await deriveMasterKey(password, saltBytes));
+        let derivedDataKey: Bytes | null = keys.dataKey;
         let token: TokenResponse;
         try {
           // v2 DEFAULT for new accounts (2026-09-26): the data key is a
@@ -301,7 +302,6 @@ export function LoginView(props: { onSuccess: (success: LoginSuccess) => void })
           // key anyway would seal every entry under a key no unlock path
           // can ever reproduce. The login path's documented ambiguity
           // defense, mirrored here.
-          const derivedDataKey = keys.dataKey;
           keys.dataKey = envelope.dataKey;
           token = await auth.register(username, saltB64, toBase64(keys.authKey), MINIMUM_AGE_ATTESTATION, {
             kdfParams: envelope.kdfParams as unknown as Record<string, unknown>,
@@ -315,8 +315,9 @@ export function LoginView(props: { onSuccess: (success: LoginSuccess) => void })
             zeroize(keys.dataKey);
             keys.dataKey = derivedDataKey;
           }
+          derivedDataKey = null; // erased or transferred back to the owned key set
         } catch (err) {
-          zeroize(keys.authKey, keys.dataKey, keys.masterKey);
+          zeroize(keys.authKey, keys.dataKey, keys.masterKey, derivedDataKey);
           throw err;
         }
         const adoption = adoptSession(keys, token, username, props.onSuccess);

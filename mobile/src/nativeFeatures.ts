@@ -377,6 +377,9 @@ export async function startNotificationPressRouting(): Promise<(() => void) | nu
     });
     return () => { disposed = true; unsubscribe(); };
   } catch {
+    // A failed subscription is inactive, including its pending cold-start
+    // callback: the caller has no disposer to revoke that callback later.
+    disposed = true;
     return null;
   }
 }

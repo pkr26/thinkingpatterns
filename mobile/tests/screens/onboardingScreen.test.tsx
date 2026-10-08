@@ -1,3 +1,4 @@
+import { runTestControl } from "../helpers/testControl";
 /**
  * OnboardingScreen: three calm panels shown once after registration, the
  * privacy-policy link on the encryption panel, the no-reset + 13+
@@ -32,7 +33,7 @@ const { changeLocalSessionOwner, __resetLocalKeyLifecycleForTests } = await impo
 const nav = { navigate: vi.fn(), replace: vi.fn() };
 
 beforeEach(() => {
-  __resetLocalKeyLifecycleForTests();
+  runTestControl(__resetLocalKeyLifecycleForTests);
   changeLocalSessionOwner("user-1");
   resetApi(api as never);
   storage.__reset();

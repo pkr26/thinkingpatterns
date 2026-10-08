@@ -1,3 +1,4 @@
+import { runTestControl } from "./helpers/testControl";
 /**
  * View behavior with mocked api/crypto layers (the crypto itself is
  * pinned by tests/crypto.test.ts against the real WebCrypto): login and
@@ -5,7 +6,8 @@
  * view — pattern cards, the sensitive non-quoting card, the evidence
  * drill-down, and notes.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { publicSurface } from "./helpers/publicSurface";
 
 vi.mock("../src/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/api")>();
@@ -109,6 +111,14 @@ const mockedCrypto = vi.mocked(await import("../src/crypto"));
 const rtr = await import("./helpers/rtr");
 const { render, flush, textOf, press, buttonByLabel, typeInto, typeTextarea } = rtr;
 const { act } = await import("react-test-renderer");
+
+/** Public render contracts supplement interaction assertions: wording,
+ * classes, SVG geometry and accessibility attributes are user-facing output.
+ * Drop function handlers and normalize React-generated association ids. */
+function expectPublicView(root: Awaited<ReturnType<typeof render>>, state: string): void {
+  expect(publicSurface(root.toJSON())).toMatchSnapshot(state);
+}
+
 const joinedLabel = (n: { props: { children?: unknown } }): string => {
   const parts: string[] = [];
   const walk = (v: unknown): void => {
@@ -144,6 +154,8 @@ const session = {
 };
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-10-05T12:00:00Z"));
   vi.clearAllMocks();
   window.localStorage.clear();
   // L-75 (2026-09-20): delta anchors now live in per-tab sessionStorage
@@ -154,6 +166,7 @@ beforeEach(() => {
   // exactly like a fresh page load.
   resetScanConfirmation();
 });
+afterEach(() => vi.useRealTimers());
 
 describe("LoginView", () => {
   it("drops the setup secret and verifier after MFA enable, and revokes an abandoned handoff", async () => {
@@ -166,6 +179,7 @@ describe("LoginView", () => {
     await flush();
     expect(textOf(root)).toContain("JBSWY3DPEHPK3PXP");
     expect(textOf(root)).toContain("otpauth://");
+    expectPublicView(root, "mandatory MFA enrollment and local QR");
 
     await typeInto(root, "Authenticator code", "123456");
     await press(root, "Enable two-factor authentication");
@@ -180,6 +194,7 @@ describe("LoginView", () => {
     expect(textOf(root)).toContain("Two-factor authentication is enabled");
     expect(textOf(root)).toContain("ABCDE12345");
     expect(textOf(root)).toContain("I saved the codes — return to sign in");
+    expectPublicView(root, "one-time recovery codes after abandoned unlock");
     expect(textOf(root)).not.toContain("JBSWY3DPEHPK3PXP");
 
     await press(root, "I saved the codes — return to sign in");
@@ -203,6 +218,7 @@ describe("LoginView", () => {
     expect(buttonByLabel(root, "Create account")).toBe(true);
     const create = root.root.findAllByType("button").find((n) => joinedLabel(n) === "Create account");
     expect(create?.props.disabled).toBe(true);
+    expectPublicView(root, "registration policy and minimum-age attestation");
   });
 
   it("fails closed with an administrative explanation when the server disables clinician enrollment", async () => {
@@ -236,6 +252,7 @@ describe("LoginView", () => {
       expect.any(String),
     );
     expect(textOf(root)).toContain("cannot be changed from the sign-in screen");
+    expectPublicView(root, "sign-in fields and custody explanation");
   });
 
   it("refuses a patient-role account", async () => {
@@ -405,10 +422,12 @@ describe("PatientsView", () => {
     const root = await render(<PatientsView displayName="Dr. Portal" onOpen={vi.fn()} onSignOut={vi.fn()} />);
     await flush();
     expect(textOf(root)).toContain("No patients are sharing with you yet");
+    expectPublicView(root, "empty caseload and pairing controls");
     await press(root, "Generate pairing code");
     await flush();
     expect(mockedApi.newPairingCode).toHaveBeenCalledTimes(1);
     expect(textOf(root)).toContain("7X2KQM4N");
+    expectPublicView(root, "active pairing code");
   });
 
   it("E (2026-09-26): entering the patient's id pulls the SAS beside the code, with compare-out-of-band copy", async () => {
@@ -429,6 +448,7 @@ describe("PatientsView", () => {
     // The honest comparison instruction, including the stop-on-mismatch.
     expect(textOf(root)).toContain("matches EXACTLY");
     expect(textOf(root)).toContain("generate a new code and do not proceed");
+    expectPublicView(root, "out-of-band patient pairing verification");
   });
 
   it("E: a flat 404 on the SAS read explains the dead/unknown code; a fresh code retires the comparison", async () => {
@@ -557,6 +577,7 @@ describe("PatientsView", () => {
     expect(textOf(root)).toContain("sharing since 2026-09-01");
     expect(textOf(root)).toContain("patientb");
     expect(textOf(root)).toContain("access ended 2026-09-10");
+    expectPublicView(root, "active and stopped patient rows");
     expect(buttonByLabel(root, "Open patterns")).toBe(true);
     await press(root, "Open patterns");
     expect(onOpen).toHaveBeenCalledWith(patient);
@@ -590,7 +611,8 @@ describe("PatientsView", () => {
     const root = await render(<PatientsView displayName="Dr. Portal" onOpen={vi.fn()} onSignOut={vi.fn()} />);
     await flush();
     await press(root, "Generate pairing code");
-    await press(root, "Generating…"); // busy guard arm
+    const generating = root.root.findAllByType("button").find(node => (node.children as unknown[]).join("") === "Generating…")!;
+    expect(generating.props.disabled).toBe(true);
     expect(mockedApi.newPairingCode).toHaveBeenCalledTimes(1);
     resolveCode?.({ code: "DONECODE", expires_in: 900 });
     await flush();
@@ -675,6 +697,7 @@ describe("PatientView", () => {
     expect(textOf(root)).toContain("About 2 day(s) after 'sleep'");
     expect(textOf(root)).toContain("concentrates on certain days");
     expect(textOf(root)).toContain("read lower than the patient's own baseline");
+    expectPublicView(root, "clinical pattern cards and print summary");
 
     await openCard(root, "temporal — work");
     await flush();
@@ -688,6 +711,7 @@ describe("PatientView", () => {
     expect(textOf(root)).toContain("decrypted e-4"); // same calendar day: distinct row keys
     expect(textOf(root)).not.toContain("decrypted e-3");
     expect(textOf(root)).toContain("mood 0.25");
+    expectPublicView(root, "decrypted evidence and mood sparkline");
     await press(root, "Back to all patterns");
     expect(textOf(root)).toContain("See the evidence");
   });
@@ -699,6 +723,7 @@ describe("PatientView", () => {
     const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
     await flush();
     expect(textOf(root)).toContain("baseline phase");
+    expectPublicView(root, "baseline chart and draft editor");
     expect(mockedCrypto.unwrapPatientDataKey).not.toHaveBeenCalled();
   });
 
@@ -771,6 +796,7 @@ describe("PatientView", () => {
     const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
     await flush();
     expect(textOf(root)).toContain("(note could not be decrypted with this account's key)");
+    expectPublicView(root, "unreadable private note with recovery explanation");
   });
 
   it("creates a note bound to the open pattern and deletes one", async () => {
@@ -1041,6 +1067,7 @@ describe("PatientView", () => {
     expect(textOf(root)).toContain("steady presence");
     expect(textOf(root)).toContain("3 mentions");
     expect(textOf(root)).toContain("'feeling better' has returned 3 times");
+    expectPublicView(root, "all other pattern descriptions");
   });
 
   it("handles a non-insight phase without a blob, dead key material, and string failures", async () => {
@@ -1160,6 +1187,7 @@ describe("PatientView 2026-09-17 wave", () => {
     // on — the server 400s a body without base_version.
     expect(mockedApi.updateNote).toHaveBeenCalledWith("n0", "SEALEDNOTE==", 4);
     expect(textOf(root)).toContain("Edited session note.");
+    expectPublicView(root, "versioned edited note and revision controls");
   });
 
   it("note templates and copy-forward seed the draft", async () => {
@@ -1217,6 +1245,7 @@ describe("PatientsView caseload summaries (2026-09-19)", () => {
     expect(textOf(root)).toContain("never echoed here");
     // The per-patient count comes from the O(1) summary, not a chart fetch.
     expect(textOf(root)).toContain("4 patterns");
+    expectPublicView(root, "consented caseload summary and sensitive banner");
     expect(mockedApi.patientInsights).not.toHaveBeenCalled();
   });
 
@@ -1276,6 +1305,7 @@ describe("PatientView recorded measures (MBC, 2026-09-19)", () => {
     // that produced it.
     expect(rtr.textOf(root)).toContain("PHQ-9 (depression): 2026-09-04: 14  ·  2026-09-11: 9");
     expect(rtr.textOf(root)).toContain("interpretation is yours");
+    expectPublicView(root, "recorded measure interpretation");
   });
 
   it("no measures means no card", async () => {
@@ -1343,6 +1373,7 @@ describe("PatientView item-9 surfacing (2026-09-27)", () => {
     // the score, drives follow-up — and no interpretation rides along.
     expect(text).toContain("2026-09-11: 6");
     expect(text).not.toMatch(/severe|moderate|mild depression/i);
+    expectPublicView(root, "endorsed item-nine screen and print follow-up");
   });
 
   it("item9 = 0 (explicitly unendorsed) renders nothing extra — the row is the fact, not the field", async () => {
@@ -1867,7 +1898,7 @@ describe("PatientsView banner fold (audit round 2, 2026-09-21, F-8)", () => {
 
   it("2026-09-26 follow-up (portal N-1): a replayed OLDER insights blob degrades to the error row, not stale triage data", async () => {
     const { resetInsightsFreshness } = await import("../src/views/PatientView");
-    resetInsightsFreshness();
+    runTestControl(resetInsightsFreshness);
     try {
       const summary = (seq: number) => ({ phase: "insight", active_days: 45, streak: 3, days_remaining: 0, blob: "BLOB==", state_seq: seq });
       // The scan bar exists only for a caseload of 2+: pair the target
@@ -1898,7 +1929,7 @@ describe("PatientsView banner fold (audit round 2, 2026-09-21, F-8)", () => {
       // Two patients scanned twice: four insight fetches total.
       expect(mockedApi.patientInsights).toHaveBeenCalledTimes(4);
     } finally {
-      resetInsightsFreshness();
+      runTestControl(resetInsightsFreshness);
     }
   });
 
@@ -2244,10 +2275,12 @@ describe("PatientView idempotent note creation (2026-09-26 audit round, L)", () 
     await typeTextarea(root, "Note about this patient…", "Conflict then retry.");
     await press(root, "Save note");
     await flush();
-    expect(textOf(root)).toContain("note id already used for another patient");
+    await vi.waitFor(() => expect(textOf(root)).toContain("note id already used for another patient"));
     // The conflicted id is burned: the retry mints a fresh one and lands.
     await press(root, "Save note");
     await flush();
+    await vi.waitFor(() => expect(mockedApi.createNote).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(buttonByLabel(root, "Save note")).toBeDefined());
     const calls = mockedApi.createNote.mock.calls as unknown as [string, { client_note_id: string }][];
     expect(calls[1]![1].client_note_id).not.toBe(calls[0]![1].client_note_id);
     expect(textOf(root)).toContain("Conflict then retry.");
@@ -2278,12 +2311,13 @@ describe("PatientView idempotent note creation (2026-09-26 audit round, L)", () 
     await typeTextarea(root, "Note about this patient…", "Version conflict then retry.");
     await press(root, "Save note");
     await flush();
-    expect(textOf(root)).toContain("a different note with this client_note_id already exists");
+    await vi.waitFor(() => expect(textOf(root)).toContain("a different note with this client_note_id already exists"));
     // The version-conflicted id is burned: the second press mints a FRESH
     // client_note_id (different bytes underneath it) and the draft is
     // savable again — not wedged on the dead id forever.
     await press(root, "Save note");
     await flush();
+    await vi.waitFor(() => expect(mockedApi.createNote).toHaveBeenCalledTimes(2));
     const calls = mockedApi.createNote.mock.calls as unknown as [string, { client_note_id: string; blob: string }][];
     expect(calls.length).toBe(2);
     expect(calls[1]![1].client_note_id).not.toBe(calls[0]![1].client_note_id);

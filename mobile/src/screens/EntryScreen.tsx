@@ -70,12 +70,13 @@ const STATUS_MS = 2_600;
 export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Element {
   const t = useTheme();
   const { activeDays, activeDaysKnown, activeDaysLoading, unlockDays, touchActivity, refreshActiveDays } = useSession();
+  const renderedSaveOwner = vault.ownerUserId();
+  const renderedSaveKey = vault.isUnlocked() ? vault.get().dataKey : null;
   const progressKnown = activeDaysKnown !== false;
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [draftRestored, setDraftRestored] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
-  // Stryker disable next-line StringLiteral: the initial tone is unobservable — a status message only renders after showStatus set its own tone first
   const [statusTone, setStatusTone] = useState<InlineStatusTone>("ok");
   /** Device-local signal: today's date appears in the on-device mood log.
    *  (Entries written on another device aren't in it — the chip's absence
@@ -107,6 +108,8 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
     permissionDenied: tr("entry.voiceMicDenied"),
     failed: tr("entry.voiceRecordFailed"),
   });
+  const voiceIntent = useRef(0);
+  const startVoiceRecording = () => { voiceIntent.current++; void voiceRecorder.start(); };
 
   // A finished take auto-transcribes exactly once: the ref holds the last
   // URI handled, so re-renders never re-fire (a re-record mints a new URI).
@@ -116,11 +119,16 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
     if (!take || lastTranscribedUriRef.current === take.uri) return;
     lastTranscribedUriRef.current = take.uri;
     let cancelled = false;
+    const transcriptionEpoch = localWriteScopeEpoch();
+    const transcriptionOwnerKey = vault.isUnlocked() ? vault.get().dataKey : null;
+    const ownsTranscription = () => !cancelled && transcriptionEpoch === localWriteScopeEpoch()
+      && vault.isUnlocked() && vault.get().dataKey === transcriptionOwnerKey;
+    const textBeforeTranscription = textRef.current;
     void (async () => {
       setTranscribing(true);
       try {
         const result = await api.transcribeAudio(take.base64, take.mime, take.durationSeconds);
-        if (cancelled) return;
+        if (!ownsTranscription()) return;
         setVoice({
           language: result.language,
           languageRaw: result.language_raw,
@@ -128,9 +136,11 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
           englishText: result.english_text,
           keepAudio: true,
         });
-        updateDraft({ text: result.original_text });
+        // Typing stays available while the provider works. Preserve words
+        // written after this take rather than replacing them on completion.
+        if (textRef.current === textBeforeTranscription) updateDraft({ text: result.original_text });
       } catch (err) {
-        if (cancelled) return;
+        if (!ownsTranscription()) return;
         if (err instanceof ApiError && err.code === "voice_consent_required") {
           setStatus(tr("entry.voiceConsentNeeded"));
           setStatusTone("neutral");
@@ -172,6 +182,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
   const draftOwner = useRef<{ scope: JournalDraftScope; key: Buffer } | null>(null);
   const draftScopeRef = useRef<JournalDraftScope | null>(null);
   const loadedDraftRef = useRef<LoadedJournalDraft | null>(null);
+  const rolloverFrom = useRef<JournalDraft | null>(null);
   const ramDraftRestored = useRef(false);
   const savingEditor = useRef<JournalDraft | null>(null);
   const draftReady = useRef(false);
@@ -216,7 +227,19 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
     const key = Buffer.from(owner.key);
     if (!unmountedRef.current) setDeviceDraftStatus("saving");
     try {
-      const result = await saveJournalDraft(key, owner.scope, snapshot, replaceCiphertext);
+      let replacement = replaceCiphertext;
+      const prior = rolloverFrom.current;
+      // Rollover changes the editor identity. Replace only the actual old
+      // receipt; the storage helper still compares it before committing.
+      if (prior && snapshot.editorId !== prior.editorId && replacement === undefined) {
+        const loaded = await loadJournalDraft(key, owner.scope);
+        if (loaded && loaded.draft.editorId === prior.editorId
+          && (loaded.draft.revision < prior.revision || sameDraft(loaded.draft, prior))) {
+          replacement = loaded.ciphertext;
+        }
+      }
+      const result = await saveJournalDraft(key, owner.scope, snapshot, replacement);
+      if (result === "saved" && prior && snapshot.editorId !== prior.editorId && rolloverFrom.current === prior) rolloverFrom.current = null;
       if (!unmountedRef.current && draftRef.current.editorId === snapshot.editorId && draftRef.current.revision === snapshot.revision) setDeviceDraftStatus(result === "saved" ? "saved" : "none");
       return true;
     } catch {
@@ -227,7 +250,15 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
   const updateDraft = (patch: Partial<Pick<JournalDraft, "text" | "mood" | "energy" | "sleep" | "tags">>, authored = true) => {
     if (authored) authoredDraft.current = true;
     justSavedRef.current = false;
-    applyDraft({ ...draftRef.current, ...patch, revision: draftRef.current.revision + 1 });
+    const current = draftRef.current;
+    // Keep revision comparisons exact, including drafts restored at the
+    // largest value accepted by the encrypted draft schema.
+    if (!Number.isSafeInteger(current.revision) || current.revision >= Number.MAX_SAFE_INTEGER) {
+      rolloverFrom.current = { ...current, tags: [...current.tags] };
+      applyDraft({ ...current, ...patch, editorId: newJournalDraft().editorId, revision: 1 });
+    } else {
+      applyDraft({ ...current, ...patch, revision: current.revision + 1 });
+    }
     if (draftTimer.current) clearTimeout(draftTimer.current);
     if (!draftBlocked.current) setDeviceDraftStatus(draftReady.current ? "saving" : "loading");
     draftTimer.current = setTimeout(() => { void persistDraft(); }, 300);
@@ -263,7 +294,12 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
     const loaded = loadedDraftRef.current;
     if (loaded && !sameDraft(draft, loaded.draft)) {
       draftBlocked.current = true; setDraftChoice(loaded); setDeviceDraftStatus("none");
-    } else if (draftReady.current && !draftBlocked.current) void persistDraft();
+    } else if (draftReady.current && !draftBlocked.current) {
+      // The current editor may have acquired a device backup after the
+      // first hydration. Read that receipt before backing up the RAM choice
+      // so a different editor is offered through the existing CAS decision.
+      void hydrateDraft();
+    }
   };
 
   useEffect(() => {
@@ -291,10 +327,6 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
       draftOwner.current?.key.fill(0); draftOwner.current = null;
     };
   }, []);
-
-  useEffect(() => {
-    textRef.current = text;
-  }, [text]);
 
   /** Transient confirmation; replaces itself cleanly and never stacks. */
   const showStatus = (message: string, tone: InlineStatusTone) => {
@@ -340,7 +372,6 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
           void restoreDraftFor(id).catch(() => {});
           // "Already wrote today" from the device-local mood log (the only
           // entry signal that needs no network round-trip).
-          // Stryker disable next-line ConditionalExpression: with the vault locked, vault.get() throws inside this .then and the chain's .catch(() => {}) swallows it — recentMoods/localStreak are skipped exactly as with the guard
           if (vault.isUnlocked()) {
             recentMoods(vault.get().dataKey, id, 30)
               .then((days) => setWroteToday(days.some((d) => d.date === localDateISO())))
@@ -405,7 +436,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
     // mini-brain recompute. That refresh SHIPS THE DATA KEY to the server
     // — after the red-team audit it is only ever sent as an explicit act
     // (the Question screen's button), never automatically after a sync.
-  }, // Stryker disable next-line ArrayDeclaration: [] and ["Stryker was here"] are both referentially constant — the mount effect runs exactly once either way (test seam)
+  },
      []);
 
   // The threshold moment: when the server-reported active days first reach
@@ -430,6 +461,12 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
   }, [activeDays, progressKnown, unlockDays]);
 
   const save = async () => {
+    // A granted Native gesture can release before a replacement-key render
+    // commits. Only the frame that displayed these words may submit them.
+    if (vault.isUnlocked() && (vault.ownerUserId() !== renderedSaveOwner || vault.get().dataKey !== renderedSaveKey)) return;
+    // A granted save may release before newly typed Native text commits.
+    // That older frame cannot acknowledge the current unsaved draft.
+    if (draftRef.current.text !== text) return;
     const trimmed = text.trim();
     if (!trimmed) return;
     if (trimmed.length > MAX_ENTRY_CHARS) {
@@ -445,6 +482,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
     if (savingRef.current) return;
     savingRef.current = true;
     const editorSnapshot = { ...draftRef.current, tags: [...draftRef.current.tags] };
+    const saveVoiceIntent = voiceIntent.current;
     savingEditor.current = editorSnapshot;
     setBusy(true);
     // Crisis detection is ON-DEVICE and pre-encryption by necessity: the
@@ -470,9 +508,13 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
     // The copies are immune to the vault's in-place zeroize-on-lock.
     let saveKeys: { authKey: Buffer; dataKey: Buffer; authKeyKnown: boolean } | null = null;
     let writePermit: LocalWritePermit | null = null;
+    const saveOwnerKey = vault.isUnlocked() ? vault.get().dataKey : null;
     const submitEpoch = localWriteScopeEpoch();
+    const canPublishSaveFailure = () => !unmountedRef.current && submitEpoch === localWriteScopeEpoch()
+      && (saveOwnerKey === null || !vault.isUnlocked() || vault.get().dataKey === saveOwnerKey);
     try {
       const userId = await api.getUserId();
+      if (!canPublishSaveFailure()) return;
       if (submitEpoch !== localWriteScopeEpoch()) throw new Error(tr("common.sessionDamagedTitle"));
       if (!userId) {
         // AAD-binding an entry to "" would make it permanently undecryptable.
@@ -519,8 +561,11 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
       // dismissal. The stamp records BEFORE the dialog so sequential saves
       // cannot double-fire; a storage failure fails toward showing.
       maybeShowCrisisAlert = async () => {
+        if (!canPublishSaveFailure()) return;
         if (await crisisDialogShownOn(userId, today)) return;
+        if (!canPublishSaveFailure()) return;
         await recordCrisisDialogShown(userId, today);
+        if (!canPublishSaveFailure()) return;
         showCrisisAlert();
       };
       const take = voice?.keepAudio ? voiceRecorder.take : null;
@@ -569,26 +614,10 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
           await enqueueAudio({ userId, clientEntryId, blobB64: audio.blobB64, mime: take.mime, durationSeconds: take.durationSeconds, parentPending: true }, writePermit);
         } finally { plainAudio.fill(0); }
       }
-      // The local mood log powers the baseline-phase trend view; it is
-      // device-only metadata, encrypted under the data key, and never
-      // leaves the phone. The explicit check-in wins when there is one;
-      // otherwise the quick text estimate fills in, as before. The streak
-      // line refreshes once the write lands.
-      // Private snapshot for the ASYNC chain: recordMood/localStreak snapshot
-      // the key at call time, but the localStreak continuation runs after
-      // recordMood's awaits — and past this save's finally, which zeroizes
-      // saveKeys when the save settles. This copy outlives the save and is
-      // zeroized when the chain settles.
-      const dataKeyCopy = Buffer.from(saveKeys.dataKey);
       const ownsSaveContext = () => {
         if (unmountedRef.current || !writePermit || !vault.isUnlocked() || vault.ownerUserId() !== userId) return false;
         try { assertLocalWritePermit(writePermit); return true; } catch { return false; }
       };
-      void recordMood(dataKeyCopy, userId, today, editorSnapshot.mood ?? localSentiment(trimmed), editorSnapshot.energy ?? undefined)
-        .then(() => localStreak(dataKeyCopy, userId))
-        .then(count => { if (ownsSaveContext()) setStreak(count); })
-        .catch(() => {})
-        .finally(() => zeroize(dataKeyCopy));
       let queuedOffline = false;
       try {
         assertLocalWritePermit(writePermit);
@@ -599,6 +628,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
         // prior count and never changes this acknowledged save's outcome.
         void Promise.resolve().then(refreshActiveDays).catch(() => {});
       } catch (err) {
+        if (!canPublishSaveFailure()) return;
         if (err instanceof ApiError && err.status === 401) {
           // Session expired: the client's unauthorized hook has already
           // locked the vault app-wide (vault.lock() here is belt-and-braces
@@ -629,6 +659,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
           queuedOffline = true;
           landed = true;
         } catch (queueErr) {
+          if (!canPublishSaveFailure()) return;
           if (queueErr instanceof QueueFullError) {
             // The entry text is still on screen — a crisis-flagged entry
             // that could not be queued must STILL point at support.
@@ -655,6 +686,22 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
           throw queueErr;
         }
       }
+      // The local mood log powers the baseline-phase trend view; it is
+      // device-only metadata, encrypted under the data key, and never
+      // leaves the phone. The explicit check-in wins when there is one;
+      // otherwise the quick text estimate fills in, as before. The streak
+      // line refreshes once the write lands.
+      // Private snapshot for the ASYNC chain: recordMood/localStreak snapshot
+      // the key at call time, but the localStreak continuation runs after
+      // recordMood's awaits — and past this save's finally, which zeroizes
+      // saveKeys when the save settles. This copy outlives the save and is
+      // zeroized when the chain settles.
+      const dataKeyCopy = Buffer.from(saveKeys.dataKey);
+      void recordMood(dataKeyCopy, userId, today, editorSnapshot.mood ?? localSentiment(trimmed), editorSnapshot.energy ?? undefined)
+        .then(() => localStreak(dataKeyCopy, userId))
+        .then(count => { if (ownsSaveContext()) setStreak(count); })
+        .catch(() => {})
+        .finally(() => zeroize(dataKeyCopy));
       // LOW (2026-09-26): mark the save BEFORE clearing — the synchronous
       // ref is visible to an unmount cleanup that fires before the re-render
       // commits the cleared text (see justSavedRef above). The TEXT clear is
@@ -673,6 +720,16 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
           await acknowledgeJournalDraft(saveKeys.dataKey, savedDraftScope, editorSnapshot.editorId, editorSnapshot.revision);
         } catch { draftCleanupFailed = true; if (ownsSaveContext()) setDeviceDraftStatus("cleanup-error"); }
       }
+      if (take) {
+        // The queue owns this encrypted child even after navigation removes
+        // the editor. Finish its parent receipt while this account remains
+        // current so a reconnect can upload the accepted recording.
+        await releaseAudioParent(userId, clientEntryId, writePermit).catch(() => {});
+        try {
+          assertLocalWritePermit(writePermit);
+          if (!queuedOffline) await flushAudioQueue().catch(() => {});
+        } catch { /* A replacement account owns its own upload admission. */ }
+      }
       // The entry is already durable. A retired screen/account must not
       // clear the current editor or dispatch a native side effect.
       if (!ownsSaveContext()) return;
@@ -685,17 +742,15 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
         if (!draftCleanupFailed && !unmountedRef.current) setDeviceDraftStatus("none");
       }
       if (voice) {
-        if (take) {
-          // Reconnect may now upload the child once the parent entry has
-          // been acknowledged. The queue owns retries and revision checks.
-          await releaseAudioParent(userId, clientEntryId, writePermit).catch(() => {});
-          if (!queuedOffline) await flushAudioQueue().catch(() => {});
-        }
         if (!ownsSaveContext()) return;
         await discardTakeFile(voiceRecorder.take);
         if (!ownsSaveContext()) return;
-        setVoice(null); voiceEntryIdRef.current = null;
-        voiceRecorder.reset();
+        // A new review/capture can replace this take while its deletion
+        // receipt is pending. Finish the save without resetting that work.
+        if (voiceRef.current === voice && voiceIntent.current === saveVoiceIntent) {
+          setVoice(null); voiceEntryIdRef.current = null;
+          voiceRecorder.reset();
+        }
       }
       lightHaptic(); // quiet success pulse (respects the haptics setting)
       setWroteToday(true); // this save just wrote today
@@ -704,7 +759,6 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
       //  InlineStatus colors every non-"ok" tone with the same muted
       //  color, so "neutral" and "" are visually identical — while the
       //  "ok" literal on the showStatus line below stays live.)
-      // Stryker disable next-line StringLiteral: InlineStatus colors every non-"ok" tone with the same muted color — "neutral" and "" render identically
       const offlineTone: InlineStatusTone = "neutral";
       showStatus(queuedOffline ? tr("entry.savedOffline") : tr("entry.saved"), queuedOffline ? offlineTone : "ok");
       // HealthKit State of Mind mirror (2026-09-19): fire-and-forget, only
@@ -719,6 +773,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
       }
       if (crisisLanguage) await maybeShowCrisisAlert();
     } catch (err) {
+      if (!canPublishSaveFailure()) return;
       // The entry went nowhere (unsaved) — a crisis-flagged entry must
       // STILL point at support here, exactly like the queue-failure paths.
       Alert.alert(tr("entry.couldNotSaveTitle"), requestFailureCopy(err), [
@@ -740,7 +795,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
       // queued, not already stashed by the 401 path), stash it here —
       // a failed save must never eat the user's words either.
       const owner = userIdRef.current;
-      if (unmountedRef.current && !landed && owner) {
+      if (unmountedRef.current && !landed && owner && submitEpoch === localWriteScopeEpoch()) {
         stashDraft(owner, textRef.current || trimmed, draftRef.current, savedDraftScope?.origin);
       }
     }
@@ -887,7 +942,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
           editable // new edits can continue while the prior snapshot is saving
           onChangeText={(next) => {
             touchActivity(); // typing resets the inactivity auto-lock
-            if (draftRestored) setDraftRestored(false);
+            setDraftRestored(false);
             justSavedRef.current = false; // new words → the draft guarantee returns
             // Keep the mirror current SYNCHRONOUSLY (the effect below lags a
             // commit): the post-save clear compares textRef against the
@@ -935,7 +990,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
                 // confirmation idiom as the crisis/discard dialogs. An
                 // empty editor starts straight away.
                 if (textRef.current.trim() === "") {
-                  void voiceRecorder.start();
+                  startVoiceRecording();
                   return;
                 }
                 Alert.alert(
@@ -946,7 +1001,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
                     {
                       text: tr("entry.voiceReplaceConfirm"),
                       style: "destructive",
-                      onPress: () => void voiceRecorder.start(),
+                      onPress: startVoiceRecording,
                     },
                   ],
                 );
@@ -986,6 +1041,7 @@ export function EntryScreen({ navigation }: { navigation: any }): React.JSX.Elem
             <GhostButton
               label={tr("entry.voiceDiscardTake")}
               onPress={() => {
+                voiceIntent.current++;
                 void discardTakeFile(voiceRecorder.take);
                 setVoice(null);
                 voiceRecorder.reset();

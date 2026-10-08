@@ -1,0 +1,126 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Local safety plan renders a safe public surface after its vault is locked 1`] = `
+"<section className="card card--sensitive">
+  <h2 className="card__title">
+    "My safety plan"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "A personal plan you write and keep close: your warning signs, what helps you cope, who you can reach. It is not shared with anyone — not even your therapist — and never leaves this device unencrypted."
+  <button className="btn btn--small" disabled=false type="button">
+    "Retry restoring saved plan"
+  <label className="field">
+    <span className="field__label">
+      "My warning signs"
+    <textarea className="textarea" maxLength=4000 placeholder="Thoughts, feelings, situations or behaviors that signal a hard stretch" rows=3 value="">
+  <label className="field">
+    <span className="field__label">
+      "What helps me cope"
+    <textarea className="textarea" maxLength=4000 placeholder="Things you can do on your own that have helped before" rows=3 value="">
+  <label className="field">
+    <span className="field__label">
+      "People and places that distract me"
+    <textarea className="textarea" maxLength=4000 placeholder="Who or where turns your attention, even briefly" rows=3 value="">
+  <label className="field">
+    <span className="field__label">
+      "Who I can ask for help"
+    <textarea className="textarea" maxLength=4000 placeholder="People you can tell how you are really doing" rows=3 value="">
+  <label className="field">
+    <span className="field__label">
+      "Professionals and services I can contact"
+    <textarea className="textarea" maxLength=4000 placeholder="e.g. 988 Suicide & Crisis Lifeline — call or text 988 · Crisis Text Line — text HOME to 741741 · my therapist or doctor" rows=3 value="">
+  <label className="field">
+    <span className="field__label">
+      "How I can make my environment safer"
+    <textarea className="textarea" maxLength=4000 placeholder="What you could move, ask someone to hold, or change" rows=3 value="">
+  <div className="row row--wrap">
+    <button className="btn" disabled=false type="button">
+      "Save my plan"
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      <svg aria-hidden="true" fill="none" focusable="false" height=15 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=15>
+        <path d="M6 3.5h3l1.5 4-2 1.5a11.5 11.5 0 0 0 5 5l1.5-2 4 1.5v3a2 2 0 0 1-2 2A14 14 0 0 1 4 5.5a2 2 0 0 1 2-2z">
+      "Get help"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Encrypted on this device under your password. Never synced, never exported, never shared. Deleting your account or clearing this browser's data removes it.""
+`;
+
+exports[`Local safety plan renders its settled public empty-account surface in en 1`] = `
+"<section className="card card--sensitive">
+  <h2 className="card__title">
+    "My safety plan"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "A personal plan you write and keep close: your warning signs, what helps you cope, who you can reach. It is not shared with anyone — not even your therapist — and never leaves this device unencrypted."
+  <label className="field">
+    <span className="field__label">
+      "My warning signs"
+    <textarea className="textarea" maxLength=4000 placeholder="Thoughts, feelings, situations or behaviors that signal a hard stretch" rows=3 value="">
+  <label className="field">
+    <span className="field__label">
+      "What helps me cope"
+    <textarea className="textarea" maxLength=4000 placeholder="Things you can do on your own that have helped before" rows=3 value="">
+  <label className="field">
+    <span className="field__label">
+      "People and places that distract me"
+    <textarea className="textarea" maxLength=4000 placeholder="Who or where turns your attention, even briefly" rows=3 value="">
+  <label className="field">
+    <span className="field__label">
+      "Who I can ask for help"
+    <textarea className="textarea" maxLength=4000 placeholder="People you can tell how you are really doing" rows=3 value="">
+  <label className="field">
+    <span className="field__label">
+      "Professionals and services I can contact"
+    <textarea className="textarea" maxLength=4000 placeholder="e.g. 988 Suicide & Crisis Lifeline — call or text 988 · Crisis Text Line — text HOME to 741741 · my therapist or doctor" rows=3 value="">
+  <label className="field">
+    <span className="field__label">
+      "How I can make my environment safer"
+    <textarea className="textarea" maxLength=4000 placeholder="What you could move, ask someone to hold, or change" rows=3 value="">
+  <div className="row row--wrap">
+    <button className="btn" disabled=false type="button">
+      "Save my plan"
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      <svg aria-hidden="true" fill="none" focusable="false" height=15 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=15>
+        <path d="M6 3.5h3l1.5 4-2 1.5a11.5 11.5 0 0 0 5 5l1.5-2 4 1.5v3a2 2 0 0 1-2 2A14 14 0 0 1 4 5.5a2 2 0 0 1 2-2z">
+      "Get help"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Encrypted on this device under your password. Never synced, never exported, never shared. Deleting your account or clearing this browser's data removes it.""
+`;
+
+exports[`Local safety plan renders its settled public empty-account surface in es 1`] = `
+"<section className="card card--sensitive">
+  <h2 className="card__title">
+    "Mi plan de seguridad"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Un plan personal que usted escribe y mantiene cerca: sus señales de alerta, lo que le ayuda a afrontar, a quién puede recurrir. No se comparte con nadie — ni siquiera con su terapeuta — y nunca sale de este dispositivo sin cifrar."
+  <label className="field">
+    <span className="field__label">
+      "Mis señales de alerta"
+    <textarea className="textarea" maxLength=4000 placeholder="Pensamientos, sentimientos, situaciones o conductas que anuncian un momento difícil" rows=3 value="">
+  <label className="field">
+    <span className="field__label">
+      "Lo que me ayuda a afrontar"
+    <textarea className="textarea" maxLength=4000 placeholder="Cosas que puede hacer por su cuenta y que antes le han ayudado" rows=3 value="">
+  <label className="field">
+    <span className="field__label">
+      "Personas y lugares que me distraen"
+    <textarea className="textarea" maxLength=4000 placeholder="Quién o dónde le cambia el foco, aunque sea un rato" rows=3 value="">
+  <label className="field">
+    <span className="field__label">
+      "A quién puedo pedir ayuda"
+    <textarea className="textarea" maxLength=4000 placeholder="Personas a las que puede decir cómo se siente de verdad" rows=3 value="">
+  <label className="field">
+    <span className="field__label">
+      "Profesionales y servicios a los que puedo contactar"
+    <textarea className="textarea" maxLength=4000 placeholder="p. ej., 988 Suicide & Crisis Lifeline — llamar o enviar un mensaje al 988 · Crisis Text Line — enviar HOME al 741741 · mi terapeuta o médico" rows=3 value="">
+  <label className="field">
+    <span className="field__label">
+      "Cómo puedo hacer mi entorno más seguro"
+    <textarea className="textarea" maxLength=4000 placeholder="Qué podría mover, pedirle a alguien que guarde, o cambiar" rows=3 value="">
+  <div className="row row--wrap">
+    <button className="btn" disabled=false type="button">
+      "Guardar mi plan"
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      <svg aria-hidden="true" fill="none" focusable="false" height=15 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=15>
+        <path d="M6 3.5h3l1.5 4-2 1.5a11.5 11.5 0 0 0 5 5l1.5-2 4 1.5v3a2 2 0 0 1-2 2A14 14 0 0 1 4 5.5a2 2 0 0 1 2-2z">
+      "Ayuda"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Cifrado en este dispositivo con su contraseña. Nunca se sincroniza, ni se exporta, ni se comparte. Eliminar su cuenta o borrar los datos de este navegador lo elimina.""
+`;

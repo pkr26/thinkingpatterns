@@ -29,6 +29,12 @@ export function memoryKvBackend(): KvBackend {
     async keys() {
       return [...map.keys()];
     },
+    async compareAndSet(key, expected, value, _permit, stillCurrent) {
+      if (stillCurrent && !stillCurrent()) return false;
+      if ((map.get(key) ?? null) !== expected) return false;
+      map.set(key, value);
+      return true;
+    },
   };
 }
 

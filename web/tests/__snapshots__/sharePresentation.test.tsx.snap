@@ -1,0 +1,60 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Therapist sharing renders a safe public surface after its vault is locked 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Share with a therapist"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Zero-knowledge: your key is wrapped to your therapist's public key — the server never sees it, and neither does anyone else."
+  <label className="field">
+    <span className="field__label">
+      "Pairing code"
+    <input className="input" placeholder="from your therapist's portal" type="text" value="">
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Look up"
+  <div className="banner banner--error" role="alert">
+    "Your session locked — sign in again."
+<section className="card">
+  <h2 className="card__title">
+    "Your grants"
+  <p className="note" role="status" style={"whiteSpace":"pre-wrap"}>
+    "Loading…""
+`;
+
+exports[`Therapist sharing renders its settled public empty-account surface in en 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Share with a therapist"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Zero-knowledge: your key is wrapped to your therapist's public key — the server never sees it, and neither does anyone else."
+  <label className="field">
+    <span className="field__label">
+      "Pairing code"
+    <input className="input" placeholder="from your therapist's portal" type="text" value="">
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Look up"
+<section className="card">
+  <h2 className="card__title">
+    "Your grants"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "No active grants — your journal is shared with no one.""
+`;
+
+exports[`Therapist sharing renders its settled public empty-account surface in es 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Compartir con un terapeuta"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Conocimiento cero: su llave se envuelve a la llave pública de su terapeuta — el servidor nunca la ve, y nadie más tampoco."
+  <label className="field">
+    <span className="field__label">
+      "Código de emparejamiento"
+    <input className="input" placeholder="del portal de su terapeuta" type="text" value="">
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Buscar"
+<section className="card">
+  <h2 className="card__title">
+    "Sus permisos"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "No hay permisos activos — su diario no se comparte con nadie.""
+`;

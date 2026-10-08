@@ -1,3 +1,4 @@
+import { runTestControl } from "./helpers/testControl";
 /**
  * The notifee action seam in src/nativeFeatures.ts (2026-09-19): a missing
  * module is a quiet false, permission denial is a false with no
@@ -27,7 +28,7 @@ const { scheduleDailyReminder, cancelDailyReminder, cancelOriginNotifications } 
 const { nextReminderFireTime } = await import("../src/reminders");
 
 beforeEach(() => {
-  __resetLocalKeyLifecycleForTests();
+  runTestControl(__resetLocalKeyLifecycleForTests);
   changeLocalSessionOwner("user-1");
   requestPermission.mockReset();
   requestPermission.mockResolvedValue({ authorizationStatus: 1 });
@@ -231,7 +232,7 @@ describe("notification copy resolves through the catalog (audit fix 22, 2026-09-
       expect(esCatalog[key]).not.toBe(enCatalog[key]);
     }
 
-    __setLocaleForTests("es");
+    runTestControl(__setLocaleForTests, "es");
     try {
       expect(await scheduleDailyReminder(20, 0, beginNotificationUpdate("user-1", "daily"))).toBe(true);
       const [notification] = createTriggerNotification.mock.calls[0] as [
@@ -247,7 +248,7 @@ describe("notification copy resolves through the catalog (audit fix 22, 2026-09-
       // …but the app-name title is the brand and never translates.
       expect(notification.title).toBe("Fathom");
     } finally {
-      __setLocaleForTests("en");
+      runTestControl(__setLocaleForTests, "en");
     }
 
     // English still resolves through the catalog (not a hardcoded literal).

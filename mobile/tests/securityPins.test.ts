@@ -1,3 +1,4 @@
+import { runTestControl } from "./helpers/testControl";
 /**
  * Security pins from the 2026-09-20 remediation wave (fourth-pass
  * fixes; originally test file auditFixes2026b.test.ts).
@@ -165,7 +166,7 @@ async function unlockRotationOwner(writeSuspended = false): Promise<void> {
 }
 
 beforeEach(async () => {
-  (await import("../src/localRekey")).__resetLocalKeyLifecycleForTests();
+  runTestControl((await import("../src/localRekey")).__resetLocalKeyLifecycleForTests);
   store.clear();
   vi.clearAllMocks();
   apiState.failAt = null;

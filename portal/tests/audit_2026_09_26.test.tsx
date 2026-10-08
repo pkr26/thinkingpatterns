@@ -1,3 +1,4 @@
+import { runTestControl } from "./helpers/testControl";
 /**
  * Audit fixes 2026-09-26 (docs/archive/audits/AUDIT_FULL_CODEBASE_2026-09-26.md, portal):
  *
@@ -126,7 +127,7 @@ beforeEach(() => {
   window.sessionStorage.clear();
   // The freshness high-water mark is module state spanning renders; every
   // test starts from a clean mark exactly like a fresh page load.
-  resetInsightsFreshness();
+  runTestControl(resetInsightsFreshness);
 });
 
 // ---------------------------------------------------------------------------

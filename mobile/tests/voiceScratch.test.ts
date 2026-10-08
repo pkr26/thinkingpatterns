@@ -49,6 +49,11 @@ describe("plaintext voice scratch lifecycle", () => {
     await expect(createPlaybackScratchUri("x".repeat(129), "audio/m4a")).rejects.toThrow(
       "Voice scratch owner is invalid",
     );
+    for (const malformed of [null, undefined, 42]) {
+      await expect(createPlaybackScratchUri(malformed as unknown as string, "audio/m4a")).rejects.toThrow("Voice scratch owner is invalid");
+    }
+    const boundary = await createPlaybackScratchUri("x".repeat(128), "audio/m4a");
+    expect(boundary).toMatch(/\/voice-[a-f0-9]{32}\.m4a$/);
   });
 
   it("erasure removes one owner's playback and all unscoped native recordings", async () => {
@@ -105,10 +110,10 @@ describe("plaintext voice scratch lifecycle", () => {
     expect(fs.__hasFile(playback)).toBe(false);
   });
 
-  it("fails closed when the native cache root is unavailable", async () => {
+  it.each([null, ""])("fails closed when the native cache root is unavailable (%s)", async cacheDirectory => {
     vi.resetModules();
     vi.doMock("expo-file-system/legacy", () => ({
-      cacheDirectory: null,
+      cacheDirectory,
       makeDirectoryAsync: vi.fn(async () => {}),
       deleteAsync: vi.fn(async () => {}),
     }));

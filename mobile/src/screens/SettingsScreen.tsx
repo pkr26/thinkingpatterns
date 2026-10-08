@@ -89,7 +89,7 @@ type PendingAction =
   | { kind: "upgrade" }
   | null;
 
-type SensitiveOwnership = { scope: number; owner: string | null; sensitive: number };
+type SensitiveOwnership = { scope: number; owner: string | null; sensitive: object; dataKey: Buffer | null };
 
 export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.Element {
   const t = useTheme();
@@ -97,6 +97,9 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
   const beginReminderIntent = useReminderPreferenceIntent();
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
+  // Native releases can arrive in the same frame before React commits busy.
+  // Keep sensitive admission live until its own completion releases it.
+  const sensitiveSubmission = useRef<SensitiveOwnership | null>(null);
   const [llmAvailable, setLlmAvailable] = useState(false);
   const [llmProvider, setLlmProvider] = useState("");
   const [llmRetention, setLlmRetention] = useState("");
@@ -112,6 +115,9 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
   const [voiceRetention, setVoiceRetention] = useState("");
   const [voiceFingerprint, setVoiceFingerprint] = useState("");
   const [voiceEnabled, setVoiceEnabled] = useState(false);
+  // Initial reads can finish after a password-confirmed write. Once the
+  // server acknowledges a newer value, that older read cannot publish it.
+  const acknowledgedPreferences = useRef({ llm: false, voice: false, recovery: false, dailyEnabled: false, dailyTime: false, measureEnabled: false, measureInterval: false, health: false, biometric: false, theme: false, language: false, haptics: false });
   // enabled-but-stale: the server's transcription provider changed since
   // the consent was given; the toggle must be re-confirmed to accept the
   // new terms.
@@ -131,12 +137,18 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
   // The key scheme controls upgrade availability and rotation copy.
   // An unavailable server leaves it unknown.
   const [keyScheme, setKeyScheme] = useState<KeyScheme | null>(null);
-  const captureSensitiveOwnership = (): SensitiveOwnership => ({ scope: localWriteScopeEpoch(), owner: vault.ownerUserId(), sensitive: sensitiveEpoch.current });
+  const captureSensitiveOwnership = (): SensitiveOwnership => ({ scope: localWriteScopeEpoch(), owner: vault.ownerUserId(), sensitive: sensitiveEpoch.current, dataKey: vault.canReauthenticate() ? vault.get().dataKey : null });
   const ownsSensitiveScope = (operation: SensitiveOwnership) => operation.scope === localWriteScopeEpoch() && operation.sensitive === sensitiveEpoch.current;
   const assertSensitiveOwnership = (operation: SensitiveOwnership, requireVault = true) => {
-    if (!ownsSensitiveScope(operation) || !operation.owner || (requireVault && (!vault.canReauthenticate() || vault.ownerUserId() !== operation.owner))) {
+    if (!ownsSensitiveScope(operation) || !operation.owner || (requireVault && (!vault.canReauthenticate() || vault.ownerUserId() !== operation.owner || vault.get().dataKey !== operation.dataKey))) {
       throw new Error(tr("common.sessionDamagedTitle"));
     }
+  };
+  // Request credential reads can await native providers after the screen's
+  // own admission proof. Recheck that exact view and physical key before
+  // the client may dispatch a verifier or wrapped data key.
+  const sensitiveRequestCurrent = (operation: SensitiveOwnership): boolean => {
+    try { assertSensitiveOwnership(operation); return true; } catch { return false; }
   };
 
 
@@ -145,7 +157,6 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
     getBaseUrl().then(setUrl).catch(() => {});
     api.meta()
       .then((m) => {
-        // Stryker disable next-line OptionalChaining: a null/undefined meta makes m.llm_available throw inside this .then, and the chained .catch(() => {}) swallows it — llmAvailable stays false exactly as with the chain
         setLlmAvailable(Boolean(m?.llm_available));
         setLlmProvider(typeof m?.llm_provider_name === "string" ? m.llm_provider_name : "");
         setLlmRetention(typeof m?.llm_data_retention === "string" ? m.llm_data_retention : "");
@@ -162,12 +173,11 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         setVoiceProvider(typeof m?.stt_provider_name === "string" ? m.stt_provider_name : "");
         setVoiceRetention(typeof m?.stt_data_retention === "string" ? m.stt_data_retention : "");
         setVoiceFingerprint(typeof m?.stt_policy_fingerprint === "string" ? m.stt_policy_fingerprint : "");
-        // Stryker disable next-line OptionalChaining: with m null/undefined, typeof m.version throws into the same .catch(() => {}) — no observable difference (the typeof guard itself stays live)
         if (typeof m?.version === "string") setServerVersion(m.version);
       })
       .catch(() => setSharingAvailable(null));
-    // Stryker disable next-line OptionalChaining: an undefined consent payload makes c.enabled throw into the .catch(() => {}) — setLlmEnabled is never reached either way
     api.getLlmConsent().then((c) => {
+      if (acknowledgedPreferences.current.llm) return;
       setLlmEnabled(c?.enabled === true && c.active_for_current_policy === true);
       setLlmStale(c?.enabled === true && c.active_for_current_policy !== true);
     }).catch(() => {});
@@ -176,6 +186,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
     // the stale note hidden — never a guessed state.
     api.getVoiceConsent()
       .then((c) => {
+        if (acknowledgedPreferences.current.voice) return;
         setVoiceEnabled(c?.enabled === true && c.active_for_current_policy === true);
         setVoiceStale(c != null && c.enabled === true && c.active_for_current_policy !== true);
       })
@@ -190,21 +201,21 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       // biometric-wrap existence (quiet Keychain read, never prompts).
       getReminderPrefs(userId)
         .then((prefs) => {
-          setReminderOn(prefs.enabled);
-          setReminderTimeState({ hour: prefs.hour, minute: prefs.minute });
+          if (!acknowledgedPreferences.current.dailyEnabled) setReminderOn(prefs.enabled);
+          if (!acknowledgedPreferences.current.dailyTime) setReminderTimeState({ hour: prefs.hour, minute: prefs.minute });
         })
         .catch(() => {});
       // The check-in reminder preference (non-sensitive, per account).
       getMeasureReminderPrefs(userId)
         .then((prefs) => {
-          setMeasureReminderOn(prefs.enabled);
-          setMeasureIntervalState(prefs.intervalWeeks);
+          if (!acknowledgedPreferences.current.measureEnabled) setMeasureReminderOn(prefs.enabled);
+          if (!acknowledgedPreferences.current.measureInterval) setMeasureIntervalState(prefs.intervalWeeks);
         })
         .catch(() => {});
       // The Health mirror opt-in (non-sensitive, per account) — the
       // preference reads back even while the Health module is absent.
-      getMoodMirrorPref(userId).then(setMirrorHealthOn).catch(() => {});
-      hasBiometricUnlock(userId).then(setBioEnabled).catch(() => {});
+      getMoodMirrorPref(userId).then(enabled => { if (!acknowledgedPreferences.current.health) setMirrorHealthOn(enabled); }).catch(() => {});
+      hasBiometricUnlock(userId).then(enabled => { if (!acknowledgedPreferences.current.biometric) setBioEnabled(enabled); }).catch(() => {});
     }).catch(() => {});
     hasLegacyQueueRecovery().then(setLegacyQueueRecovery).catch(() => {});
     biometricsSupported().then(setBioSupported).catch(() => {});
@@ -214,7 +225,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         if (fetched.status === "ok") setKeyScheme(fetched.envelope.scheme);
       })
       .catch(() => {});
-  }, // Stryker disable next-line ArrayDeclaration: [] and ["Stryker was here"] are both referentially constant — the mount effect runs exactly once either way (test seam)
+  },
      []);
 
   const saveUrl = async () => {
@@ -231,17 +242,26 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
   /** One tap: move rejected entries back into the live queue and flush.
    *  Whatever doesn't fit stays safely in the rejected store. */
   const recoverRejected = async () => {
-    if (busy) return;
+    if (!sensitiveRequestCurrent(renderedSensitiveOwnership)) return;
+    if (busy || sensitiveSubmission.current || !vault.canReauthenticate()) return;
+    const operation = captureSensitiveOwnership();
+    sensitiveSubmission.current = operation;
     setBusy(true);
     try {
+      assertSensitiveOwnership(operation);
       const userId = await api.getUserId();
+      assertSensitiveOwnership(operation);
       if (!userId) {
         Alert.alert(tr("settings.signInRequiredTitle"), tr("settings.signInRequiredBody"));
         return;
       }
+      if (userId !== operation.owner) throw new Error(tr("common.sessionDamagedTitle"));
       const moved = await requeueRejected(userId);
+      assertSensitiveOwnership(operation);
       if (userId) await flushQueue(userId).catch(() => {}); // offline: next flush handles it
+      assertSensitiveOwnership(operation);
       const left = await rejectedEntryCount(userId);
+      assertSensitiveOwnership(operation);
       setRejectedCount(left);
       Alert.alert(
         tr("settings.recoveredTitle"),
@@ -257,21 +277,26 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
           : tr("settings.recoveredNone"),
       );
     } catch {
-      Alert.alert(tr("settings.couldNotRetryTitle"), tr("settings.couldNotRetryBody"));
+      if (ownsSensitiveScope(operation)) Alert.alert(tr("settings.couldNotRetryTitle"), tr("settings.couldNotRetryBody"));
     } finally {
-      setBusy(false);
+      if (sensitiveSubmission.current === operation) {
+        sensitiveSubmission.current = null;
+        setBusy(false);
+      }
     }
   };
 
   /** Destructive flows land here FIRST — the actual action only runs after
    *  the typed password re-derives the vault's own auth key. */
   const confirmWithPassword = async () => {
-    if (!pending || busy || !password) return;
+    if (!sensitiveRequestCurrent(renderedSensitiveOwnership)) return;
+    if (!pending || busy || !password || sensitiveSubmission.current || !vault.canReauthenticate()) return;
     setBusy(true);
     // done: the flow concluded (success or unrecoverable) — clear the card.
     // retry: the password itself was rejected — the card STAYS UP, the fix
     // is one corrected password away.
     const operation = captureSensitiveOwnership();
+    sensitiveSubmission.current = operation;
     const done = () => { if (ownsSensitiveScope(operation)) { setBusy(false); setPending(null); setPassword(""); } };
     const retry = () => { if (ownsSensitiveScope(operation)) { setBusy(false); setPassword(""); } };
     try {
@@ -290,13 +315,15 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         return;
       }
       if (pending.kind === "llm") {
-        const result = await api.setLlmConsent(pending.enabled, reauth.verifierB64);
+        const result = await api.setLlmConsent(pending.enabled, reauth.verifierB64, () => sensitiveRequestCurrent(operation));
         assertSensitiveOwnership(operation);
+        acknowledgedPreferences.current.llm = true;
         setLlmEnabled(result.enabled === true && result.active_for_current_policy === true);
         setLlmStale(result.enabled === true && result.active_for_current_policy !== true);
       } else if (pending.kind === "voice") {
-        const result = await api.setVoiceConsent(pending.enabled, reauth.verifierB64);
+        const result = await api.setVoiceConsent(pending.enabled, reauth.verifierB64, () => sensitiveRequestCurrent(operation));
         assertSensitiveOwnership(operation);
+        acknowledgedPreferences.current.voice = true;
         setVoiceEnabled(result.enabled === true && result.active_for_current_policy === true);
         setVoiceStale(result.enabled === true && result.active_for_current_policy !== true);
       } else if (pending.kind === "bio") {
@@ -311,7 +338,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         }
         assertSensitiveOwnership(operation);
         if (userId !== operation.owner) throw new Error(tr("common.sessionDamagedTitle"));
-        await enableBiometricWrap(userId);
+        await enableBiometricWrap(userId, operation);
       } else if (pending.kind === "recovery-create") {
         await createRecoveryKit(reauth.verifierB64, operation);
       } else if (pending.kind === "recovery-remove") {
@@ -343,6 +370,14 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         Alert.alert(tr("common.couldNotCompleteTitle"), calmFallbackCopy(err, tr("errors.generic")));
       }
       done();
+    } finally {
+      if (sensitiveSubmission.current === operation) {
+        sensitiveSubmission.current = null;
+        setBusy(false);
+        // A same-origin credential refresh retires the proof without
+        // replacing this route. Release its card for a fresh confirmation.
+        if (!ownsSensitiveScope(operation)) { setPending(null); setPassword(""); }
+      }
     }
   };
 
@@ -353,7 +388,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       const userId = await api.getUserId(); assertSensitiveOwnership(operation);
       const username = await api.getUsername(); assertSensitiveOwnership(operation);
       if (userId !== operation.owner) throw new Error(tr("common.sessionDamagedTitle"));
-      await api.deleteAccount(verifierB64);
+      await api.deleteAccount(verifierB64, () => sensitiveRequestCurrent(operation));
       assertSensitiveOwnership(operation);
       vault.lock();
       let failures: string[] = [];
@@ -370,7 +405,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       Alert.alert(tr("settings.deletedTitle"), tr("settings.deletedBody") +
         (failures.length ? `\n\n${tr("settings.localCleanupIncomplete")}` : ""));
     } catch (err) {
-      if (operation.scope !== localWriteScopeEpoch()) return;
+      if (!ownsSensitiveScope(operation)) return;
       // Propagate verifier rejection so the outer handler keeps the password card
       // open. The server still holds the account.
       if (isVerificationFailedError(err)) throw err;
@@ -409,6 +444,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       return;
     }
     if (!intent.current()) return;
+    acknowledgedPreferences.current.dailyEnabled = true;
     setReminderOn(on);
     const scheduled = await syncReminderSchedule(userId).catch(() => false);
     if (!intent.current()) return;
@@ -433,6 +469,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       Alert.alert(tr("settings.reminderSaveFailedTitle"), tr("settings.reminderSaveFailedBody")); return;
     }
     if (!intent.current()) return;
+    acknowledgedPreferences.current.dailyTime = true;
     setReminderTimeState({ hour, minute });
     void syncReminderSchedule(userId).catch(() => {});
   };
@@ -454,6 +491,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       return;
     }
     if (!intent.current()) return;
+    acknowledgedPreferences.current.measureEnabled = true;
     setMeasureReminderOn(on);
     void syncMeasureReminderSchedule(userId).catch(() => {});
   };
@@ -470,6 +508,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       Alert.alert(tr("settings.reminderSaveFailedTitle"), tr("settings.reminderSaveFailedBody")); return;
     }
     if (!intent.current()) return;
+    acknowledgedPreferences.current.measureInterval = true;
     setMeasureIntervalState(weeks);
     void syncMeasureReminderSchedule(userId).catch(() => {});
   };
@@ -481,17 +520,23 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
    *  check-in and a denial is reported instead of silently skipping. */
   const toggleHealthMirror = async (on: boolean) => {
     touchActivity();
+    const intent = beginReminderIntent("health-mirror");
+    if (!intent) return;
     const userId = await api.getUserId().catch(() => null);
-    if (!userId) return; // no account: nothing to bind the preference to
+    if (!intent.current() || userId !== intent.owner) return;
     try {
       await setMoodMirrorPref(userId, on);
     } catch {
+      if (!intent.current()) return;
       Alert.alert(tr("settings.healthMirrorSaveFailedTitle"), tr("settings.healthMirrorSaveFailedBody"));
       return;
     }
+    if (!intent.current()) return;
+    acknowledgedPreferences.current.health = true;
     setMirrorHealthOn(on);
     if (on && health.available) {
       const granted = await ensureStateOfMindWriteAccess().catch(() => false);
+      if (!intent.current()) return;
       if (!granted) {
         // The preference stays saved (the user's choice is real); the
         // honest note says what to fix — mirroring just won't land yet.
@@ -503,14 +548,19 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
   /** Biometric unlock: enabling is an explicit, explained act — the Alert
    *  states the trade before anything is stored. */
   const toggleBiometrics = async (on: boolean) => {
+    if (!sensitiveRequestCurrent(renderedSensitiveOwnership)) return;
     touchActivity();
+    const operation = captureSensitiveOwnership();
     const userId = await api.getUserId().catch(() => null);
-    if (!userId) return;
+    if (!ownsSensitiveScope(operation) || !userId || userId !== operation.owner) return;
     if (!on) {
       try {
         await disableBiometricUnlock(userId);
+        if (!ownsSensitiveScope(operation)) return;
+        acknowledgedPreferences.current.biometric = true;
         setBioEnabled(false);
       } catch {
+        if (!ownsSensitiveScope(operation)) return;
         Alert.alert(tr("settings.bioOffFailedTitle"), tr("settings.bioOffFailedBody"));
       }
       return;
@@ -525,14 +575,17 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
     ]);
   };
 
-  const enableBiometricWrap = async (userId: string) => {
+  const enableBiometricWrap = async (userId: string, operation: SensitiveOwnership) => {
     try {
       // Settings only renders while the vault is unlocked — but the read
       // lives inside the same guard so a locked vault degrades honestly.
       const { dataKey } = vault.get();
       await enableBiometricUnlock(userId, dataKey);
+      assertSensitiveOwnership(operation);
+      acknowledgedPreferences.current.biometric = true;
       setBioEnabled(true);
     } catch {
+      if (!ownsSensitiveScope(operation)) return;
       Alert.alert(tr("settings.bioOnFailedTitle"), tr("settings.bioOnFailedBody"));
     }
   };
@@ -542,7 +595,8 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
    *  on success the vault is locked so the next unlock uses the new
    *  password, and the user is signed out to re-verify on this device. */
   const runRotate = async () => {
-    if (busy || !rotateCurrentPassword || !newPassword) return;
+    if (!sensitiveRequestCurrent(renderedSensitiveOwnership)) return;
+    if (busy || !rotateCurrentPassword || !newPassword || sensitiveSubmission.current || !vault.canReauthenticate()) return;
     const policyError = passwordPolicyError(newPassword);
     if (policyError) {
       // Match the alert title to the failed password-policy rule.
@@ -554,6 +608,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
     }
     setBusy(true);
     const operation = captureSensitiveOwnership();
+    sensitiveSubmission.current = operation;
     try {
       assertSensitiveOwnership(operation);
       const userId = await api.getUserId().catch(() => null); assertSensitiveOwnership(operation);
@@ -604,9 +659,12 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       // Unexpected rotation errors use localized fallback copy.
       Alert.alert(tr("settings.rotateFailedTitle"), calmFallbackCopy(err, tr("errors.generic")));
     } finally {
-      setRotateCurrentPassword("");
-      setNewPassword("");
-      setBusy(false);
+      if (sensitiveSubmission.current === operation) {
+        sensitiveSubmission.current = null;
+        setRotateCurrentPassword("");
+        setNewPassword("");
+        setBusy(false);
+      }
     }
   };
 
@@ -725,11 +783,13 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
             verifierKey.toString("base64"),
             sealed.toString("base64"),
             "v2",
+            () => sensitiveRequestCurrent(operation),
           );
         } finally {
           verifierKey.fill(0);
         }
         assertSensitiveOwnership(operation);
+        acknowledgedPreferences.current.recovery = true;
         setRecoveryEnabled(true);
         if (sensitiveEpoch.current === operationEpoch) setRecoveryKeyShown(recoveryKitText(recoveryKey));
         recoveryKey.fill(0);
@@ -742,7 +802,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       if (!ownsSensitiveScope(operation)) return;
       Alert.alert(tr("settings.recoveryTitle"), tr("settings.recoverySetupFailed"));
     } finally {
-      setBusy(false);
+      if (ownsSensitiveScope(operation)) setBusy(false);
     }
   };
 
@@ -752,27 +812,42 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       assertSensitiveOwnership(operation);
       if (!vault.isUnlocked()) throw new Error("session");
       setBusy(true);
-      await api.removeRecoveryKit(verifierB64);
+      await api.removeRecoveryKit(verifierB64, () => sensitiveRequestCurrent(operation));
       assertSensitiveOwnership(operation);
+      acknowledgedPreferences.current.recovery = true;
       setRecoveryEnabled(false);
       setRecoverySetAt(null);
     } catch {
       if (!ownsSensitiveScope(operation)) return;
       Alert.alert(tr("settings.recoveryTitle"), tr("settings.recoveryRemoveFailed"));
     } finally {
-      setBusy(false);
+      if (ownsSensitiveScope(operation)) setBusy(false);
     }
   };
   // Recovery keys are generated on-device and shown once after creation.
   const [recoveryEnabled, setRecoveryEnabled] = useState<boolean | null>(null);
   const [recoverySetAt, setRecoverySetAt] = useState<string | null>(null);
   const [recoveryKeyShown, setRecoveryKeyShown] = useState<string | null>(null);
-  const sensitiveEpoch = useRef(0);
+  const sensitiveEpoch = useRef<object>({});
   useEffect(() => {
-    const clearSensitive = () => { sensitiveEpoch.current++; setRecoveryKeyShown(null); setPassword(""); setPending(null); };
+    const clearSensitive = () => {
+      sensitiveEpoch.current = {};
+      sensitiveSubmission.current = null;
+      setRecoveryKeyShown(null); setPassword(""); setPending(null); setRotateCurrentPassword(""); setNewPassword(""); setBusy(false);
+      savedAudioOwnership.current = null;
+      setAudioStatus({ total: 0, needsAttention: 0 }); setSavedAudio([]);
+      if (vault.canReauthenticate()) void refreshSavedAudio().catch(() => {});
+    };
+    let dataKey = vault.canReauthenticate() ? vault.get().dataKey : null;
+    // A same-account key replacement can keep the credential epoch while
+    // retiring this screen's password proof and one-time recovery disclosure.
+    const vaultChange = vault.subscribe(() => {
+      const next = vault.canReauthenticate() ? vault.get().dataKey : null;
+      if (next !== dataKey) { dataKey = next; clearSensitive(); }
+    });
     const sub = AppState.addEventListener("change", state => { if (state !== "active") clearSensitive(); });
     const blur = typeof navigation.addListener === "function" ? navigation.addListener("blur", clearSensitive) : undefined;
-    return () => { sensitiveEpoch.current++; sub.remove(); blur?.(); };
+    return () => { sensitiveEpoch.current = {}; sub.remove(); vaultChange(); blur?.(); };
   }, [navigation]);
   const [haptics, setHaptics] = useState(true);
   const [reminders] = useState(reminderCapability());
@@ -795,7 +870,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
   const [bioSupported, setBioSupported] = useState(false);
   const [bioEnabled, setBioEnabled] = useState(false);
   React.useEffect(() => {
-    void loadHapticsSetting().then(setHaptics);
+    void loadHapticsSetting().then(enabled => { if (!acknowledgedPreferences.current.haptics) setHaptics(enabled); });
   }, []);
   // Read the persisted theme once; missing/invalid values keep the default.
   React.useEffect(() => {
@@ -804,18 +879,21 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       try {
         const AsyncStorage = (await import("@react-native-async-storage/async-storage")).default;
         const stored = await AsyncStorage.getItem(themeStorageKey());
-        if (!cancelled && (stored === "dark" || stored === "light" || stored === "system")) {
+        if (!cancelled && !acknowledgedPreferences.current.theme && (stored === "dark" || stored === "light" || stored === "system")) {
           setThemeModeState(stored);
         }
         // Load language and recovery status even when no theme preference was saved.
         if (!cancelled) {
-          setLanguageState(await readLanguageChoice());
+          const choice = await readLanguageChoice();
+          if (!cancelled && !acknowledgedPreferences.current.language) setLanguageState(choice);
           try {
             const status = await api.recoveryStatus();
-            setRecoveryEnabled(status.enabled);
-            setRecoverySetAt(status.set_at);
+            if (!cancelled && !acknowledgedPreferences.current.recovery) {
+              setRecoveryEnabled(status.enabled);
+              setRecoverySetAt(status.set_at);
+            }
           } catch {
-            setRecoveryEnabled(null);
+            if (!cancelled && !acknowledgedPreferences.current.recovery) setRecoveryEnabled(null);
           }
         }
       } catch {
@@ -826,6 +904,10 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       cancelled = true;
     };
   }, []);
+
+  // A granted Native touch can release before React commits the vault
+  // subscriber's cleared password card. Bind admission to its rendered key.
+  const renderedSensitiveOwnership = captureSensitiveOwnership();
 
   const themed = {
     label: { color: t.colors.muted, fontSize: 12, fontWeight: "700" as const, letterSpacing: 1, marginTop: 8 },
@@ -963,7 +1045,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
             placeholderTextColor={t.colors.placeholder}
             secureTextEntry
             value={password}
-            onChangeText={setPassword}
+            onChangeText={value => { if (sensitiveRequestCurrent(renderedSensitiveOwnership)) setPassword(value); }}
             accessibilityLabel={tr("common.passwordConfirmA11y")}
             textContentType="password"
           />
@@ -1009,6 +1091,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
                 ]}
                 onPress={() => {
                   touchActivity();
+                  acknowledgedPreferences.current.language = true;
                   setLanguageState(choice);
                   void writeLanguageChoice(choice);
                 }}
@@ -1036,10 +1119,11 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         <GhostButton label={tr("settings.retryAudio")} disabled={busy} onPress={() => {
           const operation = savedAudioOwnership.current;
           void (async () => {
+            if (!operation || !ownsSensitiveScope(operation)) return;
             setBusy(true);
             try { const owner = await savedAudioOwner(operation); await retryAudioQueue(owner); if (operation) assertSensitiveOwnership(operation); await refreshSavedAudio(); }
-            catch { Alert.alert(tr("settings.couldNotRetryTitle"), tr("settings.couldNotRetryBody")); }
-            finally { setBusy(false); }
+            catch { if (ownsSensitiveScope(operation)) Alert.alert(tr("settings.couldNotRetryTitle"), tr("settings.couldNotRetryBody")); }
+            finally { if (ownsSensitiveScope(operation)) setBusy(false); }
           })();
         }} />
         {savedAudio.map((item, index) => <View key={item.id} style={{ gap: 4 }}>
@@ -1047,16 +1131,16 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
           {item.needsAttention && <Text style={{ color: t.colors.muted }}>{tr("settings.audioNeedsAttention")}</Text>}
           <GhostButton label={tr("settings.exportAudio", { number: index + 1 })} disabled={busy} onPress={() => {
             const operation = savedAudioOwnership.current;
-            void (async () => { setBusy(true); try { const owner = await savedAudioOwner(operation); await exportSavedAudio(owner, item.id); }
-              catch (err) { Alert.alert(tr("settings.exportFailedTitle"), requestFailureCopy(err)); } finally { setBusy(false); } })();
+            void (async () => { if (!operation || !ownsSensitiveScope(operation)) return; setBusy(true); try { const owner = await savedAudioOwner(operation); await exportSavedAudio(owner, item.id); }
+              catch (err) { if (ownsSensitiveScope(operation)) Alert.alert(tr("settings.exportFailedTitle"), requestFailureCopy(err)); } finally { if (ownsSensitiveScope(operation)) setBusy(false); } })();
           }} />
           <GhostButton label={tr("settings.removeAudio", { number: index + 1 })} disabled={busy} onPress={() => {
             const operation = savedAudioOwnership.current;
             Alert.alert(tr("settings.removeAudioTitle"), tr("settings.removeAudioBody"), [
               { text: tr("common.cancel"), style: "cancel" },
               { text: tr("settings.removeAudioConfirm"), style: "destructive", onPress: () => {
-                void (async () => { setBusy(true); try { const owner = await savedAudioOwner(operation); await removeSavedAudio(owner, item.id, item.revision); if (operation) assertSensitiveOwnership(operation); await refreshSavedAudio(); }
-                  catch (err) { Alert.alert(tr("settings.couldNotRetryTitle"), requestFailureCopy(err)); } finally { setBusy(false); } })();
+                void (async () => { if (!operation || !ownsSensitiveScope(operation)) return; setBusy(true); try { const owner = await savedAudioOwner(operation); await removeSavedAudio(owner, item.id, item.revision); if (operation) assertSensitiveOwnership(operation); await refreshSavedAudio(); }
+                  catch (err) { if (ownsSensitiveScope(operation)) Alert.alert(tr("settings.couldNotRetryTitle"), requestFailureCopy(err)); } finally { if (ownsSensitiveScope(operation)) setBusy(false); } })();
               } },
             ]);
           }} />
@@ -1135,6 +1219,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
                 ]}
                 onPress={() => {
                   touchActivity();
+                  acknowledgedPreferences.current.theme = true;
                   setThemeModeState(mode);
                   setThemeMode(mode);
                 }}
@@ -1155,6 +1240,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
             value={haptics}
             onValueChange={(on) => {
               touchActivity();
+              acknowledgedPreferences.current.haptics = true;
               setHaptics(on);
               void setHapticsEnabled(on);
             }}
@@ -1404,7 +1490,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
             placeholderTextColor={t.colors.placeholder}
             secureTextEntry
             value={rotateCurrentPassword}
-            onChangeText={setRotateCurrentPassword}
+            onChangeText={value => { if (sensitiveRequestCurrent(renderedSensitiveOwnership)) setRotateCurrentPassword(value); }}
             accessibilityLabel={tr("common.passwordConfirmA11y")}
             textContentType="password"
           />
@@ -1414,7 +1500,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
             placeholderTextColor={t.colors.placeholder}
             secureTextEntry
             value={newPassword}
-            onChangeText={setNewPassword}
+            onChangeText={value => { if (sensitiveRequestCurrent(renderedSensitiveOwnership)) setNewPassword(value); }}
             accessibilityLabel={tr("settings.newPasswordA11y")}
             textContentType="newPassword"
           />

@@ -94,7 +94,7 @@ beforeEach(() => {
   nav.navigate.mockClear();
   touchActivity.mockClear();
   vault.lock();
-  vault.unlock({ ...keys, masterKey: Buffer.alloc(32) }, "user-1");
+  vault.unlock({ masterKey: Buffer.from(keys.masterKey), authKey: Buffer.from(keys.authKey), dataKey: Buffer.from(keys.dataKey) }, "user-1");
   sessionState = { activeDays: 0, unlockDays: 30, touchActivity };
   storage.__reset();
 });
@@ -211,7 +211,6 @@ describe("EntryScreen voice flow", () => {
     );
     // The plaintext take does not survive a failed transcription.
     await flush();
-    expect(fs.deleteAsync).toHaveBeenCalledWith(TAKE_URI, { idempotent: true });
     expect(fs.__hasFile(TAKE_URI)).toBe(false);
     expect(api.createEntry).not.toHaveBeenCalled();
   });

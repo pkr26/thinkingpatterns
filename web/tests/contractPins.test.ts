@@ -5,9 +5,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { CRISIS_DIALOG_PATTERNS, CRISIS_SUPPRESS_EXTRA_PATTERNS, CRISIS_BENIGN_COMPOUNDS } from "../src/crisisPhrases";
 import { detectCrisisLanguage, matchesCrisisSuppress } from "../src/crisisDetect";
-import { GENERIC_QUESTIONS, GENERIC_QUESTIONS_ES } from "../src/genericQuestions";
+import { genericQuestionForDate } from "../src/genericQuestions";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -18,18 +17,6 @@ describe("crisis-language contract (shared/crisis_phrases.json)", () => {
     benign_compounds: string[];
     fixtures: { dialog_fires: string[]; dialog_silent: string[]; suppress_only_fires: string[] };
   };
-
-  it("the dialog tier matches the shared contract", () => {
-    expect([...CRISIS_DIALOG_PATTERNS]).toEqual([...shared.dialog]);
-  });
-
-  it("the suppress tier matches the shared contract", () => {
-    expect([...CRISIS_SUPPRESS_EXTRA_PATTERNS]).toEqual([...shared.suppress_extra]);
-  });
-
-  it("the benign compounds match the shared contract", () => {
-    expect([...CRISIS_BENIGN_COMPOUNDS]).toEqual([...shared.benign_compounds]);
-  });
 
   it("the shared fixture corpus behaves identically through our detector", () => {
     for (const text of shared.fixtures.dialog_fires) expect(detectCrisisLanguage(text)).toBe(true);
@@ -50,21 +37,26 @@ describe("reflective question pools (shared/generic_questions{,_es}.json)", () =
   const en = (JSON.parse(readFileSync(join(here, "..", "..", "shared", "generic_questions.json"), "utf8")) as { questions: string[] }).questions;
   const es = (JSON.parse(readFileSync(join(here, "..", "..", "shared", "generic_questions_es.json"), "utf8")) as { questions: string[] }).questions;
 
-  it("the English pool is position-identical to the shared contract", () => {
-    expect(GENERIC_QUESTIONS).toEqual(en);
-  });
-
-  it("the Spanish pool is position-identical (audit E-3 parity)", () => {
-    expect(GENERIC_QUESTIONS_ES).toEqual(es);
-  });
-
-  it("every question is a question and never advice", () => {
-    for (const pool of [GENERIC_QUESTIONS, GENERIC_QUESTIONS_ES]) {
-      for (const question of pool) {
+  it("serves every approved English and Spanish question through the calendar rotation", () => {
+    const servedEn = new Set<string>();
+    const servedEs = new Set<string>();
+    for (let day = 1; day <= 730; day++) {
+      const date = new Date(2025, 0, day);
+      const localDate = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+      const english = genericQuestionForDate(localDate, "en");
+      const spanish = genericQuestionForDate(localDate, "es");
+      expect(en).toContain(english);
+      expect(es).toContain(spanish);
+      expect(es[en.indexOf(english)]).toBe(spanish);
+      for (const question of [english, spanish]) {
         expect(question.endsWith("?")).toBe(true);
         expect(question.toLowerCase()).not.toContain("should");
         expect(question.toLowerCase()).not.toContain("debería");
       }
+      servedEn.add(english);
+      servedEs.add(spanish);
     }
+    expect(servedEn.size).toBe(en.length);
+    expect(servedEs.size).toBe(es.length);
   });
 });

@@ -1,0 +1,3655 @@
+{
+  "contract": "Date rotation uses unsigned 32-bit DJB2 33/XOR; approved public copy from shared/generic_questions{,_es}.json",
+  "rows": [
+    [
+      "2025-01-01",
+      "What was the hardest part of today?",
+      "¿Cuál fue la parte más difícil de hoy?"
+    ],
+    [
+      "2025-01-02",
+      "What worry got smaller once you wrote it down?",
+      "¿Qué preocupación se hizo más pequeña al escribirla?"
+    ],
+    [
+      "2025-01-03",
+      "What are you avoiding, gently speaking?",
+      "¿Qué está evitando, dicho con gentileza?"
+    ],
+    [
+      "2025-01-04",
+      "What's a question you're sitting with lately?",
+      "¿Qué pregunta lleva rondándole últimamente?"
+    ],
+    [
+      "2025-01-05",
+      "What are you curious about right now?",
+      "¿Sobre qué tiene curiosidad ahora mismo?"
+    ],
+    [
+      "2025-01-06",
+      "What's one small thing you're curious to attempt tomorrow?",
+      "¿Qué pequeña cosa tiene curiosidad por intentar mañana?"
+    ],
+    [
+      "2025-01-07",
+      "What would you like to remember about this time?",
+      "¿Qué le gustaría recordar de esta época?"
+    ],
+    [
+      "2025-01-08",
+      "Where did you feel most at ease today?",
+      "¿Dónde se sintió más a gusto hoy?"
+    ],
+    [
+      "2025-01-09",
+      "What did you taste today that you remember?",
+      "¿Qué saboreó hoy y recuerda?"
+    ],
+    [
+      "2025-01-10",
+      "What would you say to a friend who had your day?",
+      "¿Qué le diría a un amigo que hubiera tenido su día?"
+    ],
+    [
+      "2025-01-11",
+      "What's something you did today that took effort?",
+      "¿Qué hizo hoy que le exigió esfuerzo?"
+    ],
+    [
+      "2025-01-12",
+      "What did you forgive yourself for today?",
+      "¿Qué se perdonó hoy?"
+    ],
+    [
+      "2025-01-13",
+      "What would make tomorrow 1% kinder to you?",
+      "¿Qué haría que mañana fuera un 1% más amable con usted?"
+    ],
+    [
+      "2025-01-14",
+      "What are three things that went okay today?",
+      "¿Qué tres cosas salieron más o menos bien hoy?"
+    ],
+    [
+      "2025-01-15",
+      "Who made your day a little lighter today?",
+      "¿Quién hizo su día un poco más ligero hoy?"
+    ],
+    [
+      "2025-01-16",
+      "What's something you're looking forward to?",
+      "¿Hay algo que espera con ilusión?"
+    ],
+    [
+      "2025-01-17",
+      "What comforted you today?",
+      "¿Qué le confortó hoy?"
+    ],
+    [
+      "2025-01-18",
+      "What's one thing worth keeping from today?",
+      "¿Qué vale la pena conservar de hoy?"
+    ],
+    [
+      "2025-01-19",
+      "What mattered most to you today?",
+      "¿Qué fue lo que más le importó hoy?"
+    ],
+    [
+      "2025-01-20",
+      "What's one small thing you're curious to attempt tomorrow?",
+      "¿Qué pequeña cosa tiene curiosidad por intentar mañana?"
+    ],
+    [
+      "2025-01-21",
+      "What would you like to remember about this time?",
+      "¿Qué le gustaría recordar de esta época?"
+    ],
+    [
+      "2025-01-22",
+      "What's a question you're sitting with lately?",
+      "¿Qué pregunta lleva rondándole últimamente?"
+    ],
+    [
+      "2025-01-23",
+      "What are you curious about right now?",
+      "¿Sobre qué tiene curiosidad ahora mismo?"
+    ],
+    [
+      "2025-01-24",
+      "What feels most like 'you' these days?",
+      "¿Qué se siente más 'suyo' en estos días?"
+    ],
+    [
+      "2025-01-25",
+      "What's a place you'd rather have been today?",
+      "¿En qué lugar habría preferido estar hoy?"
+    ],
+    [
+      "2025-01-26",
+      "Where did you feel most at ease today?",
+      "¿Dónde se sintió más a gusto hoy?"
+    ],
+    [
+      "2025-01-27",
+      "What did you taste today that you remember?",
+      "¿Qué saboreó hoy y recuerda?"
+    ],
+    [
+      "2025-01-28",
+      "What would tomorrow look like in an ideal world?",
+      "¿Cómo sería mañana en un mundo ideal?"
+    ],
+    [
+      "2025-01-29",
+      "If today were weather, what was it?",
+      "Si hoy fuera un clima, ¿cuál habría sido?"
+    ],
+    [
+      "2025-01-30",
+      "What's something you're looking forward to?",
+      "¿Hay algo que espera con ilusión?"
+    ],
+    [
+      "2025-01-31",
+      "What comforted you today?",
+      "¿Qué le confortó hoy?"
+    ],
+    [
+      "2025-02-01",
+      "What would tomorrow look like in an ideal world?",
+      "¿Cómo sería mañana en un mundo ideal?"
+    ],
+    [
+      "2025-02-02",
+      "What's changing in you lately, slowly?",
+      "¿Qué está cambiando en usted, poco a poco, últimamente?"
+    ],
+    [
+      "2025-02-03",
+      "What has stayed steady in you lately?",
+      "¿Qué se ha mantenido estable en usted últimamente?"
+    ],
+    [
+      "2025-02-04",
+      "What did today ask of you?",
+      "¿Qué le pidió hoy el día?"
+    ],
+    [
+      "2025-02-05",
+      "What are you grateful to past-you for today?",
+      "¿Por qué le agradece hoy a su yo del pasado?"
+    ],
+    [
+      "2025-02-06",
+      "If you could send yourself a note this morning, what would it say?",
+      "Si pudiera enviarse una nota esta mañana, ¿qué diría?"
+    ],
+    [
+      "2025-02-07",
+      "What did you do today purely because you wanted to?",
+      "¿Qué hizo hoy puramente porque quería?"
+    ],
+    [
+      "2025-02-08",
+      "When did you feel most like yourself today?",
+      "¿Cuándo se sintió más usted mismo o usted misma hoy?"
+    ],
+    [
+      "2025-02-09",
+      "What's one small thing that went right today?",
+      "¿Qué pequeña cosa salió bien hoy?"
+    ],
+    [
+      "2025-02-10",
+      "What value showed up in something you did today?",
+      "¿Qué valor suyo apareció en algo que hizo hoy?"
+    ],
+    [
+      "2025-02-11",
+      "When did today feel meaningful?",
+      "¿Cuándo sintió que hoy tenía sentido?"
+    ],
+    [
+      "2025-02-12",
+      "What mattered most to you today?",
+      "¿Qué fue lo que más le importó hoy?"
+    ],
+    [
+      "2025-02-13",
+      "What's one thing worth keeping from today?",
+      "¿Qué vale la pena conservar de hoy?"
+    ],
+    [
+      "2025-02-14",
+      "What emotion surprised you today?",
+      "¿Qué emoción lo sorprendió hoy?"
+    ],
+    [
+      "2025-02-15",
+      "What emotion visited you most today?",
+      "¿Qué emoción lo visitó más hoy?"
+    ],
+    [
+      "2025-02-16",
+      "If your mood today had a texture, what would it feel like?",
+      "Si el estado de ánimo de hoy tuviera una textura, ¿cómo se sentiría?"
+    ],
+    [
+      "2025-02-17",
+      "What would you like more of in your life?",
+      "¿Qué le gustaría tener más en su vida?"
+    ],
+    [
+      "2025-02-18",
+      "When did you feel understood today?",
+      "¿Cuándo se sintió comprendido o comprendida hoy?"
+    ],
+    [
+      "2025-02-19",
+      "What conversation stayed with you today?",
+      "¿Qué conversación se quedó con usted hoy?"
+    ],
+    [
+      "2025-02-20",
+      "What did you taste today that you remember?",
+      "¿Qué saboreó hoy y recuerda?"
+    ],
+    [
+      "2025-02-21",
+      "Where did you feel most at ease today?",
+      "¿Dónde se sintió más a gusto hoy?"
+    ],
+    [
+      "2025-02-22",
+      "What's a place you'd rather have been today?",
+      "¿En qué lugar habría preferido estar hoy?"
+    ],
+    [
+      "2025-02-23",
+      "What feels most like 'you' these days?",
+      "¿Qué se siente más 'suyo' en estos días?"
+    ],
+    [
+      "2025-02-24",
+      "What's changing in you lately, slowly?",
+      "¿Qué está cambiando en usted, poco a poco, últimamente?"
+    ],
+    [
+      "2025-02-25",
+      "What has stayed steady in you lately?",
+      "¿Qué se ha mantenido estable en usted últimamente?"
+    ],
+    [
+      "2025-02-26",
+      "If today were weather, what was it?",
+      "Si hoy fuera un clima, ¿cuál habría sido?"
+    ],
+    [
+      "2025-02-27",
+      "What would tomorrow look like in an ideal world?",
+      "¿Cómo sería mañana en un mundo ideal?"
+    ],
+    [
+      "2025-02-28",
+      "If you could send yourself a note this morning, what would it say?",
+      "Si pudiera enviarse una nota esta mañana, ¿qué diría?"
+    ],
+    [
+      "2025-03-01",
+      "What drained you today?",
+      "¿Qué lo agotó hoy?"
+    ],
+    [
+      "2025-03-02",
+      "What gave you energy today?",
+      "¿Qué le dio energía hoy?"
+    ],
+    [
+      "2025-03-03",
+      "When did you feel alone today, and what was that like?",
+      "¿Cuándo se sintió solo o sola hoy, y cómo fue eso?"
+    ],
+    [
+      "2025-03-04",
+      "What did today's pace feel like?",
+      "¿Cómo sintió el ritmo de hoy?"
+    ],
+    [
+      "2025-03-05",
+      "When were you most absorbed in something today?",
+      "¿Cuándo estuvo más absorbido o absorbida en algo hoy?"
+    ],
+    [
+      "2025-03-06",
+      "What part of the day felt longest?",
+      "¿Qué parte del día se sintió más larga?"
+    ],
+    [
+      "2025-03-07",
+      "What did you let go of today?",
+      "¿Qué dejó ir hoy?"
+    ],
+    [
+      "2025-03-08",
+      "What worry got smaller once you wrote it down?",
+      "¿Qué preocupación se hizo más pequeña al escribirla?"
+    ],
+    [
+      "2025-03-09",
+      "What are you avoiding, gently speaking?",
+      "¿Qué está evitando, dicho con gentileza?"
+    ],
+    [
+      "2025-03-10",
+      "What are you carrying into tomorrow?",
+      "¿Qué se lleva consigo hacia mañana?"
+    ],
+    [
+      "2025-03-11",
+      "What did you notice today that you usually overlook?",
+      "¿Qué notó hoy que suele pasar por alto?"
+    ],
+    [
+      "2025-03-12",
+      "What thought repeated itself today?",
+      "¿Qué pensamiento se repitió hoy?"
+    ],
+    [
+      "2025-03-13",
+      "If today had a title, what would it be?",
+      "Si hoy tuviera un título, ¿cuál sería?"
+    ],
+    [
+      "2025-03-14",
+      "What sound do you remember from today?",
+      "¿Qué sonido recuerda de hoy?"
+    ],
+    [
+      "2025-03-15",
+      "What did you see today that you'd want to see again?",
+      "¿Qué vio hoy que le gustaría volver a ver?"
+    ],
+    [
+      "2025-03-16",
+      "What did your body notice before your mind did today?",
+      "¿Qué notó su cuerpo antes que su mente hoy?"
+    ],
+    [
+      "2025-03-17",
+      "What was the quietest moment of your day?",
+      "¿Cuál fue el momento más tranquilo de su día?"
+    ],
+    [
+      "2025-03-18",
+      "What did you forgive yourself for today?",
+      "¿Qué se perdonó hoy?"
+    ],
+    [
+      "2025-03-19",
+      "What would make tomorrow 1% kinder to you?",
+      "¿Qué haría que mañana fuera un 1% más amable con usted?"
+    ],
+    [
+      "2025-03-20",
+      "Who did you think about today?",
+      "¿En quién pensó hoy?"
+    ],
+    [
+      "2025-03-21",
+      "Where in your body did today's strongest feeling live?",
+      "¿En qué parte del cuerpo vivió hoy el sentimiento más fuerte?"
+    ],
+    [
+      "2025-03-22",
+      "When did you feel understood today?",
+      "¿Cuándo se sintió comprendido o comprendida hoy?"
+    ],
+    [
+      "2025-03-23",
+      "What conversation stayed with you today?",
+      "¿Qué conversación se quedó con usted hoy?"
+    ],
+    [
+      "2025-03-24",
+      "What gave you energy today?",
+      "¿Qué le dio energía hoy?"
+    ],
+    [
+      "2025-03-25",
+      "When did you feel alone today, and what was that like?",
+      "¿Cuándo se sintió solo o sola hoy, y cómo fue eso?"
+    ],
+    [
+      "2025-03-26",
+      "What did you say no to today?",
+      "¿A qué dijo no hoy?"
+    ],
+    [
+      "2025-03-27",
+      "What drained you today?",
+      "¿Qué lo agotó hoy?"
+    ],
+    [
+      "2025-03-28",
+      "What part of the day felt longest?",
+      "¿Qué parte del día se sintió más larga?"
+    ],
+    [
+      "2025-03-29",
+      "What did you let go of today?",
+      "¿Qué dejó ir hoy?"
+    ],
+    [
+      "2025-03-30",
+      "What took up most space in your mind today?",
+      "¿Qué ocupó la mayor parte de su mente hoy?"
+    ],
+    [
+      "2025-03-31",
+      "What felt different today compared to yesterday?",
+      "¿Qué se sintió diferente hoy en comparación con ayer?"
+    ],
+    [
+      "2025-04-01",
+      "If your mood today had a texture, what would it feel like?",
+      "Si el estado de ánimo de hoy tuviera una textura, ¿cómo se sentiría?"
+    ],
+    [
+      "2025-04-02",
+      "What emotion visited you most today?",
+      "¿Qué emoción lo visitó más hoy?"
+    ],
+    [
+      "2025-04-03",
+      "What emotion surprised you today?",
+      "¿Qué emoción lo sorprendió hoy?"
+    ],
+    [
+      "2025-04-04",
+      "What's one thing worth keeping from today?",
+      "¿Qué vale la pena conservar de hoy?"
+    ],
+    [
+      "2025-04-05",
+      "What mattered most to you today?",
+      "¿Qué fue lo que más le importó hoy?"
+    ],
+    [
+      "2025-04-06",
+      "When did today feel meaningful?",
+      "¿Cuándo sintió que hoy tenía sentido?"
+    ],
+    [
+      "2025-04-07",
+      "What value showed up in something you did today?",
+      "¿Qué valor suyo apareció en algo que hizo hoy?"
+    ],
+    [
+      "2025-04-08",
+      "When did you feel alone today, and what was that like?",
+      "¿Cuándo se sintió solo o sola hoy, y cómo fue eso?"
+    ],
+    [
+      "2025-04-09",
+      "What gave you energy today?",
+      "¿Qué le dio energía hoy?"
+    ],
+    [
+      "2025-04-10",
+      "What has stayed steady in you lately?",
+      "¿Qué se ha mantenido estable en usted últimamente?"
+    ],
+    [
+      "2025-04-11",
+      "What's changing in you lately, slowly?",
+      "¿Qué está cambiando en usted, poco a poco, últimamente?"
+    ],
+    [
+      "2025-04-12",
+      "What would tomorrow look like in an ideal world?",
+      "¿Cómo sería mañana en un mundo ideal?"
+    ],
+    [
+      "2025-04-13",
+      "If today were weather, what was it?",
+      "Si hoy fuera un clima, ¿cuál habría sido?"
+    ],
+    [
+      "2025-04-14",
+      "Where did you feel most at ease today?",
+      "¿Dónde se sintió más a gusto hoy?"
+    ],
+    [
+      "2025-04-15",
+      "What did you taste today that you remember?",
+      "¿Qué saboreó hoy y recuerda?"
+    ],
+    [
+      "2025-04-16",
+      "What feels most like 'you' these days?",
+      "¿Qué se siente más 'suyo' en estos días?"
+    ],
+    [
+      "2025-04-17",
+      "What's a place you'd rather have been today?",
+      "¿En qué lugar habría preferido estar hoy?"
+    ],
+    [
+      "2025-04-18",
+      "What felt different today compared to yesterday?",
+      "¿Qué se sintió diferente hoy en comparación con ayer?"
+    ],
+    [
+      "2025-04-19",
+      "What took up most space in your mind today?",
+      "¿Qué ocupó la mayor parte de su mente hoy?"
+    ],
+    [
+      "2025-04-20",
+      "What conversation stayed with you today?",
+      "¿Qué conversación se quedó con usted hoy?"
+    ],
+    [
+      "2025-04-21",
+      "When did you feel understood today?",
+      "¿Cuándo se sintió comprendido o comprendida hoy?"
+    ],
+    [
+      "2025-04-22",
+      "Where in your body did today's strongest feeling live?",
+      "¿En qué parte del cuerpo vivió hoy el sentimiento más fuerte?"
+    ],
+    [
+      "2025-04-23",
+      "Who did you think about today?",
+      "¿En quién pensó hoy?"
+    ],
+    [
+      "2025-04-24",
+      "What emotion visited you most today?",
+      "¿Qué emoción lo visitó más hoy?"
+    ],
+    [
+      "2025-04-25",
+      "What emotion surprised you today?",
+      "¿Qué emoción lo sorprendió hoy?"
+    ],
+    [
+      "2025-04-26",
+      "What would you like more of in your life?",
+      "¿Qué le gustaría tener más en su vida?"
+    ],
+    [
+      "2025-04-27",
+      "If your mood today had a texture, what would it feel like?",
+      "Si el estado de ánimo de hoy tuviera una textura, ¿cómo se sentiría?"
+    ],
+    [
+      "2025-04-28",
+      "When were you most absorbed in something today?",
+      "¿Cuándo estuvo más absorbido o absorbida en algo hoy?"
+    ],
+    [
+      "2025-04-29",
+      "What did today's pace feel like?",
+      "¿Cómo sintió el ritmo de hoy?"
+    ],
+    [
+      "2025-04-30",
+      "What are you grateful to past-you for today?",
+      "¿Por qué le agradece hoy a su yo del pasado?"
+    ],
+    [
+      "2025-05-01",
+      "What thought repeated itself today?",
+      "¿Qué pensamiento se repitió hoy?"
+    ],
+    [
+      "2025-05-02",
+      "What did you notice today that you usually overlook?",
+      "¿Qué notó hoy que suele pasar por alto?"
+    ],
+    [
+      "2025-05-03",
+      "What are you carrying into tomorrow?",
+      "¿Qué se lleva consigo hacia mañana?"
+    ],
+    [
+      "2025-05-04",
+      "What felt different today compared to yesterday?",
+      "¿Qué se sintió diferente hoy en comparación con ayer?"
+    ],
+    [
+      "2025-05-05",
+      "What took up most space in your mind today?",
+      "¿Qué ocupó la mayor parte de su mente hoy?"
+    ],
+    [
+      "2025-05-06",
+      "What's one small thing that went right today?",
+      "¿Qué pequeña cosa salió bien hoy?"
+    ],
+    [
+      "2025-05-07",
+      "When did you feel most like yourself today?",
+      "¿Cuándo se sintió más usted mismo o usted misma hoy?"
+    ],
+    [
+      "2025-05-08",
+      "What's something you did today that took effort?",
+      "¿Qué hizo hoy que le exigió esfuerzo?"
+    ],
+    [
+      "2025-05-09",
+      "What would you say to a friend who had your day?",
+      "¿Qué le diría a un amigo que hubiera tenido su día?"
+    ],
+    [
+      "2025-05-10",
+      "What did you let go of today?",
+      "¿Qué dejó ir hoy?"
+    ],
+    [
+      "2025-05-11",
+      "What part of the day felt longest?",
+      "¿Qué parte del día se sintió más larga?"
+    ],
+    [
+      "2025-05-12",
+      "When were you most absorbed in something today?",
+      "¿Cuándo estuvo más absorbido o absorbida en algo hoy?"
+    ],
+    [
+      "2025-05-13",
+      "What did today's pace feel like?",
+      "¿Cómo sintió el ritmo de hoy?"
+    ],
+    [
+      "2025-05-14",
+      "When did you feel alone today, and what was that like?",
+      "¿Cuándo se sintió solo o sola hoy, y cómo fue eso?"
+    ],
+    [
+      "2025-05-15",
+      "What gave you energy today?",
+      "¿Qué le dio energía hoy?"
+    ],
+    [
+      "2025-05-16",
+      "What drained you today?",
+      "¿Qué lo agotó hoy?"
+    ],
+    [
+      "2025-05-17",
+      "What did you say no to today?",
+      "¿A qué dijo no hoy?"
+    ],
+    [
+      "2025-05-18",
+      "What are you curious about right now?",
+      "¿Sobre qué tiene curiosidad ahora mismo?"
+    ],
+    [
+      "2025-05-19",
+      "What's a question you're sitting with lately?",
+      "¿Qué pregunta lleva rondándole últimamente?"
+    ],
+    [
+      "2025-05-20",
+      "What did you see today that you'd want to see again?",
+      "¿Qué vio hoy que le gustaría volver a ver?"
+    ],
+    [
+      "2025-05-21",
+      "What sound do you remember from today?",
+      "¿Qué sonido recuerda de hoy?"
+    ],
+    [
+      "2025-05-22",
+      "What was the quietest moment of your day?",
+      "¿Cuál fue el momento más tranquilo de su día?"
+    ],
+    [
+      "2025-05-23",
+      "What did your body notice before your mind did today?",
+      "¿Qué notó su cuerpo antes que su mente hoy?"
+    ],
+    [
+      "2025-05-24",
+      "What did you notice today that you usually overlook?",
+      "¿Qué notó hoy que suele pasar por alto?"
+    ],
+    [
+      "2025-05-25",
+      "What are you carrying into tomorrow?",
+      "¿Qué se lleva consigo hacia mañana?"
+    ],
+    [
+      "2025-05-26",
+      "If today had a title, what would it be?",
+      "Si hoy tuviera un título, ¿cuál sería?"
+    ],
+    [
+      "2025-05-27",
+      "What thought repeated itself today?",
+      "¿Qué pensamiento se repitió hoy?"
+    ],
+    [
+      "2025-05-28",
+      "What comforted you today?",
+      "¿Qué le confortó hoy?"
+    ],
+    [
+      "2025-05-29",
+      "What's something you're looking forward to?",
+      "¿Hay algo que espera con ilusión?"
+    ],
+    [
+      "2025-05-30",
+      "What are you avoiding, gently speaking?",
+      "¿Qué está evitando, dicho con gentileza?"
+    ],
+    [
+      "2025-05-31",
+      "What worry got smaller once you wrote it down?",
+      "¿Qué preocupación se hizo más pequeña al escribirla?"
+    ],
+    [
+      "2025-06-01",
+      "What comforted you today?",
+      "¿Qué le confortó hoy?"
+    ],
+    [
+      "2025-06-02",
+      "What are three things that went okay today?",
+      "¿Qué tres cosas salieron más o menos bien hoy?"
+    ],
+    [
+      "2025-06-03",
+      "Who made your day a little lighter today?",
+      "¿Quién hizo su día un poco más ligero hoy?"
+    ],
+    [
+      "2025-06-04",
+      "What did you forgive yourself for today?",
+      "¿Qué se perdonó hoy?"
+    ],
+    [
+      "2025-06-05",
+      "What would make tomorrow 1% kinder to you?",
+      "¿Qué haría que mañana fuera un 1% más amable con usted?"
+    ],
+    [
+      "2025-06-06",
+      "What would you say to a friend who had your day?",
+      "¿Qué le diría a un amigo que hubiera tenido su día?"
+    ],
+    [
+      "2025-06-07",
+      "What's something you did today that took effort?",
+      "¿Qué hizo hoy que le exigió esfuerzo?"
+    ],
+    [
+      "2025-06-08",
+      "What emotion visited you most today?",
+      "¿Qué emoción lo visitó más hoy?"
+    ],
+    [
+      "2025-06-09",
+      "What emotion surprised you today?",
+      "¿Qué emoción lo sorprendió hoy?"
+    ],
+    [
+      "2025-06-10",
+      "What's one small thing you're curious to attempt tomorrow?",
+      "¿Qué pequeña cosa tiene curiosidad por intentar mañana?"
+    ],
+    [
+      "2025-06-11",
+      "What would you like to remember about this time?",
+      "¿Qué le gustaría recordar de esta época?"
+    ],
+    [
+      "2025-06-12",
+      "What's a question you're sitting with lately?",
+      "¿Qué pregunta lleva rondándole últimamente?"
+    ],
+    [
+      "2025-06-13",
+      "What are you curious about right now?",
+      "¿Sobre qué tiene curiosidad ahora mismo?"
+    ],
+    [
+      "2025-06-14",
+      "What worry got smaller once you wrote it down?",
+      "¿Qué preocupación se hizo más pequeña al escribirla?"
+    ],
+    [
+      "2025-06-15",
+      "What are you avoiding, gently speaking?",
+      "¿Qué está evitando, dicho con gentileza?"
+    ],
+    [
+      "2025-06-16",
+      "What did you get through today that felt heavy?",
+      "¿Qué atravesó hoy que se sintió pesado?"
+    ],
+    [
+      "2025-06-17",
+      "What was the hardest part of today?",
+      "¿Cuál fue la parte más difícil de hoy?"
+    ],
+    [
+      "2025-06-18",
+      "What would tomorrow look like in an ideal world?",
+      "¿Cómo sería mañana en un mundo ideal?"
+    ],
+    [
+      "2025-06-19",
+      "If today were weather, what was it?",
+      "Si hoy fuera un clima, ¿cuál habría sido?"
+    ],
+    [
+      "2025-06-20",
+      "What would you say to a friend who had your day?",
+      "¿Qué le diría a un amigo que hubiera tenido su día?"
+    ],
+    [
+      "2025-06-21",
+      "What's something you did today that took effort?",
+      "¿Qué hizo hoy que le exigió esfuerzo?"
+    ],
+    [
+      "2025-06-22",
+      "What did you forgive yourself for today?",
+      "¿Qué se perdonó hoy?"
+    ],
+    [
+      "2025-06-23",
+      "What would make tomorrow 1% kinder to you?",
+      "¿Qué haría que mañana fuera un 1% más amable con usted?"
+    ],
+    [
+      "2025-06-24",
+      "What did your body notice before your mind did today?",
+      "¿Qué notó su cuerpo antes que su mente hoy?"
+    ],
+    [
+      "2025-06-25",
+      "What was the quietest moment of your day?",
+      "¿Cuál fue el momento más tranquilo de su día?"
+    ],
+    [
+      "2025-06-26",
+      "What sound do you remember from today?",
+      "¿Qué sonido recuerda de hoy?"
+    ],
+    [
+      "2025-06-27",
+      "What did you see today that you'd want to see again?",
+      "¿Qué vio hoy que le gustaría volver a ver?"
+    ],
+    [
+      "2025-06-28",
+      "What's one thing worth keeping from today?",
+      "¿Qué vale la pena conservar de hoy?"
+    ],
+    [
+      "2025-06-29",
+      "What mattered most to you today?",
+      "¿Qué fue lo que más le importó hoy?"
+    ],
+    [
+      "2025-06-30",
+      "What did you get through today that felt heavy?",
+      "¿Qué atravesó hoy que se sintió pesado?"
+    ],
+    [
+      "2025-07-01",
+      "What did today ask of you?",
+      "¿Qué le pidió hoy el día?"
+    ],
+    [
+      "2025-07-02",
+      "What did you do today purely because you wanted to?",
+      "¿Qué hizo hoy puramente porque quería?"
+    ],
+    [
+      "2025-07-03",
+      "If you could send yourself a note this morning, what would it say?",
+      "Si pudiera enviarse una nota esta mañana, ¿qué diría?"
+    ],
+    [
+      "2025-07-04",
+      "What would tomorrow look like in an ideal world?",
+      "¿Cómo sería mañana en un mundo ideal?"
+    ],
+    [
+      "2025-07-05",
+      "If today were weather, what was it?",
+      "Si hoy fuera un clima, ¿cuál habría sido?"
+    ],
+    [
+      "2025-07-06",
+      "What has stayed steady in you lately?",
+      "¿Qué se ha mantenido estable en usted últimamente?"
+    ],
+    [
+      "2025-07-07",
+      "What's changing in you lately, slowly?",
+      "¿Qué está cambiando en usted, poco a poco, últimamente?"
+    ],
+    [
+      "2025-07-08",
+      "What did you notice today that you usually overlook?",
+      "¿Qué notó hoy que suele pasar por alto?"
+    ],
+    [
+      "2025-07-09",
+      "What are you carrying into tomorrow?",
+      "¿Qué se lleva consigo hacia mañana?"
+    ],
+    [
+      "2025-07-10",
+      "What conversation stayed with you today?",
+      "¿Qué conversación se quedó con usted hoy?"
+    ],
+    [
+      "2025-07-11",
+      "When did you feel understood today?",
+      "¿Cuándo se sintió comprendido o comprendida hoy?"
+    ],
+    [
+      "2025-07-12",
+      "Where in your body did today's strongest feeling live?",
+      "¿En qué parte del cuerpo vivió hoy el sentimiento más fuerte?"
+    ],
+    [
+      "2025-07-13",
+      "Who did you think about today?",
+      "¿En quién pensó hoy?"
+    ],
+    [
+      "2025-07-14",
+      "What emotion visited you most today?",
+      "¿Qué emoción lo visitó más hoy?"
+    ],
+    [
+      "2025-07-15",
+      "What emotion surprised you today?",
+      "¿Qué emoción lo sorprendió hoy?"
+    ],
+    [
+      "2025-07-16",
+      "What would you like more of in your life?",
+      "¿Qué le gustaría tener más en su vida?"
+    ],
+    [
+      "2025-07-17",
+      "If your mood today had a texture, what would it feel like?",
+      "Si el estado de ánimo de hoy tuviera una textura, ¿cómo se sentiría?"
+    ],
+    [
+      "2025-07-18",
+      "When were you most absorbed in something today?",
+      "¿Cuándo estuvo más absorbido o absorbida en algo hoy?"
+    ],
+    [
+      "2025-07-19",
+      "What did today's pace feel like?",
+      "¿Cómo sintió el ritmo de hoy?"
+    ],
+    [
+      "2025-07-20",
+      "What has stayed steady in you lately?",
+      "¿Qué se ha mantenido estable en usted últimamente?"
+    ],
+    [
+      "2025-07-21",
+      "What's changing in you lately, slowly?",
+      "¿Qué está cambiando en usted, poco a poco, últimamente?"
+    ],
+    [
+      "2025-07-22",
+      "What would tomorrow look like in an ideal world?",
+      "¿Cómo sería mañana en un mundo ideal?"
+    ],
+    [
+      "2025-07-23",
+      "If today were weather, what was it?",
+      "Si hoy fuera un clima, ¿cuál habría sido?"
+    ],
+    [
+      "2025-07-24",
+      "Where did you feel most at ease today?",
+      "¿Dónde se sintió más a gusto hoy?"
+    ],
+    [
+      "2025-07-25",
+      "What did you taste today that you remember?",
+      "¿Qué saboreó hoy y recuerda?"
+    ],
+    [
+      "2025-07-26",
+      "What feels most like 'you' these days?",
+      "¿Qué se siente más 'suyo' en estos días?"
+    ],
+    [
+      "2025-07-27",
+      "What's a place you'd rather have been today?",
+      "¿En qué lugar habría preferido estar hoy?"
+    ],
+    [
+      "2025-07-28",
+      "What felt different today compared to yesterday?",
+      "¿Qué se sintió diferente hoy en comparación con ayer?"
+    ],
+    [
+      "2025-07-29",
+      "What took up most space in your mind today?",
+      "¿Qué ocupó la mayor parte de su mente hoy?"
+    ],
+    [
+      "2025-07-30",
+      "What would you like more of in your life?",
+      "¿Qué le gustaría tener más en su vida?"
+    ],
+    [
+      "2025-07-31",
+      "If your mood today had a texture, what would it feel like?",
+      "Si el estado de ánimo de hoy tuviera una textura, ¿cómo se sentiría?"
+    ],
+    [
+      "2025-08-01",
+      "Where did you feel most at ease today?",
+      "¿Dónde se sintió más a gusto hoy?"
+    ],
+    [
+      "2025-08-02",
+      "What's a place you'd rather have been today?",
+      "¿En qué lugar habría preferido estar hoy?"
+    ],
+    [
+      "2025-08-03",
+      "What feels most like 'you' these days?",
+      "¿Qué se siente más 'suyo' en estos días?"
+    ],
+    [
+      "2025-08-04",
+      "What's changing in you lately, slowly?",
+      "¿Qué está cambiando en usted, poco a poco, últimamente?"
+    ],
+    [
+      "2025-08-05",
+      "What has stayed steady in you lately?",
+      "¿Qué se ha mantenido estable en usted últimamente?"
+    ],
+    [
+      "2025-08-06",
+      "If today were weather, what was it?",
+      "Si hoy fuera un clima, ¿cuál habría sido?"
+    ],
+    [
+      "2025-08-07",
+      "What would tomorrow look like in an ideal world?",
+      "¿Cómo sería mañana en un mundo ideal?"
+    ],
+    [
+      "2025-08-08",
+      "What was the hardest part of today?",
+      "¿Cuál fue la parte más difícil de hoy?"
+    ],
+    [
+      "2025-08-09",
+      "What did you get through today that felt heavy?",
+      "¿Qué atravesó hoy que se sintió pesado?"
+    ],
+    [
+      "2025-08-10",
+      "Who made your day a little lighter today?",
+      "¿Quién hizo su día un poco más ligero hoy?"
+    ],
+    [
+      "2025-08-11",
+      "What are three things that went okay today?",
+      "¿Qué tres cosas salieron más o menos bien hoy?"
+    ],
+    [
+      "2025-08-12",
+      "What comforted you today?",
+      "¿Qué le confortó hoy?"
+    ],
+    [
+      "2025-08-13",
+      "What's something you're looking forward to?",
+      "¿Hay algo que espera con ilusión?"
+    ],
+    [
+      "2025-08-14",
+      "What mattered most to you today?",
+      "¿Qué fue lo que más le importó hoy?"
+    ],
+    [
+      "2025-08-15",
+      "What's one thing worth keeping from today?",
+      "¿Qué vale la pena conservar de hoy?"
+    ],
+    [
+      "2025-08-16",
+      "What value showed up in something you did today?",
+      "¿Qué valor suyo apareció en algo que hizo hoy?"
+    ],
+    [
+      "2025-08-17",
+      "When did today feel meaningful?",
+      "¿Cuándo sintió que hoy tenía sentido?"
+    ],
+    [
+      "2025-08-18",
+      "What was the quietest moment of your day?",
+      "¿Cuál fue el momento más tranquilo de su día?"
+    ],
+    [
+      "2025-08-19",
+      "What did your body notice before your mind did today?",
+      "¿Qué notó su cuerpo antes que su mente hoy?"
+    ],
+    [
+      "2025-08-20",
+      "If today were weather, what was it?",
+      "Si hoy fuera un clima, ¿cuál habría sido?"
+    ],
+    [
+      "2025-08-21",
+      "What would tomorrow look like in an ideal world?",
+      "¿Cómo sería mañana en un mundo ideal?"
+    ],
+    [
+      "2025-08-22",
+      "What's changing in you lately, slowly?",
+      "¿Qué está cambiando en usted, poco a poco, últimamente?"
+    ],
+    [
+      "2025-08-23",
+      "What has stayed steady in you lately?",
+      "¿Qué se ha mantenido estable en usted últimamente?"
+    ],
+    [
+      "2025-08-24",
+      "What did today ask of you?",
+      "¿Qué le pidió hoy el día?"
+    ],
+    [
+      "2025-08-25",
+      "What are you grateful to past-you for today?",
+      "¿Por qué le agradece hoy a su yo del pasado?"
+    ],
+    [
+      "2025-08-26",
+      "If you could send yourself a note this morning, what would it say?",
+      "Si pudiera enviarse una nota esta mañana, ¿qué diría?"
+    ],
+    [
+      "2025-08-27",
+      "What did you do today purely because you wanted to?",
+      "¿Qué hizo hoy puramente porque quería?"
+    ],
+    [
+      "2025-08-28",
+      "What would you like to remember about this time?",
+      "¿Qué le gustaría recordar de esta época?"
+    ],
+    [
+      "2025-08-29",
+      "What's one small thing you're curious to attempt tomorrow?",
+      "¿Qué pequeña cosa tiene curiosidad por intentar mañana?"
+    ],
+    [
+      "2025-08-30",
+      "What value showed up in something you did today?",
+      "¿Qué valor suyo apareció en algo que hizo hoy?"
+    ],
+    [
+      "2025-08-31",
+      "When did today feel meaningful?",
+      "¿Cuándo sintió que hoy tenía sentido?"
+    ],
+    [
+      "2025-09-01",
+      "Where in your body did today's strongest feeling live?",
+      "¿En qué parte del cuerpo vivió hoy el sentimiento más fuerte?"
+    ],
+    [
+      "2025-09-02",
+      "When did you feel understood today?",
+      "¿Cuándo se sintió comprendido o comprendida hoy?"
+    ],
+    [
+      "2025-09-03",
+      "What conversation stayed with you today?",
+      "¿Qué conversación se quedó con usted hoy?"
+    ],
+    [
+      "2025-09-04",
+      "What gave you energy today?",
+      "¿Qué le dio energía hoy?"
+    ],
+    [
+      "2025-09-05",
+      "When did you feel alone today, and what was that like?",
+      "¿Cuándo se sintió solo o sola hoy, y cómo fue eso?"
+    ],
+    [
+      "2025-09-06",
+      "What did you say no to today?",
+      "¿A qué dijo no hoy?"
+    ],
+    [
+      "2025-09-07",
+      "What drained you today?",
+      "¿Qué lo agotó hoy?"
+    ],
+    [
+      "2025-09-08",
+      "What mattered most to you today?",
+      "¿Qué fue lo que más le importó hoy?"
+    ],
+    [
+      "2025-09-09",
+      "What's one thing worth keeping from today?",
+      "¿Qué vale la pena conservar de hoy?"
+    ],
+    [
+      "2025-09-10",
+      "What took up most space in your mind today?",
+      "¿Qué ocupó la mayor parte de su mente hoy?"
+    ],
+    [
+      "2025-09-11",
+      "What felt different today compared to yesterday?",
+      "¿Qué se sintió diferente hoy en comparación con ayer?"
+    ],
+    [
+      "2025-09-12",
+      "When did you feel most like yourself today?",
+      "¿Cuándo se sintió más usted mismo o usted misma hoy?"
+    ],
+    [
+      "2025-09-13",
+      "What's one small thing that went right today?",
+      "¿Qué pequeña cosa salió bien hoy?"
+    ],
+    [
+      "2025-09-14",
+      "What thought repeated itself today?",
+      "¿Qué pensamiento se repitió hoy?"
+    ],
+    [
+      "2025-09-15",
+      "If today had a title, what would it be?",
+      "Si hoy tuviera un título, ¿cuál sería?"
+    ],
+    [
+      "2025-09-16",
+      "What are you carrying into tomorrow?",
+      "¿Qué se lleva consigo hacia mañana?"
+    ],
+    [
+      "2025-09-17",
+      "What did you notice today that you usually overlook?",
+      "¿Qué notó hoy que suele pasar por alto?"
+    ],
+    [
+      "2025-09-18",
+      "What's changing in you lately, slowly?",
+      "¿Qué está cambiando en usted, poco a poco, últimamente?"
+    ],
+    [
+      "2025-09-19",
+      "What has stayed steady in you lately?",
+      "¿Qué se ha mantenido estable en usted últimamente?"
+    ],
+    [
+      "2025-09-20",
+      "What did you say no to today?",
+      "¿A qué dijo no hoy?"
+    ],
+    [
+      "2025-09-21",
+      "What drained you today?",
+      "¿Qué lo agotó hoy?"
+    ],
+    [
+      "2025-09-22",
+      "What gave you energy today?",
+      "¿Qué le dio energía hoy?"
+    ],
+    [
+      "2025-09-23",
+      "When did you feel alone today, and what was that like?",
+      "¿Cuándo se sintió solo o sola hoy, y cómo fue eso?"
+    ],
+    [
+      "2025-09-24",
+      "What did today's pace feel like?",
+      "¿Cómo sintió el ritmo de hoy?"
+    ],
+    [
+      "2025-09-25",
+      "When were you most absorbed in something today?",
+      "¿Cuándo estuvo más absorbido o absorbida en algo hoy?"
+    ],
+    [
+      "2025-09-26",
+      "What part of the day felt longest?",
+      "¿Qué parte del día se sintió más larga?"
+    ],
+    [
+      "2025-09-27",
+      "What did you let go of today?",
+      "¿Qué dejó ir hoy?"
+    ],
+    [
+      "2025-09-28",
+      "What emotion surprised you today?",
+      "¿Qué emoción lo sorprendió hoy?"
+    ],
+    [
+      "2025-09-29",
+      "What emotion visited you most today?",
+      "¿Qué emoción lo visitó más hoy?"
+    ],
+    [
+      "2025-09-30",
+      "What are you carrying into tomorrow?",
+      "¿Qué se lleva consigo hacia mañana?"
+    ],
+    [
+      "2025-10-01",
+      "What's one thing worth keeping from today?",
+      "¿Qué vale la pena conservar de hoy?"
+    ],
+    [
+      "2025-10-02",
+      "What value showed up in something you did today?",
+      "¿Qué valor suyo apareció en algo que hizo hoy?"
+    ],
+    [
+      "2025-10-03",
+      "When did today feel meaningful?",
+      "¿Cuándo sintió que hoy tenía sentido?"
+    ],
+    [
+      "2025-10-04",
+      "If your mood today had a texture, what would it feel like?",
+      "Si el estado de ánimo de hoy tuviera una textura, ¿cómo se sentiría?"
+    ],
+    [
+      "2025-10-05",
+      "What would you like more of in your life?",
+      "¿Qué le gustaría tener más en su vida?"
+    ],
+    [
+      "2025-10-06",
+      "What emotion surprised you today?",
+      "¿Qué emoción lo sorprendió hoy?"
+    ],
+    [
+      "2025-10-07",
+      "What emotion visited you most today?",
+      "¿Qué emoción lo visitó más hoy?"
+    ],
+    [
+      "2025-10-08",
+      "Who did you think about today?",
+      "¿En quién pensó hoy?"
+    ],
+    [
+      "2025-10-09",
+      "Where in your body did today's strongest feeling live?",
+      "¿En qué parte del cuerpo vivió hoy el sentimiento más fuerte?"
+    ],
+    [
+      "2025-10-10",
+      "What are you curious about right now?",
+      "¿Sobre qué tiene curiosidad ahora mismo?"
+    ],
+    [
+      "2025-10-11",
+      "What's a question you're sitting with lately?",
+      "¿Qué pregunta lleva rondándole últimamente?"
+    ],
+    [
+      "2025-10-12",
+      "What would you like to remember about this time?",
+      "¿Qué le gustaría recordar de esta época?"
+    ],
+    [
+      "2025-10-13",
+      "What's one small thing you're curious to attempt tomorrow?",
+      "¿Qué pequeña cosa tiene curiosidad por intentar mañana?"
+    ],
+    [
+      "2025-10-14",
+      "What did you taste today that you remember?",
+      "¿Qué saboreó hoy y recuerda?"
+    ],
+    [
+      "2025-10-15",
+      "Where did you feel most at ease today?",
+      "¿Dónde se sintió más a gusto hoy?"
+    ],
+    [
+      "2025-10-16",
+      "What's a place you'd rather have been today?",
+      "¿En qué lugar habría preferido estar hoy?"
+    ],
+    [
+      "2025-10-17",
+      "What feels most like 'you' these days?",
+      "¿Qué se siente más 'suyo' en estos días?"
+    ],
+    [
+      "2025-10-18",
+      "What's changing in you lately, slowly?",
+      "¿Qué está cambiando en usted, poco a poco, últimamente?"
+    ],
+    [
+      "2025-10-19",
+      "What has stayed steady in you lately?",
+      "¿Qué se ha mantenido estable en usted últimamente?"
+    ],
+    [
+      "2025-10-20",
+      "What emotion surprised you today?",
+      "¿Qué emoción lo sorprendió hoy?"
+    ],
+    [
+      "2025-10-21",
+      "What emotion visited you most today?",
+      "¿Qué emoción lo visitó más hoy?"
+    ],
+    [
+      "2025-10-22",
+      "If your mood today had a texture, what would it feel like?",
+      "Si el estado de ánimo de hoy tuviera una textura, ¿cómo se sentiría?"
+    ],
+    [
+      "2025-10-23",
+      "What would you like more of in your life?",
+      "¿Qué le gustaría tener más en su vida?"
+    ],
+    [
+      "2025-10-24",
+      "When did you feel understood today?",
+      "¿Cuándo se sintió comprendido o comprendida hoy?"
+    ],
+    [
+      "2025-10-25",
+      "What conversation stayed with you today?",
+      "¿Qué conversación se quedó con usted hoy?"
+    ],
+    [
+      "2025-10-26",
+      "Who did you think about today?",
+      "¿En quién pensó hoy?"
+    ],
+    [
+      "2025-10-27",
+      "Where in your body did today's strongest feeling live?",
+      "¿En qué parte del cuerpo vivió hoy el sentimiento más fuerte?"
+    ],
+    [
+      "2025-10-28",
+      "What did you say no to today?",
+      "¿A qué dijo no hoy?"
+    ],
+    [
+      "2025-10-29",
+      "What drained you today?",
+      "¿Qué lo agotó hoy?"
+    ],
+    [
+      "2025-10-30",
+      "What's a place you'd rather have been today?",
+      "¿En qué lugar habría preferido estar hoy?"
+    ],
+    [
+      "2025-10-31",
+      "What feels most like 'you' these days?",
+      "¿Qué se siente más 'suyo' en estos días?"
+    ],
+    [
+      "2025-11-01",
+      "What mattered most to you today?",
+      "¿Qué fue lo que más le importó hoy?"
+    ],
+    [
+      "2025-11-02",
+      "When did today feel meaningful?",
+      "¿Cuándo sintió que hoy tenía sentido?"
+    ],
+    [
+      "2025-11-03",
+      "What value showed up in something you did today?",
+      "¿Qué valor suyo apareció en algo que hizo hoy?"
+    ],
+    [
+      "2025-11-04",
+      "What would you like more of in your life?",
+      "¿Qué le gustaría tener más en su vida?"
+    ],
+    [
+      "2025-11-05",
+      "If your mood today had a texture, what would it feel like?",
+      "Si el estado de ánimo de hoy tuviera una textura, ¿cómo se sentiría?"
+    ],
+    [
+      "2025-11-06",
+      "What emotion visited you most today?",
+      "¿Qué emoción lo visitó más hoy?"
+    ],
+    [
+      "2025-11-07",
+      "What emotion surprised you today?",
+      "¿Qué emoción lo sorprendió hoy?"
+    ],
+    [
+      "2025-11-08",
+      "Where in your body did today's strongest feeling live?",
+      "¿En qué parte del cuerpo vivió hoy el sentimiento más fuerte?"
+    ],
+    [
+      "2025-11-09",
+      "Who did you think about today?",
+      "¿En quién pensó hoy?"
+    ],
+    [
+      "2025-11-10",
+      "What did you do today purely because you wanted to?",
+      "¿Qué hizo hoy puramente porque quería?"
+    ],
+    [
+      "2025-11-11",
+      "If you could send yourself a note this morning, what would it say?",
+      "Si pudiera enviarse una nota esta mañana, ¿qué diría?"
+    ],
+    [
+      "2025-11-12",
+      "What are you grateful to past-you for today?",
+      "¿Por qué le agradece hoy a su yo del pasado?"
+    ],
+    [
+      "2025-11-13",
+      "What did today ask of you?",
+      "¿Qué le pidió hoy el día?"
+    ],
+    [
+      "2025-11-14",
+      "What felt different today compared to yesterday?",
+      "¿Qué se sintió diferente hoy en comparación con ayer?"
+    ],
+    [
+      "2025-11-15",
+      "What took up most space in your mind today?",
+      "¿Qué ocupó la mayor parte de su mente hoy?"
+    ],
+    [
+      "2025-11-16",
+      "What's one small thing that went right today?",
+      "¿Qué pequeña cosa salió bien hoy?"
+    ],
+    [
+      "2025-11-17",
+      "When did you feel most like yourself today?",
+      "¿Cuándo se sintió más usted mismo o usted misma hoy?"
+    ],
+    [
+      "2025-11-18",
+      "If today had a title, what would it be?",
+      "Si hoy tuviera un título, ¿cuál sería?"
+    ],
+    [
+      "2025-11-19",
+      "What thought repeated itself today?",
+      "¿Qué pensamiento se repitió hoy?"
+    ],
+    [
+      "2025-11-20",
+      "What emotion visited you most today?",
+      "¿Qué emoción lo visitó más hoy?"
+    ],
+    [
+      "2025-11-21",
+      "What emotion surprised you today?",
+      "¿Qué emoción lo sorprendió hoy?"
+    ],
+    [
+      "2025-11-22",
+      "What would you like more of in your life?",
+      "¿Qué le gustaría tener más en su vida?"
+    ],
+    [
+      "2025-11-23",
+      "If your mood today had a texture, what would it feel like?",
+      "Si el estado de ánimo de hoy tuviera una textura, ¿cómo se sentiría?"
+    ],
+    [
+      "2025-11-24",
+      "What conversation stayed with you today?",
+      "¿Qué conversación se quedó con usted hoy?"
+    ],
+    [
+      "2025-11-25",
+      "When did you feel understood today?",
+      "¿Cuándo se sintió comprendido o comprendida hoy?"
+    ],
+    [
+      "2025-11-26",
+      "Where in your body did today's strongest feeling live?",
+      "¿En qué parte del cuerpo vivió hoy el sentimiento más fuerte?"
+    ],
+    [
+      "2025-11-27",
+      "Who did you think about today?",
+      "¿En quién pensó hoy?"
+    ],
+    [
+      "2025-11-28",
+      "What drained you today?",
+      "¿Qué lo agotó hoy?"
+    ],
+    [
+      "2025-11-29",
+      "What did you say no to today?",
+      "¿A qué dijo no hoy?"
+    ],
+    [
+      "2025-11-30",
+      "What's one small thing that went right today?",
+      "¿Qué pequeña cosa salió bien hoy?"
+    ],
+    [
+      "2025-12-01",
+      "What did you forgive yourself for today?",
+      "¿Qué se perdonó hoy?"
+    ],
+    [
+      "2025-12-02",
+      "What's something you did today that took effort?",
+      "¿Qué hizo hoy que le exigió esfuerzo?"
+    ],
+    [
+      "2025-12-03",
+      "What would you say to a friend who had your day?",
+      "¿Qué le diría a un amigo que hubiera tenido su día?"
+    ],
+    [
+      "2025-12-04",
+      "What comforted you today?",
+      "¿Qué le confortó hoy?"
+    ],
+    [
+      "2025-12-05",
+      "What's something you're looking forward to?",
+      "¿Hay algo que espera con ilusión?"
+    ],
+    [
+      "2025-12-06",
+      "Who made your day a little lighter today?",
+      "¿Quién hizo su día un poco más ligero hoy?"
+    ],
+    [
+      "2025-12-07",
+      "What are three things that went okay today?",
+      "¿Qué tres cosas salieron más o menos bien hoy?"
+    ],
+    [
+      "2025-12-08",
+      "What value showed up in something you did today?",
+      "¿Qué valor suyo apareció en algo que hizo hoy?"
+    ],
+    [
+      "2025-12-09",
+      "When did today feel meaningful?",
+      "¿Cuándo sintió que hoy tenía sentido?"
+    ],
+    [
+      "2025-12-10",
+      "When were you most absorbed in something today?",
+      "¿Cuándo estuvo más absorbido o absorbida en algo hoy?"
+    ],
+    [
+      "2025-12-11",
+      "What did today's pace feel like?",
+      "¿Cómo sintió el ritmo de hoy?"
+    ],
+    [
+      "2025-12-12",
+      "What did you let go of today?",
+      "¿Qué dejó ir hoy?"
+    ],
+    [
+      "2025-12-13",
+      "What part of the day felt longest?",
+      "¿Qué parte del día se sintió más larga?"
+    ],
+    [
+      "2025-12-14",
+      "What are you avoiding, gently speaking?",
+      "¿Qué está evitando, dicho con gentileza?"
+    ],
+    [
+      "2025-12-15",
+      "What worry got smaller once you wrote it down?",
+      "¿Qué preocupación se hizo más pequeña al escribirla?"
+    ],
+    [
+      "2025-12-16",
+      "What was the hardest part of today?",
+      "¿Cuál fue la parte más difícil de hoy?"
+    ],
+    [
+      "2025-12-17",
+      "What did you get through today that felt heavy?",
+      "¿Qué atravesó hoy que se sintió pesado?"
+    ],
+    [
+      "2025-12-18",
+      "What would you like to remember about this time?",
+      "¿Qué le gustaría recordar de esta época?"
+    ],
+    [
+      "2025-12-19",
+      "What's one small thing you're curious to attempt tomorrow?",
+      "¿Qué pequeña cosa tiene curiosidad por intentar mañana?"
+    ],
+    [
+      "2025-12-20",
+      "What was the quietest moment of your day?",
+      "¿Cuál fue el momento más tranquilo de su día?"
+    ],
+    [
+      "2025-12-21",
+      "What did your body notice before your mind did today?",
+      "¿Qué notó su cuerpo antes que su mente hoy?"
+    ],
+    [
+      "2025-12-22",
+      "What did you see today that you'd want to see again?",
+      "¿Qué vio hoy que le gustaría volver a ver?"
+    ],
+    [
+      "2025-12-23",
+      "What sound do you remember from today?",
+      "¿Qué sonido recuerda de hoy?"
+    ],
+    [
+      "2025-12-24",
+      "What's something you did today that took effort?",
+      "¿Qué hizo hoy que le exigió esfuerzo?"
+    ],
+    [
+      "2025-12-25",
+      "What would you say to a friend who had your day?",
+      "¿Qué le diría a un amigo que hubiera tenido su día?"
+    ],
+    [
+      "2025-12-26",
+      "What would make tomorrow 1% kinder to you?",
+      "¿Qué haría que mañana fuera un 1% más amable con usted?"
+    ],
+    [
+      "2025-12-27",
+      "What did you forgive yourself for today?",
+      "¿Qué se perdonó hoy?"
+    ],
+    [
+      "2025-12-28",
+      "Who made your day a little lighter today?",
+      "¿Quién hizo su día un poco más ligero hoy?"
+    ],
+    [
+      "2025-12-29",
+      "What are three things that went okay today?",
+      "¿Qué tres cosas salieron más o menos bien hoy?"
+    ],
+    [
+      "2025-12-30",
+      "When did you feel alone today, and what was that like?",
+      "¿Cuándo se sintió solo o sola hoy, y cómo fue eso?"
+    ],
+    [
+      "2025-12-31",
+      "What gave you energy today?",
+      "¿Qué le dio energía hoy?"
+    ],
+    [
+      "2026-01-01",
+      "What feels most like 'you' these days?",
+      "¿Qué se siente más 'suyo' en estos días?"
+    ],
+    [
+      "2026-01-02",
+      "What did you taste today that you remember?",
+      "¿Qué saboreó hoy y recuerda?"
+    ],
+    [
+      "2026-01-03",
+      "Where did you feel most at ease today?",
+      "¿Dónde se sintió más a gusto hoy?"
+    ],
+    [
+      "2026-01-04",
+      "If today were weather, what was it?",
+      "Si hoy fuera un clima, ¿cuál habría sido?"
+    ],
+    [
+      "2026-01-05",
+      "What would tomorrow look like in an ideal world?",
+      "¿Cómo sería mañana en un mundo ideal?"
+    ],
+    [
+      "2026-01-06",
+      "What's changing in you lately, slowly?",
+      "¿Qué está cambiando en usted, poco a poco, últimamente?"
+    ],
+    [
+      "2026-01-07",
+      "What has stayed steady in you lately?",
+      "¿Qué se ha mantenido estable en usted últimamente?"
+    ],
+    [
+      "2026-01-08",
+      "What did today ask of you?",
+      "¿Qué le pidió hoy el día?"
+    ],
+    [
+      "2026-01-09",
+      "What are you grateful to past-you for today?",
+      "¿Por qué le agradece hoy a su yo del pasado?"
+    ],
+    [
+      "2026-01-10",
+      "What emotion surprised you today?",
+      "¿Qué emoción lo sorprendió hoy?"
+    ],
+    [
+      "2026-01-11",
+      "What emotion visited you most today?",
+      "¿Qué emoción lo visitó más hoy?"
+    ],
+    [
+      "2026-01-12",
+      "If your mood today had a texture, what would it feel like?",
+      "Si el estado de ánimo de hoy tuviera una textura, ¿cómo se sentiría?"
+    ],
+    [
+      "2026-01-13",
+      "What would you like more of in your life?",
+      "¿Qué le gustaría tener más en su vida?"
+    ],
+    [
+      "2026-01-14",
+      "When did you feel understood today?",
+      "¿Cuándo se sintió comprendido o comprendida hoy?"
+    ],
+    [
+      "2026-01-15",
+      "What conversation stayed with you today?",
+      "¿Qué conversación se quedó con usted hoy?"
+    ],
+    [
+      "2026-01-16",
+      "Who did you think about today?",
+      "¿En quién pensó hoy?"
+    ],
+    [
+      "2026-01-17",
+      "Where in your body did today's strongest feeling live?",
+      "¿En qué parte del cuerpo vivió hoy el sentimiento más fuerte?"
+    ],
+    [
+      "2026-01-18",
+      "What did you say no to today?",
+      "¿A qué dijo no hoy?"
+    ],
+    [
+      "2026-01-19",
+      "What drained you today?",
+      "¿Qué lo agotó hoy?"
+    ],
+    [
+      "2026-01-20",
+      "What are you curious about right now?",
+      "¿Sobre qué tiene curiosidad ahora mismo?"
+    ],
+    [
+      "2026-01-21",
+      "What's a question you're sitting with lately?",
+      "¿Qué pregunta lleva rondándole últimamente?"
+    ],
+    [
+      "2026-01-22",
+      "What would you like to remember about this time?",
+      "¿Qué le gustaría recordar de esta época?"
+    ],
+    [
+      "2026-01-23",
+      "What's one small thing you're curious to attempt tomorrow?",
+      "¿Qué pequeña cosa tiene curiosidad por intentar mañana?"
+    ],
+    [
+      "2026-01-24",
+      "What did you taste today that you remember?",
+      "¿Qué saboreó hoy y recuerda?"
+    ],
+    [
+      "2026-01-25",
+      "Where did you feel most at ease today?",
+      "¿Dónde se sintió más a gusto hoy?"
+    ],
+    [
+      "2026-01-26",
+      "What's a place you'd rather have been today?",
+      "¿En qué lugar habría preferido estar hoy?"
+    ],
+    [
+      "2026-01-27",
+      "What feels most like 'you' these days?",
+      "¿Qué se siente más 'suyo' en estos días?"
+    ],
+    [
+      "2026-01-28",
+      "What's changing in you lately, slowly?",
+      "¿Qué está cambiando en usted, poco a poco, últimamente?"
+    ],
+    [
+      "2026-01-29",
+      "What has stayed steady in you lately?",
+      "¿Qué se ha mantenido estable en usted últimamente?"
+    ],
+    [
+      "2026-01-30",
+      "What mattered most to you today?",
+      "¿Qué fue lo que más le importó hoy?"
+    ],
+    [
+      "2026-01-31",
+      "What's one thing worth keeping from today?",
+      "¿Qué vale la pena conservar de hoy?"
+    ],
+    [
+      "2026-02-01",
+      "If you could send yourself a note this morning, what would it say?",
+      "Si pudiera enviarse una nota esta mañana, ¿qué diría?"
+    ],
+    [
+      "2026-02-02",
+      "What are you grateful to past-you for today?",
+      "¿Por qué le agradece hoy a su yo del pasado?"
+    ],
+    [
+      "2026-02-03",
+      "What did today ask of you?",
+      "¿Qué le pidió hoy el día?"
+    ],
+    [
+      "2026-02-04",
+      "What felt different today compared to yesterday?",
+      "¿Qué se sintió diferente hoy en comparación con ayer?"
+    ],
+    [
+      "2026-02-05",
+      "What took up most space in your mind today?",
+      "¿Qué ocupó la mayor parte de su mente hoy?"
+    ],
+    [
+      "2026-02-06",
+      "What's one small thing that went right today?",
+      "¿Qué pequeña cosa salió bien hoy?"
+    ],
+    [
+      "2026-02-07",
+      "When did you feel most like yourself today?",
+      "¿Cuándo se sintió más usted mismo o usted misma hoy?"
+    ],
+    [
+      "2026-02-08",
+      "If today had a title, what would it be?",
+      "Si hoy tuviera un título, ¿cuál sería?"
+    ],
+    [
+      "2026-02-09",
+      "What thought repeated itself today?",
+      "¿Qué pensamiento se repitió hoy?"
+    ],
+    [
+      "2026-02-10",
+      "What's one thing worth keeping from today?",
+      "¿Qué vale la pena conservar de hoy?"
+    ],
+    [
+      "2026-02-11",
+      "What mattered most to you today?",
+      "¿Qué fue lo que más le importó hoy?"
+    ],
+    [
+      "2026-02-12",
+      "When did today feel meaningful?",
+      "¿Cuándo sintió que hoy tenía sentido?"
+    ],
+    [
+      "2026-02-13",
+      "What value showed up in something you did today?",
+      "¿Qué valor suyo apareció en algo que hizo hoy?"
+    ],
+    [
+      "2026-02-14",
+      "What would you like more of in your life?",
+      "¿Qué le gustaría tener más en su vida?"
+    ],
+    [
+      "2026-02-15",
+      "If your mood today had a texture, what would it feel like?",
+      "Si el estado de ánimo de hoy tuviera una textura, ¿cómo se sentiría?"
+    ],
+    [
+      "2026-02-16",
+      "What emotion visited you most today?",
+      "¿Qué emoción lo visitó más hoy?"
+    ],
+    [
+      "2026-02-17",
+      "What emotion surprised you today?",
+      "¿Qué emoción lo sorprendió hoy?"
+    ],
+    [
+      "2026-02-18",
+      "Where in your body did today's strongest feeling live?",
+      "¿En qué parte del cuerpo vivió hoy el sentimiento más fuerte?"
+    ],
+    [
+      "2026-02-19",
+      "Who did you think about today?",
+      "¿En quién pensó hoy?"
+    ],
+    [
+      "2026-02-20",
+      "What's one small thing that went right today?",
+      "¿Qué pequeña cosa salió bien hoy?"
+    ],
+    [
+      "2026-02-21",
+      "When did you feel most like yourself today?",
+      "¿Cuándo se sintió más usted mismo o usted misma hoy?"
+    ],
+    [
+      "2026-02-22",
+      "What felt different today compared to yesterday?",
+      "¿Qué se sintió diferente hoy en comparación con ayer?"
+    ],
+    [
+      "2026-02-23",
+      "What took up most space in your mind today?",
+      "¿Qué ocupó la mayor parte de su mente hoy?"
+    ],
+    [
+      "2026-02-24",
+      "What did you notice today that you usually overlook?",
+      "¿Qué notó hoy que suele pasar por alto?"
+    ],
+    [
+      "2026-02-25",
+      "What are you carrying into tomorrow?",
+      "¿Qué se lleva consigo hacia mañana?"
+    ],
+    [
+      "2026-02-26",
+      "If today had a title, what would it be?",
+      "Si hoy tuviera un título, ¿cuál sería?"
+    ],
+    [
+      "2026-02-27",
+      "What thought repeated itself today?",
+      "¿Qué pensamiento se repitió hoy?"
+    ],
+    [
+      "2026-02-28",
+      "What did you see today that you'd want to see again?",
+      "¿Qué vio hoy que le gustaría volver a ver?"
+    ],
+    [
+      "2026-03-01",
+      "What did you do today purely because you wanted to?",
+      "¿Qué hizo hoy puramente porque quería?"
+    ],
+    [
+      "2026-03-02",
+      "What did today ask of you?",
+      "¿Qué le pidió hoy el día?"
+    ],
+    [
+      "2026-03-03",
+      "What are you grateful to past-you for today?",
+      "¿Por qué le agradece hoy a su yo del pasado?"
+    ],
+    [
+      "2026-03-04",
+      "What took up most space in your mind today?",
+      "¿Qué ocupó la mayor parte de su mente hoy?"
+    ],
+    [
+      "2026-03-05",
+      "What felt different today compared to yesterday?",
+      "¿Qué se sintió diferente hoy en comparación con ayer?"
+    ],
+    [
+      "2026-03-06",
+      "When did you feel most like yourself today?",
+      "¿Cuándo se sintió más usted mismo o usted misma hoy?"
+    ],
+    [
+      "2026-03-07",
+      "What's one small thing that went right today?",
+      "¿Qué pequeña cosa salió bien hoy?"
+    ],
+    [
+      "2026-03-08",
+      "What thought repeated itself today?",
+      "¿Qué pensamiento se repitió hoy?"
+    ],
+    [
+      "2026-03-09",
+      "If today had a title, what would it be?",
+      "Si hoy tuviera un título, ¿cuál sería?"
+    ],
+    [
+      "2026-03-10",
+      "What gave you energy today?",
+      "¿Qué le dio energía hoy?"
+    ],
+    [
+      "2026-03-11",
+      "When did you feel alone today, and what was that like?",
+      "¿Cuándo se sintió solo o sola hoy, y cómo fue eso?"
+    ],
+    [
+      "2026-03-12",
+      "What did you say no to today?",
+      "¿A qué dijo no hoy?"
+    ],
+    [
+      "2026-03-13",
+      "What drained you today?",
+      "¿Qué lo agotó hoy?"
+    ],
+    [
+      "2026-03-14",
+      "What part of the day felt longest?",
+      "¿Qué parte del día se sintió más larga?"
+    ],
+    [
+      "2026-03-15",
+      "What did you let go of today?",
+      "¿Qué dejó ir hoy?"
+    ],
+    [
+      "2026-03-16",
+      "What did today's pace feel like?",
+      "¿Cómo sintió el ritmo de hoy?"
+    ],
+    [
+      "2026-03-17",
+      "When were you most absorbed in something today?",
+      "¿Cuándo estuvo más absorbido o absorbida en algo hoy?"
+    ],
+    [
+      "2026-03-18",
+      "What did you get through today that felt heavy?",
+      "¿Qué atravesó hoy que se sintió pesado?"
+    ],
+    [
+      "2026-03-19",
+      "What was the hardest part of today?",
+      "¿Cuál fue la parte más difícil de hoy?"
+    ],
+    [
+      "2026-03-20",
+      "When did you feel most like yourself today?",
+      "¿Cuándo se sintió más usted mismo o usted misma hoy?"
+    ],
+    [
+      "2026-03-21",
+      "What's one small thing that went right today?",
+      "¿Qué pequeña cosa salió bien hoy?"
+    ],
+    [
+      "2026-03-22",
+      "What took up most space in your mind today?",
+      "¿Qué ocupó la mayor parte de su mente hoy?"
+    ],
+    [
+      "2026-03-23",
+      "What felt different today compared to yesterday?",
+      "¿Qué se sintió diferente hoy en comparación con ayer?"
+    ],
+    [
+      "2026-03-24",
+      "What are you carrying into tomorrow?",
+      "¿Qué se lleva consigo hacia mañana?"
+    ],
+    [
+      "2026-03-25",
+      "What did you notice today that you usually overlook?",
+      "¿Qué notó hoy que suele pasar por alto?"
+    ],
+    [
+      "2026-03-26",
+      "What thought repeated itself today?",
+      "¿Qué pensamiento se repitió hoy?"
+    ],
+    [
+      "2026-03-27",
+      "If today had a title, what would it be?",
+      "Si hoy tuviera un título, ¿cuál sería?"
+    ],
+    [
+      "2026-03-28",
+      "What sound do you remember from today?",
+      "¿Qué sonido recuerda de hoy?"
+    ],
+    [
+      "2026-03-29",
+      "What did you see today that you'd want to see again?",
+      "¿Qué vio hoy que le gustaría volver a ver?"
+    ],
+    [
+      "2026-03-30",
+      "What did today's pace feel like?",
+      "¿Cómo sintió el ritmo de hoy?"
+    ],
+    [
+      "2026-03-31",
+      "When were you most absorbed in something today?",
+      "¿Cuándo estuvo más absorbido o absorbida en algo hoy?"
+    ],
+    [
+      "2026-04-01",
+      "What did you forgive yourself for today?",
+      "¿Qué se perdonó hoy?"
+    ],
+    [
+      "2026-04-02",
+      "What's something you did today that took effort?",
+      "¿Qué hizo hoy que le exigió esfuerzo?"
+    ],
+    [
+      "2026-04-03",
+      "What would you say to a friend who had your day?",
+      "¿Qué le diría a un amigo que hubiera tenido su día?"
+    ],
+    [
+      "2026-04-04",
+      "What did you see today that you'd want to see again?",
+      "¿Qué vio hoy que le gustaría volver a ver?"
+    ],
+    [
+      "2026-04-05",
+      "What sound do you remember from today?",
+      "¿Qué sonido recuerda de hoy?"
+    ],
+    [
+      "2026-04-06",
+      "What was the quietest moment of your day?",
+      "¿Cuál fue el momento más tranquilo de su día?"
+    ],
+    [
+      "2026-04-07",
+      "What did your body notice before your mind did today?",
+      "¿Qué notó su cuerpo antes que su mente hoy?"
+    ],
+    [
+      "2026-04-08",
+      "What value showed up in something you did today?",
+      "¿Qué valor suyo apareció en algo que hizo hoy?"
+    ],
+    [
+      "2026-04-09",
+      "When did today feel meaningful?",
+      "¿Cuándo sintió que hoy tenía sentido?"
+    ],
+    [
+      "2026-04-10",
+      "When were you most absorbed in something today?",
+      "¿Cuándo estuvo más absorbido o absorbida en algo hoy?"
+    ],
+    [
+      "2026-04-11",
+      "What did today's pace feel like?",
+      "¿Cómo sintió el ritmo de hoy?"
+    ],
+    [
+      "2026-04-12",
+      "What did you let go of today?",
+      "¿Qué dejó ir hoy?"
+    ],
+    [
+      "2026-04-13",
+      "What part of the day felt longest?",
+      "¿Qué parte del día se sintió más larga?"
+    ],
+    [
+      "2026-04-14",
+      "What drained you today?",
+      "¿Qué lo agotó hoy?"
+    ],
+    [
+      "2026-04-15",
+      "What did you say no to today?",
+      "¿A qué dijo no hoy?"
+    ],
+    [
+      "2026-04-16",
+      "When did you feel alone today, and what was that like?",
+      "¿Cuándo se sintió solo o sola hoy, y cómo fue eso?"
+    ],
+    [
+      "2026-04-17",
+      "What gave you energy today?",
+      "¿Qué le dio energía hoy?"
+    ],
+    [
+      "2026-04-18",
+      "What would you like to remember about this time?",
+      "¿Qué le gustaría recordar de esta época?"
+    ],
+    [
+      "2026-04-19",
+      "What's one small thing you're curious to attempt tomorrow?",
+      "¿Qué pequeña cosa tiene curiosidad por intentar mañana?"
+    ],
+    [
+      "2026-04-20",
+      "What was the quietest moment of your day?",
+      "¿Cuál fue el momento más tranquilo de su día?"
+    ],
+    [
+      "2026-04-21",
+      "What did your body notice before your mind did today?",
+      "¿Qué notó su cuerpo antes que su mente hoy?"
+    ],
+    [
+      "2026-04-22",
+      "What did you see today that you'd want to see again?",
+      "¿Qué vio hoy que le gustaría volver a ver?"
+    ],
+    [
+      "2026-04-23",
+      "What sound do you remember from today?",
+      "¿Qué sonido recuerda de hoy?"
+    ],
+    [
+      "2026-04-24",
+      "If today had a title, what would it be?",
+      "Si hoy tuviera un título, ¿cuál sería?"
+    ],
+    [
+      "2026-04-25",
+      "What thought repeated itself today?",
+      "¿Qué pensamiento se repitió hoy?"
+    ],
+    [
+      "2026-04-26",
+      "What did you notice today that you usually overlook?",
+      "¿Qué notó hoy que suele pasar por alto?"
+    ],
+    [
+      "2026-04-27",
+      "What are you carrying into tomorrow?",
+      "¿Qué se lleva consigo hacia mañana?"
+    ],
+    [
+      "2026-04-28",
+      "Who made your day a little lighter today?",
+      "¿Quién hizo su día un poco más ligero hoy?"
+    ],
+    [
+      "2026-04-29",
+      "What are three things that went okay today?",
+      "¿Qué tres cosas salieron más o menos bien hoy?"
+    ],
+    [
+      "2026-04-30",
+      "When did you feel alone today, and what was that like?",
+      "¿Cuándo se sintió solo o sola hoy, y cómo fue eso?"
+    ],
+    [
+      "2026-05-01",
+      "What would make tomorrow 1% kinder to you?",
+      "¿Qué haría que mañana fuera un 1% más amable con usted?"
+    ],
+    [
+      "2026-05-02",
+      "What would you say to a friend who had your day?",
+      "¿Qué le diría a un amigo que hubiera tenido su día?"
+    ],
+    [
+      "2026-05-03",
+      "What's something you did today that took effort?",
+      "¿Qué hizo hoy que le exigió esfuerzo?"
+    ],
+    [
+      "2026-05-04",
+      "What sound do you remember from today?",
+      "¿Qué sonido recuerda de hoy?"
+    ],
+    [
+      "2026-05-05",
+      "What did you see today that you'd want to see again?",
+      "¿Qué vio hoy que le gustaría volver a ver?"
+    ],
+    [
+      "2026-05-06",
+      "What did your body notice before your mind did today?",
+      "¿Qué notó su cuerpo antes que su mente hoy?"
+    ],
+    [
+      "2026-05-07",
+      "What was the quietest moment of your day?",
+      "¿Cuál fue el momento más tranquilo de su día?"
+    ],
+    [
+      "2026-05-08",
+      "When did today feel meaningful?",
+      "¿Cuándo sintió que hoy tenía sentido?"
+    ],
+    [
+      "2026-05-09",
+      "What value showed up in something you did today?",
+      "¿Qué valor suyo apareció en algo que hizo hoy?"
+    ],
+    [
+      "2026-05-10",
+      "What feels most like 'you' these days?",
+      "¿Qué se siente más 'suyo' en estos días?"
+    ],
+    [
+      "2026-05-11",
+      "What's a place you'd rather have been today?",
+      "¿En qué lugar habría preferido estar hoy?"
+    ],
+    [
+      "2026-05-12",
+      "Where did you feel most at ease today?",
+      "¿Dónde se sintió más a gusto hoy?"
+    ],
+    [
+      "2026-05-13",
+      "What did you taste today that you remember?",
+      "¿Qué saboreó hoy y recuerda?"
+    ],
+    [
+      "2026-05-14",
+      "What's one small thing you're curious to attempt tomorrow?",
+      "¿Qué pequeña cosa tiene curiosidad por intentar mañana?"
+    ],
+    [
+      "2026-05-15",
+      "What would you like to remember about this time?",
+      "¿Qué le gustaría recordar de esta época?"
+    ],
+    [
+      "2026-05-16",
+      "What's a question you're sitting with lately?",
+      "¿Qué pregunta lleva rondándole últimamente?"
+    ],
+    [
+      "2026-05-17",
+      "What are you curious about right now?",
+      "¿Sobre qué tiene curiosidad ahora mismo?"
+    ],
+    [
+      "2026-05-18",
+      "What are you grateful to past-you for today?",
+      "¿Por qué le agradece hoy a su yo del pasado?"
+    ],
+    [
+      "2026-05-19",
+      "What did today ask of you?",
+      "¿Qué le pidió hoy el día?"
+    ],
+    [
+      "2026-05-20",
+      "What did your body notice before your mind did today?",
+      "¿Qué notó su cuerpo antes que su mente hoy?"
+    ],
+    [
+      "2026-05-21",
+      "What was the quietest moment of your day?",
+      "¿Cuál fue el momento más tranquilo de su día?"
+    ],
+    [
+      "2026-05-22",
+      "What sound do you remember from today?",
+      "¿Qué sonido recuerda de hoy?"
+    ],
+    [
+      "2026-05-23",
+      "What did you see today that you'd want to see again?",
+      "¿Qué vio hoy que le gustaría volver a ver?"
+    ],
+    [
+      "2026-05-24",
+      "What thought repeated itself today?",
+      "¿Qué pensamiento se repitió hoy?"
+    ],
+    [
+      "2026-05-25",
+      "If today had a title, what would it be?",
+      "Si hoy tuviera un título, ¿cuál sería?"
+    ],
+    [
+      "2026-05-26",
+      "What are you carrying into tomorrow?",
+      "¿Qué se lleva consigo hacia mañana?"
+    ],
+    [
+      "2026-05-27",
+      "What did you notice today that you usually overlook?",
+      "¿Qué notó hoy que suele pasar por alto?"
+    ],
+    [
+      "2026-05-28",
+      "What are three things that went okay today?",
+      "¿Qué tres cosas salieron más o menos bien hoy?"
+    ],
+    [
+      "2026-05-29",
+      "Who made your day a little lighter today?",
+      "¿Quién hizo su día un poco más ligero hoy?"
+    ],
+    [
+      "2026-05-30",
+      "What's a question you're sitting with lately?",
+      "¿Qué pregunta lleva rondándole últimamente?"
+    ],
+    [
+      "2026-05-31",
+      "What are you curious about right now?",
+      "¿Sobre qué tiene curiosidad ahora mismo?"
+    ],
+    [
+      "2026-06-01",
+      "What's one thing worth keeping from today?",
+      "¿Qué vale la pena conservar de hoy?"
+    ],
+    [
+      "2026-06-02",
+      "What value showed up in something you did today?",
+      "¿Qué valor suyo apareció en algo que hizo hoy?"
+    ],
+    [
+      "2026-06-03",
+      "When did today feel meaningful?",
+      "¿Cuándo sintió que hoy tenía sentido?"
+    ],
+    [
+      "2026-06-04",
+      "Who made your day a little lighter today?",
+      "¿Quién hizo su día un poco más ligero hoy?"
+    ],
+    [
+      "2026-06-05",
+      "What are three things that went okay today?",
+      "¿Qué tres cosas salieron más o menos bien hoy?"
+    ],
+    [
+      "2026-06-06",
+      "What comforted you today?",
+      "¿Qué le confortó hoy?"
+    ],
+    [
+      "2026-06-07",
+      "What's something you're looking forward to?",
+      "¿Hay algo que espera con ilusión?"
+    ],
+    [
+      "2026-06-08",
+      "Who did you think about today?",
+      "¿En quién pensó hoy?"
+    ],
+    [
+      "2026-06-09",
+      "Where in your body did today's strongest feeling live?",
+      "¿En qué parte del cuerpo vivió hoy el sentimiento más fuerte?"
+    ],
+    [
+      "2026-06-10",
+      "What are you curious about right now?",
+      "¿Sobre qué tiene curiosidad ahora mismo?"
+    ],
+    [
+      "2026-06-11",
+      "What's a question you're sitting with lately?",
+      "¿Qué pregunta lleva rondándole últimamente?"
+    ],
+    [
+      "2026-06-12",
+      "What would you like to remember about this time?",
+      "¿Qué le gustaría recordar de esta época?"
+    ],
+    [
+      "2026-06-13",
+      "What's one small thing you're curious to attempt tomorrow?",
+      "¿Qué pequeña cosa tiene curiosidad por intentar mañana?"
+    ],
+    [
+      "2026-06-14",
+      "What was the hardest part of today?",
+      "¿Cuál fue la parte más difícil de hoy?"
+    ],
+    [
+      "2026-06-15",
+      "What did you get through today that felt heavy?",
+      "¿Qué atravesó hoy que se sintió pesado?"
+    ],
+    [
+      "2026-06-16",
+      "What are you avoiding, gently speaking?",
+      "¿Qué está evitando, dicho con gentileza?"
+    ],
+    [
+      "2026-06-17",
+      "What worry got smaller once you wrote it down?",
+      "¿Qué preocupación se hizo más pequeña al escribirla?"
+    ],
+    [
+      "2026-06-18",
+      "What's changing in you lately, slowly?",
+      "¿Qué está cambiando en usted, poco a poco, últimamente?"
+    ],
+    [
+      "2026-06-19",
+      "What has stayed steady in you lately?",
+      "¿Qué se ha mantenido estable en usted últimamente?"
+    ],
+    [
+      "2026-06-20",
+      "What emotion surprised you today?",
+      "¿Qué emoción lo sorprendió hoy?"
+    ],
+    [
+      "2026-06-21",
+      "What emotion visited you most today?",
+      "¿Qué emoción lo visitó más hoy?"
+    ],
+    [
+      "2026-06-22",
+      "If your mood today had a texture, what would it feel like?",
+      "Si el estado de ánimo de hoy tuviera una textura, ¿cómo se sentiría?"
+    ],
+    [
+      "2026-06-23",
+      "What would you like more of in your life?",
+      "¿Qué le gustaría tener más en su vida?"
+    ],
+    [
+      "2026-06-24",
+      "What value showed up in something you did today?",
+      "¿Qué valor suyo apareció en algo que hizo hoy?"
+    ],
+    [
+      "2026-06-25",
+      "When did today feel meaningful?",
+      "¿Cuándo sintió que hoy tenía sentido?"
+    ],
+    [
+      "2026-06-26",
+      "What mattered most to you today?",
+      "¿Qué fue lo que más le importó hoy?"
+    ],
+    [
+      "2026-06-27",
+      "What's one thing worth keeping from today?",
+      "¿Qué vale la pena conservar de hoy?"
+    ],
+    [
+      "2026-06-28",
+      "What did you say no to today?",
+      "¿A qué dijo no hoy?"
+    ],
+    [
+      "2026-06-29",
+      "What drained you today?",
+      "¿Qué lo agotó hoy?"
+    ],
+    [
+      "2026-06-30",
+      "What's a place you'd rather have been today?",
+      "¿En qué lugar habría preferido estar hoy?"
+    ],
+    [
+      "2026-07-01",
+      "What mattered most to you today?",
+      "¿Qué fue lo que más le importó hoy?"
+    ],
+    [
+      "2026-07-02",
+      "When did today feel meaningful?",
+      "¿Cuándo sintió que hoy tenía sentido?"
+    ],
+    [
+      "2026-07-03",
+      "What value showed up in something you did today?",
+      "¿Qué valor suyo apareció en algo que hizo hoy?"
+    ],
+    [
+      "2026-07-04",
+      "What are three things that went okay today?",
+      "¿Qué tres cosas salieron más o menos bien hoy?"
+    ],
+    [
+      "2026-07-05",
+      "Who made your day a little lighter today?",
+      "¿Quién hizo su día un poco más ligero hoy?"
+    ],
+    [
+      "2026-07-06",
+      "What's something you're looking forward to?",
+      "¿Hay algo que espera con ilusión?"
+    ],
+    [
+      "2026-07-07",
+      "What comforted you today?",
+      "¿Qué le confortó hoy?"
+    ],
+    [
+      "2026-07-08",
+      "Where in your body did today's strongest feeling live?",
+      "¿En qué parte del cuerpo vivió hoy el sentimiento más fuerte?"
+    ],
+    [
+      "2026-07-09",
+      "Who did you think about today?",
+      "¿En quién pensó hoy?"
+    ],
+    [
+      "2026-07-10",
+      "What did you do today purely because you wanted to?",
+      "¿Qué hizo hoy puramente porque quería?"
+    ],
+    [
+      "2026-07-11",
+      "If you could send yourself a note this morning, what would it say?",
+      "Si pudiera enviarse una nota esta mañana, ¿qué diría?"
+    ],
+    [
+      "2026-07-12",
+      "What are you grateful to past-you for today?",
+      "¿Por qué le agradece hoy a su yo del pasado?"
+    ],
+    [
+      "2026-07-13",
+      "What did today ask of you?",
+      "¿Qué le pidió hoy el día?"
+    ],
+    [
+      "2026-07-14",
+      "What has stayed steady in you lately?",
+      "¿Qué se ha mantenido estable en usted últimamente?"
+    ],
+    [
+      "2026-07-15",
+      "What's changing in you lately, slowly?",
+      "¿Qué está cambiando en usted, poco a poco, últimamente?"
+    ],
+    [
+      "2026-07-16",
+      "What would tomorrow look like in an ideal world?",
+      "¿Cómo sería mañana en un mundo ideal?"
+    ],
+    [
+      "2026-07-17",
+      "If today were weather, what was it?",
+      "Si hoy fuera un clima, ¿cuál habría sido?"
+    ],
+    [
+      "2026-07-18",
+      "If today had a title, what would it be?",
+      "Si hoy tuviera un título, ¿cuál sería?"
+    ],
+    [
+      "2026-07-19",
+      "What thought repeated itself today?",
+      "¿Qué pensamiento se repitió hoy?"
+    ],
+    [
+      "2026-07-20",
+      "What emotion visited you most today?",
+      "¿Qué emoción lo visitó más hoy?"
+    ],
+    [
+      "2026-07-21",
+      "What emotion surprised you today?",
+      "¿Qué emoción lo sorprendió hoy?"
+    ],
+    [
+      "2026-07-22",
+      "What would you like more of in your life?",
+      "¿Qué le gustaría tener más en su vida?"
+    ],
+    [
+      "2026-07-23",
+      "If your mood today had a texture, what would it feel like?",
+      "Si el estado de ánimo de hoy tuviera una textura, ¿cómo se sentiría?"
+    ],
+    [
+      "2026-07-24",
+      "When did today feel meaningful?",
+      "¿Cuándo sintió que hoy tenía sentido?"
+    ],
+    [
+      "2026-07-25",
+      "What value showed up in something you did today?",
+      "¿Qué valor suyo apareció en algo que hizo hoy?"
+    ],
+    [
+      "2026-07-26",
+      "What's one thing worth keeping from today?",
+      "¿Qué vale la pena conservar de hoy?"
+    ],
+    [
+      "2026-07-27",
+      "What mattered most to you today?",
+      "¿Qué fue lo que más le importó hoy?"
+    ],
+    [
+      "2026-07-28",
+      "What drained you today?",
+      "¿Qué lo agotó hoy?"
+    ],
+    [
+      "2026-07-29",
+      "What did you say no to today?",
+      "¿A qué dijo no hoy?"
+    ],
+    [
+      "2026-07-30",
+      "What's one small thing that went right today?",
+      "¿Qué pequeña cosa salió bien hoy?"
+    ],
+    [
+      "2026-07-31",
+      "When did you feel most like yourself today?",
+      "¿Cuándo se sintió más usted mismo o usted misma hoy?"
+    ],
+    [
+      "2026-08-01",
+      "When were you most absorbed in something today?",
+      "¿Cuándo estuvo más absorbido o absorbida en algo hoy?"
+    ],
+    [
+      "2026-08-02",
+      "What part of the day felt longest?",
+      "¿Qué parte del día se sintió más larga?"
+    ],
+    [
+      "2026-08-03",
+      "What did you let go of today?",
+      "¿Qué dejó ir hoy?"
+    ],
+    [
+      "2026-08-04",
+      "What worry got smaller once you wrote it down?",
+      "¿Qué preocupación se hizo más pequeña al escribirla?"
+    ],
+    [
+      "2026-08-05",
+      "What are you avoiding, gently speaking?",
+      "¿Qué está evitando, dicho con gentileza?"
+    ],
+    [
+      "2026-08-06",
+      "What did you get through today that felt heavy?",
+      "¿Qué atravesó hoy que se sintió pesado?"
+    ],
+    [
+      "2026-08-07",
+      "What was the hardest part of today?",
+      "¿Cuál fue la parte más difícil de hoy?"
+    ],
+    [
+      "2026-08-08",
+      "When did you feel understood today?",
+      "¿Cuándo se sintió comprendido o comprendida hoy?"
+    ],
+    [
+      "2026-08-09",
+      "What conversation stayed with you today?",
+      "¿Qué conversación se quedó con usted hoy?"
+    ],
+    [
+      "2026-08-10",
+      "When did you feel most like yourself today?",
+      "¿Cuándo se sintió más usted mismo o usted misma hoy?"
+    ],
+    [
+      "2026-08-11",
+      "What's one small thing that went right today?",
+      "¿Qué pequeña cosa salió bien hoy?"
+    ],
+    [
+      "2026-08-12",
+      "What took up most space in your mind today?",
+      "¿Qué ocupó la mayor parte de su mente hoy?"
+    ],
+    [
+      "2026-08-13",
+      "What felt different today compared to yesterday?",
+      "¿Qué se sintió diferente hoy en comparación con ayer?"
+    ],
+    [
+      "2026-08-14",
+      "What are you carrying into tomorrow?",
+      "¿Qué se lleva consigo hacia mañana?"
+    ],
+    [
+      "2026-08-15",
+      "What did you notice today that you usually overlook?",
+      "¿Qué notó hoy que suele pasar por alto?"
+    ],
+    [
+      "2026-08-16",
+      "What thought repeated itself today?",
+      "¿Qué pensamiento se repitió hoy?"
+    ],
+    [
+      "2026-08-17",
+      "If today had a title, what would it be?",
+      "Si hoy tuviera un título, ¿cuál sería?"
+    ],
+    [
+      "2026-08-18",
+      "If today were weather, what was it?",
+      "Si hoy fuera un clima, ¿cuál habría sido?"
+    ],
+    [
+      "2026-08-19",
+      "What would tomorrow look like in an ideal world?",
+      "¿Cómo sería mañana en un mundo ideal?"
+    ],
+    [
+      "2026-08-20",
+      "What gave you energy today?",
+      "¿Qué le dio energía hoy?"
+    ],
+    [
+      "2026-08-21",
+      "When did you feel alone today, and what was that like?",
+      "¿Cuándo se sintió solo o sola hoy, y cómo fue eso?"
+    ],
+    [
+      "2026-08-22",
+      "What did you say no to today?",
+      "¿A qué dijo no hoy?"
+    ],
+    [
+      "2026-08-23",
+      "What drained you today?",
+      "¿Qué lo agotó hoy?"
+    ],
+    [
+      "2026-08-24",
+      "What part of the day felt longest?",
+      "¿Qué parte del día se sintió más larga?"
+    ],
+    [
+      "2026-08-25",
+      "What did you let go of today?",
+      "¿Qué dejó ir hoy?"
+    ],
+    [
+      "2026-08-26",
+      "What did today's pace feel like?",
+      "¿Cómo sintió el ritmo de hoy?"
+    ],
+    [
+      "2026-08-27",
+      "When were you most absorbed in something today?",
+      "¿Cuándo estuvo más absorbido o absorbida en algo hoy?"
+    ],
+    [
+      "2026-08-28",
+      "If your mood today had a texture, what would it feel like?",
+      "Si el estado de ánimo de hoy tuviera una textura, ¿cómo se sentiría?"
+    ],
+    [
+      "2026-08-29",
+      "What would you like more of in your life?",
+      "¿Qué le gustaría tener más en su vida?"
+    ],
+    [
+      "2026-08-30",
+      "If you could send yourself a note this morning, what would it say?",
+      "Si pudiera enviarse una nota esta mañana, ¿qué diría?"
+    ],
+    [
+      "2026-08-31",
+      "What did you do today purely because you wanted to?",
+      "¿Qué hizo hoy puramente porque quería?"
+    ],
+    [
+      "2026-09-01",
+      "What did today's pace feel like?",
+      "¿Cómo sintió el ritmo de hoy?"
+    ],
+    [
+      "2026-09-02",
+      "What did you let go of today?",
+      "¿Qué dejó ir hoy?"
+    ],
+    [
+      "2026-09-03",
+      "What part of the day felt longest?",
+      "¿Qué parte del día se sintió más larga?"
+    ],
+    [
+      "2026-09-04",
+      "What are you avoiding, gently speaking?",
+      "¿Qué está evitando, dicho con gentileza?"
+    ],
+    [
+      "2026-09-05",
+      "What worry got smaller once you wrote it down?",
+      "¿Qué preocupación se hizo más pequeña al escribirla?"
+    ],
+    [
+      "2026-09-06",
+      "What was the hardest part of today?",
+      "¿Cuál fue la parte más difícil de hoy?"
+    ],
+    [
+      "2026-09-07",
+      "What did you get through today that felt heavy?",
+      "¿Qué atravesó hoy que se sintió pesado?"
+    ],
+    [
+      "2026-09-08",
+      "What conversation stayed with you today?",
+      "¿Qué conversación se quedó con usted hoy?"
+    ],
+    [
+      "2026-09-09",
+      "When did you feel understood today?",
+      "¿Cuándo se sintió comprendido o comprendida hoy?"
+    ],
+    [
+      "2026-09-10",
+      "What would make tomorrow 1% kinder to you?",
+      "¿Qué haría que mañana fuera un 1% más amable con usted?"
+    ],
+    [
+      "2026-09-11",
+      "What did you forgive yourself for today?",
+      "¿Qué se perdonó hoy?"
+    ],
+    [
+      "2026-09-12",
+      "What's something you did today that took effort?",
+      "¿Qué hizo hoy que le exigió esfuerzo?"
+    ],
+    [
+      "2026-09-13",
+      "What would you say to a friend who had your day?",
+      "¿Qué le diría a un amigo que hubiera tenido su día?"
+    ],
+    [
+      "2026-09-14",
+      "What comforted you today?",
+      "¿Qué le confortó hoy?"
+    ],
+    [
+      "2026-09-15",
+      "What's something you're looking forward to?",
+      "¿Hay algo que espera con ilusión?"
+    ],
+    [
+      "2026-09-16",
+      "Who made your day a little lighter today?",
+      "¿Quién hizo su día un poco más ligero hoy?"
+    ],
+    [
+      "2026-09-17",
+      "What are three things that went okay today?",
+      "¿Qué tres cosas salieron más o menos bien hoy?"
+    ],
+    [
+      "2026-09-18",
+      "What did you notice today that you usually overlook?",
+      "¿Qué notó hoy que suele pasar por alto?"
+    ],
+    [
+      "2026-09-19",
+      "What are you carrying into tomorrow?",
+      "¿Qué se lleva consigo hacia mañana?"
+    ],
+    [
+      "2026-09-20",
+      "When did you feel alone today, and what was that like?",
+      "¿Cuándo se sintió solo o sola hoy, y cómo fue eso?"
+    ],
+    [
+      "2026-09-21",
+      "What gave you energy today?",
+      "¿Qué le dio energía hoy?"
+    ],
+    [
+      "2026-09-22",
+      "What drained you today?",
+      "¿Qué lo agotó hoy?"
+    ],
+    [
+      "2026-09-23",
+      "What did you say no to today?",
+      "¿A qué dijo no hoy?"
+    ],
+    [
+      "2026-09-24",
+      "What did you let go of today?",
+      "¿Qué dejó ir hoy?"
+    ],
+    [
+      "2026-09-25",
+      "What part of the day felt longest?",
+      "¿Qué parte del día se sintió más larga?"
+    ],
+    [
+      "2026-09-26",
+      "When were you most absorbed in something today?",
+      "¿Cuándo estuvo más absorbido o absorbida en algo hoy?"
+    ],
+    [
+      "2026-09-27",
+      "What did today's pace feel like?",
+      "¿Cómo sintió el ritmo de hoy?"
+    ],
+    [
+      "2026-09-28",
+      "What would you like more of in your life?",
+      "¿Qué le gustaría tener más en su vida?"
+    ],
+    [
+      "2026-09-29",
+      "If your mood today had a texture, what would it feel like?",
+      "Si el estado de ánimo de hoy tuviera una textura, ¿cómo se sentiría?"
+    ],
+    [
+      "2026-09-30",
+      "What was the quietest moment of your day?",
+      "¿Cuál fue el momento más tranquilo de su día?"
+    ],
+    [
+      "2026-10-01",
+      "When did you feel understood today?",
+      "¿Cuándo se sintió comprendido o comprendida hoy?"
+    ],
+    [
+      "2026-10-02",
+      "Where in your body did today's strongest feeling live?",
+      "¿En qué parte del cuerpo vivió hoy el sentimiento más fuerte?"
+    ],
+    [
+      "2026-10-03",
+      "Who did you think about today?",
+      "¿En quién pensó hoy?"
+    ],
+    [
+      "2026-10-04",
+      "What drained you today?",
+      "¿Qué lo agotó hoy?"
+    ],
+    [
+      "2026-10-05",
+      "What did you say no to today?",
+      "¿A qué dijo no hoy?"
+    ],
+    [
+      "2026-10-06",
+      "When did you feel alone today, and what was that like?",
+      "¿Cuándo se sintió solo o sola hoy, y cómo fue eso?"
+    ],
+    [
+      "2026-10-07",
+      "What gave you energy today?",
+      "¿Qué le dio energía hoy?"
+    ],
+    [
+      "2026-10-08",
+      "When were you most absorbed in something today?",
+      "¿Cuándo estuvo más absorbido o absorbida en algo hoy?"
+    ],
+    [
+      "2026-10-09",
+      "What did today's pace feel like?",
+      "¿Cómo sintió el ritmo de hoy?"
+    ],
+    [
+      "2026-10-10",
+      "What are you grateful to past-you for today?",
+      "¿Por qué le agradece hoy a su yo del pasado?"
+    ],
+    [
+      "2026-10-11",
+      "What did today ask of you?",
+      "¿Qué le pidió hoy el día?"
+    ],
+    [
+      "2026-10-12",
+      "What did you do today purely because you wanted to?",
+      "¿Qué hizo hoy puramente porque quería?"
+    ],
+    [
+      "2026-10-13",
+      "If you could send yourself a note this morning, what would it say?",
+      "Si pudiera enviarse una nota esta mañana, ¿qué diría?"
+    ],
+    [
+      "2026-10-14",
+      "What's one small thing that went right today?",
+      "¿Qué pequeña cosa salió bien hoy?"
+    ],
+    [
+      "2026-10-15",
+      "When did you feel most like yourself today?",
+      "¿Cuándo se sintió más usted mismo o usted misma hoy?"
+    ],
+    [
+      "2026-10-16",
+      "What felt different today compared to yesterday?",
+      "¿Qué se sintió diferente hoy en comparación con ayer?"
+    ],
+    [
+      "2026-10-17",
+      "What took up most space in your mind today?",
+      "¿Qué ocupó la mayor parte de su mente hoy?"
+    ],
+    [
+      "2026-10-18",
+      "What did you notice today that you usually overlook?",
+      "¿Qué notó hoy que suele pasar por alto?"
+    ],
+    [
+      "2026-10-19",
+      "What are you carrying into tomorrow?",
+      "¿Qué se lleva consigo hacia mañana?"
+    ],
+    [
+      "2026-10-20",
+      "What would you like more of in your life?",
+      "¿Qué le gustaría tener más en su vida?"
+    ],
+    [
+      "2026-10-21",
+      "If your mood today had a texture, what would it feel like?",
+      "Si el estado de ánimo de hoy tuviera una textura, ¿cómo se sentiría?"
+    ],
+    [
+      "2026-10-22",
+      "What emotion visited you most today?",
+      "¿Qué emoción lo visitó más hoy?"
+    ],
+    [
+      "2026-10-23",
+      "What emotion surprised you today?",
+      "¿Qué emoción lo sorprendió hoy?"
+    ],
+    [
+      "2026-10-24",
+      "Where in your body did today's strongest feeling live?",
+      "¿En qué parte del cuerpo vivió hoy el sentimiento más fuerte?"
+    ],
+    [
+      "2026-10-25",
+      "Who did you think about today?",
+      "¿En quién pensó hoy?"
+    ],
+    [
+      "2026-10-26",
+      "What conversation stayed with you today?",
+      "¿Qué conversación se quedó con usted hoy?"
+    ],
+    [
+      "2026-10-27",
+      "When did you feel understood today?",
+      "¿Cuándo se sintió comprendido o comprendida hoy?"
+    ],
+    [
+      "2026-10-28",
+      "When did you feel alone today, and what was that like?",
+      "¿Cuándo se sintió solo o sola hoy, y cómo fue eso?"
+    ],
+    [
+      "2026-10-29",
+      "What gave you energy today?",
+      "¿Qué le dio energía hoy?"
+    ],
+    [
+      "2026-10-30",
+      "What has stayed steady in you lately?",
+      "¿Qué se ha mantenido estable en usted últimamente?"
+    ],
+    [
+      "2026-10-31",
+      "What's changing in you lately, slowly?",
+      "¿Qué está cambiando en usted, poco a poco, últimamente?"
+    ],
+    [
+      "2026-11-01",
+      "What sound do you remember from today?",
+      "¿Qué sonido recuerda de hoy?"
+    ],
+    [
+      "2026-11-02",
+      "What was the quietest moment of your day?",
+      "¿Cuál fue el momento más tranquilo de su día?"
+    ],
+    [
+      "2026-11-03",
+      "What did your body notice before your mind did today?",
+      "¿Qué notó su cuerpo antes que su mente hoy?"
+    ],
+    [
+      "2026-11-04",
+      "What would make tomorrow 1% kinder to you?",
+      "¿Qué haría que mañana fuera un 1% más amable con usted?"
+    ],
+    [
+      "2026-11-05",
+      "What did you forgive yourself for today?",
+      "¿Qué se perdonó hoy?"
+    ],
+    [
+      "2026-11-06",
+      "What's something you did today that took effort?",
+      "¿Qué hizo hoy que le exigió esfuerzo?"
+    ],
+    [
+      "2026-11-07",
+      "What would you say to a friend who had your day?",
+      "¿Qué le diría a un amigo que hubiera tenido su día?"
+    ],
+    [
+      "2026-11-08",
+      "What comforted you today?",
+      "¿Qué le confortó hoy?"
+    ],
+    [
+      "2026-11-09",
+      "What's something you're looking forward to?",
+      "¿Hay algo que espera con ilusión?"
+    ],
+    [
+      "2026-11-10",
+      "What are you avoiding, gently speaking?",
+      "¿Qué está evitando, dicho con gentileza?"
+    ],
+    [
+      "2026-11-11",
+      "What worry got smaller once you wrote it down?",
+      "¿Qué preocupación se hizo más pequeña al escribirla?"
+    ],
+    [
+      "2026-11-12",
+      "What was the hardest part of today?",
+      "¿Cuál fue la parte más difícil de hoy?"
+    ],
+    [
+      "2026-11-13",
+      "What did you get through today that felt heavy?",
+      "¿Qué atravesó hoy que se sintió pesado?"
+    ],
+    [
+      "2026-11-14",
+      "What would you like to remember about this time?",
+      "¿Qué le gustaría recordar de esta época?"
+    ],
+    [
+      "2026-11-15",
+      "What's one small thing you're curious to attempt tomorrow?",
+      "¿Qué pequeña cosa tiene curiosidad por intentar mañana?"
+    ],
+    [
+      "2026-11-16",
+      "What are you curious about right now?",
+      "¿Sobre qué tiene curiosidad ahora mismo?"
+    ],
+    [
+      "2026-11-17",
+      "What's a question you're sitting with lately?",
+      "¿Qué pregunta lleva rondándole últimamente?"
+    ],
+    [
+      "2026-11-18",
+      "What's a place you'd rather have been today?",
+      "¿En qué lugar habría preferido estar hoy?"
+    ],
+    [
+      "2026-11-19",
+      "What feels most like 'you' these days?",
+      "¿Qué se siente más 'suyo' en estos días?"
+    ],
+    [
+      "2026-11-20",
+      "If today had a title, what would it be?",
+      "Si hoy tuviera un título, ¿cuál sería?"
+    ],
+    [
+      "2026-11-21",
+      "What thought repeated itself today?",
+      "¿Qué pensamiento se repitió hoy?"
+    ],
+    [
+      "2026-11-22",
+      "What did you notice today that you usually overlook?",
+      "¿Qué notó hoy que suele pasar por alto?"
+    ],
+    [
+      "2026-11-23",
+      "What are you carrying into tomorrow?",
+      "¿Qué se lleva consigo hacia mañana?"
+    ],
+    [
+      "2026-11-24",
+      "What was the quietest moment of your day?",
+      "¿Cuál fue el momento más tranquilo de su día?"
+    ],
+    [
+      "2026-11-25",
+      "What did your body notice before your mind did today?",
+      "¿Qué notó su cuerpo antes que su mente hoy?"
+    ],
+    [
+      "2026-11-26",
+      "What did you see today that you'd want to see again?",
+      "¿Qué vio hoy que le gustaría volver a ver?"
+    ],
+    [
+      "2026-11-27",
+      "What sound do you remember from today?",
+      "¿Qué sonido recuerda de hoy?"
+    ],
+    [
+      "2026-11-28",
+      "What's something you did today that took effort?",
+      "¿Qué hizo hoy que le exigió esfuerzo?"
+    ],
+    [
+      "2026-11-29",
+      "What would you say to a friend who had your day?",
+      "¿Qué le diría a un amigo que hubiera tenido su día?"
+    ],
+    [
+      "2026-11-30",
+      "What did you let go of today?",
+      "¿Qué dejó ir hoy?"
+    ],
+    [
+      "2026-12-01",
+      "What part of the day felt longest?",
+      "¿Qué parte del día se sintió más larga?"
+    ],
+    [
+      "2026-12-02",
+      "When were you most absorbed in something today?",
+      "¿Cuándo estuvo más absorbido o absorbida en algo hoy?"
+    ],
+    [
+      "2026-12-03",
+      "What did today's pace feel like?",
+      "¿Cómo sintió el ritmo de hoy?"
+    ],
+    [
+      "2026-12-04",
+      "What was the hardest part of today?",
+      "¿Cuál fue la parte más difícil de hoy?"
+    ],
+    [
+      "2026-12-05",
+      "What did you get through today that felt heavy?",
+      "¿Qué atravesó hoy que se sintió pesado?"
+    ],
+    [
+      "2026-12-06",
+      "What are you avoiding, gently speaking?",
+      "¿Qué está evitando, dicho con gentileza?"
+    ],
+    [
+      "2026-12-07",
+      "What worry got smaller once you wrote it down?",
+      "¿Qué preocupación se hizo más pequeña al escribirla?"
+    ],
+    [
+      "2026-12-08",
+      "What are you curious about right now?",
+      "¿Sobre qué tiene curiosidad ahora mismo?"
+    ],
+    [
+      "2026-12-09",
+      "What's a question you're sitting with lately?",
+      "¿Qué pregunta lleva rondándole últimamente?"
+    ],
+    [
+      "2026-12-10",
+      "If today had a title, what would it be?",
+      "Si hoy tuviera un título, ¿cuál sería?"
+    ],
+    [
+      "2026-12-11",
+      "What thought repeated itself today?",
+      "¿Qué pensamiento se repitió hoy?"
+    ],
+    [
+      "2026-12-12",
+      "What did you notice today that you usually overlook?",
+      "¿Qué notó hoy que suele pasar por alto?"
+    ],
+    [
+      "2026-12-13",
+      "What are you carrying into tomorrow?",
+      "¿Qué se lleva consigo hacia mañana?"
+    ],
+    [
+      "2026-12-14",
+      "What was the quietest moment of your day?",
+      "¿Cuál fue el momento más tranquilo de su día?"
+    ],
+    [
+      "2026-12-15",
+      "What did your body notice before your mind did today?",
+      "¿Qué notó su cuerpo antes que su mente hoy?"
+    ],
+    [
+      "2026-12-16",
+      "What did you see today that you'd want to see again?",
+      "¿Qué vio hoy que le gustaría volver a ver?"
+    ],
+    [
+      "2026-12-17",
+      "What sound do you remember from today?",
+      "¿Qué sonido recuerda de hoy?"
+    ],
+    [
+      "2026-12-18",
+      "What's something you did today that took effort?",
+      "¿Qué hizo hoy que le exigió esfuerzo?"
+    ],
+    [
+      "2026-12-19",
+      "What would you say to a friend who had your day?",
+      "¿Qué le diría a un amigo que hubiera tenido su día?"
+    ],
+    [
+      "2026-12-20",
+      "What are you avoiding, gently speaking?",
+      "¿Qué está evitando, dicho con gentileza?"
+    ],
+    [
+      "2026-12-21",
+      "What worry got smaller once you wrote it down?",
+      "¿Qué preocupación se hizo más pequeña al escribirla?"
+    ],
+    [
+      "2026-12-22",
+      "What was the hardest part of today?",
+      "¿Cuál fue la parte más difícil de hoy?"
+    ],
+    [
+      "2026-12-23",
+      "What did you get through today that felt heavy?",
+      "¿Qué atravesó hoy que se sintió pesado?"
+    ],
+    [
+      "2026-12-24",
+      "What would you like to remember about this time?",
+      "¿Qué le gustaría recordar de esta época?"
+    ],
+    [
+      "2026-12-25",
+      "What's one small thing you're curious to attempt tomorrow?",
+      "¿Qué pequeña cosa tiene curiosidad por intentar mañana?"
+    ],
+    [
+      "2026-12-26",
+      "What are you curious about right now?",
+      "¿Sobre qué tiene curiosidad ahora mismo?"
+    ],
+    [
+      "2026-12-27",
+      "What's a question you're sitting with lately?",
+      "¿Qué pregunta lleva rondándole últimamente?"
+    ],
+    [
+      "2026-12-28",
+      "What's a place you'd rather have been today?",
+      "¿En qué lugar habría preferido estar hoy?"
+    ],
+    [
+      "2026-12-29",
+      "What feels most like 'you' these days?",
+      "¿Qué se siente más 'suyo' en estos días?"
+    ],
+    [
+      "2026-12-30",
+      "What did you see today that you'd want to see again?",
+      "¿Qué vio hoy que le gustaría volver a ver?"
+    ],
+    [
+      "2026-12-31",
+      "What sound do you remember from today?",
+      "¿Qué sonido recuerda de hoy?"
+    ]
+  ]
+}

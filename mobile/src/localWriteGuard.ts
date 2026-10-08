@@ -44,6 +44,8 @@ export function hydrateLocalSessionOwner(userId: string | null): void {
 export function changeLocalOrigin(): void {
   originEpoch++; scopeEpoch++; sessionOwner = null;
 }
+/** The authoritative origin lifetime, unchanged by login/key rotation. */
+export function localWriteOriginEpoch(): number { return originEpoch; }
 export function markAccountDeleted(userId: string): void { deleted.add(userId); advance(userId); }
 export function assertAccountActive(userId: string): void {
   if (deleted.has(userId)) throw new Error("This account has been deleted; local writes are disabled");

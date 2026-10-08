@@ -1,0 +1,279 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Account settings renders a safe public surface after its vault is locked 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Appearance"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Dark is easier on evening eyes. Auto follows your device."
+  <div aria-label="Appearance" className="segmented" role="radiogroup">
+    <button aria-checked=false className="segmented__opt" role="radio" tabIndex=-1 type="button">
+      "Light"
+    <button aria-checked=false className="segmented__opt" role="radio" tabIndex=-1 type="button">
+      "Dark"
+    <button aria-checked=true className="segmented__opt" role="radio" tabIndex=0 type="button">
+      "System"
+  <hr className="divider">
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Language — applies immediately; Automatic follows your device."
+  <div aria-label="Language" className="segmented" role="radiogroup">
+    <button aria-checked=true className="segmented__opt" role="radio" tabIndex=0 type="button">
+      "Automatic"
+    <button aria-checked=false className="segmented__opt" role="radio" tabIndex=-1 type="button">
+      "English"
+    <button aria-checked=false className="segmented__opt" role="radio" tabIndex=-1 type="button">
+      "Español"
+<section className="card">
+  <h2 className="card__title">
+    "Check-in reminders"
+  <p className="note" role="status" style={"whiteSpace":"pre-wrap"}>
+    "Loading…"
+<section className="card">
+  <h2 className="card__title">
+    "My safety plan"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "A plan you write yourself — warning signs, what helps, who to reach. Encrypted on this device; never synced, exported, or shared."
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    <svg aria-hidden="true" fill="none" focusable="false" height=15 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=15>
+      <path d="M12 20s-7-4.3-9-8.5C1.6 8.6 3.6 5.5 6.8 5.5c1.9 0 3.6 1 4.2 2.6.6-1.6 2.3-2.6 4.2-2.6 3.2 0 5.2 3.1 3.8 6-2 4.2-7 8.5-7 8.5z">
+    "Open my safety plan"
+<section className="card">
+  <h2 className="card__title">
+    "Privacy & data"
+  <p className="note" role="status" style={"whiteSpace":"pre-wrap"}>
+    "Loading…"
+  <hr className="divider">
+  <hr className="divider">
+  <div className="row row--wrap">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Download export (encrypted)"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "The bundle is ciphertext — safe to store anywhere, unreadable without your password."
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Recovery kits are created and managed in the mobile app. Open Settings there to create, replace, or remove one."
+  <p className="note note--warn" style={"whiteSpace":"pre-wrap"}>
+    "Offline saving works after this web app is already loaded. Starting or reloading the browser app requires a connection."
+<section className="card">
+  <h2 className="card__title">
+    "Who accessed your data"
+  <p className="note" role="status" style={"whiteSpace":"pre-wrap"}>
+    "Loading…"
+<section className="card">
+  <h2 className="card__title">
+    "Change password"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "This account's key protection could not be confirmed — the password options appear after a retry."
+<section className="card card--danger">
+  <h2 className="card__title">
+    "Delete account"
+  <p className="note note--danger" style={"whiteSpace":"pre-wrap"}>
+    "Removes you and the full cascade: entries, patterns, questions, measures, sharing grants. Only the access audit log survives (metadata, no content). This cannot be undone."
+  <label className="field">
+    <span className="field__label">
+      "Type DELETE to confirm"
+    <input autoComplete="off" className="input" type="text" value="">
+  <button className="btn btn--danger" disabled=true type="button">
+    "Delete my account""
+`;
+
+exports[`Account settings renders its settled public empty-account surface in en 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Appearance"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Dark is easier on evening eyes. Auto follows your device."
+  <div aria-label="Appearance" className="segmented" role="radiogroup">
+    <button aria-checked=false className="segmented__opt" role="radio" tabIndex=-1 type="button">
+      "Light"
+    <button aria-checked=false className="segmented__opt" role="radio" tabIndex=-1 type="button">
+      "Dark"
+    <button aria-checked=true className="segmented__opt" role="radio" tabIndex=0 type="button">
+      "System"
+  <hr className="divider">
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Language — applies immediately; Automatic follows your device."
+  <div aria-label="Language" className="segmented" role="radiogroup">
+    <button aria-checked=true className="segmented__opt" role="radio" tabIndex=0 type="button">
+      "Automatic"
+    <button aria-checked=false className="segmented__opt" role="radio" tabIndex=-1 type="button">
+      "English"
+    <button aria-checked=false className="segmented__opt" role="radio" tabIndex=-1 type="button">
+      "Español"
+<section className="card">
+  <h2 className="card__title">
+    "Check-in reminders"
+  <div className="row row--between">
+    <span className="note" style={"whiteSpace":"pre-wrap"}>
+      "Remind me to complete a check-in"
+    <button aria-checked=false aria-label="Remind me to complete a check-in" className="toggle" disabled=false role="switch" type="button">
+<section className="card">
+  <h2 className="card__title">
+    "My safety plan"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "A plan you write yourself — warning signs, what helps, who to reach. Encrypted on this device; never synced, exported, or shared."
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    <svg aria-hidden="true" fill="none" focusable="false" height=15 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=15>
+      <path d="M12 20s-7-4.3-9-8.5C1.6 8.6 3.6 5.5 6.8 5.5c1.9 0 3.6 1 4.2 2.6.6-1.6 2.3-2.6 4.2-2.6 3.2 0 5.2 3.1 3.8 6-2 4.2-7 8.5-7 8.5z">
+    "Open my safety plan"
+<section className="card">
+  <h2 className="card__title">
+    "Privacy & data"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Third-party transcript translation is not offered by this server."
+  <hr className="divider">
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Voice journaling is not offered by this server."
+  <hr className="divider">
+  <div className="row row--wrap">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Download export (encrypted)"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "The bundle is ciphertext — safe to store anywhere, unreadable without your password."
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Recovery kits are created and managed in the mobile app. Open Settings there to create, replace, or remove one."
+  <p className="note note--warn" style={"whiteSpace":"pre-wrap"}>
+    "Offline saving works after this web app is already loaded. Starting or reloading the browser app requires a connection."
+<section className="card">
+  <h2 className="card__title">
+    "Who accessed your data"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "No recorded access beyond your own yet."
+<section className="card">
+  <h2 className="card__title">
+    "Change password"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Re-encrypts your entire journal under the new password, re-wraps every therapist grant, and signs out every device — including the mobile app."
+  <label className="field">
+    <span className="field__label">
+      "New password"
+    <input autoComplete="new-password" className="input" type="password" value="">
+  <label className="field">
+    <span className="field__label">
+      "Confirm new password"
+    <input autoComplete="new-password" className="input" type="password" value="">
+  <button className="btn" disabled=false type="button">
+    "Change password"
+<section className="card">
+  <h2 className="card__title">
+    "Upgrade key protection"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Optional, one-time: keeps your existing journal key exactly as it is, but stores it in the newer locker that makes future password changes instant (no re-encryption, no waiting). Nothing about what you or your therapist can see changes."
+  <label className="field">
+    <span className="field__label">
+      "Current password (to authorize the upgrade)"
+    <input autoComplete="current-password" className="input" type="password" value="">
+  <button className="btn" disabled=true type="button">
+    "Upgrade key protection"
+<section className="card card--danger">
+  <h2 className="card__title">
+    "Delete account"
+  <p className="note note--danger" style={"whiteSpace":"pre-wrap"}>
+    "Removes you and the full cascade: entries, patterns, questions, measures, sharing grants. Only the access audit log survives (metadata, no content). This cannot be undone."
+  <label className="field">
+    <span className="field__label">
+      "Type DELETE to confirm"
+    <input autoComplete="off" className="input" type="text" value="">
+  <button className="btn btn--danger" disabled=true type="button">
+    "Delete my account""
+`;
+
+exports[`Account settings renders its settled public empty-account surface in es 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Apariencia"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "El modo oscuro descansa la vista por la noche. Auto sigue a tu dispositivo."
+  <div aria-label="Apariencia" className="segmented" role="radiogroup">
+    <button aria-checked=false className="segmented__opt" role="radio" tabIndex=-1 type="button">
+      "Claro"
+    <button aria-checked=false className="segmented__opt" role="radio" tabIndex=-1 type="button">
+      "Oscuro"
+    <button aria-checked=true className="segmented__opt" role="radio" tabIndex=0 type="button">
+      "Sistema"
+  <hr className="divider">
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Idioma — se aplica de inmediato; Automático sigue a su dispositivo."
+  <div aria-label="Idioma" className="segmented" role="radiogroup">
+    <button aria-checked=true className="segmented__opt" role="radio" tabIndex=0 type="button">
+      "Automático"
+    <button aria-checked=false className="segmented__opt" role="radio" tabIndex=-1 type="button">
+      "English"
+    <button aria-checked=false className="segmented__opt" role="radio" tabIndex=-1 type="button">
+      "Español"
+<section className="card">
+  <h2 className="card__title">
+    "Recordatorios de registro"
+  <div className="row row--between">
+    <span className="note" style={"whiteSpace":"pre-wrap"}>
+      "Recuérdeme completar un registro"
+    <button aria-checked=false aria-label="Recuérdeme completar un registro" className="toggle" disabled=false role="switch" type="button">
+<section className="card">
+  <h2 className="card__title">
+    "Mi plan de seguridad"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Un plan que usted mismo/a escribe — señales de alerta, qué ayuda, a quién recurrir. Cifrado en este dispositivo; nunca se sincroniza, ni se exporta, ni se comparte."
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    <svg aria-hidden="true" fill="none" focusable="false" height=15 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=15>
+      <path d="M12 20s-7-4.3-9-8.5C1.6 8.6 3.6 5.5 6.8 5.5c1.9 0 3.6 1 4.2 2.6.6-1.6 2.3-2.6 4.2-2.6 3.2 0 5.2 3.1 3.8 6-2 4.2-7 8.5-7 8.5z">
+    "Abrir mi plan de seguridad"
+<section className="card">
+  <h2 className="card__title">
+    "Privacidad y datos"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Este servidor no ofrece traducción de transcripciones por terceros."
+  <hr className="divider">
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Este servidor no ofrece el diario por voz."
+  <hr className="divider">
+  <div className="row row--wrap">
+    <button className="btn btn--ghost btn--small" disabled=false type="button">
+      "Descargar exportación (cifrada)"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "El paquete es texto cifrado — seguro de guardar en cualquier lugar, ilegible sin su contraseña."
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Los kits de recuperación se crean y gestionan en la app móvil. Abra Ajustes allí para crear, reemplazar o eliminar uno."
+  <p className="note note--warn" style={"whiteSpace":"pre-wrap"}>
+    "Guardar sin conexión funciona después de que esta app web ya esté cargada. Iniciar o recargar la app del navegador requiere conexión."
+<section className="card">
+  <h2 className="card__title">
+    "Quién accedió a sus datos"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "Aún no hay accesos registrados más allá de los suyos."
+<section className="card">
+  <h2 className="card__title">
+    "Cambiar contraseña"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Vuelve a cifrar todo su diario con la nueva contraseña, reenvuelve cada permiso de terapeuta y cierra la sesión en todos los dispositivos — incluida la app móvil."
+  <label className="field">
+    <span className="field__label">
+      "Nueva contraseña"
+    <input autoComplete="new-password" className="input" type="password" value="">
+  <label className="field">
+    <span className="field__label">
+      "Confirmar nueva contraseña"
+    <input autoComplete="new-password" className="input" type="password" value="">
+  <button className="btn" disabled=false type="button">
+    "Cambiar contraseña"
+<section className="card">
+  <h2 className="card__title">
+    "Mejorar la protección de claves"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Opcional y por una sola vez: mantiene exactamente la misma clave de su diario, pero la guarda en el candado más reciente, que hace que los futuros cambios de contraseña sean instantáneos (sin recifrar, sin esperas). No cambia nada sobre lo que usted o su terapeuta pueden ver."
+  <label className="field">
+    <span className="field__label">
+      "Contraseña actual (para autorizar la mejora)"
+    <input autoComplete="current-password" className="input" type="password" value="">
+  <button className="btn" disabled=true type="button">
+    "Mejorar la protección de claves"
+<section className="card card--danger">
+  <h2 className="card__title">
+    "Eliminar cuenta"
+  <p className="note note--danger" style={"whiteSpace":"pre-wrap"}>
+    "Le elimina a usted y toda la cascada: entradas, patrones, preguntas, cuestionarios, permisos de compartir. Solo sobrevive el registro de auditoría de accesos (metadatos, sin contenido). Esto no se puede deshacer."
+  <label className="field">
+    <span className="field__label">
+      "Escriba DELETE para confirmar"
+    <input autoComplete="off" className="input" type="text" value="">
+  <button className="btn btn--danger" disabled=true type="button">
+    "Eliminar mi cuenta""
+`;

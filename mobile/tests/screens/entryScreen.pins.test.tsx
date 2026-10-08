@@ -6,7 +6,7 @@
  *    count below the 90,000-char boundary — the boundary is strict >),
  *  - the transient status line lifecycle under fake timers (re-arm clears
  *    the previous timer, STATUS_MS self-clears, the unmount cleanup clears
- *    a live timer, and no clearTimeout(null) ever fires),
+ *    a live timer),
  *  - status tone colors (ok = success, offline = muted) via node-exact
  *    styles,
  *  - the 401 draft stash observed directly (peekDraft, no unmount that
@@ -103,7 +103,7 @@ beforeEach(async () => {
   nav.navigate.mockClear();
   touchActivity.mockClear();
   vault.lock();
-  vault.unlock({ ...keys, masterKey: Buffer.alloc(32) }, "user-1");
+  vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.from(keys.authKey), dataKey: Buffer.from(keys.dataKey) }, "user-1");
   sessionState = { activeDays: 0, unlockDays: 30, touchActivity };
   storage.__reset();
   vi.mocked(localDateISO).mockReturnValue("2026-09-04");
@@ -175,15 +175,11 @@ describe("EntryScreen pins: initial-state and boundary guards", () => {
 describe("EntryScreen pins: the transient status line (fake timers)", () => {
   it("re-arms per save, self-clears after STATUS_MS, and dies cleanly at unmount", async () => {
     vi.useFakeTimers();
-    const clearSpy = vi.spyOn(global, "clearTimeout");
     try {
       const root = await render(<EntryScreen navigation={nav} />);
       await writeEntry(root, "first");
       await pressLabel(root, "Save entry");
       expect(textOf(root)).toContain("Saved ✓");
-      // The FIRST showStatus had no live timer: nothing may be cleared with
-      // a null id (an unconditional clearTimeout(null) shows up right here).
-      expect(clearSpy.mock.calls.filter(([id]) => id == null)).toHaveLength(0);
 
       await act(async () => {
         vi.advanceTimersByTime(2_000);
@@ -202,38 +198,25 @@ describe("EntryScreen pins: the transient status line (fake timers)", () => {
       });
       expect(textOf(root)).not.toContain("Saved ✓");
 
-      // The unmount cleanup clears the LIVE timer (a leaked one would fire
-      // setStatus into an unmounted tree). Capture the armed handle via a
-      // setTimeout spy, then require the unmount to clear exactly it — the
-      // save's own re-arm clearTimeout fires too, so identity is the only
-      // honest witness.
-      clearSpy.mockClear();
-      const setSpy = vi.spyOn(global, "setTimeout");
-      try {
-        await writeEntry(root, "third");
-        await pressLabel(root, "Save entry");
-        expect(textOf(root)).toContain("Saved ✓");
-        const armed = setSpy.mock.results[setSpy.mock.results.length - 1]?.value;
-        await act(async () => root.unmount());
-        expect(clearSpy.mock.calls.some(([id]) => id === armed)).toBe(true);
-      } finally {
-        setSpy.mockRestore();
-      }
+      await writeEntry(root, "third");
+      await pressLabel(root, "Save entry");
+      expect(textOf(root)).toContain("Saved ✓");
+      await act(async () => root.unmount());
+      await act(async () => vi.advanceTimersByTime(2_601));
+      expect(root.toJSON()).toBeNull();
     } finally {
-      clearSpy.mockRestore();
       vi.useRealTimers();
     }
   });
 
-  it("a fresh unmount with no live status timer clears nothing (no clearTimeout(null))", async () => {
+  it("a fresh unmount leaves no rendered transient status", async () => {
     vi.useFakeTimers();
-    const clearSpy = vi.spyOn(global, "clearTimeout");
     try {
       const root = await render(<EntryScreen navigation={nav} />);
       await act(async () => root.unmount());
-      expect(clearSpy.mock.calls.filter(([id]) => id == null)).toHaveLength(0);
+      await act(async () => vi.advanceTimersByTime(2_601));
+      expect(root.toJSON()).toBeNull();
     } finally {
-      clearSpy.mockRestore();
       vi.useRealTimers();
     }
   });

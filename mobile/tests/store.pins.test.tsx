@@ -147,7 +147,7 @@ describe("store pins: idle countdown wiring", () => {
       vault.unlock(keys);
     });
     expect(vault.isUnlocked()).toBe(true);
-    const listener = vi.mocked(AppState.addEventListener).mock.calls.at(-1)?.[1] as (s: string) => void;
+    const listener = vi.mocked(AppState.addEventListener).mock.calls.filter(([event]) => event === "change").at(-1)?.[1] as (s: string) => void;
     await act(async () => {
       listener("inactive");
     });
@@ -161,7 +161,7 @@ describe("store pins: idle countdown wiring", () => {
       </SessionProvider>,
     );
     await flush();
-    const listener = vi.mocked(AppState.addEventListener).mock.calls.at(-1)?.[1] as (s: string) => void;
+    const listener = vi.mocked(AppState.addEventListener).mock.calls.filter(([event]) => event === "change").at(-1)?.[1] as (s: string) => void;
     await act(async () => {
       listener("some-future-state");
     });

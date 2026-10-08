@@ -1,0 +1,46 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Patterns renders a safe public surface after its vault is locked 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Patterns"
+  <p className="note" role="status" style={"whiteSpace":"pre-wrap"}>
+    "Reading your baseline…"
+  <div aria-hidden="true" className="stack">
+    <div className="skeleton skeleton--line">
+    <div className="skeleton skeleton--line-short">
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "This trend is computed on this device from your entries and is never synced. Patterns need 30 active days — honest data takes time."
+  <div className="banner banner--error" role="alert">
+    "Your session locked — sign in again.""
+`;
+
+exports[`Patterns renders its settled public empty-account surface in en 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Patterns"
+  <p className="note" role="status" style={"whiteSpace":"pre-wrap"}>
+    "Reading your baseline…"
+  <div aria-hidden="true" className="stack">
+    <div className="skeleton skeleton--line">
+    <div className="skeleton skeleton--line-short">
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "This trend is computed on this device from your entries and is never synced. Patterns need 30 active days — honest data takes time."
+  <div className="banner banner--error" role="alert">
+    "That isn't on the server (anymore).""
+`;
+
+exports[`Patterns renders its settled public empty-account surface in es 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Patrones"
+  <p className="note" role="status" style={"whiteSpace":"pre-wrap"}>
+    "Leyendo su línea base…"
+  <div aria-hidden="true" className="stack">
+    <div className="skeleton skeleton--line">
+    <div className="skeleton skeleton--line-short">
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Esta tendencia se calcula en este dispositivo a partir de sus entradas y nunca se sincroniza. Los patrones necesitan 30 días con actividad — los datos honestos llevan tiempo."
+  <div className="banner banner--error" role="alert">
+    "Eso ya no está en el servidor.""
+`;

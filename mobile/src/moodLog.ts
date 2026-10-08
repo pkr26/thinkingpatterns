@@ -81,16 +81,12 @@ export function localDateISO(d: Date = new Date()): string {
 }
 
 function sanitize(raw: unknown): MoodDay[] {
-  // Stryker disable next-line ConditionalExpression: with the guard skipped, for..of over a non-iterable throws inside read()'s try/catch and degrades to the same empty days
   if (!Array.isArray(raw)) return [];
   const days: MoodDay[] = [];
   for (const item of raw) {
-    // Stryker disable next-line ConditionalExpression: destructuring any primitive yields undefined date/value members, so the checks below skip it identically
     if (typeof item !== "object" || item === null) continue;
     const { date, value } = item as Record<string, unknown>;
-    // Stryker disable next-line ConditionalExpression: RegExp.test coerces its argument to a string, and no non-string JSON value stringifies to ^\d{4}-\d{2}-\d{2}$
     if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
-    // Stryker disable next-line LogicalOperator,ConditionalExpression: JSON.parse can never yield NaN/Infinity (the only inputs where these forms differ), and Number.isFinite returns false for every non-number without coercion
     if (typeof value !== "number" || !Number.isFinite(value)) continue;
     const day: MoodDay = { date, value: Math.max(-1, Math.min(1, value)) };
     const { energy } = item as Record<string, unknown>;
@@ -109,7 +105,6 @@ function sanitize(raw: unknown): MoodDay[] {
  */
 async function read(dataKey: Buffer, userId: string, permit: LocalWritePermit): Promise<{ days: MoodDay[]; legacy: boolean }> {
   const raw = await AsyncStorage.getItem(key(userId));
-  // Stryker disable next-line BooleanLiteral: the legacy flag is dead output — no caller reads it (all destructures take only days)
   if (!raw) return { days: [], legacy: false };
   if (raw.startsWith("[")) {
     // Pre-encryption format. Read-through migration: a user who only ever
@@ -118,37 +113,31 @@ async function read(dataKey: Buffer, userId: string, permit: LocalWritePermit): 
     try {
       const days = sanitize(JSON.parse(raw));
       await write(dataKey, userId, days, permit);
-      // Stryker disable next-line BooleanLiteral: the legacy flag is dead output — no caller reads it
       return { days, legacy: true };
-    // Stryker disable next-line BlockStatement: with the catch emptied, a corrupt legacy blob falls through to the decrypt path, which also fails and returns the same empty days
     } catch {
-      // Stryker disable next-line BooleanLiteral: the legacy flag is dead output — no caller reads it
       return { days: [], legacy: true };
     }
   }
+  let plain: Buffer | null = null;
   try {
-    const plain = decrypt(
+    plain = decrypt(
       dataKey,
       Buffer.from(raw, "base64"),
       buildAad("moodlog", userId),
     );
-    // Stryker disable next-line BooleanLiteral: the legacy flag is dead output — no caller reads it
     return { days: sanitize(JSON.parse(plain.toString("utf8"))), legacy: false };
   } catch {
     // Wrong key (account switch), corruption, or tampering: disposable.
-    // Stryker disable next-line BooleanLiteral: the legacy flag is dead output — no caller reads it
     return { days: [], legacy: false };
-  }
+  } finally { zeroize(plain); }
 }
 
 async function write(dataKey: Buffer, userId: string, days: MoodDay[], permit: LocalWritePermit): Promise<void> {
-  const blob = encrypt(
-    dataKey,
-    // Stryker disable next-line StringLiteral: Buffer.from(str, "") is Node's UTF-8 default — the mutated encoding produces identical bytes (verified: no throw, same buffer)
-    Buffer.from(JSON.stringify(days.slice(-MAX_DAYS)), "utf8"),
-    buildAad("moodlog", userId),
-  );
-  await commitLocalWrite(permit, () => AsyncStorage.setItem(key(userId), blob.toString("base64")));
+  const plaintext = Buffer.from(JSON.stringify(days.slice(-MAX_DAYS)), "utf8");
+  try {
+    const blob = encrypt(dataKey, plaintext, buildAad("moodlog", userId));
+    await commitLocalWrite(permit, () => AsyncStorage.setItem(key(userId), blob.toString("base64")));
+  } finally { zeroize(plaintext); }
 }
 
 /** Upsert one day's mood (latest value wins for the same date). The
@@ -183,9 +172,7 @@ export async function recordMood(
       else days.push(day);
       await write(keyCopy, userId, days, permit);
     });
-  // Stryker disable next-line BlockStatement: the finally block only zeroizes the private key copy (memory hygiene, unobservable after return)
   } finally {
-    // Stryker disable next-line CallExpression: zeroize only scribbles the private key copy — unobservable from any caller
     zeroize(keyCopy);
   }
 }
@@ -199,9 +186,7 @@ export async function recentMoods(dataKey: Buffer, userId: string, days = 30): P
   try {
     const readResult = await serialized(() => { assertLocalWritePermit(permit); return read(keyCopy, userId, permit); });
     return readResult.days.slice(-days);
-  // Stryker disable next-line BlockStatement: the finally block only zeroizes the private key copy (memory hygiene, unobservable after return)
   } finally {
-    // Stryker disable next-line CallExpression: zeroize only scribbles the private key copy — unobservable from any caller
     zeroize(keyCopy);
   }
 }
@@ -213,11 +198,9 @@ export async function localStreak(dataKey: Buffer, userId: string, today = today
   const keyCopy = Buffer.from(dataKey);
   try {
     const { days } = await serialized(() => { assertLocalWritePermit(permit); return read(keyCopy, userId, permit); });
-    // Stryker disable next-line ConditionalExpression: with the guard skipped, an empty days array leaves cursor null and the !cursor guard below returns the same 0
     if (days.length === 0) return 0;
     const set = new Set(days.map((d) => d.date));
     let cursor = set.has(today) ? today : set.has(yesterday(today)) ? yesterday(today) : null;
-    // Stryker disable next-line ConditionalExpression: with the guard skipped, a null cursor falls into the while loop whose set.has(null) never matches — streak stays 0, the identical result
     if (!cursor) return 0;
     let streak = 0;
     while (set.has(cursor)) {
@@ -225,9 +208,7 @@ export async function localStreak(dataKey: Buffer, userId: string, today = today
       cursor = yesterday(cursor);
     }
     return streak;
-  // Stryker disable next-line BlockStatement: the finally block only zeroizes the private key copy (memory hygiene, unobservable after return)
   } finally {
-    // Stryker disable next-line CallExpression: zeroize only scribbles the private key copy — unobservable from any caller
     zeroize(keyCopy);
   }
 }
@@ -250,9 +231,7 @@ export async function removeMoodDay(dataKey: Buffer, userId: string, date: strin
       if (next.length === days.length) return; // absent already: no write
       await write(keyCopy, userId, next, permit);
     });
-  // Stryker disable next-line BlockStatement: the finally block only zeroizes the private key copy (memory hygiene, unobservable after return)
   } finally {
-    // Stryker disable next-line CallExpression: zeroize only scribbles the private key copy — unobservable from any caller
     zeroize(keyCopy);
   }
 }

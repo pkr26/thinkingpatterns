@@ -1,0 +1,26 @@
+import React from "react";
+import ReactTestRenderer,{act} from "react-test-renderer";
+import {beforeEach,afterEach,it,expect,vi} from "vitest";
+import {NativeTouchableOpacity,grantedTouchable} from "../helpers/nativeTouchableOpacity";
+import {api} from "../../src/api/client";
+import {InsightsScreen} from "../../src/screens/InsightsScreen";
+import {ThemeProvider} from "../../src/theme";
+import {vault} from "../../src/vault";
+import {encrypt,buildAad} from "../../src/crypto/envelope";
+import {INSIGHTS_PAYLOAD_VERSION} from "../../src/crypto/journalCrypto";
+import {installLocalDataKey,__resetLocalKeyLifecycleForTests} from "../../src/localWriteGuard";
+import {resetAnalysisGenerationMirrors} from "../../src/stateSeqGuard";
+import {accountStorageKey} from "../../src/accountStorage";
+import {runTestControl} from "../helpers/testControl";
+import storage from "../helpers/storageMock";
+vi.mock("react-native",async original=>({...await original<any>(),TouchableOpacity:NativeTouchableOpacity}));
+const USER="a".repeat(32),KEY=Buffer.alloc(32,97),session={applyActiveDays:()=>{},beginProgressRead:async()=>({owner:USER,generation:0,request:0}),finishProgressRead:()=>{},unlockDays:30,touchActivity:()=>{}};
+vi.mock("../../src/store",async original=>({...await original<any>(),useSession:()=>session}));
+let root:ReturnType<typeof ReactTestRenderer.create>|undefined,patterns:any[];
+const flush=()=>act(async()=>{await new Promise(resolve=>setTimeout(resolve,0));});
+const host=(label:string)=>root!.root.findAllByType("NativeTouchableView" as any).find(n=>n.props.accessibilityLabel===label)!;
+beforeEach(async()=>{vi.restoreAllMocks();storage.__reset();runTestControl(__resetLocalKeyLifecycleForTests);runTestControl(resetAnalysisGenerationMirrors);vault.lock();await api.setSession("Native gesture receipt",USER,"alice");vault.unlock({masterKey:Buffer.alloc(32),authKey:Buffer.alloc(32),dataKey:Buffer.from(KEY)},USER);installLocalDataKey(USER,vault.get().dataKey);patterns=["First Native muted topic","Second Native muted topic"].map((label,i)=>({kind:"topic",label,occurrences:7,confidence:.4,detail:{muted:true,pattern_pid:"topic:native-muted-"+i}}));vi.stubGlobal("fetch",async(url:string)=>{const blob=encrypt(KEY,Buffer.from(JSON.stringify({v:INSIGHTS_PAYLOAD_VERSION,stats:{patterns}})),buildAad("insights",USER,"patterns")).toString("base64"),response=new Response(JSON.stringify({phase:"insight",active_days:40,days_remaining:0,blob}));Object.defineProperty(response,"url",{value:url});return response;});});
+afterEach(async()=>{if(root){await act(async()=>root!.unmount());root=undefined;}vi.restoreAllMocks();vault.lock();await api.clearSession();vi.unstubAllGlobals();});
+it("a held Native unmute gesture retires with its row when a new pattern order replaces that control",async()=>{
+ await act(async()=>{root=ReactTestRenderer.create(<ThemeProvider><InsightsScreen/></ThemeProvider>);});await flush();const disclosure=root!.root.findAllByType("NativeTouchableView" as any).find(n=>n.props.accessibilityLabel?.startsWith("Show muted patterns"))!;expect(disclosure).toBeDefined();await act(async()=>{const release=grantedTouchable(disclosure.props);release();});await flush();const first=host("Unmute this pattern — First Native muted topic");expect(first).toBeDefined();let release!:()=>void;await act(async()=>{release=grantedTouchable(first.props);});patterns=[patterns[1],patterns[0]];const scroll=root!.root.findAll(n=>n.props.refreshControl?.props?.onRefresh).at(0)!;await act(async()=>{await scroll.props.refreshControl.props.onRefresh();});await flush();expect(host("Unmute this pattern — Second Native muted topic")).toBeDefined();await act(async()=>release());await flush();expect(await storage.getItem(accountStorageKey.feedback(USER))).toBeNull();expect(host("Unmute this pattern — First Native muted topic")).toBeDefined();expect(host("Unmute this pattern — Second Native muted topic")).toBeDefined();
+});

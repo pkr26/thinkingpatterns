@@ -1,0 +1,749 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Questionnaires renders a safe public surface after its vault is locked 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Wellbeing measures"
+  <div aria-label="Wellbeing measures" className="segmented" role="radiogroup">
+    <button aria-checked=true className="segmented__opt" role="radio" tabIndex=0 type="button">
+      "PHQ-9"
+    <button aria-checked=false className="segmented__opt" role="radio" tabIndex=-1 type="button">
+      "GAD-7"
+    <button aria-checked=false className="segmented__opt" role="radio" tabIndex=-1 type="button">
+      "PHQ-2"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Standard PHQ-9, GAD-7 and PHQ-2 questionnaires, recorded like everything else: encrypted on this device and shared only through the therapist consent you control. Scores are shown, never interpreted — that belongs to you and your clinician."
+  <p className="note note--warn" style={"whiteSpace":"pre-wrap"}>
+    "Fathom does not monitor these answers or alert a clinician or emergency service. If you may be in immediate danger, call 911 or your local emergency number now; support resources are always available from Get help."
+  <div className="stack" style={"gap":"var(--space-2)"}>
+    <p className="note" style={"whiteSpace":"pre-wrap"}>
+      "Little interest or pleasure in doing things"
+    <div className="row row--wrap">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Not at all"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Several days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "More than half the days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Nearly every day"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+  <div className="stack" style={"gap":"var(--space-2)"}>
+    <p className="note" style={"whiteSpace":"pre-wrap"}>
+      "Feeling down, depressed, or hopeless"
+    <div className="row row--wrap">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Not at all"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Several days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "More than half the days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Nearly every day"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+  <div className="stack" style={"gap":"var(--space-2)"}>
+    <p className="note" style={"whiteSpace":"pre-wrap"}>
+      "Trouble falling or staying asleep, or sleeping too much"
+    <div className="row row--wrap">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Not at all"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Several days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "More than half the days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Nearly every day"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+  <div className="stack" style={"gap":"var(--space-2)"}>
+    <p className="note" style={"whiteSpace":"pre-wrap"}>
+      "Feeling tired or having little energy"
+    <div className="row row--wrap">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Not at all"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Several days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "More than half the days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Nearly every day"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+  <div className="stack" style={"gap":"var(--space-2)"}>
+    <p className="note" style={"whiteSpace":"pre-wrap"}>
+      "Poor appetite or overeating"
+    <div className="row row--wrap">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Not at all"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Several days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "More than half the days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Nearly every day"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+  <div className="stack" style={"gap":"var(--space-2)"}>
+    <p className="note" style={"whiteSpace":"pre-wrap"}>
+      "Feeling bad about yourself — or that you are a failure or have let yourself or your family down"
+    <div className="row row--wrap">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Not at all"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Several days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "More than half the days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Nearly every day"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+  <div className="stack" style={"gap":"var(--space-2)"}>
+    <p className="note" style={"whiteSpace":"pre-wrap"}>
+      "Trouble concentrating on things, such as reading or watching television"
+    <div className="row row--wrap">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Not at all"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Several days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "More than half the days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Nearly every day"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+  <div className="stack" style={"gap":"var(--space-2)"}>
+    <p className="note" style={"whiteSpace":"pre-wrap"}>
+      "Moving or speaking so slowly that other people could have noticed — or being so fidgety or restless that you have been moving a lot more than usual"
+    <div className="row row--wrap">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Not at all"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Several days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "More than half the days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Nearly every day"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+  <div className="stack" style={"gap":"var(--space-2)"}>
+    <p className="note" style={"whiteSpace":"pre-wrap"}>
+      "Thoughts that you would be better off dead, or of hurting yourself in some way"
+    <div className="row row--wrap">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Not at all"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Several days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "More than half the days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Nearly every day"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+  <div className="stack">
+    <div aria-label="0 of 9 answered" aria-valuemax=100 aria-valuemin=0 aria-valuenow=0 className="progress-track" role="progressbar">
+      <div className="progress-fill" style={"width":"0%"}>
+  <span className="note note--muted">
+    "0 of 9 answered"
+  <div className="banner banner--error" role="alert">
+    "Your session locked — sign in again."
+  <button className="btn btn--block" disabled=false type="button">
+    "Save measure"
+<section className="card">
+  <h2 className="card__title">
+    "Your trend"
+  <p className="note" role="status" style={"whiteSpace":"pre-wrap"}>
+    "Loading…"
+  <div aria-hidden="true" className="stack">
+    <div className="skeleton skeleton--title">
+    <div className="skeleton skeleton--line">
+    <div className="skeleton skeleton--line">
+    <div className="skeleton skeleton--line-short">
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Interpretation belongs to a clinician — this app deliberately shows only your numbers.""
+`;
+
+exports[`Questionnaires renders its settled public empty-account surface in en 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Wellbeing measures"
+  <div aria-label="Wellbeing measures" className="segmented" role="radiogroup">
+    <button aria-checked=true className="segmented__opt" role="radio" tabIndex=0 type="button">
+      "PHQ-9"
+    <button aria-checked=false className="segmented__opt" role="radio" tabIndex=-1 type="button">
+      "GAD-7"
+    <button aria-checked=false className="segmented__opt" role="radio" tabIndex=-1 type="button">
+      "PHQ-2"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Standard PHQ-9, GAD-7 and PHQ-2 questionnaires, recorded like everything else: encrypted on this device and shared only through the therapist consent you control. Scores are shown, never interpreted — that belongs to you and your clinician."
+  <p className="note note--warn" style={"whiteSpace":"pre-wrap"}>
+    "Fathom does not monitor these answers or alert a clinician or emergency service. If you may be in immediate danger, call 911 or your local emergency number now; support resources are always available from Get help."
+  <div className="stack" style={"gap":"var(--space-2)"}>
+    <p className="note" style={"whiteSpace":"pre-wrap"}>
+      "Little interest or pleasure in doing things"
+    <div className="row row--wrap">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Not at all"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Several days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "More than half the days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Nearly every day"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+  <div className="stack" style={"gap":"var(--space-2)"}>
+    <p className="note" style={"whiteSpace":"pre-wrap"}>
+      "Feeling down, depressed, or hopeless"
+    <div className="row row--wrap">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Not at all"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Several days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "More than half the days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Nearly every day"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+  <div className="stack" style={"gap":"var(--space-2)"}>
+    <p className="note" style={"whiteSpace":"pre-wrap"}>
+      "Trouble falling or staying asleep, or sleeping too much"
+    <div className="row row--wrap">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Not at all"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Several days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "More than half the days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Nearly every day"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+  <div className="stack" style={"gap":"var(--space-2)"}>
+    <p className="note" style={"whiteSpace":"pre-wrap"}>
+      "Feeling tired or having little energy"
+    <div className="row row--wrap">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Not at all"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Several days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "More than half the days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Nearly every day"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+  <div className="stack" style={"gap":"var(--space-2)"}>
+    <p className="note" style={"whiteSpace":"pre-wrap"}>
+      "Poor appetite or overeating"
+    <div className="row row--wrap">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Not at all"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Several days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "More than half the days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Nearly every day"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+  <div className="stack" style={"gap":"var(--space-2)"}>
+    <p className="note" style={"whiteSpace":"pre-wrap"}>
+      "Feeling bad about yourself — or that you are a failure or have let yourself or your family down"
+    <div className="row row--wrap">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Not at all"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Several days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "More than half the days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Nearly every day"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+  <div className="stack" style={"gap":"var(--space-2)"}>
+    <p className="note" style={"whiteSpace":"pre-wrap"}>
+      "Trouble concentrating on things, such as reading or watching television"
+    <div className="row row--wrap">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Not at all"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Several days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "More than half the days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Nearly every day"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+  <div className="stack" style={"gap":"var(--space-2)"}>
+    <p className="note" style={"whiteSpace":"pre-wrap"}>
+      "Moving or speaking so slowly that other people could have noticed — or being so fidgety or restless that you have been moving a lot more than usual"
+    <div className="row row--wrap">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Not at all"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Several days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "More than half the days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Nearly every day"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+  <div className="stack" style={"gap":"var(--space-2)"}>
+    <p className="note" style={"whiteSpace":"pre-wrap"}>
+      "Thoughts that you would be better off dead, or of hurting yourself in some way"
+    <div className="row row--wrap">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Not at all"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Several days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "More than half the days"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Nearly every day"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+  <div className="stack">
+    <div aria-label="0 of 9 answered" aria-valuemax=100 aria-valuemin=0 aria-valuenow=0 className="progress-track" role="progressbar">
+      <div className="progress-fill" style={"width":"0%"}>
+  <span className="note note--muted">
+    "0 of 9 answered"
+  <button className="btn btn--block" disabled=false type="button">
+    "Save measure"
+<section className="card">
+  <h2 className="card__title">
+    "Your trend"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "Nothing recorded yet."
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Interpretation belongs to a clinician — this app deliberately shows only your numbers.""
+`;
+
+exports[`Questionnaires renders its settled public empty-account surface in es 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Cuestionarios de bienestar"
+  <div aria-label="Cuestionarios de bienestar" className="segmented" role="radiogroup">
+    <button aria-checked=true className="segmented__opt" role="radio" tabIndex=0 type="button">
+      "PHQ-9"
+    <button aria-checked=false className="segmented__opt" role="radio" tabIndex=-1 type="button">
+      "GAD-7"
+    <button aria-checked=false className="segmented__opt" role="radio" tabIndex=-1 type="button">
+      "PHQ-2"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Cuestionarios estándar PHQ-9, GAD-7 y PHQ-2, registrados como todo lo demás: cifrados en este dispositivo y compartidos solo mediante el consentimiento de terapeuta que usted controla. Los puntajes se muestran, nunca se interpretan — eso le corresponde a usted y a su clínico."
+  <p className="note note--warn" style={"whiteSpace":"pre-wrap"}>
+    "Fathom no vigila estas respuestas ni avisa a un clínico o servicio de emergencias. Si puede estar en peligro inmediato, llame ahora al 911 o al número local de emergencias; los recursos de apoyo siempre están disponibles en Buscar ayuda."
+  <div className="stack" style={"gap":"var(--space-2)"}>
+    <p className="note" style={"whiteSpace":"pre-wrap"}>
+      "Poco interés o placer en hacer las cosas"
+    <div className="row row--wrap">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Para nada"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Varios días"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Más de la mitad de los días"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Casi todos los días"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+  <div className="stack" style={"gap":"var(--space-2)"}>
+    <p className="note" style={"whiteSpace":"pre-wrap"}>
+      "Sentirse desanimado/a, deprimido/a o sin esperanza"
+    <div className="row row--wrap">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Para nada"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Varios días"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Más de la mitad de los días"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Casi todos los días"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+  <div className="stack" style={"gap":"var(--space-2)"}>
+    <p className="note" style={"whiteSpace":"pre-wrap"}>
+      "Dificultad para quedarse dormido/a, mantener el sueño o dormir demasiado"
+    <div className="row row--wrap">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Para nada"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Varios días"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Más de la mitad de los días"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Casi todos los días"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+  <div className="stack" style={"gap":"var(--space-2)"}>
+    <p className="note" style={"whiteSpace":"pre-wrap"}>
+      "Sentirse cansado/a o tener poca energía"
+    <div className="row row--wrap">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Para nada"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Varios días"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Más de la mitad de los días"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Casi todos los días"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+  <div className="stack" style={"gap":"var(--space-2)"}>
+    <p className="note" style={"whiteSpace":"pre-wrap"}>
+      "Poco apetito o comer en exceso"
+    <div className="row row--wrap">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Para nada"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Varios días"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Más de la mitad de los días"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Casi todos los días"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+  <div className="stack" style={"gap":"var(--space-2)"}>
+    <p className="note" style={"whiteSpace":"pre-wrap"}>
+      "Sentirse mal consigo mismo/a — o sentir que es un fracaso o que ha decepcionado a su familia o a usted mismo/a"
+    <div className="row row--wrap">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Para nada"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Varios días"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Más de la mitad de los días"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Casi todos los días"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+  <div className="stack" style={"gap":"var(--space-2)"}>
+    <p className="note" style={"whiteSpace":"pre-wrap"}>
+      "Dificultad para concentrarse en cosas, como leer o ver televisión"
+    <div className="row row--wrap">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Para nada"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Varios días"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Más de la mitad de los días"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Casi todos los días"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+  <div className="stack" style={"gap":"var(--space-2)"}>
+    <p className="note" style={"whiteSpace":"pre-wrap"}>
+      "Moverse o hablar tan despacio que otras personas podrían notarlo — o estar tan inquieto/a que se ha estado moviendo mucho más que de costumbre"
+    <div className="row row--wrap">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Para nada"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Varios días"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Más de la mitad de los días"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Casi todos los días"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+  <div className="stack" style={"gap":"var(--space-2)"}>
+    <p className="note" style={"whiteSpace":"pre-wrap"}>
+      "Pensar que estaría mejor muerto/a o en lastimarse de alguna manera"
+    <div className="row row--wrap">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Para nada"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Varios días"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Más de la mitad de los días"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+      <button aria-pressed=false className="chip" disabled=false type="button">
+        "Casi todos los días"
+        <span className="chip__check">
+          <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+            <path d="M5 12.5l4.5 4.5L19 7.5">
+  <div className="stack">
+    <div aria-label="0 de 9 respondidas" aria-valuemax=100 aria-valuemin=0 aria-valuenow=0 className="progress-track" role="progressbar">
+      <div className="progress-fill" style={"width":"0%"}>
+  <span className="note note--muted">
+    "0 de 9 respondidas"
+  <button className="btn btn--block" disabled=false type="button">
+    "Guardar cuestionario"
+<section className="card">
+  <h2 className="card__title">
+    "Su tendencia"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "Aún nada registrado."
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "La interpretación le corresponde a un clínico — esta app muestra deliberadamente solo sus números.""
+`;

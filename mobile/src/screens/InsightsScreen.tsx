@@ -31,6 +31,7 @@ import { CrisisHelpButton, GhostButton } from "../components/buttons";
 import { requestFailureCopy } from "../components/errors";
 import { recordPatternMute } from "../questionFeedback";
 import { t as tr, dateLocaleTag } from "../strings";
+import { localWriteScopeEpoch } from "../localWriteGuard";
 
 interface PatternDetail {
   sample_entries?: number;
@@ -165,7 +166,6 @@ function kindLabel(kind: string): string {
 }
 
 function fmt(n: number | undefined, digits = 2): string {
-  // Stryker disable next-line ConditionalExpression, LogicalOperator: Number.isFinite implies typeof "number" and every value here is JSON-parsed, so the typeof arm is redundant for every reachable input.
   return typeof n === "number" && Number.isFinite(n) ? n.toFixed(digits) : "—";
 }
 
@@ -483,7 +483,6 @@ export function sparklineSummary(days: MoodDay[]): string {
   const n = days.length;
   const half = Math.floor(n / 2);
   const avg = (slice: MoodDay[]): number =>
-    // Stryker disable next-line ConditionalExpression: an empty half only occurs at n < 2, where the trend word is forced to steady before diff is read.
     slice.length === 0 ? 0 : slice.reduce((sum, d) => sum + d.value, 0) / slice.length;
   const diff = avg(days.slice(half)) - avg(days.slice(0, half));
   // One day is a point, not a trend.
@@ -503,7 +502,6 @@ export function sparklineSummary(days: MoodDay[]): string {
  *  presentation only. */
 function MoodSparkline({ days }: { days: MoodDay[] }) {
   const t = useTheme();
-  // Stryker disable next-line ConditionalExpression: the only call site renders behind moods.length > 2; empty days cannot reach this component.
   if (days.length === 0) return null;
   const height = 44;
   return (
@@ -544,15 +542,12 @@ function sanitizePatterns(raw: unknown): PatternCard[] {
   if (!Array.isArray(raw)) return [];
   const cards: PatternCard[] = [];
   for (const item of raw) {
-    // Stryker disable next-line ConditionalExpression: JSON primitives have no .kind/.label so the checks below drop them; null stays caught by the second clause.
     if (typeof item !== "object" || item === null) continue;
     const p = item as Record<string, unknown>;
     if (typeof p.kind !== "string" || typeof p.label !== "string") continue;
-    // Stryker disable next-line ConditionalExpression, LogicalOperator: Number.isFinite implies typeof number; occurrences arrives via JSON, never NaN/Infinity.
     const occurrences = typeof p.occurrences === "number" && Number.isFinite(p.occurrences)
       ? Math.max(0, Math.floor(p.occurrences))
       : 0;
-    // Stryker disable next-line ConditionalExpression, LogicalOperator: Number.isFinite implies typeof number; confidence arrives via JSON, never NaN/Infinity.
     const confidence = typeof p.confidence === "number" && Number.isFinite(p.confidence)
       ? Math.min(1, Math.max(0, p.confidence))
       : 0;
@@ -570,7 +565,6 @@ function sanitizePatterns(raw: unknown): PatternCard[] {
       detail = validated as PatternDetail;
     }
     cards.push({
-      // Stryker disable next-line MethodExpression: kind is only compared for equality against known kinds far below 64 chars; truncation cannot change an outcome.
       kind: p.kind.slice(0, 64),
       label: p.label.slice(0, MAX_LABEL_CHARS),
       occurrences,
@@ -605,9 +599,7 @@ export function InsightsScreen({ navigation }: { navigation?: any }): React.JSX.
   const [expanded, setExpanded] = useState<string | null>(null);
   const [techExpanded, setTechExpanded] = useState<string | null>(null);
   const [streak, setStreak] = useState(0);
-  // Stryker disable next-line ArrayDeclaration: moods is only read behind moods.length > 2; a 1-element poisoned initial cannot pass that gate before setMoods replaces it.
   const [moods, setMoods] = useState<MoodDay[]>([]);
-  // Stryker disable next-line BooleanLiteral: busy is set by the load effect before any observable read; the initial value is never observably rendered.
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** Optimistic per-pattern mutes (2026-09-19): the card hides immediately;
@@ -627,14 +619,19 @@ export function InsightsScreen({ navigation }: { navigation?: any }): React.JSX.
    *  (clear-on-replace, clear-on-unmount) instead of staying on screen
    *  for the rest of the session. */
   const muteNoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(false);
   const showMuteNote = (message: string) => {
     if (muteNoteTimer.current) clearTimeout(muteNoteTimer.current);
     setMuteNote(message);
     muteNoteTimer.current = setTimeout(() => setMuteNote(null), MUTE_NOTE_MS);
   };
   useEffect(
-    () => () => {
-      if (muteNoteTimer.current) clearTimeout(muteNoteTimer.current);
+    () => {
+      mountedRef.current = true;
+      return () => {
+        mountedRef.current = false;
+        if (muteNoteTimer.current) clearTimeout(muteNoteTimer.current);
+      };
     },
     [],
   );
@@ -653,6 +650,7 @@ export function InsightsScreen({ navigation }: { navigation?: any }): React.JSX.
    *  lock), and a queue failure only costs the optimistic state: the
    *  pattern returns on the next load, which is the honest direction. */
   const mutePattern = (p: PatternCard, mute: boolean) => {
+    if (!mountedRef.current) return;
     const pid = pidOf(p);
     if (!pid) return;
     touchActivity();
@@ -660,8 +658,14 @@ export function InsightsScreen({ navigation }: { navigation?: any }): React.JSX.
     showMuteNote(mute ? tr("insights.mutedNote") : tr("insights.unmutedNote"));
     void (async () => {
       try {
+        const scope = localWriteScopeEpoch();
+        const owner = vault.ownerUserId();
+        if (!vault.isUnlocked()) return;
+        const dataKey = vault.get().dataKey;
         const userId = await api.getUserId();
-        if (userId) await recordPatternMute(vault.get().dataKey, userId, pid, mute);
+        const current = () => mountedRef.current && scope === localWriteScopeEpoch() && vault.isUnlocked() && vault.ownerUserId() === owner && vault.get().dataKey === dataKey;
+        if (!current()) return;
+        if (userId && (owner === null || userId === owner)) await recordPatternMute(dataKey, userId, pid, mute, current);
       } catch {
         // The optimistic state stands for this session; nothing to alert.
       }
@@ -686,7 +690,7 @@ export function InsightsScreen({ navigation }: { navigation?: any }): React.JSX.
       progressRead = await beginProgressRead();
       if (epoch !== loadEpochRef.current) return;
       if (!progressRead) throw new Error(tr("common.sessionDamagedTitle"));
-      const summary = await api.insights();
+      const summary = await api.insights(() => epoch === loadEpochRef.current);
       if (epoch !== loadEpochRef.current) return;
       const currentOwner = await api.getUserId();
       if (epoch !== loadEpochRef.current) return;
@@ -697,7 +701,6 @@ export function InsightsScreen({ navigation }: { navigation?: any }): React.JSX.
         throw new Error(tr("insights.unknownPhase"));
       }
       setPhase(summary.phase);
-      // Stryker disable next-line ConditionalExpression, LogicalOperator: Number.isFinite implies typeof number; days_remaining arrives via JSON and the non-numeric case is pinned by test.
       setRemaining(typeof summary.days_remaining === "number" && Number.isFinite(summary.days_remaining) ? summary.days_remaining : 0);
       // The active-days counter applies from THIS response (audit L-59):
       // refreshActiveDays() here issued a second GET /insights per load —
@@ -729,7 +732,7 @@ export function InsightsScreen({ navigation }: { navigation?: any }): React.JSX.
         // generation must equal the plaintext echo and never move below
         // this device's pinned high-water mark — a silent replay of an
         // older valid-GCM blob otherwise renders as today's truth.
-        await checkAnalysisGeneration(userId, payload.state_seq, summary.state_seq);
+        await checkAnalysisGeneration(userId, payload.state_seq, summary.state_seq, () => epoch === loadEpochRef.current);
         if (epoch !== loadEpochRef.current) return;
         setLanguageNote(payload.stats?.language === "other");
         const list = sanitizePatterns(payload.stats?.patterns);
@@ -748,13 +751,13 @@ export function InsightsScreen({ navigation }: { navigation?: any }): React.JSX.
       if (progressRead) finishProgressRead(progressRead);
       if (epoch === loadEpochRef.current) setBusy(false);
     }
-  }, // Stryker disable next-line ArrayDeclaration: constant deps are equivalent under the test seam (the mocked applyActiveDays has a stable identity); in production the dependency keeps the callback honest.
+  },
      [applyActiveDays, beginProgressRead, finishProgressRead]);
 
   React.useEffect(() => {
     load();
     return () => { loadEpochRef.current++; };
-  }, // Stryker disable next-line ArrayDeclaration: constant deps under the stable test seam described above.
+  },
      [load]);
 
   const cardStyles = makeCardStyles(t);
@@ -849,7 +852,6 @@ export function InsightsScreen({ navigation }: { navigation?: any }): React.JSX.
             </View>
           );
         }
-        // Stryker disable next-line StringLiteral: the fallback key hits no STATE_LABELS entry for every possible value; any replacement key still lands on observed.
         const stateKey = STATE_LABEL_KEYS[p.detail?.pattern_state ?? ""];
         const stateLabel = stateKey ? tr(stateKey) : tr("insights.state.observed");
         const isOpen = expanded === key;

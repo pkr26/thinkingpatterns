@@ -385,8 +385,8 @@ async function requestWithResponse<T>(
   if (!response.ok) {
     throw new ApiError(
       response.status,
-      message(data.detail, response.status),
-      typeof data.code === "string" ? data.code : undefined,
+      message(data?.detail, response.status),
+      typeof data?.code === "string" ? data.code : undefined,
     );
   }
   return { data: data as T, headers: response.headers };
@@ -433,8 +433,8 @@ async function authRequest<T>(
   if (!response.ok) {
     throw new ApiError(
       response.status,
-      message(data.detail, response.status),
-      typeof data.code === "string" ? data.code : undefined,
+      message(data?.detail, response.status),
+      typeof data?.code === "string" ? data.code : undefined,
     );
   }
   return data as T;
@@ -903,8 +903,8 @@ export const api = {
     if (!response.ok) {
       throw new ApiError(
         response.status,
-        message(data.detail, response.status),
-        typeof data.code === "string" ? data.code : undefined,
+        message(data?.detail, response.status),
+        typeof data?.code === "string" ? data.code : undefined,
       );
     }
     return null;

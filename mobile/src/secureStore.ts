@@ -72,6 +72,18 @@ export function setSecureStoreBackend(next: SecureStoreBackend | null): void {
 }
 
 let cachedKey: Buffer | null = null;
+// A legacy read is a physical write too. Keep its rewrite in the same
+// per-slot order as credential publication/removal, so an admitted old
+// rewrite cannot land after a newer login or logout.
+const slotWrites = new Map<string, Promise<unknown>>();
+function serializedSlotWrite<T>(key: string, operation: () => Promise<T>): Promise<T> {
+  const previous = slotWrites.get(key) ?? Promise.resolve();
+  const pending = previous.then(operation, operation);
+  const settled = pending.catch(() => {});
+  slotWrites.set(key, settled);
+  void settled.then(() => { if (slotWrites.get(key) === settled) slotWrites.delete(key); });
+  return pending;
+}
 /** Single-flight initialization: concurrent first callers share ONE
  *  in-flight promise. Without it, two first calls both read null, generate
  *  DIFFERENT keys and both write — the module cache then holds one key
@@ -117,7 +129,6 @@ async function loadDeviceKey(): Promise<Buffer> {
 }
 
 function deviceKey(): Promise<Buffer> {
-  // Stryker disable next-line ConditionalExpression: cachedKey is only ever set inside loadDeviceKey, which always leaves keyPromise non-null resolving to the same Buffer — the fast path is indistinguishable from returning keyPromise
   if (cachedKey) return Promise.resolve(cachedKey);
   // A failed initialization must not poison later callers: drop the promise
   // so the next call retries fresh.
@@ -128,17 +139,20 @@ function deviceKey(): Promise<Buffer> {
   return keyPromise;
 }
 
-async function setEncrypted(key: string, value: string): Promise<void> {
-  // Stryker disable next-line StringLiteral: an empty encoding string falls back to Buffer's default utf8 decoding (verified byte-identical for every input)
-  const blob = encrypt(await deviceKey(), Buffer.from(value, "utf8"));
-  await backend.setItem(key, JSON.stringify({ v: 1, c: blob.toString("base64") }));
+async function setEncryptedNow(key: string, value: string): Promise<void> {
+  const plain = Buffer.from(value, "utf8");
+  try {
+    const blob = encrypt(await deviceKey(), plain);
+    await backend.setItem(key, JSON.stringify({ v: 1, c: blob.toString("base64") }));
+  } finally { plain.fill(0); }
 }
 
 export const secureStore = {
-  setItem: setEncrypted,
+  setItem: (key: string, value: string): Promise<void> => serializedSlotWrite(key, () => setEncryptedNow(key, value)),
   /** null when absent; undefined-vault-safe: corrupt ciphertext reads as
    *  absent (a wiped/tampered store must not brick the session). */
   async getItem(key: string): Promise<string | null> {
+    let plain: Buffer | null = null;
     const raw = await backend.getItem(key);
     if (!raw) return null;
     if (raw.startsWith("{")) {
@@ -148,23 +162,31 @@ export const secureStore = {
       try {
         const parsed = JSON.parse(raw) as { v?: unknown; c?: unknown };
         if (parsed.v !== 1 || typeof parsed.c !== "string") return null;
-        return decrypt(await deviceKey(), Buffer.from(parsed.c, "base64")).toString("utf8");
+        plain = decrypt(await deviceKey(), Buffer.from(parsed.c, "base64"));
+        return plain.toString("utf8");
       } catch {
         return null;
-      }
+      } finally { plain?.fill(0); }
     }
     // Legacy bare-base64 ciphertext — read-through migration to the v1
     // envelope (same idiom as the mood log). A failed rewrite never fails
     // the read; the legacy copy is only dropped once the new write lands.
     try {
-      const value = decrypt(await deviceKey(), Buffer.from(raw, "base64")).toString("utf8");
-      await setEncrypted(key, value).catch(() => {});
+      plain = decrypt(await deviceKey(), Buffer.from(raw, "base64"));
+      const value = plain.toString("utf8");
+      await serializedSlotWrite(key, async () => {
+        // A read may have held old ciphertext before this slot was replaced
+        // or deleted. Compare inside the write lane before admitting native
+        // migration; public writes/removals use that same lane.
+        if (await backend.getItem(key) !== raw) return;
+        await setEncryptedNow(key, value);
+      }).catch(() => {});
       return value;
     } catch {
       return null;
-    }
+    } finally { plain?.fill(0); }
   },
   async removeItem(key: string): Promise<void> {
-    await backend.removeItem(key);
+    await serializedSlotWrite(key, () => backend.removeItem(key));
   },
 };

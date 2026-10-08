@@ -1,3 +1,4 @@
+import { drainPortalDraftWritesForTests } from "./testControl";
 /** Tiny renderer helpers for portal view tests (react-test-renderer).
  *
  *  Redesign 2026-09-26: components may wrap their labels in styled spans,
@@ -7,7 +8,7 @@ import { act } from "react";
 import RTR from "react-test-renderer";
 import type { ReactTestInstance } from "react-test-renderer";
 import { afterEach } from "vitest";
-import { drainPortalDraftWritesForTests } from "../../src/noteDrafts";
+
 
 type ReactTestRenderer = ReturnType<typeof RTR.create>;
 
@@ -90,6 +91,9 @@ export async function press(root: ReactTestRenderer, label: string): Promise<voi
   const button = root.root.findAllByType("button").find((n) => joined(n) === label);
   if (!button) throw new Error(`no button labeled ${JSON.stringify(label)}`);
   await act(async () => {
+    if (button.props.disabled === true) {
+      throw new Error(`button ${JSON.stringify(label)} is disabled — a browser would do nothing`);
+    }
     // 2026-09-28 audit F1: a submit-typed button carries no onClick — a
     // real browser routes its click through the owning form's submit
     // event, so the helper mirrors that (the browser behavior the old
@@ -99,9 +103,6 @@ export async function press(root: ReactTestRenderer, label: string): Promise<voi
       // and the form's implicit submission in a real browser — the
       // helper used to fire onSubmit anyway. Fail loudly: no legitimate
       // test presses a disabled submit button (fill the form first).
-      if (button.props.disabled === true) {
-        throw new Error(`submit button ${JSON.stringify(label)} is disabled — a browser would do nothing`);
-      }
       let form = button.parent;
       while (form && form.type !== "form") form = form.parent;
       if (!form) throw new Error(`submit button ${JSON.stringify(label)} has no owning form`);

@@ -1,0 +1,1189 @@
+{
+  "schemaVersion": 1,
+  "completedAt": "2026-10-08T01:59:16.072Z",
+  "complete": true,
+  "scope": "Runtime frontend JS/TS/TSX, including entrypoints and public scripts; excludes tests, build tooling, dependencies, and native platform source",
+  "counts": {
+    "sourceFiles": 177,
+    "total": 80362,
+    "runtimeKills": 77244,
+    "equivalent": 3011,
+    "nonTerminating": 103,
+    "resourceExhaustion": 4,
+    "unresolved": 0,
+    "zeroTestObservations": 0,
+    "testTimeoutFailures": 1,
+    "watchdogKillCredit": 0
+  },
+  "validation": {
+    "normalTests": {
+      "passed": 10444,
+      "failed": 0,
+      "pending": 6
+    },
+    "typechecks": {
+      "web": "PASS",
+      "mobile": "PASS",
+      "portal": "PASS"
+    },
+    "productionBuilds": {
+      "web": "PASS",
+      "portal": "PASS"
+    },
+    "pendingReason": "Two optional interoperability fixture generators and four web live-backend drills are skipped in the normal suite; shipping interoperability tests execute."
+  },
+  "packages": [
+    {
+      "package": "web",
+      "displayName": "Web portal",
+      "sourceFiles": 69,
+      "counts": {
+        "total": 33838,
+        "runtimeKills": 32756,
+        "equivalent": 1032,
+        "nonTerminating": 47,
+        "resourceExhaustion": 3,
+        "unresolved": 0,
+        "zeroTestObservations": 0,
+        "testTimeoutFailures": 0
+      },
+      "normalTests": {
+        "passed": 2772,
+        "failed": 0,
+        "pending": 5
+      },
+      "typecheck": "PASS",
+      "build": "PASS",
+      "sri": "PASS"
+    },
+    {
+      "package": "mobile",
+      "displayName": "Mobile portal",
+      "sourceFiles": 92,
+      "counts": {
+        "total": 40300,
+        "runtimeKills": 38727,
+        "equivalent": 1536,
+        "nonTerminating": 36,
+        "resourceExhaustion": 1,
+        "unresolved": 0,
+        "zeroTestObservations": 0,
+        "testTimeoutFailures": 1
+      },
+      "normalTests": {
+        "passed": 6214,
+        "failed": 0,
+        "pending": 1
+      },
+      "typecheck": "PASS"
+    },
+    {
+      "package": "portal",
+      "displayName": "Therapist portal",
+      "sourceFiles": 16,
+      "counts": {
+        "total": 6224,
+        "runtimeKills": 5761,
+        "equivalent": 443,
+        "nonTerminating": 20,
+        "resourceExhaustion": 0,
+        "unresolved": 0,
+        "zeroTestObservations": 0,
+        "testTimeoutFailures": 0
+      },
+      "normalTests": {
+        "passed": 1458,
+        "failed": 0,
+        "pending": 0
+      },
+      "typecheck": "PASS",
+      "build": "PASS",
+      "sri": "PASS"
+    }
+  ],
+  "targets": [
+    {
+      "package": "web",
+      "file": "public/theme-init.js",
+      "sha256": "852b71a66152486901e537e4ce2bd89d6ae670b3ae368d43ad4a4c74981a79d2",
+      "mutants": 26
+    },
+    {
+      "package": "web",
+      "file": "src/api/client.ts",
+      "sha256": "a5af68485aed5737e942287db429777b0fa4c74b21222851229956bbcf4d7c93",
+      "mutants": 1278
+    },
+    {
+      "package": "web",
+      "file": "src/App.tsx",
+      "sha256": "567cc573e98e8ffa9c76ba75727716e62590b4db81bcff0ce42268f942a21941",
+      "mutants": 519
+    },
+    {
+      "package": "web",
+      "file": "src/audio/player.ts",
+      "sha256": "c7a36c51374a734def850d5b941cf1eda8a6b3bc3677308dd260c6d4ac91a2b3",
+      "mutants": 15
+    },
+    {
+      "package": "web",
+      "file": "src/audio/recorder.ts",
+      "sha256": "6d7c6edc63d60f7129bf9acb359b6c4c69603ed53a8847d4e44a7f4d3b062aaa",
+      "mutants": 257
+    },
+    {
+      "package": "web",
+      "file": "src/brain/lexicon.ts",
+      "sha256": "64c17fa1035e5de6b9afc626e070f7cdeb09856ddda2bb3193908421461f6cb4",
+      "mutants": 17452
+    },
+    {
+      "package": "web",
+      "file": "src/brain/sentiment.ts",
+      "sha256": "4663f86bd9df02fdc4a6d6b0c27f831c6b1ac2a331fc31859ea95aee304081ea",
+      "mutants": 426
+    },
+    {
+      "package": "web",
+      "file": "src/brain/stats.ts",
+      "sha256": "53a96e5380f3dabd0806f9e7c0291fc5b9140fd3682345b97a6e9a511d05b438",
+      "mutants": 140
+    },
+    {
+      "package": "web",
+      "file": "src/browserRoute.ts",
+      "sha256": "abce8f93824403267673473f4304bbfb7aae7274171b4ba317cc9e7afc8153e7",
+      "mutants": 28
+    },
+    {
+      "package": "web",
+      "file": "src/crisis.tsx",
+      "sha256": "2b4c96b3ddd041c8ef055267479089bf9ddd6fb20ffb63400c869e1846d81a38",
+      "mutants": 57
+    },
+    {
+      "package": "web",
+      "file": "src/crisisDetect.ts",
+      "sha256": "b2e17281a44bf7cff0804128f19d2b7b1fdccc7a4af2f9f179da2bc88d7e1a15",
+      "mutants": 633
+    },
+    {
+      "package": "web",
+      "file": "src/crisisDialog.ts",
+      "sha256": "e97c503a484953b5aa9c44d860123b18ac2cf7f9f9f6f0c4091ebe4c880e6b4e",
+      "mutants": 20
+    },
+    {
+      "package": "web",
+      "file": "src/crisisPhrases.ts",
+      "sha256": "d5bd045fb31bc80aed4d5956874d7228d5e777e3891069bb31498072eb988dd5",
+      "mutants": 177
+    },
+    {
+      "package": "web",
+      "file": "src/crypto/aad.ts",
+      "sha256": "c844bdae436b06c78256dee104c15a5389800fcd603efc3461894d926894c24e",
+      "mutants": 15
+    },
+    {
+      "package": "web",
+      "file": "src/crypto/core.ts",
+      "sha256": "c8e172a8de189d28f9b5985b328fc927bb2124ddc0e0d3a02ee197a47c628ebb",
+      "mutants": 93
+    },
+    {
+      "package": "web",
+      "file": "src/crypto/envelope.ts",
+      "sha256": "0f923e4cd2deabcefc27dd92608666a0f9c62ccb04c078d36126c624a0658e6f",
+      "mutants": 216
+    },
+    {
+      "package": "web",
+      "file": "src/crypto/keys.ts",
+      "sha256": "104560d8a5d803c8740330ea1b09d0c64f9902f618116a39c09475086ae10d7c",
+      "mutants": 27
+    },
+    {
+      "package": "web",
+      "file": "src/crypto/patient.ts",
+      "sha256": "29934d40acbd827916de5cd61182657db0bc925405f33cb2d481268ee0ba2287",
+      "mutants": 537
+    },
+    {
+      "package": "web",
+      "file": "src/crypto/sharing.ts",
+      "sha256": "a9c41a1a9b99119d5a7a27414ba449c06f847d708d45f93c0bc36881c7615b16",
+      "mutants": 84
+    },
+    {
+      "package": "web",
+      "file": "src/dates.ts",
+      "sha256": "c90d1c2d4ed71a6712637f40d2b99af7b418d4796105990221dc62b0d8e71d9a",
+      "mutants": 6
+    },
+    {
+      "package": "web",
+      "file": "src/entryDraft.ts",
+      "sha256": "fb2ac507b3745fb7ea05a1c4d9d71681de74fb45ffdcd33c89d9ac9ef3341a26",
+      "mutants": 138
+    },
+    {
+      "package": "web",
+      "file": "src/entryId.ts",
+      "sha256": "3cafb7be09d83686f6e159ee7f87bb9f10a12c2d2458e32c1cbf41ca9972f3c0",
+      "mutants": 9
+    },
+    {
+      "package": "web",
+      "file": "src/entryVersions.ts",
+      "sha256": "6ed7eaccf0170c9874f5287281a8aa40ee5d316ce858aa0692c3f30fecd31175",
+      "mutants": 136
+    },
+    {
+      "package": "web",
+      "file": "src/ErrorBoundary.tsx",
+      "sha256": "a031ec74795165def07731744771483696438d79de4030b3affeaa5f0e788bc8",
+      "mutants": 46
+    },
+    {
+      "package": "web",
+      "file": "src/errors.ts",
+      "sha256": "ea251cd1977c666297ec257c637783fec3d1302cc7c7624ee664cfa1d21be816",
+      "mutants": 41
+    },
+    {
+      "package": "web",
+      "file": "src/genericQuestions.ts",
+      "sha256": "e1e0c90958cd8e07226dfd44daaddb4678d7a9f3656e5869ce9a8e43a2891350",
+      "mutants": 136
+    },
+    {
+      "package": "web",
+      "file": "src/historyFind.ts",
+      "sha256": "d15fbddaf786908a87266759a3a7bc86745bfe79b66e4ae6b7271e500fa17dfd",
+      "mutants": 50
+    },
+    {
+      "package": "web",
+      "file": "src/kvstore.ts",
+      "sha256": "a18e57301b34f1d5f7112a2707213899f3367dd754578175bd27a4d108dea9e4",
+      "mutants": 322
+    },
+    {
+      "package": "web",
+      "file": "src/localErasure.ts",
+      "sha256": "d4ac9730d1816a4a8452a7bb0e6f8da5a4a638d4c56dd8711c10a766447b2d15",
+      "mutants": 121
+    },
+    {
+      "package": "web",
+      "file": "src/locales/en.ts",
+      "sha256": "59560af0db7b570f381993e0dd1df4b3674d1843bd285cfc7d7c96e86558773c",
+      "mutants": 1115
+    },
+    {
+      "package": "web",
+      "file": "src/locales/es.ts",
+      "sha256": "6e2e9b46738cafc085f40877f7bc27622650900f57a82605c9f95086165fc995",
+      "mutants": 1115
+    },
+    {
+      "package": "web",
+      "file": "src/locales/preauth.ts",
+      "sha256": "a9d1bada396cecec5f592653b33d5483292cdb31536980cf85ae02f2e64af821",
+      "mutants": 346
+    },
+    {
+      "package": "web",
+      "file": "src/localRotation.ts",
+      "sha256": "ebe3676007fef05fff6b833e69e5970c36abffa1e9243792f98df2825d78737a",
+      "mutants": 211
+    },
+    {
+      "package": "web",
+      "file": "src/main.tsx",
+      "sha256": "5f19c43af1d18c587b880281165af9ba220a3757d1d85d36beb021d8c64198cb",
+      "mutants": 7
+    },
+    {
+      "package": "web",
+      "file": "src/measureCadence.ts",
+      "sha256": "16b0961c71c98ebe6f0c45977131edf7c9dc879e53684bb5591a2991723fafa8",
+      "mutants": 88
+    },
+    {
+      "package": "web",
+      "file": "src/measures.ts",
+      "sha256": "18b5a907c4b46a33271880f77eeb298c5c7c48ea8fef74e12d50502eb3689271",
+      "mutants": 87
+    },
+    {
+      "package": "web",
+      "file": "src/mood.ts",
+      "sha256": "72b7fe64049e408df604f8dc714b98c8bdfd452d13eddd160aaab267c45d71dd",
+      "mutants": 68
+    },
+    {
+      "package": "web",
+      "file": "src/moodLog.ts",
+      "sha256": "59284e2d7562c15282829f6086a9f721f034a430317e7959b4160c28eeccc124",
+      "mutants": 159
+    },
+    {
+      "package": "web",
+      "file": "src/offlineQueue.ts",
+      "sha256": "57c9874c0a8b1a6e740b45ac357153c4d9d7ad9697a67ad8f425fcbefc8d2ea9",
+      "mutants": 718
+    },
+    {
+      "package": "web",
+      "file": "src/ownerStorage.ts",
+      "sha256": "b77b87fdccc806b8f420c75dbdabe0c10cf1792cdd70fb8ecc77def80ed704ff",
+      "mutants": 45
+    },
+    {
+      "package": "web",
+      "file": "src/patientOperation.ts",
+      "sha256": "f220053e8f50aa65927bc02f46951d76e3c98bce7ec875c90c3fa9ae275ebdea",
+      "mutants": 64
+    },
+    {
+      "package": "web",
+      "file": "src/patternMutes.ts",
+      "sha256": "ba8c7196ae9c64c9efae1dfcd25d254b5bd34afc27f451f5cfb4e3b7e36589ec",
+      "mutants": 68
+    },
+    {
+      "package": "web",
+      "file": "src/pendingMeasure.ts",
+      "sha256": "5cc334cc600f15686ce234ef9f57aaa3b12d86e25aaf3c8c953d1126d516e9fe",
+      "mutants": 85
+    },
+    {
+      "package": "web",
+      "file": "src/platform.ts",
+      "sha256": "02cc2b01850d7aadc2df4a363780b62d29124de60a393bbed1238fa75790a412",
+      "mutants": 156
+    },
+    {
+      "package": "web",
+      "file": "src/promptChips.ts",
+      "sha256": "6bbb3e29d6facc8bf9dd48b750c68c122aee2d812738f1fe1a2e158cb2971c4d",
+      "mutants": 24
+    },
+    {
+      "package": "web",
+      "file": "src/questionFeedback.ts",
+      "sha256": "408829c1630662d579c31f0032bb6332aad2ff7a3579cda55f747eb0900af90d",
+      "mutants": 158
+    },
+    {
+      "package": "web",
+      "file": "src/reauth.ts",
+      "sha256": "99170e0706d134a2974d1e5354ceb52a5a12dcecd88faa42d3b9989aec3b8b84",
+      "mutants": 160
+    },
+    {
+      "package": "web",
+      "file": "src/safetyPlan.ts",
+      "sha256": "62bffb61741efaadd72dcc00b612a8a07b363b9b2b7718f813668c6deaeafb5f",
+      "mutants": 94
+    },
+    {
+      "package": "web",
+      "file": "src/sessionLock.ts",
+      "sha256": "9ad5b2aa494f53b01c428388a16cab7ccd3f678c49bfbd14039be8b6ed598dc9",
+      "mutants": 47
+    },
+    {
+      "package": "web",
+      "file": "src/stateSeqGuard.ts",
+      "sha256": "173112a51d80d885ac06db2a39848d5fcf81db431c5d6fcd6f269c3ae1ff732d",
+      "mutants": 75
+    },
+    {
+      "package": "web",
+      "file": "src/strings.ts",
+      "sha256": "697186e6abe13025f73ffc135665bc5911b7011c3b624056028ad3dcdd774e1c",
+      "mutants": 78
+    },
+    {
+      "package": "web",
+      "file": "src/sync.ts",
+      "sha256": "49e057f60a826ae27e99bca014889ed4a796cae431358ac4feb6071732b061de",
+      "mutants": 121
+    },
+    {
+      "package": "web",
+      "file": "src/tabLockdown.ts",
+      "sha256": "79ab68aa08a656e6e94cc690362469380213cf61345695c8333b2b9d090e18ab",
+      "mutants": 30
+    },
+    {
+      "package": "web",
+      "file": "src/theme.ts",
+      "sha256": "5661b865006756f468bd8bb23f410df1c2cbfd1e0189aace4bf2039ab7bb3539",
+      "mutants": 69
+    },
+    {
+      "package": "web",
+      "file": "src/thresholdNotice.ts",
+      "sha256": "b85a7af61f19726f66a7cc21c8f5d9d1a01037cdcfdfc88bea70edec6d6b932f",
+      "mutants": 11
+    },
+    {
+      "package": "web",
+      "file": "src/tokens.ts",
+      "sha256": "1ec863205febc688a3d0f6ac36b84e5dc8dcd886bc270afb5549c73485ae3cbb",
+      "mutants": 170
+    },
+    {
+      "package": "web",
+      "file": "src/ui.tsx",
+      "sha256": "497103150478201d95b0737aa9339c02433ba5febfa5d94762492357270e3741",
+      "mutants": 565
+    },
+    {
+      "package": "web",
+      "file": "src/vault.ts",
+      "sha256": "2a7ace8d974d71d6e2f93c7438c7262e05acc072d75878c8377efc6441aaf133",
+      "mutants": 33
+    },
+    {
+      "package": "web",
+      "file": "src/views/Entry.tsx",
+      "sha256": "b853ef6a1168ad3919e4262350698470b26c860c2023656f954e48bcb84b604a",
+      "mutants": 866
+    },
+    {
+      "package": "web",
+      "file": "src/views/History.tsx",
+      "sha256": "2af6fc13efa83c063a98ec964c6ecc39de86e0a86a13f4b1ac7fc3304c5be75f",
+      "mutants": 802
+    },
+    {
+      "package": "web",
+      "file": "src/views/LoginView.tsx",
+      "sha256": "0bd8de59b1901604fa8bd416b08a5e868896480455b68ce64cf8ea62a880ee04",
+      "mutants": 424
+    },
+    {
+      "package": "web",
+      "file": "src/views/Measures.tsx",
+      "sha256": "5f519d945739be92868561e00ec9b5110b837e149471874da37f202dc58bf82a",
+      "mutants": 433
+    },
+    {
+      "package": "web",
+      "file": "src/views/Onboarding.tsx",
+      "sha256": "860b08888e43514a656638c7ca0060e3eea33d63837abc8c626b494527baad92",
+      "mutants": 52
+    },
+    {
+      "package": "web",
+      "file": "src/views/Patterns.tsx",
+      "sha256": "9eb9a02e640f69dd655e49418bdb040c692cebd1a94506cbfaf81c83e6ee236d",
+      "mutants": 357
+    },
+    {
+      "package": "web",
+      "file": "src/views/Privacy.tsx",
+      "sha256": "e67cb2bb8b0044d024d2e542959dd0c7aae0437c6c9e562dda8cb2746e7b789d",
+      "mutants": 10
+    },
+    {
+      "package": "web",
+      "file": "src/views/Question.tsx",
+      "sha256": "1f56927ee4bcbe3b2defc96d896b7e2c281b89b945c712497f8f5d9043421c89",
+      "mutants": 183
+    },
+    {
+      "package": "web",
+      "file": "src/views/SafetyPlan.tsx",
+      "sha256": "dd9fa845151fb31514ac4865229a398849cc0374892ece29a57552cfc9d03f3a",
+      "mutants": 116
+    },
+    {
+      "package": "web",
+      "file": "src/views/Settings.tsx",
+      "sha256": "1c1dd878e58470ceb833fea2b83cb0282251861f38c9166a12b522096452abde",
+      "mutants": 1147
+    },
+    {
+      "package": "web",
+      "file": "src/views/Share.tsx",
+      "sha256": "8d851c06f026aaa1e4ebd5b20b47c30906e2269f8a0048ab2d9370713afc9bd7",
+      "mutants": 476
+    },
+    {
+      "package": "mobile",
+      "file": "App.tsx",
+      "sha256": "26e843fc966e99e82b3ae475fa879afd8dac72752dd4c378ce7cf8b3b9754215",
+      "mutants": 45
+    },
+    {
+      "package": "mobile",
+      "file": "index.js",
+      "sha256": "bc5dfcbe9c4ff37f77693a5af64d753c7f5f1967eb63231a483c3ee574e31857",
+      "mutants": 3
+    },
+    {
+      "package": "mobile",
+      "file": "installPolyfills.cjs",
+      "sha256": "9d2a19c4699b323eda0bf6f10ccaac6f98be0f93d967b4e55414111413f3908e",
+      "mutants": 2
+    },
+    {
+      "package": "mobile",
+      "file": "src/accountErasure.ts",
+      "sha256": "7599353043f71ba68798381cf94354c6ec52bf2efe2c7cc21cc1973683437ca6",
+      "mutants": 230
+    },
+    {
+      "package": "mobile",
+      "file": "src/accountStorage.ts",
+      "sha256": "11217101aa61966a5a0e42f27345d3d498f434981ececf784c085d9560ba44b9",
+      "mutants": 164
+    },
+    {
+      "package": "mobile",
+      "file": "src/api/client.ts",
+      "sha256": "ef4620103dd2921a2d484b0c795df85fa3820450827eea6227b9ca51524e4c59",
+      "mutants": 1673
+    },
+    {
+      "package": "mobile",
+      "file": "src/audio/playback.ts",
+      "sha256": "28222aa0bf85a5ec741f2186caf962469e8f91172ed14cb8ee983fb642de2b74",
+      "mutants": 29
+    },
+    {
+      "package": "mobile",
+      "file": "src/audio/recorder.ts",
+      "sha256": "232d021bb33fdeade079264356fb788728a34b44e58a4889e8e0732e708adea3",
+      "mutants": 262
+    },
+    {
+      "package": "mobile",
+      "file": "src/audio/voiceScratch.ts",
+      "sha256": "a96ee14df0c681cb3f56671d6972261bca414f707676e5f0a8ea6ec7984334f6",
+      "mutants": 79
+    },
+    {
+      "package": "mobile",
+      "file": "src/audioQueue.ts",
+      "sha256": "94e49fe2c589de680680d14f722ebec3db2ca5b2a8fac68270b80ae598831aab",
+      "mutants": 542
+    },
+    {
+      "package": "mobile",
+      "file": "src/biometricUnlock.ts",
+      "sha256": "9cff9f262257cc95ff489e81ea1071f4dcb6f110b0ffc575866ea45a24cd788c",
+      "mutants": 132
+    },
+    {
+      "package": "mobile",
+      "file": "src/brain/lexicon.ts",
+      "sha256": "64c17fa1035e5de6b9afc626e070f7cdeb09856ddda2bb3193908421461f6cb4",
+      "mutants": 17452
+    },
+    {
+      "package": "mobile",
+      "file": "src/brain/sentiment.ts",
+      "sha256": "35a28f0ea1cb90dfee16f102f228123c1b5de61f1ba2c073192a7a6b879d15ad",
+      "mutants": 412
+    },
+    {
+      "package": "mobile",
+      "file": "src/brain/stats.ts",
+      "sha256": "d3b57bffb5e664f692e50dd3aad87e731fab0b896c3a566ce025a2deabdc45e4",
+      "mutants": 140
+    },
+    {
+      "package": "mobile",
+      "file": "src/brainSync.ts",
+      "sha256": "1d766e924e03a32456105eb957d10734069cc34dc5ace0226e0e5c1c641abb1e",
+      "mutants": 1
+    },
+    {
+      "package": "mobile",
+      "file": "src/components/BottomNav.tsx",
+      "sha256": "0330755bef1681936cd865a4cf6ff559c41f5a130b33e1beab1a17ed38bacb0e",
+      "mutants": 62
+    },
+    {
+      "package": "mobile",
+      "file": "src/components/buttons.tsx",
+      "sha256": "6b98d08a844522bdaf1f3726171830c179c53eae9bdb422864f58ec04d9fd63a",
+      "mutants": 44
+    },
+    {
+      "package": "mobile",
+      "file": "src/components/errors.ts",
+      "sha256": "81b245c6d531fe86ee3b8b440c810a2f1b7782cbf1f3a92320a202da37377d35",
+      "mutants": 44
+    },
+    {
+      "package": "mobile",
+      "file": "src/components/InlineStatus.tsx",
+      "sha256": "60d56c802c2e01013b18b72b14f10e85615d2c013531d56bba5f07bcaf0dacb7",
+      "mutants": 22
+    },
+    {
+      "package": "mobile",
+      "file": "src/components/keyConsent.ts",
+      "sha256": "f1632e1c994b797de8dece9376d9957ded742864f1165389b49904f628c7dc8b",
+      "mutants": 8
+    },
+    {
+      "package": "mobile",
+      "file": "src/components/MoodCalendar.tsx",
+      "sha256": "27ca96179ae499e9dfb6b75a45ddccf9d95c1e7f069db5d49a08209dad6b7661",
+      "mutants": 112
+    },
+    {
+      "package": "mobile",
+      "file": "src/crisisDetect.ts",
+      "sha256": "b2e17281a44bf7cff0804128f19d2b7b1fdccc7a4af2f9f179da2bc88d7e1a15",
+      "mutants": 633
+    },
+    {
+      "package": "mobile",
+      "file": "src/crisisDialog.ts",
+      "sha256": "2508b69f5af604a88408ffb03a96efd8eef90117860dc688d56eed374c692ac8",
+      "mutants": 28
+    },
+    {
+      "package": "mobile",
+      "file": "src/crisisPhrases.ts",
+      "sha256": "d5bd045fb31bc80aed4d5956874d7228d5e777e3891069bb31498072eb988dd5",
+      "mutants": 177
+    },
+    {
+      "package": "mobile",
+      "file": "src/crypto/aad.ts",
+      "sha256": "69a7e69d1187c2387853554f081ef0862e5fb1495817128b66df4d0ad7183bf1",
+      "mutants": 17
+    },
+    {
+      "package": "mobile",
+      "file": "src/crypto/engine.native.ts",
+      "sha256": "ccfa129878034b9a2f32f69558c307d2fd7d6ae764a8300cb327ee86a31e4c57",
+      "mutants": 0
+    },
+    {
+      "package": "mobile",
+      "file": "src/crypto/engine.ts",
+      "sha256": "c3222a676bf2adc355ca9e1af9bef4734cb5d578b95da92c1d1309db2dcea19b",
+      "mutants": 4
+    },
+    {
+      "package": "mobile",
+      "file": "src/crypto/envelope.ts",
+      "sha256": "beee530f4d90b974a1c6400c529ad83dfa1defc03ef5acec66f990d16e8182b9",
+      "mutants": 41
+    },
+    {
+      "package": "mobile",
+      "file": "src/crypto/journalCrypto.ts",
+      "sha256": "99e385a1c6fe72fd5e9b449ae0e7843f0ce4d8ba58c0711d2f3bc65b2951930b",
+      "mutants": 162
+    },
+    {
+      "package": "mobile",
+      "file": "src/crypto/kdf.ts",
+      "sha256": "53b75566613efad59a2d97d989fa2f1df75ed22f820ac545d1ea81c6242cb42b",
+      "mutants": 59
+    },
+    {
+      "package": "mobile",
+      "file": "src/crypto/keyEnvelope.ts",
+      "sha256": "6d98b18c9cfdbbb64d39b731502deff7e62e9ee0fda679610ff71f1c30d2ca7f",
+      "mutants": 108
+    },
+    {
+      "package": "mobile",
+      "file": "src/crypto/recovery.ts",
+      "sha256": "dc799f5f8275ef16d063805ec7b2adff8debd259d83bb7c0166b385dd743fdd4",
+      "mutants": 68
+    },
+    {
+      "package": "mobile",
+      "file": "src/crypto/sharing.ts",
+      "sha256": "1f1e67206968077cfc6f6ae0837c992a2baaa8c152459a5b13c88f1d601563d8",
+      "mutants": 78
+    },
+    {
+      "package": "mobile",
+      "file": "src/entryId.ts",
+      "sha256": "6983db5d1e84deb74178bb540e9e4eff59d0c8f442e1e004448084c39c6e49a5",
+      "mutants": 8
+    },
+    {
+      "package": "mobile",
+      "file": "src/entryVersions.ts",
+      "sha256": "ef792494d3bb51337de7cc40e740967ba22342e2fb02e5241a40c5410ca3aaff",
+      "mutants": 151
+    },
+    {
+      "package": "mobile",
+      "file": "src/envelopeUpgrade.ts",
+      "sha256": "f4a283f1c8e1a94fcb5b26c637b17fdbebd1d4e6cf5b366c9b210bb41ff88799",
+      "mutants": 220
+    },
+    {
+      "package": "mobile",
+      "file": "src/ErrorBoundary.tsx",
+      "sha256": "0f3094e3d0fec459b313718f6819c5b6aceb2699c85268da9c3f19ed45d59e3e",
+      "mutants": 43
+    },
+    {
+      "package": "mobile",
+      "file": "src/genericQuestions.ts",
+      "sha256": "05592c97ed7a8b566890be6a9b6878966c7de4605fa52a010b660bff0525f12c",
+      "mutants": 136
+    },
+    {
+      "package": "mobile",
+      "file": "src/haptics.ts",
+      "sha256": "e01b37ee14e484c05f86ef391d0b4ea6d7b3b7603e9668051df6f43008aae800",
+      "mutants": 32
+    },
+    {
+      "package": "mobile",
+      "file": "src/healthkit.ts",
+      "sha256": "5d35b9883a5c2ff3ce9d6e26eea630bf31fc4ef4e3faf2c6c576764c7b5ebd41",
+      "mutants": 231
+    },
+    {
+      "package": "mobile",
+      "file": "src/historyFind.ts",
+      "sha256": "ce9748348d68d2bb1d9e30eb19aa3ee4bd3376a00004f07610a562ebea70ce0e",
+      "mutants": 50
+    },
+    {
+      "package": "mobile",
+      "file": "src/journalDraft.ts",
+      "sha256": "8c6036b4fe81efda33cf528dcae14b4a9b9a3aed7655fad0531e6164a7af5c3c",
+      "mutants": 234
+    },
+    {
+      "package": "mobile",
+      "file": "src/keyScheme.ts",
+      "sha256": "6e31c0fad1e14fcc2a4c16db8a82c9a3df27effb50d63f3803455835f26e3651",
+      "mutants": 170
+    },
+    {
+      "package": "mobile",
+      "file": "src/languagePref.ts",
+      "sha256": "abd1098ade4786e9ecb9f8dce52c751376c780416354f211e09c457974953736",
+      "mutants": 32
+    },
+    {
+      "package": "mobile",
+      "file": "src/locales/en.ts",
+      "sha256": "6d715087ab22808fae315df8540448e72e88784312e96356c5d0bf6e7b60d4f5",
+      "mutants": 901
+    },
+    {
+      "package": "mobile",
+      "file": "src/locales/es.ts",
+      "sha256": "10c857c1e75972d18109e2c073c8c3bb10eafeef6bf036e5f07a8c114a4a61cb",
+      "mutants": 901
+    },
+    {
+      "package": "mobile",
+      "file": "src/localRekey.ts",
+      "sha256": "2e467386071b2a680d96d3b54f4f70928c6826d54a44f1fd55c54ee420bfb397",
+      "mutants": 288
+    },
+    {
+      "package": "mobile",
+      "file": "src/localWriteGuard.ts",
+      "sha256": "77781415d2d53d327369450d4d07367b2d48607630b6dcbe9fab2227c0069c0a",
+      "mutants": 217
+    },
+    {
+      "package": "mobile",
+      "file": "src/measureReminders.ts",
+      "sha256": "830a3d2bc9a999d2ab189b97ee29866681b2238f435f95210e9f0e3687d03080",
+      "mutants": 153
+    },
+    {
+      "package": "mobile",
+      "file": "src/measures.ts",
+      "sha256": "949bfa82af692010301086766a0d6d5334e8ec1692a884cc27e261813d39d952",
+      "mutants": 85
+    },
+    {
+      "package": "mobile",
+      "file": "src/mood.ts",
+      "sha256": "960ab8cecd2c5b04086e83bef613929bf1dd5380aaae6a3588b3018df0b3aa5a",
+      "mutants": 68
+    },
+    {
+      "package": "mobile",
+      "file": "src/moodLog.ts",
+      "sha256": "49e98165f3e300bb044431e9140dbe44b380b1c68e2d68b1b7dace5edd495bc8",
+      "mutants": 187
+    },
+    {
+      "package": "mobile",
+      "file": "src/nativeFeatures.ts",
+      "sha256": "a5e3252c089de221903709b5e3ae79b4396c6d1ddfd486c572e4cf80d26a7851",
+      "mutants": 338
+    },
+    {
+      "package": "mobile",
+      "file": "src/navigation.tsx",
+      "sha256": "310921baf71d3ee0c8feac2792bf490930d75f490870b659496f055b5e52d166",
+      "mutants": 175
+    },
+    {
+      "package": "mobile",
+      "file": "src/notificationOwnership.ts",
+      "sha256": "da81bd7882dbc0af284cbb8bcc5c0ef0fa063c6533e698e18f27d8b03acdbf8b",
+      "mutants": 37
+    },
+    {
+      "package": "mobile",
+      "file": "src/notificationRoute.ts",
+      "sha256": "9cabcda3c6d0076cc579ab979e9a573f35c2bdfd8b723b436ea60e2e13cd004b",
+      "mutants": 25
+    },
+    {
+      "package": "mobile",
+      "file": "src/offlineQueue.ts",
+      "sha256": "c1ca9950fc75c816c947d34818197761d11b05db3fa8976fa4d8c24ae4c67cb6",
+      "mutants": 642
+    },
+    {
+      "package": "mobile",
+      "file": "src/onboarding.ts",
+      "sha256": "94e4bfe042820e7d79b9e3ea25ce3d0275877759c8fb79fa5cc1ca1680094d50",
+      "mutants": 54
+    },
+    {
+      "package": "mobile",
+      "file": "src/pendingMeasure.ts",
+      "sha256": "9ab4b629ea0326641110b1a03e40f972bcbca6ccfa4e165caa51afc93504a11b",
+      "mutants": 100
+    },
+    {
+      "package": "mobile",
+      "file": "src/phq9.ts",
+      "sha256": "881f62bd6e3517d4f241bf1ebbb9148b888c945c5f42aebded3f09351188419f",
+      "mutants": 13
+    },
+    {
+      "package": "mobile",
+      "file": "src/promptChips.ts",
+      "sha256": "42993ffb365c6d146bfe9db170d548433cb07bd09feaceafe49f1532cd69103d",
+      "mutants": 24
+    },
+    {
+      "package": "mobile",
+      "file": "src/questionFeedback.ts",
+      "sha256": "247208734c0b93a4d251d73d9b3d70d0293f8d0e0104de3af58199026ca01829",
+      "mutants": 196
+    },
+    {
+      "package": "mobile",
+      "file": "src/reauth.ts",
+      "sha256": "774d2a9238f268c06dedec451a7eb51b8ee82a3f32b36a158321619e7b5d8406",
+      "mutants": 184
+    },
+    {
+      "package": "mobile",
+      "file": "src/recoveryFlow.ts",
+      "sha256": "262e181c5e2755f2ca064cf55a132ae90e788dac4f6a049cf7e18910a4b60984",
+      "mutants": 139
+    },
+    {
+      "package": "mobile",
+      "file": "src/reminderPreferences.ts",
+      "sha256": "4dc9b233df4aa27f94e7f982194d0466e02400030261a1f2a8dbb5b1f16d477a",
+      "mutants": 48
+    },
+    {
+      "package": "mobile",
+      "file": "src/reminders.ts",
+      "sha256": "3b8f1c6a2a1b2bcc78033d40c5e86bf03f848fad3f783d97ef3b7635edb48802",
+      "mutants": 101
+    },
+    {
+      "package": "mobile",
+      "file": "src/reminderSync.ts",
+      "sha256": "c2837efeb3fa230ee134eee1f49bbe09217b8c7415eae4f2c8754f862da09b61",
+      "mutants": 23
+    },
+    {
+      "package": "mobile",
+      "file": "src/rotation.ts",
+      "sha256": "711ab75cc0fd9d73b3950a9ec63f50f488920470465c489a2d7bcffb5aa43b16",
+      "mutants": 564
+    },
+    {
+      "package": "mobile",
+      "file": "src/safetyPlan.ts",
+      "sha256": "955e3a2dae417123677e4f0ca77ee6d15e90d9533db8c62bd24835357ee235a5",
+      "mutants": 110
+    },
+    {
+      "package": "mobile",
+      "file": "src/screens/CrisisScreen.tsx",
+      "sha256": "8546a36477ef4adee251809ad4f3f33a246696fcca4eb92b61daa57b2547b062",
+      "mutants": 129
+    },
+    {
+      "package": "mobile",
+      "file": "src/screens/EntryScreen.tsx",
+      "sha256": "4a60a8ee38ac7010745d21225cffdc3dc520cbb08972485714722f434f700f9d",
+      "mutants": 1343
+    },
+    {
+      "package": "mobile",
+      "file": "src/screens/HistoryScreen.tsx",
+      "sha256": "4dfdb23ac1e25b7851c3451fa36c9fa18fbfe5e2f699f141197f4667c02583a3",
+      "mutants": 1377
+    },
+    {
+      "package": "mobile",
+      "file": "src/screens/InsightsScreen.tsx",
+      "sha256": "9895055f79c30ca714e4ae9f16bf4d95c8bbdd60181cb015f4409e3492c4e78d",
+      "mutants": 1397
+    },
+    {
+      "package": "mobile",
+      "file": "src/screens/LoginScreen.tsx",
+      "sha256": "e642a5ffe996ccf64e4d669017c4e94750f77757015632c698750919dc7ac7f5",
+      "mutants": 615
+    },
+    {
+      "package": "mobile",
+      "file": "src/screens/MeasuresScreen.tsx",
+      "sha256": "23571f9794266d3e3054022d55f165158a69eab333f7d7c2ebe29059857477e3",
+      "mutants": 520
+    },
+    {
+      "package": "mobile",
+      "file": "src/screens/OnboardingScreen.tsx",
+      "sha256": "f1e2f849fee755681fda08447bd4cc7644781fa7cc751aad9c11befa59e0e445",
+      "mutants": 131
+    },
+    {
+      "package": "mobile",
+      "file": "src/screens/PrivacyScreen.tsx",
+      "sha256": "3805cdf9bb0ff8994f34b1e3c9af7766089f299f8f391968ab08f20113c729cc",
+      "mutants": 42
+    },
+    {
+      "package": "mobile",
+      "file": "src/screens/QuestionScreen.tsx",
+      "sha256": "bb3d3872cc7978c17e606dcf5c221dac36e5d7b31335b6c2fdb11154c8e18c01",
+      "mutants": 511
+    },
+    {
+      "package": "mobile",
+      "file": "src/screens/RecoveryScreen.tsx",
+      "sha256": "03055511989b946185eea90564da39ca0032e848d6f3bb734c9e9a2439096387",
+      "mutants": 180
+    },
+    {
+      "package": "mobile",
+      "file": "src/screens/SafetyPlanScreen.tsx",
+      "sha256": "7e798a6a7d41905a2297fca4757c897c0467d4b8d6c9099353cab98f3993b59d",
+      "mutants": 339
+    },
+    {
+      "package": "mobile",
+      "file": "src/screens/SettingsScreen.tsx",
+      "sha256": "d31921d3da3381ac5f415fc78d26884a684b21a938df04e72e0ebf99c83bfa95",
+      "mutants": 1866
+    },
+    {
+      "package": "mobile",
+      "file": "src/screens/TherapistShareScreen.tsx",
+      "sha256": "97ecb80c66c2b055339357c7f44eec9609206bdbe12051acc6cbd2956fbf7da0",
+      "mutants": 608
+    },
+    {
+      "package": "mobile",
+      "file": "src/screens/UnlockScreen.tsx",
+      "sha256": "9af5fdc547291922318a274f80207f1f75d4313a8b3a0a1c93b319d2ad9a25b1",
+      "mutants": 497
+    },
+    {
+      "package": "mobile",
+      "file": "src/secureStore.ts",
+      "sha256": "673f405d86a168fca541802e6ef793911216ca3a77de03aed9a40d29eefd3ea8",
+      "mutants": 110
+    },
+    {
+      "package": "mobile",
+      "file": "src/stateSeqGuard.ts",
+      "sha256": "99bf9fba3568ec368b69de0cd4e53a5e0dbdb9d2d7a695acabe230a75fb34563",
+      "mutants": 140
+    },
+    {
+      "package": "mobile",
+      "file": "src/store.tsx",
+      "sha256": "e60ee6ffb6ebd9074c79186e3e034e77f9db83a0acf4bc4b5e2918557665eac7",
+      "mutants": 521
+    },
+    {
+      "package": "mobile",
+      "file": "src/strings.ts",
+      "sha256": "cb824871cf0bed4e36d446c6d30793c115b5dd889fd2ad061f3486f09bc43652",
+      "mutants": 40
+    },
+    {
+      "package": "mobile",
+      "file": "src/theme.tsx",
+      "sha256": "29e394de4bb74559d09e29fb8e9be7bd482d9a83ffb576107cc2745b3216a3a9",
+      "mutants": 106
+    },
+    {
+      "package": "mobile",
+      "file": "src/thresholdNotice.ts",
+      "sha256": "0fdabf98cc3eab119fe767e244dd10eec46a4d09cc3d61ed552a223c04f7b460",
+      "mutants": 13
+    },
+    {
+      "package": "mobile",
+      "file": "src/unlockBackoff.ts",
+      "sha256": "86e09d92b8dc8c3802a7a22fbc43c2032885fb461a30343bbbc78b7c0064a608",
+      "mutants": 24
+    },
+    {
+      "package": "mobile",
+      "file": "src/unlockProof.ts",
+      "sha256": "4ef268324882ec21bdf2ca98c7367baea83b46d68bc9f2db6b8ea88cbfede420",
+      "mutants": 23
+    },
+    {
+      "package": "mobile",
+      "file": "src/vault.ts",
+      "sha256": "cbb006d67bd789eea88a251655653529b917d42e4ebbb5d8bd3b8ee0c0f965f3",
+      "mutants": 55
+    },
+    {
+      "package": "portal",
+      "file": "src/aad.ts",
+      "sha256": "c844bdae436b06c78256dee104c15a5389800fcd603efc3461894d926894c24e",
+      "mutants": 15
+    },
+    {
+      "package": "portal",
+      "file": "src/api.ts",
+      "sha256": "c3136eb8266b2c8336cb47561905f82cb5fbde0a208a707f72b2648d2347c485",
+      "mutants": 954
+    },
+    {
+      "package": "portal",
+      "file": "src/App.tsx",
+      "sha256": "d6d07154d22e723ba745685bbf0858bceb42723c42eeea449e2ce4f50fc4a1a4",
+      "mutants": 310
+    },
+    {
+      "package": "portal",
+      "file": "src/browserRoute.ts",
+      "sha256": "c02578d97ddbbbfc804a47f794babbda103ae3672291f573fadd6f7cb331f00a",
+      "mutants": 30
+    },
+    {
+      "package": "portal",
+      "file": "src/crypto.ts",
+      "sha256": "e22624c8ff824bc87d242d4eff5bde32aca60e1f59c2c1d1b8721fdb021b2249",
+      "mutants": 847
+    },
+    {
+      "package": "portal",
+      "file": "src/ErrorBoundary.tsx",
+      "sha256": "068a1971174b3be63acf970ed7e293e61e4a988395b0bda03ca074eea4dc0145",
+      "mutants": 37
+    },
+    {
+      "package": "portal",
+      "file": "src/errors.ts",
+      "sha256": "b3c34b4e013b1cab9f002b1c7efe1efdf7e18253012bb78288964966db866f01",
+      "mutants": 28
+    },
+    {
+      "package": "portal",
+      "file": "src/kvstore.ts",
+      "sha256": "3b6c968eeb8608bc9a61d67e1b7a182e4ee33d0e6e1201ee1163a3059fe022f2",
+      "mutants": 91
+    },
+    {
+      "package": "portal",
+      "file": "src/main.tsx",
+      "sha256": "e526c4b5105a07ed624337bfe294cff68a2fbb78db914b76e93c8fd8c3f52f32",
+      "mutants": 6
+    },
+    {
+      "package": "portal",
+      "file": "src/noteDrafts.ts",
+      "sha256": "bf7ef6b61acc188b36940048aec2e89d6b28290c9d48af8c6e459b5ebbcb00cf",
+      "mutants": 211
+    },
+    {
+      "package": "portal",
+      "file": "src/platform.ts",
+      "sha256": "867108355b3674be46294677b2e18cd541f27b24617fe83e08aeb7265bb9877a",
+      "mutants": 132
+    },
+    {
+      "package": "portal",
+      "file": "src/TotpQr.tsx",
+      "sha256": "04b618af1dda91ed06a0da159e781d53c065ef89946df26623fb810a35560901",
+      "mutants": 29
+    },
+    {
+      "package": "portal",
+      "file": "src/ui.tsx",
+      "sha256": "fd108817291f44b1fd5f98206922304651f5a898955cb0a7d64e6d5425528905",
+      "mutants": 116
+    },
+    {
+      "package": "portal",
+      "file": "src/views/LoginView.tsx",
+      "sha256": "29524b52fac67cf4cf4c6868af7a4aa839ff7e3f97a94f65f8edc128bb1187b8",
+      "mutants": 573
+    },
+    {
+      "package": "portal",
+      "file": "src/views/PatientsView.tsx",
+      "sha256": "5240324aa9e10f22d8190e1ba8472f6a8e591158a291e62563316844ac99a27a",
+      "mutants": 1088
+    },
+    {
+      "package": "portal",
+      "file": "src/views/PatientView.tsx",
+      "sha256": "994ea9f0338d2bd9b645fc6f282a01f400ac104ba9bf906b090c774f7676a158",
+      "mutants": 1757
+    }
+  ],
+  "reviewedDispositions": {
+    "path": "reviewed-dispositions.json.gz",
+    "sha256": "596acf77ab0d2efbedb24cd46e250451ab58342caf84b611e395a23604c224fd",
+    "counts": {
+      "Equivalent": 3011,
+      "NonTermination": 103,
+      "ResourceExhaustion": 4
+    },
+    "sourceExcerptEncoding": "completeContainingLinesReference expands to sourceExcerpts. References are SHA256 of UTF-8 JSON with sorted keys and compact separators; repeated source excerpts are retained once."
+  },
+  "localEvidence": {
+    "authority": "reports/mutation-2026-10-07/frontend-final-authority-index.json",
+    "authoritySha256": "3c4a228a5d4cdb03fd7622e16f0a3f8fa1645d58d59db8747d93a08d6ea653f6",
+    "note": "Raw execution reports, complete normal-test logs, source snapshots, superseded fixtures and independent peer receipts are retained locally in ignored campaign directories. Published disposition evidence references those local artifacts; the code, independent behavioral corpora, snapshots and reproducible campaign tools are versioned.",
+    "reviewInputHashes": {
+      "mobile/reports/mutation-2026-10-07/frontend-current-reviews.json": "47f61c3fddc7ef8d9f3c42b1a3601323325c9983e01f6cdcbdbe2b8cd45f6975",
+      "web/reports/mutation-2026-10-05/web-final-current-reviews.json": "80dc6e7ca490041abe1479d6ab3dd77a858c34c7d4afae5efb40d59dc8ac9aaf",
+      "portal/reports/mutation-2026-10-05/all-reviews.json": "5b0dc4e20af3a33c3ce9447bb1db815aefce7fea67c7e0c3a9e55088e898e23b"
+    }
+  },
+  "note": "All current-source operator identities are accounted for. Finite behavioral runtime kills, independently reviewed equivalents, causally reviewed nontermination and resource exhaustion are separate. Historical raw reports and superseded fixtures remain preserved. One mobile raw test-timeout failure is linked to causal nontermination and receives no runtime-kill credit. No zero-test observations or ignored/compile/runtime errors are selected. Mobile fixtures test exported SDK/module contracts and do not claim simulator or end-to-end native device execution."
+}

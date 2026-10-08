@@ -1,3 +1,4 @@
+import { runTestControl } from "./helpers/testControl";
 /**
  * S-5 (pentest 2026-09-26): the escalating offline-unlock failure pad.
  * Pins the delay curve (first failure pays the historical 500 ms, doubling
@@ -26,8 +27,8 @@ const USER = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 beforeEach(async () => {
   storage.__reset();
   (Keychain as unknown as { __reset: () => void }).__reset();
-  __resetLocalKeyLifecycleForTests();
-  setSecureStoreBackend(null);
+  runTestControl(__resetLocalKeyLifecycleForTests);
+  runTestControl(setSecureStoreBackend, null);
   await api.setSession("token", USER, "alice");
 });
 

@@ -158,7 +158,7 @@ export async function upgradeKeyProtection(input: {
   // --- 4. possession proof + upload --------------------------------------------
   try {
     assertCurrent();
-    const session = await api.openProcessingSession(dataKeyCopy.toString("base64"));
+    const session = await api.openProcessingSession(dataKeyCopy.toString("base64"), permit);
     assertCurrent();
     await api.upgradeKeyEnvelope(params, wrappedB64, String(session.session_token), verifierB64);
     assertCurrent();

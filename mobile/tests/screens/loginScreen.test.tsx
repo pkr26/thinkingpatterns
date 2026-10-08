@@ -1,3 +1,4 @@
+import { runTestControl } from "../helpers/testControl";
 /**
  * LoginScreen: register/login flows, short-password gate, key custody on
  * failure (derived buffers zeroized, vault locked), the mode toggle, and
@@ -54,7 +55,7 @@ async function confirmAge18(root: Awaited<ReturnType<typeof render>>): Promise<v
 }
 
 beforeEach(() => {
-  __resetLocalKeyLifecycleForTests();
+  runTestControl(__resetLocalKeyLifecycleForTests);
   resetApi(api as never);
   lastDerived = null;
   vi.mocked(deriveKeysAsync).mockReset();
@@ -183,13 +184,13 @@ describe("registration", () => {
 
   it("the age declaration renders in Spanish under the es locale (safety copy)", async () => {
     const { __setLocaleForTests } = await import("../../src/strings");
-    __setLocaleForTests("es");
+    runTestControl(__setLocaleForTests, "es");
     try {
       const root = await render(<LoginScreen />);
       await pressLabel(root, "¿Primera vez aquí? Crear una cuenta");
       expect(textOf(root)).toContain("Tengo 18 años o más");
     } finally {
-      __setLocaleForTests("en");
+      runTestControl(__setLocaleForTests, "en");
     }
   });
 

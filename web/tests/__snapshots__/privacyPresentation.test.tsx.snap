@@ -1,0 +1,58 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Privacy disclosures renders a safe public surface after its vault is locked 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Privacy, honestly"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "What this app encrypts: everything you write. Your password derives a key on this device; entries, patterns, questions and measures travel and rest as opaque ciphertext the server cannot read."
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "What the server does hold: your username, the dates and sizes of entries, and insight dates. A database leak reveals when and how much you wrote — never what."
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "One deliberate exception: when you press \\"Refresh patterns\\", your key travels inside a single-use processing session over TLS, is held in memory only, and is destroyed the moment the analysis consumes it."
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "Sharing with a therapist is opt-in, encrypted end to end, and revocable. Revoking ends access immediately; it cannot unread what was already seen."
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Deletion removes you and the full cascade from the live database. Only the access audit log (who read what, when — no content) survives, for accountability."
+  <div style={"display":"flex","gap":8}>
+    <button className="btn btn--small" disabled=false type="button">
+      "Back""
+`;
+
+exports[`Privacy disclosures renders its settled public empty-account surface in en 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Privacy, honestly"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "What this app encrypts: everything you write. Your password derives a key on this device; entries, patterns, questions and measures travel and rest as opaque ciphertext the server cannot read."
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "What the server does hold: your username, the dates and sizes of entries, and insight dates. A database leak reveals when and how much you wrote — never what."
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "One deliberate exception: when you press \\"Refresh patterns\\", your key travels inside a single-use processing session over TLS, is held in memory only, and is destroyed the moment the analysis consumes it."
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "Sharing with a therapist is opt-in, encrypted end to end, and revocable. Revoking ends access immediately; it cannot unread what was already seen."
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Deletion removes you and the full cascade from the live database. Only the access audit log (who read what, when — no content) survives, for accountability."
+  <div style={"display":"flex","gap":8}>
+    <button className="btn btn--small" disabled=false type="button">
+      "Back""
+`;
+
+exports[`Privacy disclosures renders its settled public empty-account surface in es 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Privacidad, con honestidad"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "Lo que esta app cifra: todo lo que usted escribe. Su contraseña genera una llave en este dispositivo; las entradas, patrones, preguntas y cuestionarios viajan y descansan como texto cifrado opaco que el servidor no puede leer."
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "Lo que el servidor sí guarda: su nombre de usuario, las fechas y los tamaños de las entradas, y las fechas de análisis. Una filtración de la base de datos revela cuándo y cuánto escribió — nunca qué."
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "Una excepción deliberada: al pulsar \\"Actualizar patrones\\", su llave viaja dentro de una sesión de procesamiento de un solo uso por TLS, se mantiene solo en memoria y se destruye en el momento en que el análisis la consume."
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "Compartir con un terapeuta es opcional, está cifrado de extremo a extremo y es revocable. Revocar termina el acceso de inmediato; no puede desleer lo que ya se vio."
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Eliminar le quita a usted y toda la cascada de la base de datos activa. Solo sobrevive el registro de auditoría de accesos (quién leyó qué y cuándo — sin contenido), por responsabilidad."
+  <div style={"display":"flex","gap":8}>
+    <button className="btn btn--small" disabled=false type="button">
+      "Volver""
+`;

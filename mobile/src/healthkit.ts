@@ -49,8 +49,8 @@
  * it through the account-erasure flow.
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { commitReminderPreferenceWrite } from "./reminderPreferences";
 import { accountStorageKey } from "./accountStorage";
-import { commitActiveAccountWrite } from "./localWriteGuard";
 import { Platform } from "react-native";
 import type { NativeCapability } from "./nativeFeatures";
 
@@ -293,7 +293,11 @@ export async function getMoodMirrorPref(userId: string): Promise<boolean> {
 }
 
 async function writePrefs(userId: string, prefs: MirrorPrefs): Promise<void> {
-  await commitActiveAccountWrite(userId, () => AsyncStorage.setItem(key(userId), JSON.stringify(prefs)));
+  await commitReminderPreferenceWrite(userId, async check => {
+    check();
+    await AsyncStorage.setItem(key(userId), JSON.stringify(prefs));
+    check();
+  });
 }
 
 /** Flip the opt-in. Throwing surfaces to the caller as an honest failure —

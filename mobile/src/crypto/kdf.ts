@@ -28,15 +28,11 @@ const MIN_SALT_SIZE = 8;
 // bytes, and no warm test worker can cache a stale value.
 function authInfo(): Buffer {
   // "utf8" is Buffer's default; an empty encoding string decodes identically.
-// Stryker disable StringLiteral
 return Buffer.from("mindpattern/auth/v1", "utf8");
-// Stryker restore StringLiteral
 }
 
 function dataInfo(): Buffer {
-  // Stryker disable StringLiteral
 return Buffer.from("mindpattern/data/v1", "utf8");
-  // Stryker restore StringLiteral
 }
 
 export function deriveMasterKey(password: string, salt: Buffer, iterations = KDF_ITERATIONS): Buffer {

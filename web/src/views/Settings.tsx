@@ -112,6 +112,7 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
   const [error, setError] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const generation = useRef(0);
+  const accessGeneration = useRef(0);
 
   /** The account's CURRENT validated kdf_params as the mount-time envelope
    *  read reported them (2026-09-28 audit): null for v1 accounts (the
@@ -124,7 +125,9 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
   const load = useCallback(async (): Promise<void> => {
     const run = generation.current + 1;
     generation.current = run;
-    if (!vault.isUnlocked()) return;
+    const operation = beginOperation();
+    if (!operation) return;
+    const current = () => generation.current === run && operation.current();
     setSchemeUnknown(false);
     setLlmLoad("loading");
     const [meta, consentState, voiceConsent, envelope] = await Promise.all([
@@ -140,7 +143,7 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
           : null),
       ),
     ]);
-    if (generation.current !== run) return;
+    if (!current()) return;
     if (envelope) {
       setKeyScheme(envelope.key_scheme === "v2" ? "v2" : "v1");
       setSchemeUnknown(false);
@@ -148,22 +151,27 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
       // password change left behind — but only while the account really is
       // v2. A v1 account rekeys on every password change by construction,
       // so a leftover flag there is stale and gets swept, not shown.
-      const ownerForHint = vault.ownerUserId();
+      const ownerForHint = operation.owner;
       if (ownerForHint) {
         const hintKey = rekeyHintKey(ownerForHint);
         let hint = await kv.getItem(hintKey);
+        if (!current()) return;
         // One-way migration for builds that stored the hint in
         // localStorage. The KV commit is generation/deletion checked before
         // the legacy value is removed; no new localStorage writes occur.
         const legacyHintKey = legacyRekeyHintKey(ownerForHint);
         if (hint === null && localStore.get(legacyHintKey)) {
           await kv.setItem(hintKey, "1");
+          if (!current()) return;
           localStore.remove(legacyHintKey);
           hint = "1";
         }
         if (hint) {
           if (envelope.key_scheme === "v2") setShowRekeyHint(true);
-          else await kv.removeItem(hintKey);
+          else {
+            await kv.removeItem(hintKey);
+            if (!current()) return;
+          }
         }
       }
       // 2026-09-28 audit: remember the DECLARED params when they parse —
@@ -209,24 +217,39 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
     } else {
       setVoice(null);
     }
-    const owner = vault.ownerUserId();
+    if (!current()) return;
+    const owner = operation.owner;
     if (owner) {
-      setQueued(await queueLength(owner).catch(() => 0));
-      setRejected((await rejectedEntries(owner).catch(() => [])).length);
-      const losses = await queueEvictionSummary(owner).catch(() => ({ rejected: 0, quarantine: 0 }));
+      const [queued, rejected, losses, cadence] = await Promise.all([
+        queueLength(owner).catch(() => 0),
+        rejectedEntries(owner).catch(() => []),
+        queueEvictionSummary(owner).catch(() => ({ rejected: 0, quarantine: 0 })),
+        readMeasureCadence(owner),
+      ]);
+      if (!current()) return;
+      setQueued(queued);
+      setRejected(rejected.length);
       setQueueEvictions(losses.rejected + losses.quarantine);
-      setCadence(await readMeasureCadence(owner));
+      setCadence(cadence);
     }
+    if (!current()) return;
     await loadAccess();
-  }, []);
+  }, [beginOperation]);
 
   const loadAccess = useCallback(async (cursor?: string): Promise<void> => {
+    const operation = beginOperation();
+    if (!operation) return;
+    const run = generation.current;
+    const request = ++accessGeneration.current;
+    const current = () => run === generation.current && request === accessGeneration.current && operation.current();
     try {
       const page = await api.accessLogPage(cursor);
+      if (!current()) return;
       setAccessRows((current) => (cursor && current ? [...current, ...page.rows] : page.rows));
       setAccessCursor(page.nextCursor);
       setAccessError("");
     } catch {
+      if (!current()) return;
       // 2026-09-28 audit (INFO): a page-2 failure must not WIPE the rows
       // already on screen — the fetched pages were true when fetched and
       // the next press retries the cursor. Keep them, surface the honest
@@ -239,7 +262,7 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
         setAccessError("");
       }
     }
-  }, []);
+  }, [beginOperation]);
 
   useEffect(() => {
     void load();
@@ -308,16 +331,23 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
   };
 
   const recoverQueue = async (): Promise<void> => {
-    const owner = vault.ownerUserId();
-    if (!owner) return;
+    const operation = beginOperation();
+    if (!operation) return;
+    const owner = operation.owner;
     setBusy(true);
+    setError("");
     try {
       const moved = await requeueRejected(owner);
-      setQueued(await queueLength(owner));
-      setRejected((await rejectedEntries(owner)).length);
+      if (!operation.current()) return;
+      const [queued, rejected] = await Promise.all([queueLength(owner), rejectedEntries(owner)]);
+      if (!operation.current()) return;
+      setQueued(queued);
+      setRejected(rejected.length);
       setStatus(moved > 0 ? t(moved === 1 ? "settings.recoveredOne" : "settings.recoveredMany", { count: moved }) : t("settings.recoveredNone"));
+    } catch (err) {
+      if (operation.current()) setError(displayError(err, t("errors.generic")));
     } finally {
-      setBusy(false);
+      if (operation.current()) setBusy(false);
     }
   };
 
@@ -326,8 +356,9 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
    * an exact encrypted checkpoint resumes only after remote confirmation.
    * Old-key sessions always lock after confirmed or ambiguous commit. */
   const rotatePassword = async (): Promise<void> => {
-    const owner = vault.ownerUserId();
-    if (!owner || !vault.isUnlocked()) {
+    const operation = beginOperation();
+    const owner = operation?.owner;
+    if (!operation || !owner) {
       setError(t("common.sessionLocked"));
       return;
     }
@@ -347,7 +378,7 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
     }
     setBusy(true);
     setError("");
-    const old = vault.get();
+    const old = operation.keys;
     // FE-4 (pentest 2026-09-29): snapshot BOTH vault buffers BEFORE the
     // first await — vault.get()'s buffers are SHARED, and this flow awaits
     // (queue drain, derivation, every server step) before serializing the
@@ -383,7 +414,7 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
       }
       // FE-4: a lock during the drain leaves nothing moved server-side —
       // abort honestly instead of opening sessions under a dead key.
-      if (!vault.isUnlocked()) {
+      if (!operation.current()) {
         setError(t("common.sessionLocked"));
         return;
       }
@@ -449,7 +480,7 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
 
       // FE-4: a lock during the derivation still leaves nothing moved —
       // abort honestly before opening the processing sessions.
-      if (!vault.isUnlocked()) {
+      if (!operation.current()) {
         setError(t("common.sessionLocked"));
         return;
       }
@@ -461,13 +492,17 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
       let newB64 = "";
       for (const byte of newKey.dataKey) newB64 += String.fromCharCode(byte);
       const oldSession = await api.openProcessingSession(btoa(oldB64));
+      if (!operation.current()) {
+        setError(t("common.sessionLocked"));
+        return;
+      }
       const newSession = await api.openProcessingSession(btoa(newB64));
       // FE-4: a lock while the sessions were opening still leaves the corpus
       // untouched — abort honestly instead of rekeying under a dead
       // session's authorization. (After the rekey lands there are NO more
       // re-checks: H-4 requires the flow to COMPLETE, with the snapshotted
       // old key, so the local re-wraps survive a mid-flow lock.)
-      if (!vault.isUnlocked()) {
+      if (!operation.current()) {
         setError(t("common.sessionLocked"));
         return;
       }
@@ -488,6 +523,7 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
       };
       const credential = await stageLocalRotation(owner,oldDataKey,newKey.dataKey,candidate);
       for (let attempt = 0; attempt < 4; attempt += 1) {
+        if (!operation.current()) return;
         try {
           const result = await api.rekeyStoredData(oldSession.session_token,newSession.session_token,toBase64(oldAuthKey),credential);
           if (!result?.credential_rotated || result.operation_id !== credential.operation_id) throw new Error("The server did not confirm the atomic credential change. Its encrypted checkpoint is retained.");
@@ -504,10 +540,13 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
 
       // MED-3: and the rekey hint with it — the corpus now sits under a
       // fresh key, which is exactly what the hint was asking for.
+      if (!operation.viewCurrent()) return;
       await kv.removeItem(rekeyHintKey(owner));
+      if (!operation.viewCurrent()) return;
       // Apply only pre-staged transforms. A failed local destination retains
       // both ciphertext versions and the journal for fresh-login resume.
       await resumeLocalRotation(owner,newKey.dataKey,credential.new_salt);
+      if (!operation.viewCurrent()) return;
       props.onLockdown(
         t("settings.rotateSuccessNotice"),
       );
@@ -544,9 +583,10 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
    *  one transaction and bumps the token epoch — every session dies with
    *  the 204, so success funnels to the honest lockdown, like v1. */
   const rotatePasswordV2 = async (): Promise<void> => {
-    const owner = vault.ownerUserId();
+    const operation = beginOperation();
+    const owner = operation?.owner;
     const username = sessionUsername();
-    if (!owner || !username || !vault.isUnlocked()) {
+    if (!operation || !owner || !username) {
       setError(t("common.sessionLocked"));
       return;
     }
@@ -563,7 +603,7 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
     }
     setBusy(true);
     setError("");
-    const old = vault.get();
+    const old = operation.keys;
     let newKeys: PatientKeys | null = null;
     let newSalt: Bytes | null = null;
     // 2026-09-28 audit (LOW, the moodLog/Entry M-3 idiom): snapshot BOTH
@@ -602,7 +642,7 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
       }
       // A lock during the envelope fetch: nothing has moved yet — abort
       // honestly instead of opening a session under a dead key.
-      if (!vault.isUnlocked()) {
+      if (!operation.current()) {
         setError(t("common.sessionLocked"));
         return;
       }
@@ -612,7 +652,7 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
       // proves the credential, not the key). Failure here surfaces the
       // honest retry error; there is no tokenless fallback.
       const processingToken = (await api.openProcessingSession(toBase64(dataKey))).session_token;
-      if (!vault.isUnlocked()) {
+      if (!operation.current()) {
         setError(t("common.sessionLocked"));
         return;
       }
@@ -624,7 +664,7 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
       let wrappedDataKeyB64: string;
       try { wrappedDataKeyB64 = await rewrapDataKey(dataKey, wrappingMaster, newSalt, username, params); }
       finally { zeroize(wrappingMaster); }
-      if (!vault.isUnlocked()) {
+      if (!operation.current()) {
         setError(t("common.sessionLocked"));
         return;
       }
@@ -648,7 +688,9 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
       // tells the user the honest difference and offers the full rotation.
       // A failed hint write must never keep an epoch-invalid session alive.
       // The account change itself succeeded, so lock down either way.
+      if (!operation.viewCurrent()) return;
       await kv.setItem(rekeyHintKey(owner), "1").catch(() => undefined);
+      if (!operation.viewCurrent()) return;
       props.onLockdown(t("settings.rotateV2SuccessNotice"));
     } catch (err) {
       setError(displayError(err, t("settings.rotateFailed")));
@@ -672,9 +714,10 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
    *  Nothing the account can see changes: same key, same journal, same
    *  grants; only future password changes become O(1). */
   const upgradeKeyProtection = async (): Promise<void> => {
-    const owner = vault.ownerUserId();
+    const operation = beginOperation();
+    const owner = operation?.owner;
     const username = sessionUsername();
-    if (!owner || !username || !vault.isUnlocked() || !upgradePassword) {
+    if (!operation || !owner || !username || !upgradePassword) {
       setError(t("common.sessionLocked"));
       return;
     }
@@ -688,8 +731,8 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
     // lock landing during the session open or the re-wrap zeroizes them,
     // so the wrap (and the upload) would otherwise run under all-zero
     // bytes. The copy dies in the finally.
-    const dataKey = new Uint8Array(new ArrayBuffer(vault.get().dataKey.length));
-    dataKey.set(vault.get().dataKey);
+    const dataKey = new Uint8Array(new ArrayBuffer(operation.keys.dataKey.length));
+    dataKey.set(operation.keys.dataKey);
     try {
       const { salt } = await auth.saltFor(username);
       saltBytes = fromBase64(salt);
@@ -705,9 +748,10 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
         return;
       }
       typedKeys = await derivePatientKeys(await deriveMasterKey(upgradePassword, saltBytes, params.iterations));
+      if (!operation.current()) return;
       const verifierB64 = toBase64(typedKeys.authKey);
       const session = await api.openProcessingSession(toBase64(dataKey));
-      if (!vault.isUnlocked()) {
+      if (!operation.current()) {
         // A lock during the session open: nothing has moved server-side —
         // abort honestly instead of uploading an envelope under a dead
         // session's authorization.
@@ -715,7 +759,7 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
         return;
       }
       const wrappedDataKeyB64 = await rewrapDataKey(dataKey, typedKeys.masterKey, saltBytes, username, params);
-      if (!vault.isUnlocked()) {
+      if (!operation.current()) {
         setError(t("common.sessionLocked"));
         return;
       }
@@ -725,6 +769,7 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
         session.session_token,
         verifierB64,
       );
+      if (!operation.current()) return;
       setKeyScheme("v2");
       setStatus(t("settings.upgradeDoneNote"));
     } catch (err) {
@@ -765,10 +810,11 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
   const confirmSensitiveAction = async (): Promise<void> => {
     const pending = pendingSensitive;
     if (!pending || busy) return;
+    const operation = beginOperation();
+    if (!operation) return;
     setBusy(true);
     setError("");
-    const owner = vault.ownerUserId();
-    if (!owner) { setBusy(false); return; }
+    const owner = operation.owner;
     let remoteDeleted = false;
     try {
       const action = pending.kind === "llm"
@@ -777,6 +823,7 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
           ? "voice_consent"
           : "account_delete";
       const stepped = await freshStepUp(reauthPassword, action);
+      if (!operation.current()) return;
       if (!stepped.ok) {
         const messages = {
           locked: t("common.reauthLocked"),
@@ -790,6 +837,7 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
       const proof = stepped.proof;
       if (pending.kind === "llm") {
         const result = await api.setLlmConsent(pending.enabled, proof);
+        if (!operation.current()) return;
         setLlm((current) => (current ? {
           ...current,
           enabled: result.enabled && result.active_for_current_policy === true,
@@ -798,6 +846,7 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
         setStatus(pending.enabled ? t("settings.llmEnabledNote") : t("settings.llmDisabledNote"));
       } else if (pending.kind === "voice") {
         const result = await api.setVoiceConsent(pending.enabled, proof);
+        if (!operation.current()) return;
         setVoice((current) => (current ? {
           ...current,
           enabled: result.enabled && result.active_for_current_policy === true,
@@ -806,13 +855,15 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
         setStatus(pending.enabled ? t("settings.voiceEnabledNote") : t("settings.voiceDisabledNote"));
       } else {
         await stageLocalErasure(owner);
+        if (!operation.current()) return;
         await api.deleteAccount(proof);
         remoteDeleted = true;
         await confirmLocalErasure(owner);
-        props.onLockdown(t("settings.deleteDoneNotice"));
+        if (operation.viewCurrent()) props.onLockdown(t("settings.deleteDoneNotice"));
       }
       setPendingSensitive(null);
     } catch (err) {
+      if (!operation.viewCurrent()) return;
       if (pending.kind === "delete" && (remoteDeleted || (err instanceof ApiError && err.status === 410))) {
         props.onLockdown(t("app.erasureIncomplete"));
       } else if (pending.kind === "llm" && err instanceof ApiError && err.code === "llm_unavailable") {

@@ -1,5 +1,5 @@
 /** Fresh-password verification and action-bound step-up for web. */
-import { api, auth, sessionUsername, type StepUpAction } from "./api/client";
+import { api, auth, sessionAbortSignal, sessionUsername, type StepUpAction } from "./api/client";
 import { deriveMasterKey, fromBase64, toBase64, zeroize, type Bytes } from "./crypto/core";
 import { validateKdfParams } from "./crypto/envelope";
 import { derivePatientKeys } from "./crypto/keys";
@@ -71,8 +71,15 @@ export type FreshStepUpResult =
   | { ok: false; reason: "locked" | "no-account" | "wrong-password" | "offline" };
 
 export async function freshStepUp(password: string, action: StepUpAction): Promise<FreshStepUpResult> {
+  const owner = vault.ownerUserId(), username = sessionUsername(), signal = sessionAbortSignal();
+  const original = vault.isUnlocked() ? vault.get() : null;
+  const current = (): boolean => original !== null && !!signal && !signal.aborted && sessionAbortSignal() === signal &&
+    vault.isUnlocked() && vault.ownerUserId() === owner && sessionUsername() === username &&
+    vault.get().authKey === original.authKey && vault.get().dataKey === original.dataKey;
   const verified = await verifyPasswordForVault(password);
   if (!verified.ok) return verified;
+  if (!current()) return { ok: false, reason: "locked" };
   const result = await api.stepUp(verified.verifier, action);
+  if (!current()) return { ok: false, reason: "locked" };
   return { ok: true, proof: result.proof };
 }

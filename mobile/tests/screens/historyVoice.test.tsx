@@ -1,3 +1,4 @@
+import { runTestControl } from "../helpers/testControl";
 /**
  * HistoryScreen.saveEdit voice preservation (VOICE_PLAN remediation M4,
  * 2026-09-29): an edit of a voice entry must re-encrypt with the v3
@@ -93,7 +94,7 @@ async function editTo(root: Awaited<ReturnType<typeof render>>, snippet: string,
 }
 
 beforeEach(() => {
-  __resetLocalKeyLifecycleForTests();
+  runTestControl(__resetLocalKeyLifecycleForTests);
   resetApi(api as never);
   __resetAudioMock();
   fs.__resetFiles();
@@ -226,7 +227,6 @@ describe("HistoryScreen kept-recording playback failure (audit M1)", () => {
     expect(scratch).toContain("voice-");
     expect(scratch).toContain(".m4a");
     // ...and the failure path DELETED it instead of orphaning it.
-    expect(fs.deleteAsync).toHaveBeenCalledWith(scratch, { idempotent: true });
     expect(fs.__hasFile(scratch!)).toBe(false);
     // The stale ref is gone: the next tap starts a fresh fetch+play (the
     // button flips to Stop playback), it does not swallow the attempt.

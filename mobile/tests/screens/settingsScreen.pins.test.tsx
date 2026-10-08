@@ -1,3 +1,4 @@
+import { runTestControl } from "../helpers/testControl";
 /**
  * Deep-mutation pins for SettingsScreen (2026-09-15 Stryker campaign).
  *
@@ -91,7 +92,7 @@ const keys = { masterKey: Buffer.alloc(32), authKey, dataKey: Buffer.alloc(32, 3
 const nav = { popToTop: vi.fn(), navigate: vi.fn() };
 
 beforeEach(async () => {
-  (await import("../../src/localRekey")).__resetLocalKeyLifecycleForTests();
+  runTestControl((await import("../../src/localRekey")).__resetLocalKeyLifecycleForTests);
   resetApi(api as never);
   storage.__reset();
   vi.mocked(clearQueue).mockClear();
@@ -116,7 +117,7 @@ beforeEach(async () => {
   vi.mocked(Share.share).mockReset();
   vi.mocked(Share.share).mockImplementation(async () => ({}));
   vault.lock();
-  vault.unlock({ ...keys }, "user-1");
+  vault.unlock({ masterKey: Buffer.from(keys.masterKey), authKey: Buffer.from(keys.authKey), dataKey: Buffer.from(keys.dataKey) }, "user-1");
   verifyPasswordForVault.mockClear();
   verifyPasswordForVault.mockImplementation(async () => ({ ok: true as const, verifierB64: authKeyB64() }));
 });

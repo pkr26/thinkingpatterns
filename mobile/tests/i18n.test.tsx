@@ -1,3 +1,4 @@
+import { runTestControl } from "./helpers/testControl";
 /**
  * The i18n module (2026-09-19): the t() contract (total lookup, {var}
  * interpolation, es→en→key fallback), catalog completeness (es carries
@@ -79,7 +80,7 @@ const {
 } = await import("../src/strings");
 
 afterEach(() => {
-  __setLocaleForTests("en");
+  runTestControl(__setLocaleForTests, "en");
   Alert.alert.mockClear();
 });
 
@@ -107,7 +108,7 @@ describe("t() under the pinned English locale", () => {
 
 describe("the es→en→key fallback chain", () => {
   it("resolves Spanish copy under the es locale", () => {
-    __setLocaleForTests("es");
+    runTestControl(__setLocaleForTests, "es");
     expect(t("crisis.call988")).toBe("Llame o envíe un mensaje de texto al 988");
   });
 
@@ -116,7 +117,7 @@ describe("the es→en→key fallback chain", () => {
     const spanish = esCatalog[key];
     delete esCatalog[key];
     try {
-      __setLocaleForTests("es");
+      runTestControl(__setLocaleForTests, "es");
       expect(t(key)).toBe(enCatalog[key]);
     } finally {
       esCatalog[key] = spanish!;
@@ -190,7 +191,7 @@ describe("the locale seam", () => {
 
 describe("screens render under es", () => {
   it("CrisisScreen speaks Spanish and keeps every number/URL", async () => {
-    __setLocaleForTests("es");
+    runTestControl(__setLocaleForTests, "es");
     const { CrisisScreen } = await import("../src/screens/CrisisScreen");
     const { render, textOf } = await import("./helpers/rtr");
     const root = await render(<CrisisScreen region="US" />);
@@ -205,7 +206,7 @@ describe("screens render under es", () => {
   });
 
   it("EntryScreen speaks Spanish (editor placeholder, save button, nav) and no English leaks", async () => {
-    __setLocaleForTests("es");
+    runTestControl(__setLocaleForTests, "es");
     const { EntryScreen } = await import("../src/screens/EntryScreen");
     const { vault } = await import("../src/vault");
     const { render, textOf, inputByPlaceholder } = await import("./helpers/rtr");
@@ -227,7 +228,7 @@ describe("screens render under es", () => {
   // display labels (keyed by option value) while the WIRE values — the
   // numeric picks and the English tag tokens — stay locale-independent.
   it("EntryScreen check-in labels localize by value; the saved payload keeps English wire values", async () => {
-    __setLocaleForTests("es");
+    runTestControl(__setLocaleForTests, "es");
     const { EntryScreen } = await import("../src/screens/EntryScreen");
     const { vault } = await import("../src/vault");
     const { encryptEntry } = await import("../src/crypto/journalCrypto");
@@ -287,7 +288,7 @@ describe("2026-09-20 audit copy pins (L-72 / M-36 / M-25 / L-65)", () => {
   });
 
   it("M-36: the Spanish insights copy holds the usted register and no stutter", () => {
-    __setLocaleForTests("es");
+    runTestControl(__setLocaleForTests, "es");
     try {
       // 355-356: these two keys used "tu/tus" in a 100%-usted catalog.
       expect(t("insights.languageTitle")).toBe("Sobre el idioma de su diario");
@@ -302,7 +303,7 @@ describe("2026-09-20 audit copy pins (L-72 / M-36 / M-25 / L-65)", () => {
       );
       expect(t("insights.desc.moodShift")).toContain("han sonado {direction} que su línea base habitual");
     } finally {
-      __setLocaleForTests("en");
+      runTestControl(__setLocaleForTests, "en");
     }
   });
 
@@ -313,7 +314,7 @@ describe("2026-09-20 audit copy pins (L-72 / M-36 / M-25 / L-65)", () => {
       expect(en).toContain("GAD-7");
       expect(en).toContain("PHQ-2");
       expect(en.toLowerCase()).toContain("summary");
-      __setLocaleForTests("es");
+      runTestControl(__setLocaleForTests, "es");
       try {
         const es = t(key);
         expect(es).toContain("PHQ-9");
@@ -321,7 +322,7 @@ describe("2026-09-20 audit copy pins (L-72 / M-36 / M-25 / L-65)", () => {
         expect(es).toContain("PHQ-2");
         expect(es).toContain("resumen");
       } finally {
-        __setLocaleForTests("en");
+        runTestControl(__setLocaleForTests, "en");
       }
     }
     // The stale-state and 409 copy exists and stays calm.
@@ -333,12 +334,12 @@ describe("2026-09-20 audit copy pins (L-72 / M-36 / M-25 / L-65)", () => {
   it("L-65: the partial-registration copy exists in both locales", () => {
     expect(t("login.registerPartialTitle")).toBe("Account created");
     expect(t("login.registerPartialBody")).toContain("Switch to sign-in");
-    __setLocaleForTests("es");
+    runTestControl(__setLocaleForTests, "es");
     try {
       expect(t("login.registerPartialTitle")).toBe("Cuenta creada");
       expect(t("login.registerPartialBody")).toContain("iniciar sesión");
     } finally {
-      __setLocaleForTests("en");
+      runTestControl(__setLocaleForTests, "en");
     }
   });
 

@@ -303,7 +303,6 @@ export function canonicalOrigin(origin: string): string {
     }
     return origin;
   } catch {
-    // Stryker disable next-line BlockStatement: unreachable for production inputs — canonicalOrigin only ever receives URL.origin output (always parseable); the guard exists for direct callers with arbitrary strings
     return origin;
   }
 }
@@ -558,7 +557,6 @@ export function detailToMessage(detail: unknown, status: number): string {
         ? (d as { msg: string }).msg
         : "invalid field",
     );
-    // Stryker disable next-line ConditionalExpression,EqualityOperator: parts mirrors detail's length, so the only reachable false case is detail === []; [].join("; ") sanitizes to "" which falls to the identical `request failed (${status})` fallback
     if (parts.length > 0)
       return sanitizeDetail(parts.join("; ")) || `request failed (${status})`;
   }
@@ -660,7 +658,6 @@ export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
  *  logic, not dialogs: accept only the known slugs (anything else degrades
  *  to undefined, and the caller falls back to status/detail matching). */
 function sanitizeCode(code: unknown): ApiErrorCode | undefined {
-  // Stryker disable next-line ConditionalExpression: Array#includes uses SameValueZero, so any non-string code is never equal to a string slug — the typeof arm is fully subsumed by the includes check
   return typeof code === "string" &&
     (API_ERROR_CODES as readonly string[]).includes(code)
     ? (code as ApiErrorCode)
@@ -709,6 +706,9 @@ export function setUnauthorizedHandler(
 
 interface RequestOptions {
   localWritePermit?: LocalWritePermit;
+  /** A screen-scoped sensitive operation may retire without changing the
+   * account or key. Check its admission at every Native request boundary. */
+  stillCurrent?: () => boolean;
   /** Durable outboxes may flush while the vault is locked. Bind their
    * ciphertext owner to the stored bearer owner at the dispatch boundary. */
   expectedUserId?: string;
@@ -760,7 +760,8 @@ async function request(
   const ownershipEpoch = localWriteScopeEpoch();
   let dispatched = false;
   const assertOwnership = (): void => {
-    let stale = ownershipEpoch !== localWriteScopeEpoch();
+    let stale = ownershipEpoch !== localWriteScopeEpoch() ||
+      (opts.stillCurrent !== undefined && !opts.stillCurrent());
     if (opts.localWritePermit) {
       try {
         assertLocalWritePermit(opts.localWritePermit);
@@ -820,7 +821,7 @@ async function request(
         "The queued ciphertext belongs to another account; no request was sent.",
         "stale_operation",
       );
-    if (!token)
+    if (!token || !token.trim())
       throw new ApiError(
         0,
         "No authenticated session owns the queued ciphertext; no request was sent.",
@@ -900,7 +901,6 @@ async function request(
         );
       }
     } catch (err) {
-      // Stryker disable next-line ConditionalExpression: both arms throw an ApiError with status 0 and the identical redirected-origin message — rethrow vs re-wrap is indistinguishable
       if (err instanceof ApiError) throw err;
       // An unparseable final URL degrades to the same refusal.
       throw new ApiError(
@@ -920,22 +920,44 @@ async function request(
   // timeout, never fall through to the malformed-JSON {} fallback (an
   // empty payload that looks like success).
   const bodyTimer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const abortBodyRead = (): void => {
+    rejectBodyRead(new ApiError(0, `request timed out after ${REQUEST_TIMEOUT_MS / 1000}s`));
+  };
+  let rejectBodyRead!: (reason: unknown) => void;
   let data: any;
   try {
-    data = await response.json();
-  } catch {
+    // Native/alternate Response implementations do not all connect their
+    // body reader to fetch's signal. Race it explicitly so abort always
+    // settles the caller, even when the underlying reader ignores it.
+    data = await new Promise<unknown>((resolve, reject) => {
+      rejectBodyRead = reject;
+      if (controller.signal.aborted) {
+        abortBodyRead();
+        return;
+      }
+      controller.signal.addEventListener("abort", abortBodyRead, { once: true });
+      Promise.resolve(response.json()).then(resolve, reject);
+    });
+  } catch (err) {
     if (controller.signal.aborted) {
       throw new ApiError(
         0,
         `request timed out after ${REQUEST_TIMEOUT_MS / 1000}s`,
       );
     }
+    if (!(err instanceof SyntaxError)) {
+      throw new ApiError(0, "server unreachable — check the server URL or your connection");
+    }
     data = {};
   } finally {
     clearTimeout(bodyTimer);
+    controller.signal.removeEventListener("abort", abortBodyRead);
   }
   assertOwnership();
   if (!response.ok) {
+    // A valid JSON null is still a malformed error envelope. Keep it on
+    // the typed failure surface rather than dereferencing it as a record.
+    data ??= {};
     // Audit 2026-09-25: a 410 only means account death when the server says
     // so in its code (account_deleted/gone, exactly the web client's gate).
     // A status-only check would spuriously lock the vault if a future
@@ -956,7 +978,6 @@ async function request(
       // the vault app-wide BEFORE the caller sees the error, and a hook
       // failure must never mask the ApiError itself.
       try {
-        // Stryker disable next-line OptionalChaining: the call is wrapped in a catch that swallows everything, so onUnauthorized() on a null handler throws the same-swallowed TypeError
         const callback = onUnauthorized?.({
           status: response.status as 401 | 410,
           code: deathCode,
@@ -1347,10 +1368,12 @@ export const api = {
     });
   },
   isLoggedIn: async () => {
+    const epoch = localWriteScopeEpoch();
     const [token, owner] = await Promise.all([
       secureStore.getItem(TOKEN_KEY),
       secureStore.getItem(USER_ID_KEY),
     ]);
+    if (epoch !== localWriteScopeEpoch()) return false;
     const loggedIn = token !== null && owner !== null && USER_ID_PATTERN.test(owner);
     // A process restart loses the in-memory owner/generation contract even
     // though its encrypted credential tuple survives. Re-establish the
@@ -1423,7 +1446,6 @@ export const api = {
       legacySaltKey(username),
       saltKey(username),
     );
-    // Stryker disable next-line ConditionalExpression: with the guard skipped, JSON.parse of a falsy raw ("" / null) throws or yields null inside the try below, and the catch returns the same null
     if (!raw) return null;
     try {
       const parsed = JSON.parse(raw) as {
@@ -1438,7 +1460,6 @@ export const api = {
       if (typeof parsed.o !== "string" || typeof parsed.s !== "string")
         return null;
       if (parsed.o !== (await getBaseUrl())) return null;
-      // Stryker disable next-line ConditionalExpression: the read-through rewrite stores {v:1,o,s} — for already-v1 records that is a byte-identical (or normalizing) no-op write, and the returned salt never changes
       if (legacy) {
         // Read-through migration (same idiom as the mood log): refresh the
         // record to the v1 envelope so the legacy window stays bounded. A
@@ -1564,6 +1585,7 @@ export const api = {
     recoveryVerifierB64: string,
     wrappedKeyB64: string,
     scheme: "v1" | "v2",
+    stillCurrent?: () => boolean,
   ) =>
     request(
       "PUT",
@@ -1577,15 +1599,15 @@ export const api = {
         scheme,
       },
       {},
-      { sensitive: true },
+      { sensitive: true, stillCurrent },
     ),
-  removeRecoveryKit: (passwordVerifierB64: string) =>
+  removeRecoveryKit: (passwordVerifierB64: string, stillCurrent?: () => boolean) =>
     request(
       "DELETE",
       `${API_PREFIX}/account/recovery`,
       undefined,
       { verifier: passwordVerifierB64 },
-      { sensitive: true },
+      { sensitive: true, stillCurrent },
     ),
   recoverLogin: (
     username: string,
@@ -2122,8 +2144,17 @@ export const api = {
   /** The data key is the whole journal. The app transport policy already
    * refuses every remote plain-HTTP server; retain this local check as a
    * defence-in-depth guard for a corrupted persisted base URL. */
-  openProcessingSession: async (dataKeyB64: string) => {
+  openProcessingSession: async (dataKeyB64: string, localWritePermit?: LocalWritePermit, stillCurrent?: () => boolean) => {
+    const epoch = localWriteScopeEpoch();
+    const assertCurrent = (): void => {
+      assertCredentialEpoch(epoch);
+      if (localWritePermit) assertLocalWritePermit(localWritePermit);
+      if (stillCurrent && !stillCurrent())
+        throw new ApiError(0, "The operation is no longer active; no request was sent.", "stale_operation");
+    };
+    assertCurrent();
     const parsed = parseServerUrl(await getBaseUrl());
+    assertCurrent();
     if (parsed && parsed.insecure) {
       throw new ApiError(
         0,
@@ -2135,10 +2166,10 @@ export const api = {
       `${API_PREFIX}/processing/sessions`,
       { data_key: dataKeyB64 },
       {},
-      { sensitive: true },
+      { sensitive: true, localWritePermit, stillCurrent },
     );
   },
-  recompute: (processingToken: string, feedbackBlob?: string) =>
+  recompute: (processingToken: string, feedbackBlob?: string, stillCurrent?: () => boolean) =>
     request(
       "POST",
       `${API_PREFIX}/insights/recompute`,
@@ -2146,9 +2177,12 @@ export const api = {
         ? ({ feedback_blob: feedbackBlob } as Record<string, unknown>)
         : undefined,
       { "X-Processing-Token": processingToken },
+      { stillCurrent },
     ),
-  insights: () => request("GET", `${API_PREFIX}/insights`),
-  questionToday: () => request("GET", `${API_PREFIX}/questions/today`),
+  insights: (stillCurrent?: () => boolean) =>
+    request("GET", `${API_PREFIX}/insights`, undefined, {}, { stillCurrent }),
+  questionToday: (stillCurrent?: () => boolean) =>
+    request("GET", `${API_PREFIX}/questions/today`, undefined, {}, { stillCurrent }),
 
   // 2026-09-26 audit LOW: the account export is a sensitive request like
   // deleteAccount/login/rekey — it ships the bearer and must refuse an
@@ -2165,13 +2199,13 @@ export const api = {
    *  data. The verifier travels in the X-Account-Verifier header (the v1
    *  preference), never the URL; the server still accepts the legacy body
    *  field during the transition. */
-  deleteAccount: (verifierB64: string) =>
+  deleteAccount: (verifierB64: string, stillCurrent?: () => boolean) =>
     request(
       "DELETE",
       `${API_PREFIX}/account`,
       undefined,
       { "X-Account-Verifier": verifierB64 },
-      { sensitive: true },
+      { sensitive: true, stillCurrent },
     ),
   /** Explicit, re-authenticated opt-in for third-party transcript translation. */
   getLlmConsent: (): Promise<ThirdPartyConsentState> =>
@@ -2238,13 +2272,14 @@ export const api = {
   setVoiceConsent: (
     enabled: boolean,
     verifierB64: string,
+    stillCurrent?: () => boolean,
   ): Promise<ThirdPartyConsentState> =>
     request(
       "PUT",
       `${API_PREFIX}/account/voice-consent`,
       { enabled, verifier: verifierB64 },
       {},
-      { sensitive: true },
+      { sensitive: true, stillCurrent },
     ),
   setShareVoice: (consentId: string, enabled: boolean, verifierB64: string) =>
     request(
@@ -2257,13 +2292,14 @@ export const api = {
   setLlmConsent: (
     enabled: boolean,
     verifierB64: string,
+    stillCurrent?: () => boolean,
   ): Promise<ThirdPartyConsentState> =>
     request(
       "PUT",
       `${API_PREFIX}/account/llm-consent`,
       { enabled, verifier: verifierB64 },
       {},
-      { sensitive: true },
+      { sensitive: true, stillCurrent },
     ),
 
   // --- credential & key rotation (audit fix H-1/M-3, 2026-09-20) -----------

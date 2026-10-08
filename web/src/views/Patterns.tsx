@@ -72,7 +72,7 @@ const METHOD_KEY: Record<string, string> = {
 };
 
 function methodText(kind: string): string {
-  const key = METHOD_KEY[kind];
+  const key = Object.hasOwn(METHOD_KEY, kind) ? METHOD_KEY[kind] : undefined;
   return key === undefined ? t("insights.methodFallbackWeb") : t(key);
 }
 
@@ -296,7 +296,8 @@ export function PatternsView(props: { onCrisis: () => void }): React.JSX.Element
 
       {visible?.map((pattern, index) => {
         const pid = pattern.detail.pattern_pid ?? `#${index}`;
-        const stateKey = LIFECYCLE_KEY[pattern.detail.pattern_state ?? ""];
+        const stateToken = pattern.detail.pattern_state ?? "";
+        const stateKey = Object.hasOwn(LIFECYCLE_KEY, stateToken) ? LIFECYCLE_KEY[stateToken] : undefined;
         const state = stateKey === undefined ? (pattern.detail.pattern_state ?? "") : t(stateKey);
         const method = methodText(pattern.kind);
         const sensitive = isSensitivePattern(pattern);

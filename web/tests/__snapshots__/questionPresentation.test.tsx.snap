@@ -1,0 +1,76 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Writing question renders a safe public surface after its vault is locked 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Today's question"
+  <p className="note" role="status" style={"whiteSpace":"pre-wrap"}>
+    "Loading…"
+  <div className="banner banner--error" role="alert">
+    "Your session locked — sign in again."
+<section className="card">
+  <h2 className="card__title">
+    "Refresh patterns"
+  <span className="row" style={"gap":10,"alignItems":"flex-start"}>
+    <span style={"color":"var(--primary-strong)","flex":"none","paddingTop":2}>
+      <svg aria-hidden="true" fill="none" focusable="false" height=22 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=22>
+        <path d="M12 3l7 3v5c0 4.5-3 7.6-7 9.2C8 18.6 5 15.5 5 11V6z">
+        <path d="M9 11.6l2.1 2.1 4-4.2">
+    <p className="note" style={"whiteSpace":"pre-wrap"}>
+      "Runs the analysis over your encrypted journal. This is the ONLY action that sends your key to the server — inside a single-use session that is destroyed the moment the analysis finishes."
+  <button className="btn" disabled=false type="button">
+    <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+      <path d="M20 12a8 8 0 1 1-2.34-5.66">
+      <path d="M20 4v4.5h-4.5">
+    "Refresh patterns""
+`;
+
+exports[`Writing question renders its settled public empty-account surface in en 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Today's question"
+  <p className="note note--lead" style={"whiteSpace":"pre-wrap"}>
+    "What did you say no to today?"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Today's question comes from a small built-in set — nothing leaves this device for it."
+<section className="card">
+  <h2 className="card__title">
+    "Refresh patterns"
+  <span className="row" style={"gap":10,"alignItems":"flex-start"}>
+    <span style={"color":"var(--primary-strong)","flex":"none","paddingTop":2}>
+      <svg aria-hidden="true" fill="none" focusable="false" height=22 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=22>
+        <path d="M12 3l7 3v5c0 4.5-3 7.6-7 9.2C8 18.6 5 15.5 5 11V6z">
+        <path d="M9 11.6l2.1 2.1 4-4.2">
+    <p className="note" style={"whiteSpace":"pre-wrap"}>
+      "Runs the analysis over your encrypted journal. This is the ONLY action that sends your key to the server — inside a single-use session that is destroyed the moment the analysis finishes."
+  <button className="btn" disabled=false type="button">
+    <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+      <path d="M20 12a8 8 0 1 1-2.34-5.66">
+      <path d="M20 4v4.5h-4.5">
+    "Refresh patterns""
+`;
+
+exports[`Writing question renders its settled public empty-account surface in es 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "La pregunta de hoy"
+  <p className="note note--lead" style={"whiteSpace":"pre-wrap"}>
+    "¿A qué dijo no hoy?"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "La pregunta de hoy viene de un pequeño conjunto integrado — nada sale de este dispositivo por ella."
+<section className="card">
+  <h2 className="card__title">
+    "Actualizar patrones"
+  <span className="row" style={"gap":10,"alignItems":"flex-start"}>
+    <span style={"color":"var(--primary-strong)","flex":"none","paddingTop":2}>
+      <svg aria-hidden="true" fill="none" focusable="false" height=22 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=22>
+        <path d="M12 3l7 3v5c0 4.5-3 7.6-7 9.2C8 18.6 5 15.5 5 11V6z">
+        <path d="M9 11.6l2.1 2.1 4-4.2">
+    <p className="note" style={"whiteSpace":"pre-wrap"}>
+      "Ejecuta el análisis sobre su diario cifrado. Esta es la ÚNICA acción que envía su llave al servidor — dentro de una sesión de un solo uso que se destruye en el momento en que el análisis termina."
+  <button className="btn" disabled=false type="button">
+    <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+      <path d="M20 12a8 8 0 1 1-2.34-5.66">
+      <path d="M20 4v4.5h-4.5">
+    "Actualizar patrones""
+`;

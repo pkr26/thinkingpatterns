@@ -1,3 +1,4 @@
+import { runTestControl } from "./helpers/testControl";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import storage from "./helpers/storageMock";
 import * as fs from "./helpers/expoFsMock";
@@ -11,7 +12,7 @@ import { buildAad, encrypt } from "../src/crypto/envelope";
 const USER = "11111111111111111111111111111111", OTHER = "22222222222222222222222222222222", KEY = Buffer.alloc(32, 5);
 function deferred<T = void>() { let resolve!: (value: T | PromiseLike<T>) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
 beforeEach(async () => {
-  vi.restoreAllMocks(); storage.__reset(); fs.__resetFiles(); __resetLocalKeyLifecycleForTests(); setSecureStoreBackend(null);
+  vi.restoreAllMocks(); storage.__reset(); fs.__resetFiles(); runTestControl(__resetLocalKeyLifecycleForTests); runTestControl(setSecureStoreBackend, null);
   await api.setSession("old-account-token", USER, "alice");
   vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 201, headers: { "Content-Type": "application/json" } })));
 });
@@ -31,7 +32,7 @@ it("an interrupted replacement login cannot leave an old owner paired with the r
   const failing = vi.spyOn(secureStore, "setItem").mockImplementation((slot, value) => slot === "@mindpattern/user_id"
     ? Promise.reject(new Error("simulated durable credential interruption")) : original(slot, value));
   await expect(api.setSession("replacement-account-token", OTHER, "bob")).rejects.toThrow("credential interruption");
-  failing.mockRestore(); __resetLocalKeyLifecycleForTests();
+  failing.mockRestore(); runTestControl(__resetLocalKeyLifecycleForTests);
   await flushQueue(USER).catch(() => {});
   expect(fetch).not.toHaveBeenCalled(); expect(await queueLength(USER)).toBe(1);
   expect(await api.isLoggedIn()).toBe(false);
@@ -49,7 +50,7 @@ it.each(["@mindpattern/user_id", "@mindpattern/username", "@mindpattern/token"])
   // Observe the durable state before any catch/rollback can run. Clearing
   // process-local epochs models a newly started client reading those bytes.
   expect(await secureStore.getItem("@mindpattern/token")).toBeNull();
-  __resetLocalKeyLifecycleForTests(); await flushQueue(USER).catch(() => {});
+  runTestControl(__resetLocalKeyLifecycleForTests); await flushQueue(USER).catch(() => {});
   expect(fetch).not.toHaveBeenCalled(); expect(await queueLength(USER)).toBe(1);
   release.resolve(); expect(await replacement).toMatchObject({ code: "stale_operation" });
 });
@@ -62,7 +63,7 @@ it("a cold restart after the final native token write sees a complete replacemen
     if (slot === "@mindpattern/token") { started.resolve(); await release.promise; }
   });
   const replacement = api.setSession("replacement-account-token", OTHER, "bob").catch(e => e); await started.promise;
-  __resetLocalKeyLifecycleForTests();
+  runTestControl(__resetLocalKeyLifecycleForTests);
   expect(await api.getUserId()).toBe(OTHER); expect(await api.getUsername()).toBe("bob"); expect(await api.isLoggedIn()).toBe(true);
   await flushQueue(USER).catch(() => {}); expect(fetch).not.toHaveBeenCalled();
   await enqueue({ userId: OTHER, clientEntryId: "new-saved", blobB64: "replacement-account ciphertext", entryDate: "2026-10-03" });

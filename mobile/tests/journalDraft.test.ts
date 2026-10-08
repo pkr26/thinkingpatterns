@@ -1,3 +1,4 @@
+import { runTestControl } from "./helpers/testControl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import storage from "./helpers/storageMock";
 import { setBaseUrl } from "../src/api/client";
@@ -8,8 +9,8 @@ import { setSecureStoreBackend } from "../src/secureStore";
 const user = "draft-owner", key = Buffer.alloc(32, 7), nextKey = Buffer.alloc(32, 9);
 let scope: JournalDraftScope;
 beforeEach(async () => {
-  await waitJournalDraftWrites(); __resetJournalDraftRuntimeForTests(); __resetLocalKeyLifecycleForTests();
-  storage.__reset(); setSecureStoreBackend(null);
+  await waitJournalDraftWrites(); runTestControl(__resetJournalDraftRuntimeForTests); runTestControl(__resetLocalKeyLifecycleForTests);
+  storage.__reset(); runTestControl(setSecureStoreBackend, null);
   await setBaseUrl("http://localhost:8000"); scope = await journalDraftScope(user);
 });
 afterEach(async () => { vi.restoreAllMocks(); await waitJournalDraftWrites(); });
@@ -19,7 +20,7 @@ describe("encrypted account/server-bound typed draft custody", () => {
     const draft = words(); await saveJournalDraft(key, scope, draft);
     const raw = (await storage.getItem(scope.slot))!;
     expect(raw).not.toContain(draft.text); expect(raw).not.toContain(key.toString("base64"));
-    __resetJournalDraftRuntimeForTests();
+    runTestControl(__resetJournalDraftRuntimeForTests);
     expect((await loadJournalDraft(key, scope))?.draft).toEqual(draft);
     expect(scope.slot.startsWith(JOURNAL_DRAFT_PREFIX)).toBe(true);
   });

@@ -80,8 +80,9 @@ function newMeasureId(date: string): string {
 /** Decrypt one history row (the patient's own key). Wrong shapes degrade
  *  to a skipped row — history is honest about what it can read. */
 function decryptReading(dataKey: Buffer, userId: string, row: MeasureRow): Reading | null {
+  let plain: Buffer | null = null;
   try {
-    const plain = decrypt(
+    plain = decrypt(
       dataKey,
       Buffer.from(row.blob, "base64"),
       buildAad("measure", userId, row.client_measure_id),
@@ -96,6 +97,8 @@ function decryptReading(dataKey: Buffer, userId: string, row: MeasureRow): Readi
     return { instrument: String(parsed.measure), date: row.measure_date, score: Math.max(0, Math.min(max, Math.round(parsed.score))) };
   } catch {
     return null;
+  } finally {
+    plain?.fill(0);
   }
 }
 
@@ -114,15 +117,30 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
   const [responses, setResponses] = useState<Array<number | null>>(
     () => INSTRUMENTS.phq9.items !== null ? Array.from({ length: INSTRUMENTS.phq9.items }, () => null) : [],
   );
+  const editorGeneration = useRef(0);
   const switchInstrument = (id: MeasureId): void => {
     touchActivity();
+    editorGeneration.current++;
     setActive(id);
     setResponses(Array.from({ length: INSTRUMENTS[id].items }, () => null));
   };
   const [busy, setBusy] = useState(false);
+  const submitting = useRef(false);
+  const [restoring, setRestoring] = useState(true);
   const [status, setStatus] = useState<string | null>(null);
   const [statusTone, setStatusTone] = useState<InlineStatusTone>("ok");
   const statusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mounted = useRef(true);
+  const loadGeneration = useRef(0);
+  // A completed provider receipt still belongs to the view, account and
+  // exact vault generation that admitted it. Unmounting cannot authorize
+  // a follow-up request, write or dialog in a later session.
+  const beginOperation = () => {
+    if (!mounted.current || !vault.isUnlocked()) return null;
+    const owner = vault.ownerUserId(), key = vault.get().dataKey, epoch = localWriteScopeEpoch();
+    if (!owner) return null;
+    return { owner, key, current: () => mounted.current && epoch === localWriteScopeEpoch() && vault.isUnlocked() && vault.ownerUserId() === owner && vault.get().dataKey === key };
+  };
   /** The pending record the current in-progress answers belong to (audit
    *  LOW, 2026-09-26): completed answers are persisted BEFORE their send
    *  (client_measure_id is the server's idempotency key) and every retry —
@@ -149,20 +167,32 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
   };
 
   useEffect(() => {
+    mounted.current = true;
     return () => {
+      mounted.current = false;
       if (statusTimer.current) clearTimeout(statusTimer.current);
     };
   }, []);
 
   const load = useCallback(async () => {
+    const operation = beginOperation(), run = ++loadGeneration.current;
+    if (!operation) {
+      setError(tr("measures.lockedBody"));
+      setLoading(false);
+      return;
+    }
+    const current = () => operation.current() && run === loadGeneration.current;
     setLoading(true);
     setError(null);
     try {
       const userId = await api.getUserId();
+      if (!current()) return;
       if (!userId) throw new Error(tr("common.accountMissing"));
+      if (userId !== operation.owner) throw new Error(tr("common.sessionDamagedTitle"));
       const rows = (await api.listMeasures()) as MeasureRow[];
+      if (!current()) return;
       if (!vault.isUnlocked()) throw new Error(tr("measures.lockedBody"));
-      const dataKey = vault.get().dataKey;
+      const dataKey = operation.key;
       const decrypted: Reading[] = [];
       for (const row of rows) {
         const reading = decryptReading(dataKey, userId, row);
@@ -171,6 +201,7 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
       setReadings(decrypted); // newest first from the server
       setOffline(false);
     } catch (err) {
+      if (!current()) return;
       if (err instanceof ApiError && err.status === 0) {
         setOffline(true);
         setReadings(null);
@@ -178,7 +209,7 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
         setError(err instanceof ApiError ? requestFailureCopy(err) : tr("measures.loadFailed"));
       }
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
     }
   }, []);
 
@@ -190,8 +221,10 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
    *  sends a specific persisted record; a plain tap reuses the pending
    *  record when the on-screen answers still match it, so the SAME
    *  client_measure_id rides every attempt of one questionnaire. */
-  const submit = async (retryOf?: PendingMeasure) => {
-    if (busy) return;
+  const submit = async (retryOf?: PendingMeasure, resetAnswers = true) => {
+    if (busy || submitting.current) return;
+    const operation = beginOperation();
+    if (!operation) return;
     const reusable =
       retryOf ??
       (pendingRef.current !== null &&
@@ -200,6 +233,7 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
         ? pendingRef.current
         : undefined);
     if (reusable === undefined && !measureComplete(active, responses)) return;
+    submitting.current = true;
     setBusy(true);
     // Hoisted for the catch paths (try and catch are separate scopes): the
     // 409 branch must clear the very pending record this send used.
@@ -218,6 +252,7 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
     const submitEpoch = localWriteScopeEpoch();
     try {
       const userId = await api.getUserId();
+      if (!operation.current()) return;
       if (submitEpoch !== localWriteScopeEpoch()) throw new Error(tr("common.sessionDamagedTitle"));
       if (!userId) {
         Alert.alert(tr("measures.sessionDamagedTitle"), tr("measures.sessionDamagedBody"));
@@ -240,13 +275,16 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
         reusable ?? { kind: active, clientMeasureId: newMeasureId(today), picks: [...responses] as number[], date: today };
       pendingRef.current = record;
       await savePendingMeasure(keyCopy, userId, record).catch(() => {});
+      if (!operation.current()) return;
       const safetyFlagged = safetyItemEndorsed(record.kind, record.picks);
       assertLocalWritePermit(writePermit);
-      const blob = encrypt(
-        keyCopy,
-        Buffer.from(measurePayload(record.kind, record.picks, record.date), "utf8"),
-        buildAad("measure", userId, record.clientMeasureId),
-      ).toString("base64");
+      const plain = Buffer.from(measurePayload(record.kind, record.picks, record.date), "utf8");
+      let blob: string;
+      try {
+        blob = encrypt(keyCopy, plain, buildAad("measure", userId, record.clientMeasureId)).toString("base64");
+      } finally {
+        plain.fill(0);
+      }
       // The post-send reset, guarded like EntryScreen's editor clear: only
       // reset when the on-screen answers are still the ones that shipped —
       // answers changed while the send was in flight are kept for a fresh
@@ -254,14 +292,16 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
       finishSent = () => {
         pendingRef.current = null;
         setResponses((previous) =>
-          samePicks(previous, record.picks)
+          resetAnswers && samePicks(previous, record.picks)
             ? Array.from({ length: INSTRUMENTS[record.kind].items }, () => null)
             : previous,
         );
       };
       assertLocalWritePermit(writePermit);
       await api.createMeasure(record.clientMeasureId, blob, record.date, writePermit);
+      if (!operation.current()) return;
       await clearPendingMeasure(userId, writePermit).catch(() => {});
+      if (!operation.current()) return;
       finishSent();
       showStatus(tr("measures.recordedStatus"), "ok");
       // The MBC cadence clock (2026-09-27): a completed questionnaire
@@ -270,15 +310,19 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
       // longer due). Best-effort by design — a lost stamp only ever means
       // one slightly-early nudge.
       await recordMeasureCompleted(userId, record.date).catch(() => {});
+      if (!operation.current()) return;
       void syncMeasureReminderSchedule(userId).catch(() => {});
       await load();
+      if (!operation.current()) return;
       // SAFETY: only after the response is safely stored. Item-9 uses its
       // own trigger-specific throttle so a journal prompt shown earlier
       // today cannot suppress this clinically distinct safety check-in.
       if (safetyFlagged) {
         const flagged = await crisisDialogShownOn(userId, record.date, "phq9-item9").catch(() => false);
+        if (!operation.current()) return;
         if (!flagged) {
           await recordCrisisDialogShown(userId, record.date, "phq9-item9").catch(() => {});
+          if (!operation.current()) return;
           Alert.alert(
             tr("measures.crisisTitle"),
             tr("measures.crisisBody"),
@@ -293,11 +337,13 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
         }
       }
     } catch (err) {
+      if (!operation.current()) return;
       if (err instanceof ApiError && err.status === 409) {
         // Idempotent retry of a send that already landed: the record dies
         // here too (under its OWN account id — never a fallback ""), or
         // every mount would retry it forever.
         if (sentUserId && writePermit) await clearPendingMeasure(sentUserId, writePermit).catch(() => {});
+        if (!operation.current()) return;
         finishSent();
         showStatus(tr("measures.alreadyRecorded"), "neutral");
         await load();
@@ -325,8 +371,10 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
             owner !== null
               ? await crisisDialogShownOn(owner, offlinePending.date, "phq9-item9").catch(() => false)
               : false;
+          if (!operation.current()) return;
           if (!flagged && owner !== null) {
             await recordCrisisDialogShown(owner, offlinePending.date, "phq9-item9").catch(() => {});
+            if (!operation.current()) return;
             Alert.alert(
               tr("measures.crisisTitle"),
               tr("measures.crisisBody"),
@@ -345,7 +393,8 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
     } finally {
       // The snapshot dies with the submit, success or failure.
       if (keyCopy) keyCopy.fill(0);
-      setBusy(false);
+      submitting.current = false;
+      if (mounted.current) setBusy(false);
     }
   };
 
@@ -357,20 +406,31 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
   useEffect(() => {
     if (retriedRef.current) return;
     retriedRef.current = true;
+    const editorRun = editorGeneration.current;
     void (async () => {
       try {
+        const operation = beginOperation();
+        if (!operation) return;
         const userId = await api.getUserId();
+        if (!operation.current()) return;
         if (!userId || !vault.isUnlocked()) return;
-        const pending = await loadPendingMeasure(vault.get().dataKey, userId);
+        if (userId !== operation.owner) return;
+        const pending = await loadPendingMeasure(operation.key, userId);
+        if (!operation.current()) return;
         if (pending === null) return;
-        setActive(pending.kind);
-        setResponses(pending.picks);
-        await submit(pending);
+        const restoreAnswers = editorRun === editorGeneration.current;
+        if (restoreAnswers) {
+          setActive(pending.kind);
+          setResponses(pending.picks);
+        }
+        await submit(pending, restoreAnswers);
       } catch {
         // Locked vault / dead storage: the record stays; nothing to show.
+      } finally {
+        if (mounted.current) setRestoring(false);
       }
     })();
-  }, // Stryker disable next-line ArrayDeclaration: a mount-once flow guarded by retriedRef — the effect body is idempotent under a double fire
+  },
      []);
 
   return (
@@ -478,6 +538,7 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
                     ]}
                     onPress={() => {
                       touchActivity();
+                      editorGeneration.current++;
                       const next = [...responses];
                       next[index] = value;
                       setResponses(next);
@@ -506,7 +567,7 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
         <PrimaryButton
           label={tr("measures.recordButton")}
           onPress={() => void submit()}
-          disabled={!measureComplete(active, responses)}
+          disabled={restoring || !measureComplete(active, responses)}
           busy={busy}
         />
         <InlineStatus message={status} tone={statusTone} />

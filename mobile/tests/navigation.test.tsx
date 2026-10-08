@@ -1,3 +1,4 @@
+import { runTestControl } from "./helpers/testControl";
 /**
  * AppNavigator tri-state: loading → BootSplash (never a flash of Login over
  * a live session), loggedOut → Login, loggedIn-but-locked → Unlock,
@@ -202,7 +203,7 @@ describe("AppNavigator", () => {
     await recordOnboardingSeen("user-1"); // a settled account: no onboarding
     vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, 2) });
     sessionState = { authStatus: "loggedIn", unlocked: true };
-    __setLocaleForTests("es");
+    runTestControl(__setLocaleForTests, "es");
     try {
       const root = await render(<AppNavigator />);
       await flush();
@@ -216,20 +217,20 @@ describe("AppNavigator", () => {
       expect(screenOptions(root, "Privacy")).toEqual({ title: "Privacidad" });
       expect(screenOptions(root, "Crisis")).toEqual({ title: "Ayuda" });
     } finally {
-      __setLocaleForTests("en");
+      runTestControl(__setLocaleForTests, "en");
     }
 
     // Boot-state Crisis titles — and the splash tagline (login.subtitle) —
     // localize as well.
     sessionState = { authStatus: "loading", unlocked: false };
-    __setLocaleForTests("es");
+    runTestControl(__setLocaleForTests, "es");
     try {
       const root = await render(<AppNavigator />);
       await flush();
       expect(screenOptions(root, "Crisis")).toEqual({ title: "Ayuda" });
       expect(textOf(root)).toContain("Sus patrones, a partir de sus palabras. Cifrado en este dispositivo.");
     } finally {
-      __setLocaleForTests("en");
+      runTestControl(__setLocaleForTests, "en");
     }
   });
 

@@ -1,3 +1,4 @@
+import { runTestControl } from "./helpers/testControl";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import * as Keychain from "react-native-keychain";
 import * as mock from "./helpers/keychainMock";
@@ -12,7 +13,7 @@ const USER = "11111111111111111111111111111111", OTHER = "2222222222222222222222
 const SERVICE = `com.mindpattern.biometric-unlock.v1.${USER}`;
 function deferred<T = void>() { let resolve!: (value: T | PromiseLike<T>) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
 beforeEach(async () => {
-  vi.restoreAllMocks(); storage.__reset(); mock.__reset(); __resetLocalKeyLifecycleForTests(); setSecureStoreBackend(null);
+  vi.restoreAllMocks(); storage.__reset(); mock.__reset(); runTestControl(__resetLocalKeyLifecycleForTests); runTestControl(setSecureStoreBackend, null);
   await api.setSession("owner-token", USER, "alice");
 });
 afterEach(() => { vi.restoreAllMocks(); });

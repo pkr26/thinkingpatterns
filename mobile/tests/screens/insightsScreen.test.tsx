@@ -1,3 +1,6 @@
+import { runTestControl } from "../helpers/testControl";
+import storage from "../helpers/storageMock";
+import { resetAnalysisGenerationMirrors } from "../../src/stateSeqGuard";
 /**
  * InsightsScreen: phase-gated rendering, on-device decryption of the
  * patterns blob, per-kind copy, pull-to-refresh, and error surfacing.
@@ -51,12 +54,15 @@ const pattern = (over: Record<string, unknown>) => ({
 });
 
 beforeEach(() => {
+  storage.__reset();
+  runTestControl(resetAnalysisGenerationMirrors);
   resetApi(api as never);
   refreshActiveDays.mockClear();
   applyActiveDays.mockClear();
   touchActivity.mockClear();
   AlertlessReset();
   vault.lock();
+  dataKey.fill(9);
   vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey });
 });
 
@@ -641,7 +647,7 @@ describe("InsightsScreen evidence view", () => {
   it("labels the raw p-value as unadjusted in the Spanish technical panel", async () => {
     const { __setLocaleForTests } = await import("../../src/strings");
     const { pressLabel } = await import("../helpers/rtr");
-    __setLocaleForTests("es");
+    runTestControl(__setLocaleForTests, "es");
     try {
       vi.mocked(api.insights).mockResolvedValue({
         phase: "insight", active_days: 60, days_remaining: 0,
@@ -654,7 +660,7 @@ describe("InsightsScreen evidence view", () => {
       expect(textOf(root)).toContain("p = 1.0e-3 (sin ajustar)");
       expect(textOf(root)).not.toContain("corregido por ejecutar muchas pruebas");
       await act(async () => { root.unmount(); });
-    } finally { __setLocaleForTests("en"); }
+    } finally { runTestControl(__setLocaleForTests, "en"); }
   });
 
   it("the evidence panel renders plain-language rows, with raw stats behind Technical details", async () => {
@@ -1398,7 +1404,7 @@ describe("M-36: weekday words localize at render time", () => {
     const { localWeekday } = await import("../../src/screens/InsightsScreen");
     const { __setLocaleForTests } = await import("../../src/strings");
     // English passes through unchanged (tests pin the en baseline).
-    __setLocaleForTests("en");
+    runTestControl(__setLocaleForTests, "en");
     try {
       expect(localWeekday("Monday")).toBe("Monday");
       expect(localWeekday("Sunday")).toBe("Sunday");
@@ -1408,23 +1414,23 @@ describe("M-36: weekday words localize at render time", () => {
       expect(localWeekday("")).toBe("");
       expect(localWeekday("constructor")).toBe("constructor");
     } finally {
-      __setLocaleForTests("en");
+      runTestControl(__setLocaleForTests, "en");
     }
     // Spanish renders Spanish weekdays — "la mayoría de las veces en
     // Monday" was the shipped sentence before this fix.
-    __setLocaleForTests("es");
+    runTestControl(__setLocaleForTests, "es");
     try {
       expect(localWeekday("Monday")).toBe("lunes");
       expect(localWeekday("Tuesday")).toBe("martes");
       expect(localWeekday("Sunday")).toBe("domingo");
     } finally {
-      __setLocaleForTests("en");
+      runTestControl(__setLocaleForTests, "en");
     }
   });
 
   it("the temporal card renders the Spanish weekday inside Spanish copy", async () => {
     const { __setLocaleForTests } = await import("../../src/strings");
-    __setLocaleForTests("es");
+    runTestControl(__setLocaleForTests, "es");
     try {
       vi.mocked(api.insights).mockResolvedValue({
         phase: "insight",
@@ -1443,7 +1449,7 @@ describe("M-36: weekday words localize at render time", () => {
       expect(text).not.toContain("Monday");
       await act(async () => root.unmount());
     } finally {
-      __setLocaleForTests("en");
+      runTestControl(__setLocaleForTests, "en");
     }
   });
 });
@@ -1452,14 +1458,14 @@ describe("theme-key labels localize at render time (ES theme set, 2026-09-21)", 
   it("themeLabel maps the engine's canonical theme keys onto the locale", async () => {
     const { themeLabel } = await import("../../src/screens/InsightsScreen");
     const { __setLocaleForTests } = await import("../../src/strings");
-    __setLocaleForTests("en");
+    runTestControl(__setLocaleForTests, "en");
     try {
       expect(themeLabel("work")).toBe("work");
       expect(themeLabel("weather")).toBe("weather");
     } finally {
-      __setLocaleForTests("en");
+      runTestControl(__setLocaleForTests, "en");
     }
-    __setLocaleForTests("es");
+    runTestControl(__setLocaleForTests, "es");
     try {
       // The engine's wire label is the canonical English key; the Spanish
       // card must read "el trabajo", not "'work'".
@@ -1473,13 +1479,13 @@ describe("theme-key labels localize at render time (ES theme set, 2026-09-21)", 
       expect(themeLabel("constructor")).toBe("constructor");
       expect(themeLabel("")).toBe("");
     } finally {
-      __setLocaleForTests("en");
+      runTestControl(__setLocaleForTests, "en");
     }
   });
 
   it("a Spanish temporal card with the canonical 'work' label renders localized", async () => {
     const { __setLocaleForTests } = await import("../../src/strings");
-    __setLocaleForTests("es");
+    runTestControl(__setLocaleForTests, "es");
     try {
       vi.mocked(api.insights).mockResolvedValue({
         phase: "insight",
@@ -1496,7 +1502,7 @@ describe("theme-key labels localize at render time (ES theme set, 2026-09-21)", 
       expect(text).not.toContain("'work'");
       await act(async () => root.unmount());
     } finally {
-      __setLocaleForTests("en");
+      runTestControl(__setLocaleForTests, "en");
     }
   });
 });

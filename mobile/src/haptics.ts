@@ -11,18 +11,21 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const HAPTICS_KEY = "@mindpattern/haptics.enabled";
 let enabled = true;
+let preferenceRevision = 0;
 
 export async function loadHapticsSetting(): Promise<boolean> {
+  const revision = preferenceRevision;
   try {
     const stored = await AsyncStorage.getItem(HAPTICS_KEY);
-    enabled = stored !== "off";
+    if (revision === preferenceRevision) enabled = stored !== "off";
   } catch {
-    enabled = true;
+    if (revision === preferenceRevision) enabled = true;
   }
   return enabled;
 }
 
 export async function setHapticsEnabled(on: boolean): Promise<void> {
+  preferenceRevision++;
   enabled = on;
   try {
     await AsyncStorage.setItem(HAPTICS_KEY, on ? "on" : "off");

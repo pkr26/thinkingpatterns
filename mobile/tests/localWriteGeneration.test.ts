@@ -1,3 +1,4 @@
+import { runTestControl } from "./helpers/testControl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import storage from "./helpers/storageMock";
 import { setSecureStoreBackend, secureStore } from "../src/secureStore";
@@ -30,8 +31,8 @@ function holdRead(slot: string) {
   }); return { original, gate, started, spy };
 }
 beforeEach(() => {
-  vi.restoreAllMocks(); vi.unstubAllGlobals(); storage.__reset(); setSecureStoreBackend(null);
-  __resetLocalKeyLifecycleForTests(); resetEntryVersionMirrors(); __resetJournalDraftRuntimeForTests();
+  vi.restoreAllMocks(); vi.unstubAllGlobals(); storage.__reset(); runTestControl(setSecureStoreBackend, null);
+  runTestControl(__resetLocalKeyLifecycleForTests); resetEntryVersionMirrors(); runTestControl(__resetJournalDraftRuntimeForTests);
   setUnauthorizedHandler(null); setOriginChangeHandler(null);
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); setUnauthorizedHandler(null); });

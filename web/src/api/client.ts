@@ -640,7 +640,10 @@ async function authRequest<T>(
     if (err instanceof ApiError) throw err;
     throw new ApiError(0, "server unreachable — check your connection");
   }
-  const data = (await response.json().catch(() => ({}))) as {
+  const data = ((await response.json().catch((err: unknown) => {
+    if (!(err instanceof SyntaxError)) throw err;
+    return {};
+  })) ?? {}) as {
     detail?: unknown;
     code?: unknown;
   };
@@ -1248,19 +1251,28 @@ export const api = {
   logout: async (): Promise<null> => {
     const activeSession = session;
     if (!activeSession) throw new ApiError(0, "not signed in");
-    const response = await fetchWithTimeout(
-      `${activeSession.baseUrl}${API_PREFIX}/auth/logout`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${activeSession.token}`,
+    let response: Response;
+    try {
+      response = await fetchWithTimeout(
+        `${activeSession.baseUrl}${API_PREFIX}/auth/logout`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${activeSession.token}`,
+          },
         },
-      },
-      activeSession.baseUrl,
-    );
+        activeSession.baseUrl,
+      );
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      throw new ApiError(0, "server unreachable — check your connection");
+    }
     if (response.status === 204) return null;
-    const data = (await response.json().catch(() => ({}))) as {
+    const data = ((await response.json().catch((err: unknown) => {
+      if (!(err instanceof SyntaxError)) throw err;
+      return {};
+    })) ?? {}) as {
       detail?: unknown;
       code?: unknown;
     };

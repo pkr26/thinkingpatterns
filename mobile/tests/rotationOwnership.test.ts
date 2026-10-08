@@ -1,3 +1,4 @@
+import { runTestControl } from "./helpers/testControl";
 /** Shipping helpers/crypto, controlled transport/native waits. These cases
  * prove ownership retirement, not physical-device scheduling or provider I/O. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -23,7 +24,7 @@ function unlock(userId: string, biometric = false) {
 }
 async function replace(user = OTHER) { await api.setSession("replacement-token", user, "replacement"); return unlock(user); }
 beforeEach(async () => {
-  vi.restoreAllMocks(); storage.__reset(); setSecureStoreBackend(null); __resetLocalKeyLifecycleForTests(); vault.lock();
+  vi.restoreAllMocks(); storage.__reset(); runTestControl(setSecureStoreBackend, null); runTestControl(__resetLocalKeyLifecycleForTests); vault.lock();
   await api.setSession("original-token", USER, "original"); unlock(USER);
   vi.spyOn(api, "getCachedSalt").mockResolvedValue(SALT.toString("base64"));
 });

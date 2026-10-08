@@ -1,0 +1,1798 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`LoginView > drops the setup secret and verifier after MFA enable, and revokes an abandoned handoff > mandatory MFA enrollment and local QR 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Set up two-factor authentication to continue"
+      <p className="note note--danger">
+        "Patient data stays locked until two-factor authentication is enabled."
+      <p className="note">
+        "Add this account to your authenticator app, then enter its current 6-digit code."
+      <div className="totp-secret">
+        <code>
+          "JBSWY3DPEHPK3PXP"
+      <details className="disclose">
+        <summary>
+          "Can’t scan a QR code? Show the setup URI"
+        <div className="disclose__body">
+          <p className="note note--muted">
+            <code>
+              "otpauth://totp/Fathom:test"
+      <div className="field">
+        <label className="field__label" htmlFor="field-association-1">
+          "Authenticator code"
+        <input autoComplete="one-time-code" className="input" id="field-association-1" placeholder="123456" type="text" value="">
+      <button className="btn" disabled=true type="button">
+        "Enable two-factor authentication"
+      <button className="btn btn--small" disabled=false type="button">
+        "Cancel and sign out""
+`;
+
+exports[`LoginView > drops the setup secret and verifier after MFA enable, and revokes an abandoned handoff > one-time recovery codes after abandoned unlock 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Set up two-factor authentication to continue"
+      <p className="note note--danger">
+        "Patient data stays locked until two-factor authentication is enabled."
+      <p className="note note--danger">
+        "Save these one-time recovery codes now. They will not be shown again."
+      <div className="totp-codes">
+        <code>
+          "ABCDE12345"
+        <code>
+          "FGHIJ67890"
+      <button className="btn" disabled=false type="button">
+        "I saved the codes — return to sign in"
+      <div className="banner banner--error" role="alert">
+        "Two-factor authentication is enabled, but the portal could not finish opening. Try signing in again."
+      <button className="btn btn--small" disabled=false type="button">
+        "Cancel and sign out""
+`;
+
+exports[`LoginView > requires a genuinely strong registration password while allowing a long passphrase > registration policy and minimum-age attestation 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Create a therapist account"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Your name (shown to patients)"
+          <input autoComplete="name" className="input" id="field-association-1" placeholder="Dr. Jane Omega" type="text" value="">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-2" placeholder="dromega" type="text" value="drnew">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-3">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-3" type="password" value="one">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div aria-label="Password strength: Weak" className="pw-meter" role="status">
+          <span className="pw-meter__bar pw-meter__bar--1">
+          <span className="pw-meter__bar">
+          <span className="pw-meter__bar">
+          <span className="pw-meter__bar">
+          <span className="pw-meter__label pw-meter__label--1">
+            "Weak"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-4">
+            "Repeat password"
+          <span className="field__row">
+            <input autoComplete="new-password" className="input" id="field-association-4" type="password" value="one">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-5">
+            "Clinician enrollment token (if issued)"
+          <input autoComplete="one-time-code" className="input" id="field-association-5" placeholder="Organization-issued token" type="password" value="">
+        <label className="row">
+          <input checked=false type="checkbox">
+          <span>
+            "I confirm that I am 18 or older."
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <p className="note">
+          "Choose a password of at least 12 characters. Use a 16-character passphrase, or use at least three character types at 12–15 characters."
+        <p className="note">
+          "If your organization issued a clinician enrollment token, enter it here. It is sent only to this portal's same-origin secure API connection and is never stored by this portal."
+        <p className="note note--danger">
+          "There is no password reset and no account recovery. Your sharing key is wrapped to this password alone: if you forget it, your account and every shared note become permanently unreadable. Save the password in a password manager before you continue."
+        <button className="btn" disabled=true type="submit">
+          "Create account"
+        <button className="btn btn--small" disabled=false type="button">
+          "Back to sign in"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`LoginView > signs in: salt -> derive -> login -> onReady > sign-in fields and custody explanation 1`] = `
+"<main className="login-main">
+  <div className="login-wrap">
+    <h1 className="login-title">
+      "Fathom · Therapist portal"
+    <section className="card">
+      <h2 className="card__title">
+        "Sign in"
+      <form className="login-form">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-1">
+            "Username"
+          <input autoComplete="username" className="input" id="field-association-1" placeholder="dromega" type="text" value="drportal">
+        <div className="field">
+          <label className="field__label" htmlFor="field-association-2">
+            "Password"
+          <span className="field__row">
+            <input autoComplete="current-password" className="input" id="field-association-2" type="password" value="">
+            <button className="btn btn--ghost btn--small" disabled=false type="button">
+              "Show password"
+        <p className="note">
+          "Server: this portal's own secure origin. It cannot be changed from the sign-in screen."
+        <button className="btn" disabled=true type="submit">
+          "Sign in"
+        <button className="btn btn--small" disabled=false type="button">
+          "Create a therapist account instead"
+        <details className="disclose">
+          <summary>
+            "How your password is protected"
+          <div className="disclose__body">
+            <p className="note note--muted">
+              "Your password never leaves this page: the server stores only a hash of a derived key, and your sharing key is decryptable only with your password.""
+`;
+
+exports[`PatientView > covers the remaining describe arms: inertia, instability, topic, default, quoted phrase > all other pattern descriptions 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <div>
+      <h1>
+        "patienta"
+      <p className="note">
+        "sharing since 2026-09-01 · read-only — you cannot change their data"
+        " · 5 patterns new for you to review"
+    <div className="no-print row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Print session summary"
+      <button className="btn btn--small" disabled=false type="button">
+        "Back to patients"
+  <div className="no-print row row--wrap mb-14">
+    <button className="btn btn--small" disabled=false type="button">
+      "Mark reviewed (start the delta anchor)"
+    <span className="hint">
+      "The new-pattern count anchors the first time you mark reviewed."
+  <section className="card">
+    <h2 className="card__title">
+      "Account summary"
+    <p className="note">
+      "?"
+      " entries · "
+      "?"
+      " active days"
+      " · average reading unavailable · source and coverage unavailable for this older analysis"
+  <section className="card">
+    <h2 className="card__title">
+      "mood"
+    <p className="note">
+      "Mood has been carrying over day to day more than usual for this patient."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card">
+    <h2 className="card__title">
+      "mood"
+    <p className="note">
+      "Daily mood has swung more widely than usual for this patient."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card">
+    <h2 className="card__title">
+      "guitar"
+    <p className="note">
+      "'guitar' is a steady presence in the writing."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card">
+    <h2 className="card__title">
+      "thing"
+    <p className="note">
+      "'thing' — 3 mentions."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card">
+    <h2 className="card__title">
+      "feeling better"
+    <p className="note">
+      "The phrase 'feeling better' has returned 3 times."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card no-print">
+    <h2 className="card__title">
+      "General notes about this patient"
+    <p className="note">
+      "No notes yet."
+    <div className="tpl-row">
+      <span className="hint tpl-row__label">
+        "Start from:"
+      <button className="tpl-chip" type="button">
+        "Session focus"
+      <button className="tpl-chip" type="button">
+        "Observed together"
+      <button className="tpl-chip" type="button">
+        "Homework / between-session plan"
+      <button className="tpl-chip" type="button">
+        "Questions for next visit"
+    <textarea aria-label="New note about this patient" className="textarea" disabled=false maxLength=100000 placeholder="Note about this patient…" rows=3 value="">
+    <div>
+      <p className="note" role="status">
+        "Drafts are encrypted on this device."
+      <button className="btn" disabled=true type="button">
+        "Save note"
+    <details className="disclose">
+      <summary>
+        "How private clinician notes are encrypted"
+      <div className="disclose__body">
+        <p className="note note--muted">
+          "Private clinician notes are encrypted under YOUR password before leaving this page. They are not shared with the patient or added to their journal, and may remain in your account after the patient stops sharing; delete them when your records policy requires it."
+  <div className="print-only">
+    <h1>
+      "Fathom session summary — "
+      "patienta"
+    <p className="print-meta">
+      "Sharing since 2026-09-01"
+      " "
+      "· summary generated "
+      "CURRENT_DATE"
+      " · 5 new patterns"
+    <p className="print-meta">
+      "?"
+      " entries · "
+      "?"
+      " active days"
+      " · average reading unavailable · source and coverage unavailable for this older analysis"
+    <div className="print-item">
+      <strong>
+        "inertia — mood"
+      <p className="print-line">
+        "Mood has been carrying over day to day more than usual for this patient."
+      <p className="print-evidence">
+        "mentions: 2 · evidence days: 0"
+    <div className="print-item">
+      <strong>
+        "instability — mood"
+      <p className="print-line">
+        "Daily mood has swung more widely than usual for this patient."
+      <p className="print-evidence">
+        "mentions: 2 · evidence days: 0"
+    <div className="print-item">
+      <strong>
+        "topic — guitar"
+      <p className="print-line">
+        "'guitar' is a steady presence in the writing."
+      <p className="print-evidence">
+        "mentions: 5 · evidence days: 0"
+    <div className="print-item">
+      <strong>
+        "mystery — thing"
+      <p className="print-line">
+        "'thing' — 3 mentions."
+      <p className="print-evidence">
+        "mentions: 3 · evidence days: 0"
+    <div className="print-item">
+      <strong>
+        "recurring_phrase — feeling better"
+      <p className="print-line">
+        "The phrase 'feeling better' has returned 3 times."
+      <p className="print-evidence">
+        "mentions: 3 · evidence days: 0"
+    <p className="print-footer">
+      "Observations from the patient's own encrypted journal — not a diagnosis. Generated by Fathom.""
+`;
+
+exports[`PatientView > renders pattern cards, the sensitive card non-quoting, and the drill-down > clinical pattern cards and print summary 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <div>
+      <h1>
+        "patienta"
+      <p className="note">
+        "sharing since 2026-09-01 · read-only — you cannot change their data"
+        " · 6 patterns new for you to review"
+    <div className="no-print row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Print session summary"
+      <button className="btn btn--small" disabled=false type="button">
+        "Back to patients"
+  <div className="no-print row row--wrap mb-14">
+    <button className="btn btn--small" disabled=false type="button">
+      "Mark reviewed (start the delta anchor)"
+    <span className="hint">
+      "The new-pattern count anchors the first time you mark reviewed."
+  <section className="card">
+    <h2 className="card__title">
+      "Account summary"
+    <p className="note">
+      "?"
+      " entries · "
+      "?"
+      " active days"
+      " · average reading unavailable · source and coverage unavailable for this older analysis"
+  <section className="card">
+    <h2 className="card__title">
+      "A difficult thought has been returning"
+    <p className="note">
+      "A difficult thought has been returning in the patient's writing — the entries below show it in the patient's own words."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card">
+    <p className="note">
+      "Entries have read lower than the patient's own baseline lately."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card">
+    <h2 className="card__title">
+      "work"
+    <p className="note">
+      "'work' concentrates on Sunday (? of 9 mentions)."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card">
+    <h2 className="card__title">
+      "family"
+    <p className="note">
+      "Entries read higher on days 'family' appears (mood delta -0.3)."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card">
+    <h2 className="card__title">
+      "sleep"
+    <p className="note">
+      "About 2 day(s) after 'sleep' comes up, entries read lower."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card">
+    <h2 className="card__title">
+      "gym"
+    <p className="note">
+      "'gym' concentrates on certain days (? of 4 mentions)."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card no-print">
+    <h2 className="card__title">
+      "General notes about this patient"
+    <p className="note">
+      "No notes yet."
+    <div className="tpl-row">
+      <span className="hint tpl-row__label">
+        "Start from:"
+      <button className="tpl-chip" type="button">
+        "Session focus"
+      <button className="tpl-chip" type="button">
+        "Observed together"
+      <button className="tpl-chip" type="button">
+        "Homework / between-session plan"
+      <button className="tpl-chip" type="button">
+        "Questions for next visit"
+    <textarea aria-label="New note about this patient" className="textarea" disabled=false maxLength=100000 placeholder="Note about this patient…" rows=3 value="">
+    <div>
+      <p className="note" role="status">
+        "Drafts are encrypted on this device."
+      <button className="btn" disabled=true type="button">
+        "Save note"
+    <details className="disclose">
+      <summary>
+        "How private clinician notes are encrypted"
+      <div className="disclose__body">
+        <p className="note note--muted">
+          "Private clinician notes are encrypted under YOUR password before leaving this page. They are not shared with the patient or added to their journal, and may remain in your account after the patient stops sharing; delete them when your records policy requires it."
+  <div className="print-only">
+    <h1>
+      "Fathom session summary — "
+      "patienta"
+    <p className="print-meta">
+      "Sharing since 2026-09-01"
+      " "
+      "· summary generated "
+      "CURRENT_DATE"
+      " · 6 new patterns"
+    <p className="print-meta">
+      "?"
+      " entries · "
+      "?"
+      " active days"
+      " · average reading unavailable · source and coverage unavailable for this older analysis"
+    <div className="print-item">
+      <strong>
+        "A difficult thought (non-quoting)"
+      <p className="print-line">
+        "A difficult thought has been returning in the patient's writing — the entries below show it in the patient's own words."
+      <p className="print-evidence">
+        "mentions: 4 · evidence days: 1"
+    <div className="print-item">
+      <strong>
+        "mood_shift — "
+      <p className="print-line">
+        "Entries have read lower than the patient's own baseline lately."
+      <p className="print-evidence">
+        "mentions: 1 · evidence days: 1"
+    <div className="print-item">
+      <strong>
+        "temporal — work"
+      <p className="print-line">
+        "'work' concentrates on Sunday (? of 9 mentions)."
+      <p className="print-evidence">
+        "state: confirmed · first seen: 2026-08-20 · last seen: 2026-09-08 · mentions: 9 · evidence days: 2"
+    <div className="print-item">
+      <strong>
+        "mood_correlation — family"
+      <p className="print-line">
+        "Entries read higher on days 'family' appears (mood delta -0.3)."
+      <p className="print-evidence">
+        "mentions: 6 · evidence days: 1"
+    <div className="print-item">
+      <strong>
+        "link — sleep"
+      <p className="print-line">
+        "About 2 day(s) after 'sleep' comes up, entries read lower."
+      <p className="print-evidence">
+        "mentions: 5 · evidence days: 1"
+    <div className="print-item">
+      <strong>
+        "temporal — gym"
+      <p className="print-line">
+        "'gym' concentrates on certain days (? of 4 mentions)."
+      <p className="print-evidence">
+        "mentions: 4 · evidence days: 1"
+    <p className="print-footer">
+      "Observations from the patient's own encrypted journal — not a diagnosis. Generated by Fathom.""
+`;
+
+exports[`PatientView > renders pattern cards, the sensitive card non-quoting, and the drill-down > decrypted evidence and mood sparkline 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <div>
+      <h1>
+        "patienta"
+      <p className="note">
+        "sharing since 2026-09-01 · read-only — you cannot change their data"
+        " · 6 patterns new for you to review"
+    <div className="no-print row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Print session summary"
+      <button className="btn btn--small" disabled=false type="button">
+        "Back to patients"
+  <div className="no-print row row--wrap mb-14">
+    <button className="btn btn--small" disabled=false type="button">
+      "Mark reviewed (start the delta anchor)"
+    <span className="hint">
+      "The new-pattern count anchors the first time you mark reviewed."
+  <section className="card">
+    <h2 className="card__title">
+      "Account summary"
+    <p className="note">
+      "?"
+      " entries · "
+      "?"
+      " active days"
+      " · average reading unavailable · source and coverage unavailable for this older analysis"
+  <section className="card">
+    <h2 className="card__title">
+      "temporal — work"
+    <p className="note">
+      "'work' concentrates on Sunday (? of 9 mentions)."
+    <dl className="evidence-grid">
+      <div>
+        <dt>
+          "state"
+        <dd>
+          "confirmed"
+      <div>
+        <dt>
+          "first seen"
+        <dd>
+          "2026-08-20"
+      <div>
+        <dt>
+          "last seen"
+        <dd>
+          "2026-09-08"
+      <div>
+        <dt>
+          "mentions"
+        <dd>
+          "9"
+      <div>
+        <dt>
+          "evidence days"
+        <dd>
+          "2"
+    <button className="btn btn--small" disabled=false type="button">
+      "Back to all patterns"
+  <section className="card no-print">
+    <h2 className="card__title">
+      "Evidence entries (3)"
+    <div className="entry-row">
+      <strong className="entry-date">
+        "2026-09-01"
+      <span className="entry-mood">
+        "mood "
+        "0.25"
+      <p className="entry-text">
+        "decrypted e-1"
+    <div className="entry-row">
+      <strong className="entry-date">
+        "2026-09-08"
+      <p className="entry-text">
+        "decrypted e-2"
+    <div className="entry-row">
+      <strong className="entry-date">
+        "2026-09-08"
+      <p className="entry-text">
+        "decrypted e-4"
+  <section className="card no-print">
+    <h2 className="card__title">
+      "Notes on this pattern"
+    <p className="note">
+      "No notes on this pattern yet."
+    <div className="tpl-row">
+      <span className="hint tpl-row__label">
+        "Start from:"
+      <button className="tpl-chip" type="button">
+        "Session focus"
+      <button className="tpl-chip" type="button">
+        "Observed together"
+      <button className="tpl-chip" type="button">
+        "Homework / between-session plan"
+      <button className="tpl-chip" type="button">
+        "Questions for next visit"
+    <textarea aria-label="New note about this pattern" className="textarea" disabled=false maxLength=100000 placeholder="Note about this pattern…" rows=3 value="">
+    <div>
+      <p className="note" role="status">
+        "Drafts are encrypted on this device."
+      <button className="btn" disabled=true type="button">
+        "Save note"
+    <details className="disclose">
+      <summary>
+        "How private clinician notes are encrypted"
+      <div className="disclose__body">
+        <p className="note note--muted">
+          "Private clinician notes are encrypted under YOUR password before leaving this page. They are not shared with the patient or added to their journal, and may remain in your account after the patient stops sharing; delete them when your records policy requires it."
+  <div className="print-only">
+    <h1>
+      "Fathom session summary — "
+      "patienta"
+    <p className="print-meta">
+      "Sharing since 2026-09-01"
+      " "
+      "· summary generated "
+      "CURRENT_DATE"
+      " · 6 new patterns"
+    <p className="print-meta">
+      "?"
+      " entries · "
+      "?"
+      " active days"
+      " · average reading unavailable · source and coverage unavailable for this older analysis"
+    <div className="print-item">
+      <strong>
+        "A difficult thought (non-quoting)"
+      <p className="print-line">
+        "A difficult thought has been returning in the patient's writing — the entries below show it in the patient's own words."
+      <p className="print-evidence">
+        "mentions: 4 · evidence days: 1"
+    <div className="print-item">
+      <strong>
+        "mood_shift — "
+      <p className="print-line">
+        "Entries have read lower than the patient's own baseline lately."
+      <p className="print-evidence">
+        "mentions: 1 · evidence days: 1"
+    <div className="print-item">
+      <strong>
+        "temporal — work"
+      <p className="print-line">
+        "'work' concentrates on Sunday (? of 9 mentions)."
+      <p className="print-evidence">
+        "state: confirmed · first seen: 2026-08-20 · last seen: 2026-09-08 · mentions: 9 · evidence days: 2"
+    <div className="print-item">
+      <strong>
+        "mood_correlation — family"
+      <p className="print-line">
+        "Entries read higher on days 'family' appears (mood delta -0.3)."
+      <p className="print-evidence">
+        "mentions: 6 · evidence days: 1"
+    <div className="print-item">
+      <strong>
+        "link — sleep"
+      <p className="print-line">
+        "About 2 day(s) after 'sleep' comes up, entries read lower."
+      <p className="print-evidence">
+        "mentions: 5 · evidence days: 1"
+    <div className="print-item">
+      <strong>
+        "temporal — gym"
+      <p className="print-line">
+        "'gym' concentrates on certain days (? of 4 mentions)."
+      <p className="print-evidence">
+        "mentions: 4 · evidence days: 1"
+    <p className="print-footer">
+      "Observations from the patient's own encrypted journal — not a diagnosis. Generated by Fathom.""
+`;
+
+exports[`PatientView > shows an honest placeholder for notes it cannot decrypt > unreadable private note with recovery explanation 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <div>
+      <h1>
+        "patienta"
+      <p className="note">
+        "sharing since 2026-09-01 · read-only — you cannot change their data"
+        " · 6 patterns new for you to review"
+    <div className="no-print row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Print session summary"
+      <button className="btn btn--small" disabled=false type="button">
+        "Back to patients"
+  <div className="no-print row row--wrap mb-14">
+    <button className="btn btn--small" disabled=false type="button">
+      "Mark reviewed (start the delta anchor)"
+    <span className="hint">
+      "The new-pattern count anchors the first time you mark reviewed."
+  <section className="card">
+    <h2 className="card__title">
+      "Account summary"
+    <p className="note">
+      "?"
+      " entries · "
+      "?"
+      " active days"
+      " · average reading unavailable · source and coverage unavailable for this older analysis"
+  <section className="card">
+    <h2 className="card__title">
+      "A difficult thought has been returning"
+    <p className="note">
+      "A difficult thought has been returning in the patient's writing — the entries below show it in the patient's own words."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card">
+    <p className="note">
+      "Entries have read lower than the patient's own baseline lately."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card">
+    <h2 className="card__title">
+      "work"
+    <p className="note">
+      "'work' concentrates on Sunday (? of 9 mentions)."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card">
+    <h2 className="card__title">
+      "family"
+    <p className="note">
+      "Entries read higher on days 'family' appears (mood delta -0.3)."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card">
+    <h2 className="card__title">
+      "sleep"
+    <p className="note">
+      "About 2 day(s) after 'sleep' comes up, entries read lower."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card">
+    <h2 className="card__title">
+      "gym"
+    <p className="note">
+      "'gym' concentrates on certain days (? of 4 mentions)."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card no-print">
+    <h2 className="card__title">
+      "General notes about this patient"
+    <div className="entry-row">
+      <p className="note">
+        "(note could not be decrypted with this account's key)"
+      <div className="row">
+        <span className="note-date">
+          "2026-09-16"
+        <button className="btn btn--small" disabled=true type="button">
+          "Edit"
+        <button className="btn btn--danger btn--small" disabled=false type="button">
+          "Delete"
+    <div className="tpl-row">
+      <span className="hint tpl-row__label">
+        "Start from:"
+      <button className="tpl-chip" type="button">
+        "Session focus"
+      <button className="tpl-chip" type="button">
+        "Observed together"
+      <button className="tpl-chip" type="button">
+        "Homework / between-session plan"
+      <button className="tpl-chip" type="button">
+        "Questions for next visit"
+      <button className="tpl-chip" type="button">
+        "Copy forward last note"
+    <textarea aria-label="New note about this patient" className="textarea" disabled=false maxLength=100000 placeholder="Note about this patient…" rows=3 value="">
+    <div>
+      <p className="note" role="status">
+        "Drafts are encrypted on this device."
+      <button className="btn" disabled=true type="button">
+        "Save note"
+    <details className="disclose">
+      <summary>
+        "How private clinician notes are encrypted"
+      <div className="disclose__body">
+        <p className="note note--muted">
+          "Private clinician notes are encrypted under YOUR password before leaving this page. They are not shared with the patient or added to their journal, and may remain in your account after the patient stops sharing; delete them when your records policy requires it."
+  <div className="print-only">
+    <h1>
+      "Fathom session summary — "
+      "patienta"
+    <p className="print-meta">
+      "Sharing since 2026-09-01"
+      " "
+      "· summary generated "
+      "CURRENT_DATE"
+      " · 6 new patterns"
+    <p className="print-meta">
+      "?"
+      " entries · "
+      "?"
+      " active days"
+      " · average reading unavailable · source and coverage unavailable for this older analysis"
+    <div className="print-item">
+      <strong>
+        "A difficult thought (non-quoting)"
+      <p className="print-line">
+        "A difficult thought has been returning in the patient's writing — the entries below show it in the patient's own words."
+      <p className="print-evidence">
+        "mentions: 4 · evidence days: 1"
+    <div className="print-item">
+      <strong>
+        "mood_shift — "
+      <p className="print-line">
+        "Entries have read lower than the patient's own baseline lately."
+      <p className="print-evidence">
+        "mentions: 1 · evidence days: 1"
+    <div className="print-item">
+      <strong>
+        "temporal — work"
+      <p className="print-line">
+        "'work' concentrates on Sunday (? of 9 mentions)."
+      <p className="print-evidence">
+        "state: confirmed · first seen: 2026-08-20 · last seen: 2026-09-08 · mentions: 9 · evidence days: 2"
+    <div className="print-item">
+      <strong>
+        "mood_correlation — family"
+      <p className="print-line">
+        "Entries read higher on days 'family' appears (mood delta -0.3)."
+      <p className="print-evidence">
+        "mentions: 6 · evidence days: 1"
+    <div className="print-item">
+      <strong>
+        "link — sleep"
+      <p className="print-line">
+        "About 2 day(s) after 'sleep' comes up, entries read lower."
+      <p className="print-evidence">
+        "mentions: 5 · evidence days: 1"
+    <div className="print-item">
+      <strong>
+        "temporal — gym"
+      <p className="print-line">
+        "'gym' concentrates on certain days (? of 4 mentions)."
+      <p className="print-evidence">
+        "mentions: 4 · evidence days: 1"
+    <h2 className="print-h2">
+      "Therapist notes ("
+      "general"
+      ")"
+    <div className="print-note">
+      <p className="print-note-p">
+        "2026-09-16"
+        " — "
+        "(note could not be decrypted with this account's key)"
+    <p className="print-footer">
+      "Observations from the patient's own encrypted journal — not a diagnosis. Generated by Fathom.""
+`;
+
+exports[`PatientView > shows the baseline phase note without unwrapping > baseline chart and draft editor 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <div>
+      <h1>
+        "patienta"
+      <p className="note">
+        "sharing since 2026-09-01 · read-only — you cannot change their data"
+    <div className="no-print row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Print session summary"
+      <button className="btn btn--small" disabled=false type="button">
+        "Back to patients"
+  <div className="no-print row row--wrap mb-14">
+    <button className="btn btn--small" disabled=false type="button">
+      "Mark reviewed (start the delta anchor)"
+    <span className="hint">
+      "The new-pattern count anchors the first time you mark reviewed."
+  <section className="card">
+    <h2 className="card__title">
+      "Baseline phase"
+    <p className="note">
+      "Still in the baseline phase — 27 active day(s) until patterns surface. Your private clinician notes remain available below."
+  <section className="card no-print">
+    <h2 className="card__title">
+      "General notes about this patient"
+    <p className="note">
+      "No notes yet."
+    <div className="tpl-row">
+      <span className="hint tpl-row__label">
+        "Start from:"
+      <button className="tpl-chip" type="button">
+        "Session focus"
+      <button className="tpl-chip" type="button">
+        "Observed together"
+      <button className="tpl-chip" type="button">
+        "Homework / between-session plan"
+      <button className="tpl-chip" type="button">
+        "Questions for next visit"
+    <textarea aria-label="New note about this patient" className="textarea" disabled=false maxLength=100000 placeholder="Note about this patient…" rows=3 value="">
+    <div>
+      <p className="note" role="status">
+        "Drafts are encrypted on this device."
+      <button className="btn" disabled=true type="button">
+        "Save note"
+    <details className="disclose">
+      <summary>
+        "How private clinician notes are encrypted"
+      <div className="disclose__body">
+        <p className="note note--muted">
+          "Private clinician notes are encrypted under YOUR password before leaving this page. They are not shared with the patient or added to their journal, and may remain in your account after the patient stops sharing; delete them when your records policy requires it."
+  <div className="print-only">
+    <h1>
+      "Fathom session summary — "
+      "patienta"
+    <p className="print-meta">
+      "Sharing since 2026-09-01"
+      " "
+      "· summary generated "
+      "CURRENT_DATE"
+    <p className="print-footer">
+      "Observations from the patient's own encrypted journal — not a diagnosis. Generated by Fathom.""
+`;
+
+exports[`PatientView 2026-09-17 wave > note editing round-trips through the PATCH endpoint > versioned edited note and revision controls 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <div>
+      <h1>
+        "patienta"
+      <p className="note">
+        "sharing since 2026-09-01 · read-only — you cannot change their data"
+        " · 6 patterns new for you to review"
+    <div className="no-print row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Print session summary"
+      <button className="btn btn--small" disabled=false type="button">
+        "Back to patients"
+  <div className="no-print row row--wrap mb-14">
+    <button className="btn btn--small" disabled=false type="button">
+      "Mark reviewed (start the delta anchor)"
+    <span className="hint">
+      "The new-pattern count anchors the first time you mark reviewed."
+  <section className="card">
+    <h2 className="card__title">
+      "Account summary"
+    <p className="note">
+      "?"
+      " entries · "
+      "?"
+      " active days"
+      " · average reading unavailable · source and coverage unavailable for this older analysis"
+  <section className="card">
+    <h2 className="card__title">
+      "A difficult thought has been returning"
+    <p className="note">
+      "A difficult thought has been returning in the patient's writing — the entries below show it in the patient's own words."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card">
+    <p className="note">
+      "Entries have read lower than the patient's own baseline lately."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card">
+    <h2 className="card__title">
+      "work"
+    <p className="note">
+      "'work' concentrates on Sunday (? of 9 mentions)."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card">
+    <h2 className="card__title">
+      "family"
+    <p className="note">
+      "Entries read higher on days 'family' appears (mood delta -0.3)."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card">
+    <h2 className="card__title">
+      "sleep"
+    <p className="note">
+      "About 2 day(s) after 'sleep' comes up, entries read lower."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card">
+    <h2 className="card__title">
+      "gym"
+    <p className="note">
+      "'gym' concentrates on certain days (? of 4 mentions)."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card no-print">
+    <h2 className="card__title">
+      "General notes about this patient"
+    <div className="entry-row">
+      <p className="note">
+        "Edited session note."
+      <div className="row">
+        <span className="note-date">
+          "2026-09-16"
+        <button className="btn btn--small" disabled=false type="button">
+          "Edit"
+        <button className="btn btn--small" disabled=false type="button">
+          "View history"
+        <button className="btn btn--danger btn--small" disabled=false type="button">
+          "Delete"
+    <div className="tpl-row">
+      <span className="hint tpl-row__label">
+        "Start from:"
+      <button className="tpl-chip" type="button">
+        "Session focus"
+      <button className="tpl-chip" type="button">
+        "Observed together"
+      <button className="tpl-chip" type="button">
+        "Homework / between-session plan"
+      <button className="tpl-chip" type="button">
+        "Questions for next visit"
+      <button className="tpl-chip" type="button">
+        "Copy forward last note"
+    <textarea aria-label="New note about this patient" className="textarea" disabled=false maxLength=100000 placeholder="Note about this patient…" rows=3 value="">
+    <div>
+      <p className="note" role="status">
+        "Drafts are encrypted on this device."
+      <button className="btn" disabled=true type="button">
+        "Save note"
+    <details className="disclose">
+      <summary>
+        "How private clinician notes are encrypted"
+      <div className="disclose__body">
+        <p className="note note--muted">
+          "Private clinician notes are encrypted under YOUR password before leaving this page. They are not shared with the patient or added to their journal, and may remain in your account after the patient stops sharing; delete them when your records policy requires it."
+  <div className="print-only">
+    <h1>
+      "Fathom session summary — "
+      "patienta"
+    <p className="print-meta">
+      "Sharing since 2026-09-01"
+      " "
+      "· summary generated "
+      "CURRENT_DATE"
+      " · 6 new patterns"
+    <p className="print-meta">
+      "?"
+      " entries · "
+      "?"
+      " active days"
+      " · average reading unavailable · source and coverage unavailable for this older analysis"
+    <div className="print-item">
+      <strong>
+        "A difficult thought (non-quoting)"
+      <p className="print-line">
+        "A difficult thought has been returning in the patient's writing — the entries below show it in the patient's own words."
+      <p className="print-evidence">
+        "mentions: 4 · evidence days: 1"
+    <div className="print-item">
+      <strong>
+        "mood_shift — "
+      <p className="print-line">
+        "Entries have read lower than the patient's own baseline lately."
+      <p className="print-evidence">
+        "mentions: 1 · evidence days: 1"
+    <div className="print-item">
+      <strong>
+        "temporal — work"
+      <p className="print-line">
+        "'work' concentrates on Sunday (? of 9 mentions)."
+      <p className="print-evidence">
+        "state: confirmed · first seen: 2026-08-20 · last seen: 2026-09-08 · mentions: 9 · evidence days: 2"
+    <div className="print-item">
+      <strong>
+        "mood_correlation — family"
+      <p className="print-line">
+        "Entries read higher on days 'family' appears (mood delta -0.3)."
+      <p className="print-evidence">
+        "mentions: 6 · evidence days: 1"
+    <div className="print-item">
+      <strong>
+        "link — sleep"
+      <p className="print-line">
+        "About 2 day(s) after 'sleep' comes up, entries read lower."
+      <p className="print-evidence">
+        "mentions: 5 · evidence days: 1"
+    <div className="print-item">
+      <strong>
+        "temporal — gym"
+      <p className="print-line">
+        "'gym' concentrates on certain days (? of 4 mentions)."
+      <p className="print-evidence">
+        "mentions: 4 · evidence days: 1"
+    <h2 className="print-h2">
+      "Therapist notes ("
+      "general"
+      ")"
+    <div className="print-note">
+      <p className="print-note-p">
+        "2026-09-16"
+        " — "
+        "Edited session note."
+        <span className="print-edited">
+          "edited"
+    <p className="print-footer">
+      "Observations from the patient's own encrypted journal — not a diagnosis. Generated by Fathom.""
+`;
+
+exports[`PatientView item-9 surfacing (2026-09-27) > an endorsed item 9 renders the bordered safety row on screen AND in the printed summary > endorsed item-nine screen and print follow-up 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <div>
+      <h1>
+        "patienta"
+      <p className="note">
+        "sharing since 2026-09-01 · read-only — you cannot change their data"
+        " · 6 patterns new for you to review"
+    <div className="no-print row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Print session summary"
+      <button className="btn btn--small" disabled=false type="button">
+        "Back to patients"
+  <div className="no-print row row--wrap mb-14">
+    <button className="btn btn--small" disabled=false type="button">
+      "Mark reviewed (start the delta anchor)"
+    <span className="hint">
+      "The new-pattern count anchors the first time you mark reviewed."
+  <section className="card">
+    <h2 className="card__title">
+      "Recorded measures (1)"
+    <div>
+      <p className="note">
+        "PHQ-9 (depression)"
+        ": "
+        "2026-09-11: 6"
+      <div className="measure-flag">
+        "2026-09-11: PHQ-9 item 9 endorsed (self-harm question) — follow your clinical protocol · C-SSRS follow-up recommended"
+    <p className="note">
+      "Patient-recorded questionnaire scores, shared with you by consent. Fathom displays them; interpretation is yours."
+  <section className="card">
+    <h2 className="card__title">
+      "Account summary"
+    <p className="note">
+      "?"
+      " entries · "
+      "?"
+      " active days"
+      " · average reading unavailable · source and coverage unavailable for this older analysis"
+  <section className="card">
+    <h2 className="card__title">
+      "A difficult thought has been returning"
+    <p className="note">
+      "A difficult thought has been returning in the patient's writing — the entries below show it in the patient's own words."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card">
+    <p className="note">
+      "Entries have read lower than the patient's own baseline lately."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card">
+    <h2 className="card__title">
+      "work"
+    <p className="note">
+      "'work' concentrates on Sunday (? of 9 mentions)."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card">
+    <h2 className="card__title">
+      "family"
+    <p className="note">
+      "Entries read higher on days 'family' appears (mood delta -0.3)."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card">
+    <h2 className="card__title">
+      "sleep"
+    <p className="note">
+      "About 2 day(s) after 'sleep' comes up, entries read lower."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card">
+    <h2 className="card__title">
+      "gym"
+    <p className="note">
+      "'gym' concentrates on certain days (? of 4 mentions)."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card no-print">
+    <h2 className="card__title">
+      "General notes about this patient"
+    <p className="note">
+      "No notes yet."
+    <div className="tpl-row">
+      <span className="hint tpl-row__label">
+        "Start from:"
+      <button className="tpl-chip" type="button">
+        "Session focus"
+      <button className="tpl-chip" type="button">
+        "Observed together"
+      <button className="tpl-chip" type="button">
+        "Homework / between-session plan"
+      <button className="tpl-chip" type="button">
+        "Questions for next visit"
+    <textarea aria-label="New note about this patient" className="textarea" disabled=false maxLength=100000 placeholder="Note about this patient…" rows=3 value="">
+    <div>
+      <p className="note" role="status">
+        "Drafts are encrypted on this device."
+      <button className="btn" disabled=true type="button">
+        "Save note"
+    <details className="disclose">
+      <summary>
+        "How private clinician notes are encrypted"
+      <div className="disclose__body">
+        <p className="note note--muted">
+          "Private clinician notes are encrypted under YOUR password before leaving this page. They are not shared with the patient or added to their journal, and may remain in your account after the patient stops sharing; delete them when your records policy requires it."
+  <div className="print-only">
+    <h1>
+      "Fathom session summary — "
+      "patienta"
+    <p className="print-meta">
+      "Sharing since 2026-09-01"
+      " "
+      "· summary generated "
+      "CURRENT_DATE"
+      " · 6 new patterns"
+    <p className="print-meta">
+      "?"
+      " entries · "
+      "?"
+      " active days"
+      " · average reading unavailable · source and coverage unavailable for this older analysis"
+    <h2 className="print-h2">
+      "Recorded measures"
+    <div>
+      <p className="print-line">
+        "PHQ-9 (depression)"
+        ": "
+        "2026-09-11: 6"
+      <p className="print-line print-flag">
+        "2026-09-11: PHQ-9 item 9 endorsed (self-harm question) — follow your clinical protocol · C-SSRS follow-up recommended"
+    <div className="print-item">
+      <strong>
+        "A difficult thought (non-quoting)"
+      <p className="print-line">
+        "A difficult thought has been returning in the patient's writing — the entries below show it in the patient's own words."
+      <p className="print-evidence">
+        "mentions: 4 · evidence days: 1"
+    <div className="print-item">
+      <strong>
+        "mood_shift — "
+      <p className="print-line">
+        "Entries have read lower than the patient's own baseline lately."
+      <p className="print-evidence">
+        "mentions: 1 · evidence days: 1"
+    <div className="print-item">
+      <strong>
+        "temporal — work"
+      <p className="print-line">
+        "'work' concentrates on Sunday (? of 9 mentions)."
+      <p className="print-evidence">
+        "state: confirmed · first seen: 2026-08-20 · last seen: 2026-09-08 · mentions: 9 · evidence days: 2"
+    <div className="print-item">
+      <strong>
+        "mood_correlation — family"
+      <p className="print-line">
+        "Entries read higher on days 'family' appears (mood delta -0.3)."
+      <p className="print-evidence">
+        "mentions: 6 · evidence days: 1"
+    <div className="print-item">
+      <strong>
+        "link — sleep"
+      <p className="print-line">
+        "About 2 day(s) after 'sleep' comes up, entries read lower."
+      <p className="print-evidence">
+        "mentions: 5 · evidence days: 1"
+    <div className="print-item">
+      <strong>
+        "temporal — gym"
+      <p className="print-line">
+        "'gym' concentrates on certain days (? of 4 mentions)."
+      <p className="print-evidence">
+        "mentions: 4 · evidence days: 1"
+    <p className="print-footer">
+      "Observations from the patient's own encrypted journal — not a diagnosis. Generated by Fathom.""
+`;
+
+exports[`PatientView recorded measures (MBC, 2026-09-19) > renders decrypted measure scores with the interpretation-belongs-to-you copy > recorded measure interpretation 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <div>
+      <h1>
+        "patienta"
+      <p className="note">
+        "sharing since 2026-09-01 · read-only — you cannot change their data"
+        " · 6 patterns new for you to review"
+    <div className="no-print row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Print session summary"
+      <button className="btn btn--small" disabled=false type="button">
+        "Back to patients"
+  <div className="no-print row row--wrap mb-14">
+    <button className="btn btn--small" disabled=false type="button">
+      "Mark reviewed (start the delta anchor)"
+    <span className="hint">
+      "The new-pattern count anchors the first time you mark reviewed."
+  <section className="card">
+    <h2 className="card__title">
+      "Recorded measures (2)"
+    <div>
+      <svg aria-label="PHQ-9 (depression) trend over 2 readings: first 14, latest 9, low 9, high 14 (higher is more of what the instrument measures; interpretation is the clinician's)" className="trend" role="img" viewBox="0 0 320 40">
+        <line stroke="#3a352c" strokeWidth=1 x1=0 x2=320 y1=36 y2=36>
+        <path d="M0.0,4.0 L320.0,15.4" fill="none" stroke="#b7d5b2" strokeWidth=1.6>
+      <p className="note">
+        "PHQ-9 (depression)"
+        ": "
+        "2026-09-04: 14  ·  2026-09-11: 9"
+    <p className="note">
+      "Patient-recorded questionnaire scores, shared with you by consent. Fathom displays them; interpretation is yours."
+  <section className="card">
+    <h2 className="card__title">
+      "Account summary"
+    <p className="note">
+      "?"
+      " entries · "
+      "?"
+      " active days"
+      " · average reading unavailable · source and coverage unavailable for this older analysis"
+  <section className="card">
+    <h2 className="card__title">
+      "A difficult thought has been returning"
+    <p className="note">
+      "A difficult thought has been returning in the patient's writing — the entries below show it in the patient's own words."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card">
+    <p className="note">
+      "Entries have read lower than the patient's own baseline lately."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card">
+    <h2 className="card__title">
+      "work"
+    <p className="note">
+      "'work' concentrates on Sunday (? of 9 mentions)."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card">
+    <h2 className="card__title">
+      "family"
+    <p className="note">
+      "Entries read higher on days 'family' appears (mood delta -0.3)."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card">
+    <h2 className="card__title">
+      "sleep"
+    <p className="note">
+      "About 2 day(s) after 'sleep' comes up, entries read lower."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card">
+    <h2 className="card__title">
+      "gym"
+    <p className="note">
+      "'gym' concentrates on certain days (? of 4 mentions)."
+    <p className="note note--ok">
+      "new for you to review"
+    <button className="btn btn--small" disabled=false type="button">
+      "See the evidence"
+  <section className="card no-print">
+    <h2 className="card__title">
+      "General notes about this patient"
+    <p className="note">
+      "No notes yet."
+    <div className="tpl-row">
+      <span className="hint tpl-row__label">
+        "Start from:"
+      <button className="tpl-chip" type="button">
+        "Session focus"
+      <button className="tpl-chip" type="button">
+        "Observed together"
+      <button className="tpl-chip" type="button">
+        "Homework / between-session plan"
+      <button className="tpl-chip" type="button">
+        "Questions for next visit"
+    <textarea aria-label="New note about this patient" className="textarea" disabled=false maxLength=100000 placeholder="Note about this patient…" rows=3 value="">
+    <div>
+      <p className="note" role="status">
+        "Drafts are encrypted on this device."
+      <button className="btn" disabled=true type="button">
+        "Save note"
+    <details className="disclose">
+      <summary>
+        "How private clinician notes are encrypted"
+      <div className="disclose__body">
+        <p className="note note--muted">
+          "Private clinician notes are encrypted under YOUR password before leaving this page. They are not shared with the patient or added to their journal, and may remain in your account after the patient stops sharing; delete them when your records policy requires it."
+  <div className="print-only">
+    <h1>
+      "Fathom session summary — "
+      "patienta"
+    <p className="print-meta">
+      "Sharing since 2026-09-01"
+      " "
+      "· summary generated "
+      "CURRENT_DATE"
+      " · 6 new patterns"
+    <p className="print-meta">
+      "?"
+      " entries · "
+      "?"
+      " active days"
+      " · average reading unavailable · source and coverage unavailable for this older analysis"
+    <h2 className="print-h2">
+      "Recorded measures"
+    <div>
+      <p className="print-line">
+        "PHQ-9 (depression)"
+        ": "
+        "2026-09-04: 14  ·  2026-09-11: 9"
+    <div className="print-item">
+      <strong>
+        "A difficult thought (non-quoting)"
+      <p className="print-line">
+        "A difficult thought has been returning in the patient's writing — the entries below show it in the patient's own words."
+      <p className="print-evidence">
+        "mentions: 4 · evidence days: 1"
+    <div className="print-item">
+      <strong>
+        "mood_shift — "
+      <p className="print-line">
+        "Entries have read lower than the patient's own baseline lately."
+      <p className="print-evidence">
+        "mentions: 1 · evidence days: 1"
+    <div className="print-item">
+      <strong>
+        "temporal — work"
+      <p className="print-line">
+        "'work' concentrates on Sunday (? of 9 mentions)."
+      <p className="print-evidence">
+        "state: confirmed · first seen: 2026-08-20 · last seen: 2026-09-08 · mentions: 9 · evidence days: 2"
+    <div className="print-item">
+      <strong>
+        "mood_correlation — family"
+      <p className="print-line">
+        "Entries read higher on days 'family' appears (mood delta -0.3)."
+      <p className="print-evidence">
+        "mentions: 6 · evidence days: 1"
+    <div className="print-item">
+      <strong>
+        "link — sleep"
+      <p className="print-line">
+        "About 2 day(s) after 'sleep' comes up, entries read lower."
+      <p className="print-evidence">
+        "mentions: 5 · evidence days: 1"
+    <div className="print-item">
+      <strong>
+        "temporal — gym"
+      <p className="print-line">
+        "'gym' concentrates on certain days (? of 4 mentions)."
+      <p className="print-evidence">
+        "mentions: 4 · evidence days: 1"
+    <p className="print-footer">
+      "Observations from the patient's own encrypted journal — not a diagnosis. Generated by Fathom.""
+`;
+
+exports[`PatientsView > E (2026-09-26): entering the patient's id pulls the SAS beside the code, with compare-out-of-band copy > out-of-band patient pairing verification 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="pairing-code" data-testid="pairing-code">
+      "7X2KQM4N"
+    <hr className="divider">
+    <div className="field">
+      <label className="field__label" htmlFor="field-association-1">
+        "Patient's account id (shown in their app)"
+      <input autoComplete="off" className="input" id="field-association-1" placeholder="32 characters" type="text" value="0123456789abcdef0123456789abcdef">
+    <button className="btn btn--small" disabled=false type="button">
+      "Show verification code"
+    <p className="pairing-code" data-testid="pairing-sas">
+      "482 913"
+    <p className="note note--warn">
+      "This portal could not compute the fingerprint of your own sharing key, so the local cross-check against the server's key id could not run — only the out-of-band comparison of the verification code and key fingerprint with your patient verifies this pairing's key. Do not treat the key id above as verified."
+    <p className="note note--warn">
+      "Verification code for this pairing (key id "
+      "a1b2c3d4e5f60718"
+      "). "
+      "The patient's app shows the same code after they enter yours — read it to each other and confirm it matches EXACTLY before they confirm sharing. A"
+      "mismatch means the account id was entered wrong here or a key was substituted: re-check the id first, then generate a new code and do not proceed."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <p className="note">
+    "No patients are sharing with you yet."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="row row--wrap">
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Show account security"
+      <span className="hint">
+        "Change your password, recover your sharing key after an interrupted change, or rotate a compromised sharing key — nothing runs until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`PatientsView > lists active and stopped patients; open hands the patient up > active and stopped patient rows 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "patienta"
+        <p className="note">
+          "sharing since "
+          "2026-09-01"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "patientb"
+        <p className="note">
+          "access ended "
+          "2026-09-10"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="row row--wrap">
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Show account security"
+      <span className="hint">
+        "Change your password, recover your sharing key after an interrupted change, or rotate a compromised sharing key — nothing runs until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`PatientsView > shows the empty state and generates pairing codes > active pairing code 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="pairing-code" data-testid="pairing-code">
+      "7X2KQM4N"
+    <hr className="divider">
+    <div className="field">
+      <label className="field__label" htmlFor="field-association-1">
+        "Patient's account id (shown in their app)"
+      <input autoComplete="off" className="input" id="field-association-1" placeholder="32 characters" type="text" value="">
+    <button className="btn btn--small" disabled=true type="button">
+      "Show verification code"
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <p className="note">
+    "No patients are sharing with you yet."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="row row--wrap">
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Show account security"
+      <span className="hint">
+        "Change your password, recover your sharing key after an interrupted change, or rotate a compromised sharing key — nothing runs until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`PatientsView > shows the empty state and generates pairing codes > empty caseload and pairing controls 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <p className="note">
+    "No patients are sharing with you yet."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="row row--wrap">
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Show account security"
+      <span className="hint">
+        "Change your password, recover your sharing key after an interrupted change, or rotate a compromised sharing key — nothing runs until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`PatientsView caseload summaries (2026-09-19) > decrypts server summaries and shows the sensitive banner without opening charts > consented caseload summary and sensitive banner 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "F3EA 67E5 8DD3 DEF0 EA04 C676 CD80 7836"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <div className="mb-14" data-testid="sensitive-banner">
+    <p className="note note--warn">
+      "1"
+      " of your patients "
+      "has a sensitive card"
+      " in their current patterns. Opening "
+      "that chart"
+      " puts the non-quoting card first — the wording itself is never echoed here."
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <div className="toolbar">
+    <button className="btn btn--small" disabled=false type="button">
+      "Scan caseload for triage"
+    <label className="toolbar__search">
+      "search"
+      " "
+      <input aria-label="Search patients by username" className="input" placeholder="username…" value="">
+    <label className="toolbar__sort">
+      "sort"
+      " "
+      <span className="select-wrap">
+        <select aria-label="Sort patients" className="select" value="shared">
+          <option value="shared">
+            "newest share"
+          <option value="username">
+            "username"
+          <option value="triage">
+            "triage"
+            " (scan first)"
+  <div className="mb-10">
+    <span className="hint">
+      "The triage scan fetches each patient's decrypted pattern counts sequentially — nothing is stored."
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "patienta"
+        <p className="note">
+          "sharing since "
+          "2026-09-01"
+          " · 4 patterns as of 2026-09-18"
+        <p className="note note--warn">
+          "a sensitive card is present — review ordering puts it first"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "patientb"
+        <p className="note">
+          "sharing since "
+          "2026-09-01"
+          " · 0 patterns as of 2026-09-19"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="row row--wrap">
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Show account security"
+      <span className="hint">
+        "Change your password, recover your sharing key after an interrupted change, or rotate a compromised sharing key — nothing runs until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;

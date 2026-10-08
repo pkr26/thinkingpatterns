@@ -1,3 +1,4 @@
+import { runTestControl } from "../helpers/testControl";
 import React from "react";
 import { afterEach,beforeEach,describe,expect,it,vi } from "vitest";
 import { Alert } from "react-native";
@@ -29,7 +30,7 @@ const A="user-1",B="user-2";
 function deferred<T>(){let resolve!:(value:T)=>void;const promise=new Promise<T>(r=>{resolve=r;});return {promise,resolve};}
 function keys(value=3){return {masterKey:Buffer.alloc(32,value),authKey:Buffer.alloc(32,value),dataKey:Buffer.alloc(32,value)};}
 const roots:Array<Awaited<ReturnType<typeof render>>>=[];
-beforeEach(()=>{resetApi(api as never);__resetLocalKeyLifecycleForTests();vault.lock();vi.mocked(deriveKeysAsync).mockReset();vi.mocked(deriveMasterKeyAsync).mockReset();vi.mocked(unwrapBiometricDataKey).mockReset();vi.mocked(api.recoverLogin).mockReset();session.markLoggedIn.mockClear();session.refreshActiveDays.mockClear();Alert.alert.mockClear();});
+beforeEach(()=>{resetApi(api as never);runTestControl(__resetLocalKeyLifecycleForTests);vault.lock();vi.mocked(deriveKeysAsync).mockReset();vi.mocked(deriveMasterKeyAsync).mockReset();vi.mocked(unwrapBiometricDataKey).mockReset();vi.mocked(api.recoverLogin).mockReset();session.markLoggedIn.mockClear();session.refreshActiveDays.mockClear();Alert.alert.mockClear();});
 afterEach(async()=>{await act(async()=>{for(const root of roots)root.unmount();});roots.length=0;});
 async function login(){const root=await render(<LoginScreen navigation={{navigate:vi.fn()}}/>);roots.push(root);await typeInto(root,"username","alice");await typeInto(root,"password","Correct horse!");return root;}
 describe("authentication attempt custody",()=>{

@@ -49,10 +49,12 @@ function render(ui: React.ReactElement): void {
   });
 }
 
-function pressKey(target: Node, key: string, shift = false): void {
+function pressKey(target: Node, key: string, shift = false): boolean {
+  const event = new KeyboardEvent("keydown", { key, shiftKey: shift, bubbles: true, cancelable: true });
   act(() => {
-    target.dispatchEvent(new KeyboardEvent("keydown", { key, shiftKey: shift, bubbles: true, cancelable: true }));
+    target.dispatchEvent(event);
   });
+  return event.defaultPrevented;
 }
 
 const options5 = [
@@ -66,6 +68,47 @@ const options5 = [
 /* ------------------------------------------------------------------ dialog */
 
 describe("Dialog focus management", () => {
+  it("closes safely when the previous focused element belongs to SVG", () => {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("tabindex", "0");document.body.appendChild(svg);
+    try {
+      act(() => svg.focus());expect(document.activeElement).toBe(svg);
+      render(<Dialog title="Help" onClose={() => {}}><button>Close</button></Dialog>);
+      expect(() => act(() => root!.unmount())).not.toThrow();
+    } finally { svg.remove(); }
+  });
+  it("keeps a dialog with no enabled controls safe and leaves ordinary keys available", () => {
+    render(<Dialog title="Information" onClose={() => {}}><p>Read this information</p><button disabled>Unavailable</button></Dialog>);
+    expect(container!.querySelector('[role="dialog"]')?.textContent).toContain("Read this information");
+    expect(pressKey(document, "Tab")).toBe(false);
+    expect(pressKey(document, "Tab", true)).toBe(false);
+    expect(pressKey(document, "Enter")).toBe(false);
+  });
+  it("keeps its own ancestor interactive, excludes disabled controls and pulls escaped focus back to either end", () => {
+    const main = document.createElement("main"); main.id = "app-content";
+    const background = document.createElement("div"); const outside = document.createElement("button"); background.appendChild(outside);
+    document.body.appendChild(main); main.append(background, container!);
+    render(<Dialog title="Help" onClose={() => {}}><button disabled>Disabled</button><button>First</button><button>Middle</button><button>Last</button></Dialog>);
+    const buttons = [...container!.querySelectorAll("button")];
+    expect(background.hasAttribute("inert")).toBe(true); expect(container!.hasAttribute("inert")).toBe(false); expect(document.activeElement).toBe(buttons[1]);
+    act(() => outside.focus()); expect(pressKey(document, "Tab")).toBe(true); expect(document.activeElement).toBe(buttons[1]);
+    act(() => outside.focus()); expect(pressKey(document, "Tab", true)).toBe(true); expect(document.activeElement).toBe(buttons[3]);
+    act(() => root!.unmount()); expect(background.hasAttribute("inert")).toBe(false); main.remove();
+  });
+  it("intercepts only wraparound Tab and Escape, uses the latest close callback and removes its keyboard listener", () => {
+    const old = vi.fn(), current = vi.fn();
+    render(<Dialog title="Help" onClose={old}><button>First</button><button>Middle</button><button>Last</button></Dialog>);
+    render(<Dialog title="Help" onClose={current}><button>First</button><button>Middle</button><button>Last</button></Dialog>);
+    const buttons = [...container!.querySelectorAll("button")];
+    const key = (target: HTMLButtonElement, value: string, shiftKey = false) => { act(() => target.focus()); const event = new KeyboardEvent("keydown", { key: value, shiftKey, bubbles: true, cancelable: true }); act(() => target.dispatchEvent(event)); return event.defaultPrevented; };
+    expect(key(buttons[0]!, "Tab")).toBe(false); expect(document.activeElement).toBe(buttons[0]);
+    expect(key(buttons[1]!, "Tab", true)).toBe(false); expect(document.activeElement).toBe(buttons[1]);
+    expect(key(buttons[2]!, "Enter")).toBe(false); expect(document.activeElement).toBe(buttons[2]);
+    expect(key(buttons[2]!, "Tab")).toBe(true); expect(document.activeElement).toBe(buttons[0]);
+    expect(key(buttons[0]!, "Tab", true)).toBe(true); expect(document.activeElement).toBe(buttons[2]);
+    expect(key(buttons[1]!, "Escape")).toBe(true); expect(current).toHaveBeenCalledOnce(); expect(old).not.toHaveBeenCalled();
+    act(() => root!.unmount()); pressKey(document, "Escape"); expect(current).toHaveBeenCalledOnce();
+  });
   function mountDialog(onClose: () => void): void {
     const trigger = document.createElement("button");
     trigger.textContent = "Get help";
@@ -199,6 +242,59 @@ describe("MoreMenu keyboard pattern", () => {
     { id: "c", label: "Gamma", danger: true },
   ];
 
+  it("releases its Escape handler after closing so another control retains focus", () => {
+    render(<MoreMenu label="More" items={items} activeIds={[]} onSelect={() => {}} />);
+    const trigger = container!.querySelector("button")!;
+    const outside = document.createElement("button");document.body.appendChild(outside);
+    try {
+      for (const close of ["Tab", "select"]) {
+        act(() => trigger.click());
+        const first = container!.querySelector('[role="menuitem"]') as HTMLButtonElement;
+        if (close === "Tab") pressKey(first, "Tab"); else act(() => first.click());
+        act(() => outside.focus());expect(document.activeElement).toBe(outside);
+        expect(pressKey(document, "Escape")).toBe(false);
+        expect(document.activeElement).toBe(outside);
+      }
+    } finally { outside.remove(); }
+  });
+
+  it("releases the browser pointer subscription when its menu closes", () => {
+    render(<MoreMenu label="More" items={items} activeIds={[]} onSelect={() => {}} />);
+    const add = vi.spyOn(document, "addEventListener"), remove = vi.spyOn(document, "removeEventListener");
+    try {
+      act(() => container!.querySelector("button")!.click());
+      const listener = add.mock.calls.find(([kind]) => kind === "mousedown")?.[1];
+      expect(listener).toBeTypeOf("function");
+      pressKey(container!.querySelector('[role="menuitem"]')!, "Tab");
+      expect(remove.mock.calls.some(([kind, callback]) => kind === "mousedown" && callback === listener)).toBe(true);
+    } finally { add.mockRestore();remove.mockRestore(); }
+  });
+
+  it("opens an empty menu safely and still closes with Escape", () => {
+    render(<MoreMenu label="More" items={[]} activeIds={[]} onSelect={() => {}} />);
+    const trigger = container!.querySelector("button")!;
+    act(() => trigger.click());
+    expect(container!.querySelector('[role="menu"]')).not.toBeNull();
+    pressKey(document, "Escape");
+    expect(container!.querySelector('[role="menu"]')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("keeps inside clicks open, closes for outside clicks and Tab, and supports Home and harmless other keys", () => {
+    render(<MoreMenu label="More" items={items} activeIds={[]} onSelect={() => {}} />);
+    const trigger = container!.querySelector("button")!;
+    act(() => trigger.click());
+    const first = container!.querySelector('[role="menuitem"]')!;
+    act(() => first.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))); expect(container!.querySelector('[role="menu"]')).not.toBeNull();
+    expect(pressKey(first, "End")).toBe(true); expect(document.activeElement?.textContent).toBe("Gamma");
+    expect(pressKey(document.activeElement!, "Home")).toBe(true); expect(document.activeElement?.textContent).toBe("Alpha");
+    expect(pressKey(document.activeElement!, "Enter")).toBe(false); expect(container!.querySelector('[role="menu"]')).not.toBeNull(); expect(document.activeElement?.textContent).toBe("Alpha");
+    expect(pressKey(first, "Tab")).toBe(false); expect(container!.querySelector('[role="menu"]')).toBeNull();
+    act(() => trigger.click()); act(() => document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))); expect(container!.querySelector('[role="menu"]')).toBeNull();
+    act(() => root!.unmount());
+    expect(() => document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))).not.toThrow();
+  });
+
   it("opening focuses the first item; arrows roam; Escape refocuses the trigger", () => {
     let selected: string | null = null;
     render(<MoreMenu label="More" items={items} activeIds={[]} onSelect={(id) => { selected = id; }} />);
@@ -238,6 +334,15 @@ describe("SegmentedControl radio keyboard pattern", () => {
     { id: "dark", label: "Dark" },
     { id: "auto", label: "Auto" },
   ];
+
+  it("selects with vertical arrows and permits ordinary keys while preventing handled keyboard navigation", () => {
+    const select = vi.fn(); render(<SegmentedControl options={options} activeId="light" onSelect={select} a11yLabel="Theme" />);
+    const buttons = [...container!.querySelectorAll('button')];
+    const key = (index: number, value: string) => { const event = new KeyboardEvent("keydown", { key: value, bubbles: true, cancelable: true }); act(() => buttons[index]!.dispatchEvent(event)); return event.defaultPrevented; };
+    expect(key(0, "ArrowUp")).toBe(true); expect(select).toHaveBeenLastCalledWith("auto");
+    expect(key(0, "ArrowDown")).toBe(true); expect(select).toHaveBeenLastCalledWith("dark");
+    expect(key(0, "Enter")).toBe(false); expect(select).toHaveBeenCalledTimes(2);
+  });
 
   it("tabs stop only on the checked option; arrows select and move focus", () => {
     let active = "light";

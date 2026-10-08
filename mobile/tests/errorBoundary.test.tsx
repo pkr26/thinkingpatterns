@@ -14,7 +14,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React, { useEffect, useState } from "react";
-import { Linking, Text } from "react-native";
+import { Linking, Text, View, Pressable } from "react-native";
+import { darkTheme } from "../src/theme";
 import type { ReactTestRenderer } from "react-test-renderer";
 
 const { ErrorBoundary } = await import("../src/ErrorBoundary");
@@ -85,6 +86,16 @@ describe("ErrorBoundary (2026-10-01 audit L-4)", () => {
     expect(text).toContain("Your journal is safe and encrypted on this device.");
     // The load-bearing escape hatch renders even though the child tree died.
     expect(text).toContain("Crisis resources");
+    const flattened = (style: unknown): Record<string, unknown> => Array.isArray(style) ? Object.assign({}, ...style) : style as Record<string, unknown>;
+    const container = root.root.findByType(View);
+    expect(flattened(container.props.style)).toEqual({ flex: 1, alignItems: "center", justifyContent: "center", padding: 32, gap: 16, backgroundColor: darkTheme.colors.bg });
+    const textNodes = root.root.findAllByType(Text);
+    const nodeFor = (fragment: string) => textNodes.find(node => String(node.props.children).includes(fragment))!;
+    expect(flattened(nodeFor("Something went wrong").props.style)).toEqual({ fontSize: 20, fontWeight: "700", color: darkTheme.colors.text });
+    expect(flattened(nodeFor("Your journal is safe").props.style)).toEqual({ fontSize: 14, textAlign: "center", lineHeight: 20, color: darkTheme.colors.muted });
+    expect(flattened(nodeFor("Try again").props.style)).toEqual({ color: darkTheme.colors.text, fontWeight: "700" });
+    expect(flattened(nodeFor("Crisis resources").props.style)).toEqual({ color: darkTheme.colors.muted });
+    for (const button of root.root.findAllByType(Pressable)) expect(flattened(button.props.style)).toEqual({ borderRadius: 12, paddingHorizontal: 20, paddingVertical: 12, backgroundColor: darkTheme.colors.card });
     expect(console.warn).toHaveBeenCalledWith("render_error_boundary");
     expect(JSON.stringify(vi.mocked(console.warn).mock.calls)).not.toContain("PRIVATE-JOURNAL-SENTINEL");
   });

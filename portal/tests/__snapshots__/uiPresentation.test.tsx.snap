@@ -1,0 +1,85 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`preserves the public layout, labels and accessibility states of portal controls 1`] = `
+"<main>
+  <button className="btn" disabled=false type="button">
+    "Continue"
+  <button className="btn btn--danger btn--small" disabled=true type="button">
+    "Remove"
+  <button className="btn btn--ghost" disabled=false type="button">
+    "Back"
+  <button className="btn" disabled=false type="submit">
+    "Save"
+  <section className="card">
+    <h2 className="card__title">
+      "Ordinary card"
+    <p>
+      "Body"
+  <section className="card card--deep card--danger account-warning">
+    <h2 className="card__title">
+      "Danger card"
+    <p>
+      "Important content"
+  <section className="card">
+    <p>
+      "Card without heading"
+  <div className="field">
+    <label className="field__label" htmlFor="field-association-1">
+      "Name"
+    <input className="input" id="field-association-1" type="text" value="Example">
+  <div className="field">
+    <label className="field__label" htmlFor="field-association-2">
+      "Email"
+    <input autoComplete="email" className="input" id="field-association-2" placeholder="Email address" type="email" value="person@example.test">
+  <details className="disclose">
+    <summary>
+      "Read the policy"
+    <div className="disclose__body">
+      <p className="note note--muted">
+        <p>
+          "Policy details"
+  <p className="note">
+    "Plain note"
+  <p className="note note--muted">
+    "Muted note"
+  <p className="note note--ok" role="status">
+    "Saved"
+  <p className="note note--danger" role="alert">
+    "Failed"
+  <p className="note note--warn">
+    "Warning"
+  <div className="banner banner--error" role="alert">
+    "Try again"
+  <div className="banner banner--info" role="status">
+    "Loading"
+  <div className="banner banner--info banner--flush" role="status">
+    "Account notice"
+  <div aria-label="Password strength: Weak" className="pw-meter" role="status">
+    <span className="pw-meter__bar pw-meter__bar--1">
+    <span className="pw-meter__bar">
+    <span className="pw-meter__bar">
+    <span className="pw-meter__bar">
+    <span className="pw-meter__label pw-meter__label--1">
+      "Weak"
+  <div aria-label="Password strength: Fair" className="pw-meter" role="status">
+    <span className="pw-meter__bar pw-meter__bar--2">
+    <span className="pw-meter__bar pw-meter__bar--2">
+    <span className="pw-meter__bar">
+    <span className="pw-meter__bar">
+    <span className="pw-meter__label pw-meter__label--2">
+      "Fair"
+  <div aria-label="Password strength: Good" className="pw-meter" role="status">
+    <span className="pw-meter__bar pw-meter__bar--3">
+    <span className="pw-meter__bar pw-meter__bar--3">
+    <span className="pw-meter__bar pw-meter__bar--3">
+    <span className="pw-meter__bar">
+    <span className="pw-meter__label pw-meter__label--3">
+      "Good"
+  <div aria-label="Password strength: Strong" className="pw-meter" role="status">
+    <span className="pw-meter__bar pw-meter__bar--4">
+    <span className="pw-meter__bar pw-meter__bar--4">
+    <span className="pw-meter__bar pw-meter__bar--4">
+    <span className="pw-meter__bar pw-meter__bar--4">
+    <span className="pw-meter__label pw-meter__label--4">
+      "Strong""
+`;

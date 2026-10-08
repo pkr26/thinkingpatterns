@@ -46,9 +46,9 @@ export async function recoverAccountWithKey(username: string, recoveryKeyText: s
     let wrapped: Buffer;
     try {
       const authKey = deriveAuthKey(master);
-      const kek = envelopeKek(master, salt);
-      try { wrapped = wrapDataKey(dataKey, kek, canonicalUsername, params); } finally { zeroize(kek); }
       try {
+        const kek = envelopeKek(master, salt);
+        try { wrapped = wrapDataKey(dataKey, kek, canonicalUsername, params); } finally { zeroize(kek); }
         await wait(() => api.resetPasswordWithRecovery(proof, {
           new_salt: salt!.toString("base64"), new_verifier: authKey.toString("base64"),
           new_kdf_params: params, wrapped_data_key: wrapped.toString("base64"),

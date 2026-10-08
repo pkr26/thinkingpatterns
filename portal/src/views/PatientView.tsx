@@ -434,7 +434,7 @@ export function patternAnchorLabel(pid: string | null): string {
     sensemaking: "a sense-making pattern",
     diversity: "an activity-variety pattern",
   };
-  return names[kind] ?? "a pattern";
+  return Object.hasOwn(names, kind) ? names[kind]! : "a pattern";
 }
 
 /** 2026-09-28 audit F2: phrase highlighting must survive the engine's

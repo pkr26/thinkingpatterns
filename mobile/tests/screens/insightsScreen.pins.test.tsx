@@ -591,3 +591,48 @@ describe("InsightsScreen pins: navigation-less operation", () => {
     expect(style[1]).toBeFalsy(); // no `centered` entry
   });
 });
+describe("authenticated pattern descriptions across all shipped channels", () => {
+  const cases: Array<[string, string, Record<string, unknown>, string]> = [
+    ["energy_inertia", "ENERGY CARRYOVER", {}, "Your energy has been carrying over from day to day more than usual for you."],
+    ["pa_inertia", "POSITIVE CARRYOVER", {}, "Your positive feelings have been carrying over from day to day more than usual for you."],
+    ["na_inertia", "NEGATIVE CARRYOVER", {}, "Your negative feelings have been carrying over from day to day more than usual for you."],
+    ["energy_mood_coupling", "ENERGY AND MOOD", {}, "Your energy and your mood have been moving together more closely than usual for you."],
+    ["sense_making", "SENSE-MAKING", {}, "Your writing has leaned more on sense-making words — like 'because' and 'realize' — than it used to."],
+    ["avoidance", "SILENCE AFTER", { share: 0.34, silences: 7, observed: 20, base_rate: 0.25 }, "The day after 'work' comes up, you tend not to write (34% of such days)."],
+    ["cadence", "RHYTHM", { gap_spread_recent: 3.7, gap_spread_earlier: 1.2 }, "Your writing rhythm has been less regular than it used to be for you — longer stretches of silence between writing days."],
+    ["link", "DAY-AFTER LINK", { direction: "lower" }, "The day after 'work' comes up, your entries read lower than usual for you."],
+    ["link", "DAY-AFTER LINK", { direction: "higher", channel: "sleep_quality" }, "The day after a night you rated as rougher than your own usual, your entries read higher than usual for you."],
+    ["link", "DAY-AFTER LINK", { direction: "lower", source: "tag" }, "The day after you tag 'work', your entries read lower than usual for you."],
+    ["temporal", "TIMING", { day: "Tuesday", channel: "sleep_quality" }, "Your rougher nights (by your own ratings) fall most often on Tuesdays."],
+    ["temporal", "TIMING", { channel: "sleep_quality" }, "Your rougher nights (by your own ratings) fall most often on certain days."],
+    ["temporal", "TIMING", { day: "Thursday", source: "tag" }, "You tag 'work' most often on Thursdays."],
+    ["temporal", "TIMING", { source: "tag" }, "You tag 'work' most often on certain days."],
+    ["topic", "THEME", { share: 0.37, trend: "rising" }, "'work' has been taking up more space in your writing lately (37% of entries)."],
+    ["topic", "THEME", { share: 0.42 }, "'work' is a steady presence in your writing (42% of entries)."],
+    ["mood_shift", "MOOD TREND", { shift: 0.4 }, "Your entries have read higher than your usual baseline lately (a shift of 0.4)."],
+    ["mood_shift", "MOOD TREND", { shift: -0.5, direction: "higher" }, "Your entries have read higher than your usual baseline lately (a shift of 0.5)."],
+    ["authenticated-unknown", "PATTERN", {}, "'work' appeared 7 times."],
+  ];
+  it.each(cases)("renders the public %s/%s/%j card copy", async (kind, badge, detail, description) => {
+    const root = await renderExpanded([pattern({ kind, detail })]);
+    expect(allText(root)).toContain(badge); expect(allText(root)).toContain(description);
+    if (kind === "avoidance") expect(textOf(root)).toContain("your usual silent-day rate is 25%");
+    if (kind === "cadence") expect(textOf(root)).toContain("3.7");
+    await act(async () => root.unmount());
+  });
+});
+
+describe("evidence copy for every authenticated diary channel",()=>{
+ it.each([
+ ["energy_inertia","energy","your energy has been carrying over more strongly than it used to for you"],
+ ["pa_inertia","positive_affect","your positive feelings have been carrying over more strongly than it used to for you"],
+ ["na_inertia","negative_affect","your negative feelings have been carrying over more strongly than it used to for you"],
+ ])("keeps the %s channel in its plain-language evidence",async(kind,channel,expected)=>{const root=await renderExpanded([pattern({kind,detail:{channel,carryover_recent:.7,carryover_earlier:.2}})]);expect(textOf(root)).toContain(expected);await act(async()=>root.unmount());});
+ it("renders the actual sense-making rates and keeps absent past rates unavailable",async()=>{const root=await renderExpanded([pattern({kind:"sense_making",detail:{density_recent:2.7,density_earlier:1.3}})]);expect(textOf(root)).toContain("2.7 per 100 words lately, versus your earlier 1.3");});
+ it("renders both widened and narrowed activity varieties without manufacturing a direction",async()=>{for(const direction of["widened","narrowed"]){const root=await renderExpanded([pattern({kind:"activity_diversity",detail:{entropy_recent:2.7,entropy_earlier:1.3,direction}})]);expect(textOf(root)).toContain("has "+direction+" compared");await act(async()=>root.unmount());}});
+});
+describe("complete sample and coupling evidence",()=>{
+ it("renders entry counts independently beside the number of sample days",async()=>{const root=await renderExpanded([pattern({detail:{sample_days:8,sample_entries:23}})]);expect(textOf(root)).toContain("8 entries in your analysis window");expect(textOf(root)).toContain("23 journal entries");});
+ it("renders actual coupling evidence and the protected technical numbers",async()=>{const root=await renderExpanded([pattern({kind:"energy_mood_coupling",detail:{coupling_recent:.72,coupling_earlier:.31}})]);expect(textOf(root)).toContain("your energy and your mood have been moving more in step than they used to");await pressLabel(root,"Technical details");expect(textOf(root)).toContain("0.72 vs 0.31");});
+ it("explicit lower directions remain lower even when the cached signed measurement is positive",async()=>{for(const kind of["mood_correlation","mood_shift"]){const root=await renderExpanded([pattern({kind,detail:kind==="mood_correlation"?{mood_delta:.4,direction:"lower"}:{shift:.4,direction:"lower"}})]);expect(textOf(root)).toContain("read lower");expect(textOf(root)).not.toContain("read higher");await act(async()=>root.unmount());}});
+});

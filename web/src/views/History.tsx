@@ -68,9 +68,10 @@ const DECRYPT_YIELD_EVERY = 25;
 
 function yieldToHost(): Promise<void> {
   return new Promise((resolve) => {
-    const idle = (globalThis as { requestIdleCallback?: (callback: () => void) => number }).requestIdleCallback;
+    const idle = (globalThis as { requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number }).requestIdleCallback;
     if (typeof idle === "function") {
-      idle(() => resolve());
+      // Busy browsers may never become idle; the host deadline still yields.
+      idle(() => resolve(), { timeout: 50 });
       return;
     }
     setTimeout(resolve, 0);
@@ -143,39 +144,41 @@ export function HistoryView(): React.JSX.Element {
       stopPlayback();
       return;
     }
-    if (!vault.isUnlocked()) return;
+    const patient = beginOperation();
+    if (!patient) return;
     // Pressing play on B while A plays stops A FIRST (H2): exactly one
     // element may ever be mounted, so the switch is stop-then-start.
     stopPlayback();
     const operation = playbackGeneration.current;
     setAudioBusyId(attachmentId);
     try {
-      const keys = vault.get();
-      const owner = vault.ownerUserId();
-      if (!owner) return;
+      const { keys, owner } = patient;
       const current = await playAttachment({
         fetchBlob: () => api.fetchAudioAttachment(attachmentId),
         dataKey: keys.dataKey,
         userId: owner,
         clientEntryId: entry.clientEntryId,
       });
-      if (operation !== playbackGeneration.current) { current.release(); return; }
+      if (operation !== playbackGeneration.current || !patient.current()) { current.release(); return; }
       playingRef.current = current;
       setPlaying(current);
       setPlayingId(attachmentId);
     } catch (err) {
-      if (operation === playbackGeneration.current) setError(playbackErrorText(err));
+      if (operation === playbackGeneration.current && patient.current()) setError(playbackErrorText(err));
     } finally {
-      if (operation === playbackGeneration.current) setAudioBusyId(null);
+      if (operation === playbackGeneration.current && patient.current()) setAudioBusyId(null);
     }
   };
 
   const removeRecording = async (entry: DecodedEntry): Promise<void> => {
     if (!entry.audio) return;
+    const operation = beginOperation();
+    if (!operation) return;
     setAudioBusyId(entry.audio.attachment_id);
     setError("");
     try {
       await api.deleteAudioAttachment(entry.audio.attachment_id);
+      if (!operation.current()) return;
       // Only the PLAYING entry's delete stops playback (H2): deleting one
       // recording must not silence another that is mid-play.
       if (playingId === entry.audio.attachment_id) stopPlayback();
@@ -183,9 +186,9 @@ export function HistoryView(): React.JSX.Element {
         (list ?? []).map((item) => (item.clientEntryId === entry.clientEntryId ? { ...item, audio: null } : item)),
       );
     } catch (err) {
-      setError(err instanceof ApiError && err.status === 0 ? t("history.loadOffline") : t("history.deleteRecordingFailed"));
+      if (operation.current()) setError(err instanceof ApiError && err.status === 0 ? t("history.loadOffline") : t("history.deleteRecordingFailed"));
     } finally {
-      setAudioBusyId(null);
+      if (operation.current()) setAudioBusyId(null);
     }
   };
   const [busy, setBusy] = useState(false);
@@ -369,7 +372,7 @@ export function HistoryView(): React.JSX.Element {
     // The same client-side length cap as the create path (2026-09-28
     // audit MEDIUM): MAX_ENTRY_CHARS gates the editor, not just the
     // server's blob ceiling.
-    if (editText.trim().length > MAX_ENTRY_CHARS) {
+    if (editText.length > MAX_ENTRY_CHARS) {
       setError(t("entry.tooLongBody", { max: MAX_ENTRY_CHARS.toLocaleString(dateLocaleTag()) }));
       return;
     }
@@ -742,7 +745,7 @@ export function HistoryView(): React.JSX.Element {
 
       {editing && (
         <Card title={t("history.editTitle", { date: editing.entryDate })}>
-          <TextArea label={t("history.yourEntry")} value={editText} onChange={setEditText} rows={8} />
+          <TextArea label={t("history.yourEntry")} value={editText} onChange={setEditText} disabled={busy} rows={8} />
           <div className="row">
             <Button label={busy ? t("entry.saving") : t("history.saveEdit")} onPress={() => void submitEdit()} disabled={busy} />
             <Button label={t("common.cancel")} onPress={() => setEditing(null)} small variant="ghost" />
@@ -762,8 +765,8 @@ export function HistoryView(): React.JSX.Element {
             <Note>{conflict.mine}</Note>
           </div>
           <div className="row row--wrap">
-            <Button label={t("history.keepTheirs")} onPress={() => { setConflict(null); void load(); }} small variant="ghost" />
-            <Button label={t("history.applyMine")} onPress={() => void applyMineOnTop()} small />
+            <Button label={t("history.keepTheirs")} onPress={() => { setConflict(null); void load(); }} small variant="ghost" disabled={busy} />
+            <Button label={t("history.applyMine")} onPress={() => void applyMineOnTop()} small disabled={busy} />
           </div>
           <Note tone="muted">{t("history.noOverwriteNote")}</Note>
         </Card>

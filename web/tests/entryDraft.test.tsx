@@ -46,7 +46,7 @@ const memoryBackend = (): KvBackend => {
 };
 
 const unlockVault = (): void => {
-  vault.unlock({ authKey: DATA_KEY, dataKey: DATA_KEY }, USER);
+  vault.unlock({ authKey: DATA_KEY.slice(), dataKey: DATA_KEY.slice() }, USER);
 };
 
 const DRAFT: EntryDraft = { text: "half-written honesty", mood: 0.5, energy: -0.5, sleep: null, tags: ["work"] };
@@ -157,7 +157,7 @@ describe("entryDraft custody (module)", () => {
     const sealed = preserveActiveDraft();
     vault.lock(); // the lockDown continuation zeroizes the shared buffer NOW
     await sealed;
-    vault.unlock({ authKey: DATA_KEY, dataKey: DATA_KEY }, USER);
+    vault.unlock({ authKey: DATA_KEY.slice(), dataKey: DATA_KEY.slice() }, USER);
     expect(await loadActiveDraft(DATA_KEY, USER)).toEqual(DRAFT);
   });
 
@@ -238,6 +238,7 @@ describe("entryDraft custody (module)", () => {
 });
 
 describe("EntryView draft contract", () => {
+  beforeEach(() => { installSession(USER); });
   it("lock mid-draft → re-unlock → the editor restores text AND structured picks", async () => {
     authStubs();
     let root = await render(<EntryView onSaved={() => undefined} />);
@@ -254,6 +255,7 @@ describe("EntryView draft contract", () => {
     });
     // Re-unlock, fresh editor mount: the draft comes back — the whole
     // multi-field state, exactly as the editor models it.
+    installSession(USER);
     unlockVault();
     root = await render(<EntryView onSaved={() => undefined} />);
     await settle(40, 3);

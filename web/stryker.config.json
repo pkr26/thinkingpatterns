@@ -2,12 +2,13 @@
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
   "testRunner": "command",
   "commandRunner": {
-    "command": "node_modules/.bin/vitest run --coverage.enabled=false --silent"
+    "command": "node_modules/.bin/vitest run --coverage.enabled=false --silent --exclude tests/brainArtifact.test.ts --exclude tests/crisisArtifact.test.ts --exclude tests/designTokens.test.ts --exclude tests/audioArtifact.test.ts"
   },
   "inPlace": true,
   "mutate": [
     "src/**/*.ts",
-    "src/**/*.tsx"
+    "src/**/*.tsx",
+    "public/theme-init.js"
   ],
   "disableTypeChecks": "{src,tests}/**/*.{ts,tsx}",
   "coverageAnalysis": "off",

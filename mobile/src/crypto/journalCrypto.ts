@@ -111,10 +111,8 @@ export function encryptEntry(
         english_text: voice.englishText,
       }
     : base;
-  // Stryker disable StringLiteral
   const extras = originalPayload ? Object.fromEntries(Object.entries(originalPayload).filter(([field]) => !ENTRY_FIELDS.has(field))) : {};
 const plaintext = Buffer.from(JSON.stringify({ ...extras, ...payload }), "utf8");
-  // Stryker restore StringLiteral
   const aad =
     contentVersion !== undefined && Number.isSafeInteger(contentVersion) && contentVersion >= 1
       ? buildAad("entry", userId, clientEntryId, String(contentVersion))

@@ -1,3 +1,4 @@
+import { runTestControl } from "./helpers/testControl";
 /**
  * Rollback-guard pins (2026-09-19 contract): the payload's embedded
  * analysis generation must equal the plaintext echo, and neither may move
@@ -103,7 +104,7 @@ describe("sealed persistence (2026-09-26 audit LOW)", () => {
     await checkAnalysisGeneration("t1", 8, 8); // sealed under the device key
     const key = "mindpattern.stateSeq.t1";
     tamperSealed(key, "2"); // a local attacker's edit, no device key
-    resetAnalysisGenerationMirrors(); // fresh process: no mirror either
+    runTestControl(resetAnalysisGenerationMirrors); // fresh process: no mirror either
     // The tampered record cannot present itself as a genuine (lowered)
     // mark: it reads as ABSENT, and the documented deletion residual
     // applies across a restart — the check degrades to "no memory" and

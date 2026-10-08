@@ -13,7 +13,7 @@
  * wrapped key — future access dies instantly. The disclosure is honest
  * that already-read data cannot be unread.
  */
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { api, ApiError, SHARING_DISCLOSURE_VERSION, type ListedConsent, type PairingLookup } from "../api/client";
 import { vault } from "../vault";
@@ -23,6 +23,7 @@ import { useTheme } from "../theme";
 import { PrimaryButton, GhostButton, CrisisHelpButton } from "../components/buttons";
 import { calmFallbackCopy } from "../components/errors";
 import { t as tr, dateLocaleTag } from "../strings";
+import { localWriteScopeEpoch } from "../localWriteGuard";
 
 type PendingAction =
   | { kind: "grant"; code: string; lookup: PairingLookup }
@@ -82,6 +83,8 @@ export function validSas(value: unknown): string | null {
 
 export function TherapistShareScreen({ navigation }: { navigation: any }): React.JSX.Element {
   const t = useTheme();
+  const mounted = useRef(true);
+  const submitting = useRef(false);
   const [consents, setConsents] = useState<ListedConsent[]>([]);
   /** L-66: a FAILED consents load is "unknown", not "not sharing" — this
    *  screen is where a revoke gets verified, so the empty-state copy must
@@ -141,15 +144,23 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
       })
       .finally(() => setMetaPending(false));
   }, []);
-  useEffect(refresh, [refresh]);
+  useEffect(() => {
+    mounted.current = true;
+    refresh();
+    return () => { mounted.current = false; };
+  }, [refresh]);
 
   const findTherapist = async () => {
-    if (busy || sharingAvailable !== true || !code.trim()) return;
+    if (!mounted.current || submitting.current || busy || sharingAvailable !== true || !code.trim()) return;
+    const scope = localWriteScopeEpoch();
+    submitting.current = true;
     setBusy(true);
     try {
       const found = await api.pairingLookup(code.trim());
+      if (!mounted.current || scope !== localWriteScopeEpoch()) return;
       setLookup(found);
     } catch (err) {
+      if (!mounted.current || scope !== localWriteScopeEpoch()) return;
       if (isSessionExpiredError(err)) {
         Alert.alert(tr("common.sessionExpiredTitle"), tr("common.unlockAgainBody"));
       } else if (err instanceof ApiError && err.status === 404) {
@@ -160,7 +171,11 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
         Alert.alert(tr("share.lookupFailedTitle"), calmFallbackCopy(err, tr("errors.generic")));
       }
     } finally {
-      setBusy(false);
+      submitting.current = false;
+      // No newer action can start before this submission latch releases.
+      // A same-origin server save retires the scope without closing this
+      // route, so its settled lookup must release the local busy state.
+      if (mounted.current) setBusy(false);
     }
   };
 
@@ -231,12 +246,18 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
    *  typed password re-derives the vault's own auth key (the reauth.ts
    *  contract). */
   const confirmWithPassword = async () => {
-    if (!pending || busy || !password) return;
+    if (!mounted.current || submitting.current || !pending || busy || !password || !vault.isUnlocked()) return;
+    submitting.current = true;
+    const scope = localWriteScopeEpoch(), owner = vault.ownerUserId();
+    const key = vault.isUnlocked() ? vault.get().dataKey : null;
+    const current = () => mounted.current && scope === localWriteScopeEpoch() &&
+      owner === vault.ownerUserId() && (key === null || (vault.isUnlocked() && vault.get().dataKey === key));
     setBusy(true);
     const done = () => { setBusy(false); setPending(null); setPassword(""); setLookup(null); setCode(""); };
     const retry = () => { setBusy(false); setPassword(""); };
     try {
       const reauth = await verifyPasswordForVault(password);
+      if (!current()) return;
       if (!reauth.ok) {
         const messages = {
           locked: tr("common.reauthLocked"),
@@ -250,6 +271,7 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
       }
       if (pending.kind === "grant") {
         const userId = await api.getUserId();
+        if (!current()) return;
         if (!userId) throw new Error(tr("share.noAccount"));
         // The data key leaves the device exactly once: inside this wrap.
         const wrap = wrapDataKeyForTherapist(
@@ -259,6 +281,7 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
           pending.lookup.therapist_id,
         );
         await api.grantConsent(pending.code, wrap.ephemeralPubB64, wrap.wrappedKeyB64, reauth.verifierB64);
+        if (!current()) return;
         Alert.alert(
           tr("share.grantDoneTitle"),
           tr("share.grantDoneBody", { name: pending.lookup.display_name }),
@@ -267,16 +290,19 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
         // Optimistic-failure honest (web's Share discipline): the row only
         // flips on the server's own answer; a failure reloads the truth.
         await api.setShareVoice(pending.consentId, pending.enabled, reauth.verifierB64);
+        if (!current()) return;
         setConsents((current) =>
           current.map((row) => (row.id === pending.consentId ? { ...row, share_voice: pending.enabled } : row)),
         );
       } else {
         await api.revokeConsent(pending.consentId, reauth.verifierB64);
+        if (!current()) return;
         Alert.alert(tr("share.revokeDoneTitle"), tr("share.revokeDoneBody"));
       }
       refresh();
       done();
     } catch (err) {
+      if (!current()) return;
       if (isDisclosureOutdated(err)) {
         // M-25: the server refused the grant because the disclosure this
         // screen reviewed is no longer current (409 disclosure_outdated).
@@ -300,6 +326,12 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
         Alert.alert(tr("common.couldNotCompleteTitle"), calmFallbackCopy(err, tr("errors.generic")));
       }
       done();
+    } finally {
+      submitting.current = false;
+      if (mounted.current) {
+        setBusy(false);
+        setPassword("");
+      }
     }
   };
 

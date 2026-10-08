@@ -1286,6 +1286,7 @@ export const en: Record<string, string> = {
   "share.voiceOn": "Therapist can hear my recordings",
   "share.voiceOff": "Therapist cannot hear my recordings",
   "share.voiceToggleFailed": "Could not change what this therapist may hear — try again.",
+  "share.reauthShareVoiceTitle": "Enter your password to change what {name} can hear",
   "app.erasureTitle": "Unfinished local deletion",
   "app.erasureExplanation": "Encrypted records for an account-deletion request still need removal from this browser. Other accounts are kept. Confirmed requests are retried automatically.",
   "app.erasureRetry": "Retry local cleanup",

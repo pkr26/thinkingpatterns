@@ -104,7 +104,7 @@ export async function adoptLegacyPlaintextMutes(dataKey: Bytes, userId: string):
     // Unparseable legacy value: drop it below rather than crash the view.
   } finally {
     try {
-      localStore.removePrefix(legacyKey(userId));
+      localStore.remove(legacyKey(userId));
     } catch {
       // Storage is optional; the plaintext copy dies on the next wipe.
     }

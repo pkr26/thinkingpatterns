@@ -1,0 +1,275 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Journal history renders a safe public surface after its vault is locked 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Mood calendar"
+  <div className="cal-toolbar">
+    <button aria-label="Previous month" className="cal-arrow" type="button">
+      <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+        <path d="M14.5 5.5 8 12l6.5 6.5">
+    <span className="cal-month">
+      "October 2026"
+    <button aria-label="Next month" className="cal-arrow" type="button">
+      <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+        <path d="M9.5 5.5 16 12l-6.5 6.5">
+  <div aria-label="Mood calendar" className="cal-grid" role="group">
+    <span aria-hidden="true" className="cal-weekday">
+      "Mon"
+    <span aria-hidden="true" className="cal-weekday">
+      "Tue"
+    <span aria-hidden="true" className="cal-weekday">
+      "Wed"
+    <span aria-hidden="true" className="cal-weekday">
+      "Thu"
+    <span aria-hidden="true" className="cal-weekday">
+      "Fri"
+    <span aria-hidden="true" className="cal-weekday">
+      "Sat"
+    <span aria-hidden="true" className="cal-weekday">
+      "Sun"
+  <div className="row row--wrap row--between">
+    <span className="cal-legend">
+      <span aria-hidden="true" className="cal-legend__swatch" style={"background":"#8fb98d"}>
+      "Lighter days"
+      <span aria-hidden="true" className="cal-legend__swatch" style={"background":"#cd8f82","marginLeft":8}>
+      "Heavier days"
+    <span className="cal-legend">
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Each tile is the day's mood — your explicit check-in pick when you made one, otherwise the on-device read of that day's entry. Computed locally, never synced separately."
+<section className="card">
+  <h2 className="card__title">
+    "History"
+  <label className="field">
+    <span className="field__label">
+      "Search"
+    <input className="input" placeholder="Search your words, or an exact date (YYYY-MM-DD)" type="text" value="">
+  <div className="banner banner--error" role="alert">
+    "Your session locked — sign in again.""
+`;
+
+exports[`Journal history renders its settled public empty-account surface in en 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Mood calendar"
+  <div className="cal-toolbar">
+    <button aria-label="Previous month" className="cal-arrow" type="button">
+      <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+        <path d="M14.5 5.5 8 12l6.5 6.5">
+    <span className="cal-month">
+      "October 2026"
+    <button aria-label="Next month" className="cal-arrow" type="button">
+      <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+        <path d="M9.5 5.5 16 12l-6.5 6.5">
+  <div aria-label="Mood calendar" className="cal-grid" role="group">
+    <span aria-hidden="true" className="cal-weekday">
+      "Mon"
+    <span aria-hidden="true" className="cal-weekday">
+      "Tue"
+    <span aria-hidden="true" className="cal-weekday">
+      "Wed"
+    <span aria-hidden="true" className="cal-weekday">
+      "Thu"
+    <span aria-hidden="true" className="cal-weekday">
+      "Fri"
+    <span aria-hidden="true" className="cal-weekday">
+      "Sat"
+    <span aria-hidden="true" className="cal-weekday">
+      "Sun"
+    <span>
+    <span>
+    <span>
+    <button aria-label="2026-10-01" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "1"
+    <button aria-label="2026-10-02" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "2"
+    <button aria-label="2026-10-03" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "3"
+    <button aria-label="2026-10-04" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "4"
+    <button aria-label="2026-10-05 — today" aria-pressed=false className="cal-day cal-day--today" disabled=true style={} type="button">
+      "5"
+    <button aria-label="2026-10-06" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "6"
+    <button aria-label="2026-10-07" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "7"
+    <button aria-label="2026-10-08" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "8"
+    <button aria-label="2026-10-09" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "9"
+    <button aria-label="2026-10-10" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "10"
+    <button aria-label="2026-10-11" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "11"
+    <button aria-label="2026-10-12" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "12"
+    <button aria-label="2026-10-13" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "13"
+    <button aria-label="2026-10-14" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "14"
+    <button aria-label="2026-10-15" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "15"
+    <button aria-label="2026-10-16" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "16"
+    <button aria-label="2026-10-17" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "17"
+    <button aria-label="2026-10-18" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "18"
+    <button aria-label="2026-10-19" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "19"
+    <button aria-label="2026-10-20" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "20"
+    <button aria-label="2026-10-21" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "21"
+    <button aria-label="2026-10-22" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "22"
+    <button aria-label="2026-10-23" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "23"
+    <button aria-label="2026-10-24" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "24"
+    <button aria-label="2026-10-25" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "25"
+    <button aria-label="2026-10-26" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "26"
+    <button aria-label="2026-10-27" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "27"
+    <button aria-label="2026-10-28" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "28"
+    <button aria-label="2026-10-29" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "29"
+    <button aria-label="2026-10-30" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "30"
+    <button aria-label="2026-10-31" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "31"
+  <div className="row row--wrap row--between">
+    <span className="cal-legend">
+      <span aria-hidden="true" className="cal-legend__swatch" style={"background":"#8fb98d"}>
+      "Lighter days"
+      <span aria-hidden="true" className="cal-legend__swatch" style={"background":"#cd8f82","marginLeft":8}>
+      "Heavier days"
+    <span className="cal-legend">
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Each tile is the day's mood — your explicit check-in pick when you made one, otherwise the on-device read of that day's entry. Computed locally, never synced separately."
+<section className="card">
+  <h2 className="card__title">
+    "History"
+  <label className="field">
+    <span className="field__label">
+      "Search"
+    <input className="input" placeholder="Search your words, or an exact date (YYYY-MM-DD)" type="text" value="">
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "No entries yet — today is a fine day to start.""
+`;
+
+exports[`Journal history renders its settled public empty-account surface in es 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Calendario de ánimo"
+  <div className="cal-toolbar">
+    <button aria-label="Mes anterior" className="cal-arrow" type="button">
+      <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+        <path d="M14.5 5.5 8 12l6.5 6.5">
+    <span className="cal-month">
+      "octubre 2026"
+    <button aria-label="Mes siguiente" className="cal-arrow" type="button">
+      <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+        <path d="M9.5 5.5 16 12l-6.5 6.5">
+  <div aria-label="Calendario de ánimo" className="cal-grid" role="group">
+    <span aria-hidden="true" className="cal-weekday">
+      "lun"
+    <span aria-hidden="true" className="cal-weekday">
+      "mar"
+    <span aria-hidden="true" className="cal-weekday">
+      "mié"
+    <span aria-hidden="true" className="cal-weekday">
+      "jue"
+    <span aria-hidden="true" className="cal-weekday">
+      "vie"
+    <span aria-hidden="true" className="cal-weekday">
+      "sáb"
+    <span aria-hidden="true" className="cal-weekday">
+      "dom"
+    <span>
+    <span>
+    <span>
+    <button aria-label="2026-10-01" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "1"
+    <button aria-label="2026-10-02" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "2"
+    <button aria-label="2026-10-03" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "3"
+    <button aria-label="2026-10-04" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "4"
+    <button aria-label="2026-10-05 — hoy" aria-pressed=false className="cal-day cal-day--today" disabled=true style={} type="button">
+      "5"
+    <button aria-label="2026-10-06" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "6"
+    <button aria-label="2026-10-07" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "7"
+    <button aria-label="2026-10-08" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "8"
+    <button aria-label="2026-10-09" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "9"
+    <button aria-label="2026-10-10" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "10"
+    <button aria-label="2026-10-11" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "11"
+    <button aria-label="2026-10-12" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "12"
+    <button aria-label="2026-10-13" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "13"
+    <button aria-label="2026-10-14" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "14"
+    <button aria-label="2026-10-15" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "15"
+    <button aria-label="2026-10-16" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "16"
+    <button aria-label="2026-10-17" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "17"
+    <button aria-label="2026-10-18" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "18"
+    <button aria-label="2026-10-19" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "19"
+    <button aria-label="2026-10-20" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "20"
+    <button aria-label="2026-10-21" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "21"
+    <button aria-label="2026-10-22" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "22"
+    <button aria-label="2026-10-23" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "23"
+    <button aria-label="2026-10-24" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "24"
+    <button aria-label="2026-10-25" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "25"
+    <button aria-label="2026-10-26" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "26"
+    <button aria-label="2026-10-27" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "27"
+    <button aria-label="2026-10-28" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "28"
+    <button aria-label="2026-10-29" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "29"
+    <button aria-label="2026-10-30" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "30"
+    <button aria-label="2026-10-31" aria-pressed=false className="cal-day" disabled=true style={} type="button">
+      "31"
+  <div className="row row--wrap row--between">
+    <span className="cal-legend">
+      <span aria-hidden="true" className="cal-legend__swatch" style={"background":"#8fb98d"}>
+      "Días más ligeros"
+      <span aria-hidden="true" className="cal-legend__swatch" style={"background":"#cd8f82","marginLeft":8}>
+      "Días más pesados"
+    <span className="cal-legend">
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Cada casilla es el ánimo del día: su registro explícito si lo hizo, y si no, la lectura en el dispositivo de la entrada de ese día. Se calcula localmente y nunca se sincroniza por separado."
+<section className="card">
+  <h2 className="card__title">
+    "Historial"
+  <label className="field">
+    <span className="field__label">
+      "Buscar"
+    <input className="input" placeholder="Busque en sus palabras, o una fecha exacta (AAAA-MM-DD)" type="text" value="">
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "Aún no hay entradas — hoy es un buen día para empezar.""
+`;

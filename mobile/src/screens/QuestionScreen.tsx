@@ -11,14 +11,14 @@
  *
  * "Write about this" stashes an account-bound draft for EntryScreen.
  */
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from "react-native";
 import { api, ApiError } from "../api/client";
 import { decryptQuestion } from "../crypto/journalCrypto";
-import { buildFeedbackBlob, clearFeedback, recordFeedbackTap } from "../questionFeedback";
+import { buildFeedbackBlob, clearFeedback, recordFeedbackTap, type FeedbackReceipt } from "../questionFeedback";
 import { lightHaptic } from "../haptics";
 import { vault } from "../vault";
-import { assertLocalWritePermit, captureLocalWritePermit } from "../localRekey";
+import { assertLocalWritePermit, captureLocalWritePermit, type LocalWritePermit } from "../localRekey";
 import { localWriteScopeEpoch } from "../localWriteGuard";
 import { useSession, stashDraft } from "../store";
 import { genericQuestionForDate } from "../genericQuestions";
@@ -32,11 +32,11 @@ import { getLocale, t as tr } from "../strings";
 /** Calm copy for a failed load: calm request copy for ApiErrors, our own
  *  sentence for local Errors, one generic line for anything else. */
 function failureCopy(err: unknown): string {
-  // Stryker disable next-line ConditionalExpression: requestFailureCopy implements the identical three-way mapping (ApiError→status copy, Error→message, else generic) — delegating every error to it is behavior-preserving
   if (err instanceof ApiError) return requestFailureCopy(err);
   if (err instanceof Error) return err.message;
   return tr("errors.generic");
 }
+type QuestionOwnership = { scope: number; owner: string | null; dataKey: Buffer | null; view: number };
 
 export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.Element {
   const t = useTheme();
@@ -45,7 +45,6 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
   // hardcoded 30 (a server configured for a different threshold rendered
   // the wrong count whenever dayProgress had not loaded yet).
   const { touchActivity, unlockDays } = useSession();
-  // Stryker disable next-line StringLiteral: "unknown" is never rendered or compared — only phase === "baseline" is ever tested, and "" fails that test identically
   const [phase, setPhase] = useState<"unknown" | "baseline" | "insight">("unknown");
   /** True when the phase is ASSUMED because the server was unreachable
    *  (status 0: offline, timeout, local refusal — audit L-57). The card
@@ -63,11 +62,28 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
   const [error, setError] = useState<string | null>(null);
   /** The "no pattern has enough evidence yet" note — a normal state. */
   const [notice, setNotice] = useState<string | null>(null);
+  const viewGeneration = useRef(0);
+  const loadingOperation = useRef<QuestionOwnership | null>(null);
+  const computingOperation = useRef<QuestionOwnership | null>(null);
+  const captureOwnership = (): QuestionOwnership => ({ scope: localWriteScopeEpoch(), owner: vault.ownerUserId(), dataKey: vault.isUnlocked() ? vault.get().dataKey : null, view: viewGeneration.current });
+  const renderedOwnership = captureOwnership();
+  const ownsOperation = (operation: QuestionOwnership) => operation.view === viewGeneration.current && operation.scope === localWriteScopeEpoch()
+    && operation.owner === vault.ownerUserId() && vault.isUnlocked() && operation.dataKey === vault.get().dataKey;
+  const ownsView = (operation: QuestionOwnership) => operation.view === viewGeneration.current
+    && operation.owner === vault.ownerUserId() && vault.isUnlocked() && operation.dataKey === vault.get().dataKey;
+  const finishBusy = (operation: QuestionOwnership) => {
+    if (!ownsView(operation)) return;
+    if ((loadingOperation.current && ownsOperation(loadingOperation.current)) || (computingOperation.current && ownsOperation(computingOperation.current))) return;
+    setBusy(false);
+  };
+  const assertOwnership = (operation: QuestionOwnership) => { if (!ownsOperation(operation)) throw new Error(tr("common.sessionDamagedTitle")); };
 
-  const decryptToday = async () => {
+  const decryptToday = async (operation: QuestionOwnership) => {
     const userId = await api.getUserId();
+    assertOwnership(operation);
     if (!userId) throw new Error(tr("common.accountMissing"));
-    const direct = await api.questionToday();
+    const direct = await api.questionToday(() => ownsOperation(operation));
+    assertOwnership(operation);
     // The blob's AAD is bound to the server's calendar date — always
     // decrypt with the for_date the server reported, never a locally
     // computed "today" (timezones would break authentication).
@@ -78,19 +94,44 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
    *  the "did this land?" taps (2026-09-17). */
   const [patternPid, setPatternPid] = useState<string | null>(null);
   const [feedbackGiven, setFeedbackGiven] = useState(false);
+  const feedbackLatched = useRef(false);
+  const feedbackGeneration = useRef(0);
+  const renderedFeedbackGeneration = feedbackGeneration.current;
+  const displayedQuestion = useRef<{ question: string | null; pid: string | null }>({ question: null, pid: null });
+  const showQuestion = (payload: Awaited<ReturnType<typeof decryptToday>>, fresh = false) => {
+    const pid = typeof payload.pattern_pid === "string" ? payload.pattern_pid : null;
+    if (fresh || displayedQuestion.current.question !== payload.question || displayedQuestion.current.pid !== pid) {
+      feedbackGeneration.current++;
+      feedbackLatched.current = false;
+      setFeedbackGiven(false);
+    }
+    displayedQuestion.current = { question: payload.question, pid };
+    setQuestion(payload.question);
+    setPatternPid(pid);
+  };
   const recordTap = async (resonated: boolean) => {
     const pid = patternPid;
-    if (!pid || feedbackGiven) return;
+    if (!pid || feedbackGiven || feedbackLatched.current || renderedFeedbackGeneration !== feedbackGeneration.current) return;
+    feedbackLatched.current = true;
+    const operation = captureOwnership();
+    const feedbackEpoch = feedbackGeneration.current;
+    const current = () => ownsOperation(operation) && feedbackEpoch === feedbackGeneration.current;
+    const sameQuestionView = () => feedbackEpoch === feedbackGeneration.current && ownsView(operation);
+    const assertCurrent = () => { assertOwnership(operation); if (feedbackEpoch !== feedbackGeneration.current) throw new Error(tr("common.sessionDamagedTitle")); };
     setFeedbackGiven(true);
     lightHaptic();
     try {
       const userId = await api.getUserId();
-      if (userId) {
-        await recordFeedbackTap(vault.get().dataKey, userId, pid, resonated);
+      assertCurrent();
+      if (userId && userId === operation.owner) {
+        await recordFeedbackTap(operation.dataKey!, userId, pid, resonated, current);
+        assertCurrent();
         setNotice(resonated ? tr("question.noticedMore") : tr("question.noticedLess"));
-      }
+      } else throw new Error(tr("common.sessionDamagedTitle"));
     } catch {
+      if (!current() && !sameQuestionView()) return;
       setNotice(tr("question.feedbackSaveFailed"));
+      feedbackLatched.current = false;
       setFeedbackGiven(false);
     }
   };
@@ -106,36 +147,47 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
 
   /** Step 3 of the load: the key-bearing recompute. Only ever runs in the
    *  insight phase, and only after the consent check in load(). */
-  const computeQuestion = async () => {
+  const computeQuestion = async (operation: QuestionOwnership) => {
+    if (!ownsOperation(operation)) return;
+    if (computingOperation.current && ownsOperation(computingOperation.current)) return;
+    computingOperation.current = operation;
     setBusy(true);
-    // Stryker disable next-line CallExpression: redundant reset — both callers run inside load(), which cleared the error first with no setter in between
     setError(null);
-    // Stryker disable next-line CallExpression: redundant reset — both callers run inside load(), which cleared the notice first with no setter in between
     setNotice(null);
     let keyCopy: Buffer | null = null;
+    let writePermit: LocalWritePermit | null = null;
+    const current = () => {
+      if (!ownsOperation(operation)) return false;
+      if (!writePermit) return true;
+      try { assertLocalWritePermit(writePermit); return true; } catch { return false; }
+    };
     const submitEpoch = localWriteScopeEpoch();
     try {
       const userId = await api.getUserId();
+      assertOwnership(operation);
       if (submitEpoch !== localWriteScopeEpoch()) throw new Error(tr("common.sessionDamagedTitle"));
       if (!userId) throw new Error(tr("common.sessionDamagedTitle"));
       if (vault.ownerUserId() !== userId) throw new Error(tr("common.sessionDamagedTitle"));
       keyCopy = Buffer.from(vault.get().dataKey);
-      const writePermit = captureLocalWritePermit(userId, keyCopy);
-      const session = await api.openProcessingSession(keyCopy.toString("base64"));
+      writePermit = captureLocalWritePermit(userId, keyCopy);
+      const assertCurrent = () => { assertOwnership(operation); assertLocalWritePermit(writePermit!); };
+      const session = await api.openProcessingSession(keyCopy.toString("base64"), writePermit, current);
       // Pending question-feedback taps ride along, encrypted like every
       // other payload (2026-09-17); cleared once the server consumed them.
-      assertLocalWritePermit(writePermit);
-      const feedbackBlob = await buildFeedbackBlob(keyCopy, userId);
-      assertLocalWritePermit(writePermit);
+      assertCurrent();
+      let feedbackReceipt: FeedbackReceipt | undefined;
+      const feedbackBlob = await buildFeedbackBlob(keyCopy, userId, receipt => { feedbackReceipt = receipt; }, current);
+      assertCurrent();
       let result: Awaited<ReturnType<typeof api.recompute>>;
       try {
-        result = await api.recompute(session.session_token, feedbackBlob ?? undefined);
+        result = await api.recompute(session.session_token, feedbackBlob ?? undefined, current);
       } catch (err) {
         // A feedback blob that failed AEAD can never authenticate again —
         // quarantine it (drop the queue) and finish the recompute without
         // it, instead of failing every question load from now on.
         if (err instanceof ApiError && err.code === "feedback_blob_invalid" && userId) {
-          await clearFeedback(userId, writePermit).catch(() => {});
+          assertCurrent();
+          if (feedbackBlob) await clearFeedback(userId, writePermit, feedbackReceipt ? { dataKey: keyCopy, receipt: feedbackReceipt } : undefined, current).catch(() => {});
           // M-12: the failed feedback pre-flight already CONSUMED the
           // single-use processing token server-side (the key is popped
           // before the pre-flight raises) — replaying it is a guaranteed
@@ -143,34 +195,37 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
           // below was dead code. Open a FRESH session — the data key ships
           // once more under the same consent already given for this flow —
           // so the retry can actually run.
-          assertLocalWritePermit(writePermit);
-          const fresh = await api.openProcessingSession(keyCopy.toString("base64"));
-          assertLocalWritePermit(writePermit);
-          result = await api.recompute(fresh.session_token);
+          assertCurrent();
+          const fresh = await api.openProcessingSession(keyCopy.toString("base64"), writePermit, current);
+          assertCurrent();
+          result = await api.recompute(fresh.session_token, undefined, current);
         } else {
           throw err;
         }
       }
-      if (feedbackBlob) await clearFeedback(userId, writePermit).catch(() => {});
-      assertLocalWritePermit(writePermit);
+      assertCurrent();
+      if (feedbackBlob) await clearFeedback(userId, writePermit, feedbackReceipt ? { dataKey: keyCopy, receipt: feedbackReceipt } : undefined, current).catch(() => {});
+      assertCurrent();
       if (!result.question_stored) {
         setNotice(tr("question.noEvidenceYet"));
         return;
       }
-      const payload = await decryptToday();
-      assertLocalWritePermit(writePermit);
-      setQuestion(payload.question);
-      setPatternPid(typeof payload.pattern_pid === "string" ? payload.pattern_pid : null);
-      setFeedbackGiven(false);
+      const payload = await decryptToday(operation);
+      assertCurrent();
+      showQuestion(payload, true);
     } catch (err) {
-      reportFailure(err);
+      if (current()) reportFailure(err);
     } finally {
       keyCopy?.fill(0);
-      setBusy(false);
+      if (computingOperation.current === operation) computingOperation.current = null;
+      finishBusy(operation);
     }
   };
 
   const load = async (allowKeyShip: boolean) => {
+    if (loadingOperation.current && ownsOperation(loadingOperation.current)) return;
+    const operation = captureOwnership();
+    loadingOperation.current = operation;
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -183,9 +238,11 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
       //    information the user must see: they stay on the error path.
       let summary: Awaited<ReturnType<typeof api.insights>>;
       try {
-        summary = await api.insights();
+        summary = await api.insights(() => ownsOperation(operation));
+        assertOwnership(operation);
         setPhaseAssumedOffline(false); // a real answer replaces any assumption
       } catch (err) {
+        if (!ownsOperation(operation)) return;
         if (err instanceof ApiError && err.status === 0) {
           // Status 0 means NO RESPONSE (offline, timeout, local refusal) —
           // the phase is unknowable, not "baseline" (audit L-57). The
@@ -200,30 +257,28 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
       }
       if (summary.phase !== "insight") {
         setPhase("baseline");
-        // Stryker disable next-line ConditionalExpression,LogicalOperator: Number.isFinite(x) ⇒ typeof x === "number" for JSON-parsed values, and `active` is only consumed when total > 0 — which itself requires Number.isFinite(active_days)
         const active = typeof summary.active_days === "number" && Number.isFinite(summary.active_days)
           ? summary.active_days
           : 0;
         const total = Number.isFinite(summary.days_remaining) && Number.isFinite(summary.active_days)
           ? summary.days_remaining + summary.active_days
           : 0;
-        setDayProgress(total > 0 ? { active, total } : null);
+        setDayProgress(Number.isFinite(total) && total > 0 ? { active, total } : null);
         // Day-one value: a reflective question TODAY from the built-in
         // pool, computed on-device — nothing leaves the phone for it, so
         // no key ships and no consent explainer belongs here.
         setGeneric(genericQuestionForDate(localDateISO(), getLocale()));
         return;
       }
-      // Stryker disable next-line StringLiteral: phase is only ever compared to "baseline" (the card guard and the caption) — "" and "insight" both fail that test identically
       setPhase("insight");
       // 2) A question may already exist for today — no key required either.
       try {
-        const payload = await decryptToday();
-        setQuestion(payload.question);
+        const payload = await decryptToday(operation);
+        assertOwnership(operation);
         // The pid must follow every question swap (a refresh after a
         // recompute would otherwise keep the PREVIOUS question's pid and
         // attribute the taps to the wrong pattern); no pid → none offered.
-        setPatternPid(typeof payload.pattern_pid === "string" ? payload.pattern_pid : null);
+        showQuestion(payload);
         return;
       } catch (err) {
         // 404 = none stored yet (expected, continue to recompute). Anything
@@ -240,32 +295,36 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
       // below is the explicit act that may continue.
       if (!allowKeyShip) return;
       const sessionUserId = await api.getUserId();
+      assertOwnership(operation);
       if (!sessionUserId || vault.ownerUserId() !== sessionUserId) {
         throw new Error(tr("question.sessionMismatch"));
       }
       // A failed consent READ errs toward showing the explainer again (the
       // user may never have been told), never toward skipping it silently.
-      // Stryker disable next-line ArrowFunction: !undefined ≡ !false — a failed consent read shows the explainer either way
-      if (!(await hasKeyShipConsent(sessionUserId).catch(() => false))) {
+      const consent = await hasKeyShipConsent(sessionUserId).catch(() => false);
+      assertOwnership(operation);
+      if (!consent) {
         Alert.alert(tr("question.keyShipTitle"), tr("question.keyShipBody"), [
           { text: tr("common.notNow"), style: "cancel" },
           {
             text: tr("common.continue"),
             onPress: () => {
+              if (!ownsOperation(operation)) return;
               // Losing this write just shows the explainer again — never
               // block the load on it.
               void recordKeyShipConsent(sessionUserId).catch(() => {});
-              void computeQuestion();
+              void computeQuestion(operation);
             },
           },
         ]);
         return;
       }
-      await computeQuestion();
+      await computeQuestion(operation);
     } catch (err) {
-      reportFailure(err);
+      if (ownsOperation(operation)) reportFailure(err);
     } finally {
-      setBusy(false);
+      if (loadingOperation.current === operation) loadingOperation.current = null;
+      finishBusy(operation);
     }
   };
 
@@ -274,8 +333,16 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
   // runs from here (see load's allowKeyShip guard) — mounting a screen
   // must not ship the data key or fire the consent dialog at the user.
   useEffect(() => {
+    let owner = vault.ownerUserId(), dataKey = vault.isUnlocked() ? vault.get().dataKey : null;
+    const unsubscribe = vault.subscribe(() => {
+      const nextOwner = vault.ownerUserId(), nextKey = vault.isUnlocked() ? vault.get().dataKey : null;
+      if (owner === nextOwner && dataKey === nextKey) return;
+      owner = nextOwner; dataKey = nextKey; viewGeneration.current++;
+      feedbackGeneration.current++; feedbackLatched.current = false; displayedQuestion.current = { question: null, pid: null };
+      setBusy(false); setQuestion(null); setPatternPid(null); setFeedbackGiven(false); setGeneric(null); setError(null); setNotice(null); setPhase("unknown");
+    });
     void load(false);
-    // Stryker disable next-line ArrayDeclaration: the mount effect must run exactly once — load closes over stable setters and a boolean flag, so a literal dep array and [] are behaviorally identical
+    return () => { viewGeneration.current++; unsubscribe(); };
   }, []);
 
   const onShowQuestion = () => {
@@ -287,10 +354,16 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
   /** The question → journal bridge: the question becomes the start of
    *  today's entry via the account-bound draft stash. */
   const writeAbout = async (text: string) => {
-    // Stryker disable next-line ArrowFunction: null and undefined are both falsy in the !userId branch directly below
+    if (!ownsView(renderedOwnership)) return;
+    const operation = captureOwnership();
     const userId = await api.getUserId().catch(() => null);
+    if (!ownsOperation(operation)) return;
     if (!userId) {
       Alert.alert(tr("common.sessionDamagedTitle"), tr("question.accountMissingPlain"));
+      return;
+    }
+    if (userId !== operation.owner) {
+      Alert.alert(tr("common.sessionDamagedTitle"), tr("question.sessionMismatch"));
       return;
     }
     stashDraft(userId, text);

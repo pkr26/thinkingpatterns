@@ -1,0 +1,1398 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`changes voice sharing only after its fresh proof and reloads honest state on failure: failure=false 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Enter your password to change what Dr. Current can hear"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "For your protection, type your current password now. An unlocked session alone cannot authorize this change."
+  <label className="field">
+    <span className="field__label">
+      "Current password"
+    <input autoComplete="current-password" className="input" type="password" value="">
+  <div className="row row--wrap">
+    <button className="btn" disabled=true type="button">
+      "Verify and continue"
+    <button className="btn btn--ghost" disabled=false type="button">
+      "Cancel"
+<section className="card">
+  <h2 className="card__title">
+    "Share with a therapist"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Zero-knowledge: your key is wrapped to your therapist's public key — the server never sees it, and neither does anyone else."
+  <label className="field">
+    <span className="field__label">
+      "Pairing code"
+    <input className="input" placeholder="from your therapist's portal" type="text" value="">
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Look up"
+<section className="card">
+  <h2 className="card__title">
+    "Your grants"
+  <div className="entry-card">
+    <div className="row" style={"gap":12,"alignItems":"center"}>
+      <span aria-hidden="true" className="avatar">
+        "DC"
+      <div className="stack" style={"gap":2,"flex":1}>
+        <strong style={"fontSize":"var(--text-md)","color":"var(--text)"}>
+          "Dr. Current"
+        <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+          "Sharing since 2026-10-01"
+    <div className="row row--between">
+      <span className="note" style={"whiteSpace":"pre-wrap"}>
+        "Therapist cannot hear my recordings"
+      <button aria-checked=false aria-label="Therapist cannot hear my recordings" className="toggle" disabled=false role="switch" type="button">
+    <div className="row row--end">
+      <button className="btn btn--danger btn--small" disabled=false type="button">
+        "Revoke access""
+`;
+
+exports[`changes voice sharing only after its fresh proof and reloads honest state on failure: failure=true 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Enter your password to change what Dr. Current can hear"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "For your protection, type your current password now. An unlocked session alone cannot authorize this change."
+  <label className="field">
+    <span className="field__label">
+      "Current password"
+    <input autoComplete="current-password" className="input" type="password" value="">
+  <div className="row row--wrap">
+    <button className="btn" disabled=true type="button">
+      "Verify and continue"
+    <button className="btn btn--ghost" disabled=false type="button">
+      "Cancel"
+<section className="card">
+  <h2 className="card__title">
+    "Share with a therapist"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Zero-knowledge: your key is wrapped to your therapist's public key — the server never sees it, and neither does anyone else."
+  <label className="field">
+    <span className="field__label">
+      "Pairing code"
+    <input className="input" placeholder="from your therapist's portal" type="text" value="">
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Look up"
+<section className="card">
+  <h2 className="card__title">
+    "Your grants"
+  <div className="entry-card">
+    <div className="row" style={"gap":12,"alignItems":"center"}>
+      <span aria-hidden="true" className="avatar">
+        "DC"
+      <div className="stack" style={"gap":2,"flex":1}>
+        <strong style={"fontSize":"var(--text-md)","color":"var(--text)"}>
+          "Dr. Current"
+        <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+          "Sharing since 2026-10-01"
+    <div className="row row--between">
+      <span className="note" style={"whiteSpace":"pre-wrap"}>
+        "Therapist cannot hear my recordings"
+      <button aria-checked=false aria-label="Therapist cannot hear my recordings" className="toggle" disabled=false role="switch" type="button">
+    <div className="row row--end">
+      <button className="btn btn--danger btn--small" disabled=false type="button">
+        "Revoke access""
+`;
+
+exports[`clears revocation arming before a concurrent relationship reappears in the refreshed listing 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Share with a therapist"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Zero-knowledge: your key is wrapped to your therapist's public key — the server never sees it, and neither does anyone else."
+  <label className="field">
+    <span className="field__label">
+      "Pairing code"
+    <input className="input" placeholder="from your therapist's portal" type="text" value="">
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Look up"
+  <span className="pill-note pill-note--ok" role="status">
+    <svg aria-hidden="true" fill="none" focusable="false" height=14 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=14>
+      <path d="M5 12.5l4.5 4.5L19 7.5">
+    "Revoked — Dr. Current loses access immediately. What they already read cannot be unread."
+<section className="card">
+  <h2 className="card__title">
+    "Your grants"
+  <div className="entry-card">
+    <div className="row" style={"gap":12,"alignItems":"center"}>
+      <span aria-hidden="true" className="avatar">
+        "DC"
+      <div className="stack" style={"gap":2,"flex":1}>
+        <strong style={"fontSize":"var(--text-md)","color":"var(--text)"}>
+          "Dr. Current"
+        <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+          "Sharing since 2026-10-01"
+    <div className="row row--between">
+      <span className="note" style={"whiteSpace":"pre-wrap"}>
+        "Therapist cannot hear my recordings"
+      <button aria-checked=false aria-label="Therapist cannot hear my recordings" className="toggle" disabled=false role="switch" type="button">
+    <div className="row row--end">
+      <button className="btn btn--danger btn--small" disabled=false type="button">
+        "Revoke access""
+`;
+
+exports[`displays pairing progress and clears prior success before the next lookup completes 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Share with a therapist"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Zero-knowledge: your key is wrapped to your therapist's public key — the server never sees it, and neither does anyone else."
+  <label className="field">
+    <span className="field__label">
+      "Pairing code"
+    <input className="input" placeholder="from your therapist's portal" type="text" value="NEXT-CODE">
+  <button className="btn btn--ghost btn--small" disabled=true type="button">
+    "Working…"
+<section className="card">
+  <h2 className="card__title">
+    "Your grants"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "No active grants — your journal is shared with no one.""
+`;
+
+exports[`displays the active progress and danger states while fresh revocation authentication is pending 1`] = `
+"<section className="card card--danger">
+  <h2 className="card__title">
+    "Enter your password to stop sharing"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "For your protection, type your current password now. An unlocked session alone cannot authorize this change."
+  <label className="field">
+    <span className="field__label">
+      "Current password"
+    <input autoComplete="current-password" className="input" type="password" value="fresh patient password">
+  <div className="row row--wrap">
+    <button className="btn btn--danger" disabled=true type="button">
+      "Working…"
+    <button className="btn btn--ghost" disabled=true type="button">
+      "Cancel"
+<section className="card">
+  <h2 className="card__title">
+    "Share with a therapist"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Zero-knowledge: your key is wrapped to your therapist's public key — the server never sees it, and neither does anyone else."
+  <label className="field">
+    <span className="field__label">
+      "Pairing code"
+    <input className="input" placeholder="from your therapist's portal" type="text" value="">
+  <button className="btn btn--ghost btn--small" disabled=true type="button">
+    "Working…"
+<section className="card">
+  <h2 className="card__title">
+    "Your grants"
+  <div className="entry-card">
+    <div className="row" style={"gap":12,"alignItems":"center"}>
+      <span aria-hidden="true" className="avatar">
+        "DC"
+      <div className="stack" style={"gap":2,"flex":1}>
+        <strong style={"fontSize":"var(--text-md)","color":"var(--text)"}>
+          "Dr. Current"
+        <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+          "Sharing since 2026-10-01"
+    <div className="row row--between">
+      <span className="note" style={"whiteSpace":"pre-wrap"}>
+        "Therapist cannot hear my recordings"
+      <button aria-checked=false aria-label="Therapist cannot hear my recordings" className="toggle" disabled=true role="switch" type="button">
+    <div className="row row--wrap">
+      <button className="btn btn--danger btn--small" disabled=true type="button">
+        "Revoke access"
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Cancel""
+`;
+
+exports[`hides a malformed comparison fingerprint independently of a usable server SAS 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Share with a therapist"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Zero-knowledge: your key is wrapped to your therapist's public key — the server never sees it, and neither does anyone else."
+  <label className="field">
+    <span className="field__label">
+      "Pairing code"
+    <input className="input" placeholder="from your therapist's portal" type="text" value="  PAIR1234  ">
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Look up"
+  <p className="note" role="status" style={"whiteSpace":"pre-wrap"}>
+    "Therapist: Dr. Current"
+  <div className="stack" style={"gap":"var(--space-1)"}>
+    <span className="fingerprint">
+      "123 456"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "Your pairing id (also read it to them): sharing-behavior-owner"
+    <p className="note note--warn" style={"whiteSpace":"pre-wrap"}>
+      "Read this verification code to your therapist — in the room or on the phone — and make sure their portal shows exactly the same one before you share. If it does not match, STOP: a mismatch means the connection was tampered with."
+  <div className="stack" style={"gap":"var(--space-1)"}>
+    <span className="fingerprint">
+      "DERIVED_THERAPIST_FINGERPRINT"
+    <span className="row" style={"gap":8}>
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        <svg aria-hidden="true" fill="none" focusable="false" height=15 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=15>
+          <rect height="10.5" rx="2" width="10.5" x="9" y="9">
+          <path d="M6.5 15H5.5A1.5 1.5 0 0 1 4 13.5v-8A1.5 1.5 0 0 1 5.5 4h8A1.5 1.5 0 0 1 15 5.5v1">
+        "Copy fingerprint"
+  <p className="note note--warn" style={"whiteSpace":"pre-wrap"}>
+    "Read this fingerprint back to your therapist (in the room or on the phone). If it does not match what their portal shows, STOP — a mismatch means the key was substituted."
+  <label className="checkbox">
+    <input checked=false className="checkbox__input" type="checkbox">
+    <span aria-hidden="true" className="checkbox__box">
+      <span className="checkbox__check">
+        <svg aria-hidden="true" fill="none" focusable="false" height=13 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=13>
+          <path d="M5 12.5l4.5 4.5L19 7.5">
+    <span>
+      "We read the key fingerprint back to each other and it MATCHED. (A substituted key would decrypt nothing — but checking is the only proof the right therapist is on the other end.)"
+  <label className="checkbox">
+    <input checked=false className="checkbox__input" type="checkbox">
+    <span aria-hidden="true" className="checkbox__box">
+      <span className="checkbox__check">
+        <svg aria-hidden="true" fill="none" focusable="false" height=13 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=13>
+          <path d="M5 12.5l4.5 4.5L19 7.5">
+    <span>
+      "I understand: they can read my patterns and the decrypted entries behind them; every read is audit-logged; revoking ends access immediately but cannot unread what has already been seen."
+  <button className="btn" disabled=true type="button">
+    <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+      <circle cx="18" cy="5.5" r="2.4">
+      <circle cx="6" cy="12" r="2.4">
+      <circle cx="18" cy="18.5" r="2.4">
+      <path d="M8.2 10.8l7.6-4.1">
+      <path d="M8.2 13.2l7.6 4.1">
+    "Confirm and share"
+<section className="card">
+  <h2 className="card__title">
+    "Your grants"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "No active grants — your journal is shared with no one.""
+`;
+
+exports[`hides malformed optional comparison data while keeping a usable local fingerprint 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Share with a therapist"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Zero-knowledge: your key is wrapped to your therapist's public key — the server never sees it, and neither does anyone else."
+  <label className="field">
+    <span className="field__label">
+      "Pairing code"
+    <input className="input" placeholder="from your therapist's portal" type="text" value="  PAIR1234  ">
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Look up"
+  <p className="note" role="status" style={"whiteSpace":"pre-wrap"}>
+    "Therapist: Dr. Current"
+  <div className="stack" style={"gap":"var(--space-1)"}>
+    <span className="fingerprint">
+      "DERIVED_THERAPIST_FINGERPRINT"
+    <span className="row" style={"gap":8}>
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        <svg aria-hidden="true" fill="none" focusable="false" height=15 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=15>
+          <rect height="10.5" rx="2" width="10.5" x="9" y="9">
+          <path d="M6.5 15H5.5A1.5 1.5 0 0 1 4 13.5v-8A1.5 1.5 0 0 1 5.5 4h8A1.5 1.5 0 0 1 15 5.5v1">
+        "Copy fingerprint"
+  <p className="note note--warn" style={"whiteSpace":"pre-wrap"}>
+    "Read this fingerprint back to your therapist (in the room or on the phone). If it does not match what their portal shows, STOP — a mismatch means the key was substituted."
+  <label className="checkbox">
+    <input checked=false className="checkbox__input" type="checkbox">
+    <span aria-hidden="true" className="checkbox__box">
+      <span className="checkbox__check">
+        <svg aria-hidden="true" fill="none" focusable="false" height=13 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=13>
+          <path d="M5 12.5l4.5 4.5L19 7.5">
+    <span>
+      "We read the key fingerprint back to each other and it MATCHED. (A substituted key would decrypt nothing — but checking is the only proof the right therapist is on the other end.)"
+  <label className="checkbox">
+    <input checked=false className="checkbox__input" type="checkbox">
+    <span aria-hidden="true" className="checkbox__box">
+      <span className="checkbox__check">
+        <svg aria-hidden="true" fill="none" focusable="false" height=13 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=13>
+          <path d="M5 12.5l4.5 4.5L19 7.5">
+    <span>
+      "I understand: they can read my patterns and the decrypted entries behind them; every read is audit-logged; revoking ends access immediately but cannot unread what has already been seen."
+  <button className="btn" disabled=true type="button">
+    <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+      <circle cx="18" cy="5.5" r="2.4">
+      <circle cx="6" cy="12" r="2.4">
+      <circle cx="18" cy="18.5" r="2.4">
+      <path d="M8.2 10.8l7.6-4.1">
+      <path d="M8.2 13.2l7.6 4.1">
+    "Confirm and share"
+<section className="card">
+  <h2 className="card__title">
+    "Your grants"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "No active grants — your journal is shared with no one.""
+`;
+
+exports[`keeps the pairing available after a failed grant and shows honest recovery: 0 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Enter your password to share with Dr. Current"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "For your protection, type your current password now. An unlocked session alone cannot authorize this change."
+  <label className="field">
+    <span className="field__label">
+      "Current password"
+    <input autoComplete="current-password" className="input" type="password" value="">
+  <div className="row row--wrap">
+    <button className="btn" disabled=true type="button">
+      "Verify and continue"
+    <button className="btn btn--ghost" disabled=false type="button">
+      "Cancel"
+<section className="card">
+  <h2 className="card__title">
+    "Share with a therapist"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Zero-knowledge: your key is wrapped to your therapist's public key — the server never sees it, and neither does anyone else."
+  <label className="field">
+    <span className="field__label">
+      "Pairing code"
+    <input className="input" placeholder="from your therapist's portal" type="text" value="  PAIR1234  ">
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Look up"
+  <p className="note" role="status" style={"whiteSpace":"pre-wrap"}>
+    "Therapist: Dr. Current"
+  <div className="stack" style={"gap":"var(--space-1)"}>
+    <span className="fingerprint">
+      "123 456"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "Their key id: server fingerprint"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "Your pairing id (also read it to them): sharing-behavior-owner"
+    <p className="note note--warn" style={"whiteSpace":"pre-wrap"}>
+      "Read this verification code to your therapist — in the room or on the phone — and make sure their portal shows exactly the same one before you share. If it does not match, STOP: a mismatch means the connection was tampered with."
+  <div className="stack" style={"gap":"var(--space-1)"}>
+    <span className="fingerprint">
+      "DERIVED_THERAPIST_FINGERPRINT"
+    <span className="row" style={"gap":8}>
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        <svg aria-hidden="true" fill="none" focusable="false" height=15 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=15>
+          <rect height="10.5" rx="2" width="10.5" x="9" y="9">
+          <path d="M6.5 15H5.5A1.5 1.5 0 0 1 4 13.5v-8A1.5 1.5 0 0 1 5.5 4h8A1.5 1.5 0 0 1 15 5.5v1">
+        "Copy fingerprint"
+  <p className="note note--warn" style={"whiteSpace":"pre-wrap"}>
+    "Read this fingerprint back to your therapist (in the room or on the phone). If it does not match what their portal shows, STOP — a mismatch means the key was substituted."
+  <label className="checkbox">
+    <input checked=true className="checkbox__input" type="checkbox">
+    <span aria-hidden="true" className="checkbox__box">
+      <span className="checkbox__check">
+        <svg aria-hidden="true" fill="none" focusable="false" height=13 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=13>
+          <path d="M5 12.5l4.5 4.5L19 7.5">
+    <span>
+      "We read the key fingerprint back to each other and it MATCHED. (A substituted key would decrypt nothing — but checking is the only proof the right therapist is on the other end.)"
+  <label className="checkbox">
+    <input checked=true className="checkbox__input" type="checkbox">
+    <span aria-hidden="true" className="checkbox__box">
+      <span className="checkbox__check">
+        <svg aria-hidden="true" fill="none" focusable="false" height=13 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=13>
+          <path d="M5 12.5l4.5 4.5L19 7.5">
+    <span>
+      "I understand: they can read my patterns and the decrypted entries behind them; every read is audit-logged; revoking ends access immediately but cannot unread what has already been seen."
+  <button className="btn" disabled=false type="button">
+    <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+      <circle cx="18" cy="5.5" r="2.4">
+      <circle cx="6" cy="12" r="2.4">
+      <circle cx="18" cy="18.5" r="2.4">
+      <path d="M8.2 10.8l7.6-4.1">
+      <path d="M8.2 13.2l7.6 4.1">
+    "Confirm and share"
+  <div className="banner banner--error" role="alert">
+    "The sharing terms changed — start the pairing again to see the current disclosure."
+<section className="card">
+  <h2 className="card__title">
+    "Your grants"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "No active grants — your journal is shared with no one.""
+`;
+
+exports[`keeps the pairing available after a failed grant and shows honest recovery: 1 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Enter your password to share with Dr. Current"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "For your protection, type your current password now. An unlocked session alone cannot authorize this change."
+  <label className="field">
+    <span className="field__label">
+      "Current password"
+    <input autoComplete="current-password" className="input" type="password" value="">
+  <div className="row row--wrap">
+    <button className="btn" disabled=true type="button">
+      "Verify and continue"
+    <button className="btn btn--ghost" disabled=false type="button">
+      "Cancel"
+<section className="card">
+  <h2 className="card__title">
+    "Share with a therapist"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Zero-knowledge: your key is wrapped to your therapist's public key — the server never sees it, and neither does anyone else."
+  <label className="field">
+    <span className="field__label">
+      "Pairing code"
+    <input className="input" placeholder="from your therapist's portal" type="text" value="  PAIR1234  ">
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Look up"
+  <p className="note" role="status" style={"whiteSpace":"pre-wrap"}>
+    "Therapist: Dr. Current"
+  <div className="stack" style={"gap":"var(--space-1)"}>
+    <span className="fingerprint">
+      "123 456"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "Their key id: server fingerprint"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "Your pairing id (also read it to them): sharing-behavior-owner"
+    <p className="note note--warn" style={"whiteSpace":"pre-wrap"}>
+      "Read this verification code to your therapist — in the room or on the phone — and make sure their portal shows exactly the same one before you share. If it does not match, STOP: a mismatch means the connection was tampered with."
+  <div className="stack" style={"gap":"var(--space-1)"}>
+    <span className="fingerprint">
+      "DERIVED_THERAPIST_FINGERPRINT"
+    <span className="row" style={"gap":8}>
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        <svg aria-hidden="true" fill="none" focusable="false" height=15 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=15>
+          <rect height="10.5" rx="2" width="10.5" x="9" y="9">
+          <path d="M6.5 15H5.5A1.5 1.5 0 0 1 4 13.5v-8A1.5 1.5 0 0 1 5.5 4h8A1.5 1.5 0 0 1 15 5.5v1">
+        "Copy fingerprint"
+  <p className="note note--warn" style={"whiteSpace":"pre-wrap"}>
+    "Read this fingerprint back to your therapist (in the room or on the phone). If it does not match what their portal shows, STOP — a mismatch means the key was substituted."
+  <label className="checkbox">
+    <input checked=true className="checkbox__input" type="checkbox">
+    <span aria-hidden="true" className="checkbox__box">
+      <span className="checkbox__check">
+        <svg aria-hidden="true" fill="none" focusable="false" height=13 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=13>
+          <path d="M5 12.5l4.5 4.5L19 7.5">
+    <span>
+      "We read the key fingerprint back to each other and it MATCHED. (A substituted key would decrypt nothing — but checking is the only proof the right therapist is on the other end.)"
+  <label className="checkbox">
+    <input checked=true className="checkbox__input" type="checkbox">
+    <span aria-hidden="true" className="checkbox__box">
+      <span className="checkbox__check">
+        <svg aria-hidden="true" fill="none" focusable="false" height=13 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=13>
+          <path d="M5 12.5l4.5 4.5L19 7.5">
+    <span>
+      "I understand: they can read my patterns and the decrypted entries behind them; every read is audit-logged; revoking ends access immediately but cannot unread what has already been seen."
+  <button className="btn" disabled=false type="button">
+    <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+      <circle cx="18" cy="5.5" r="2.4">
+      <circle cx="6" cy="12" r="2.4">
+      <circle cx="18" cy="18.5" r="2.4">
+      <path d="M8.2 10.8l7.6-4.1">
+      <path d="M8.2 13.2l7.6 4.1">
+    "Confirm and share"
+  <div className="banner banner--error" role="alert">
+    "Could not complete sharing."
+<section className="card">
+  <h2 className="card__title">
+    "Your grants"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "No active grants — your journal is shared with no one.""
+`;
+
+exports[`names the fallback therapist identity in the voice authentication prompt: en 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Enter your password to change what fallback-clinician can hear"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "For your protection, type your current password now. An unlocked session alone cannot authorize this change."
+  <label className="field">
+    <span className="field__label">
+      "Current password"
+    <input autoComplete="current-password" className="input" type="password" value="">
+  <div className="row row--wrap">
+    <button className="btn" disabled=true type="button">
+      "Verify and continue"
+    <button className="btn btn--ghost" disabled=false type="button">
+      "Cancel"
+<section className="card">
+  <h2 className="card__title">
+    "Share with a therapist"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Zero-knowledge: your key is wrapped to your therapist's public key — the server never sees it, and neither does anyone else."
+  <label className="field">
+    <span className="field__label">
+      "Pairing code"
+    <input className="input" placeholder="from your therapist's portal" type="text" value="">
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Look up"
+<section className="card">
+  <h2 className="card__title">
+    "Your grants"
+  <div className="entry-card">
+    <div className="row" style={"gap":12,"alignItems":"center"}>
+      <span aria-hidden="true" className="avatar">
+        "F"
+      <div className="stack" style={"gap":2,"flex":1}>
+        <strong style={"fontSize":"var(--text-md)","color":"var(--text)"}>
+          "fallback-clinician"
+        <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+          "Sharing since 2026-10-01"
+    <div className="row row--between">
+      <span className="note" style={"whiteSpace":"pre-wrap"}>
+        "Therapist cannot hear my recordings"
+      <button aria-checked=false aria-label="Therapist cannot hear my recordings" className="toggle" disabled=false role="switch" type="button">
+    <div className="row row--end">
+      <button className="btn btn--danger btn--small" disabled=false type="button">
+        "Revoke access""
+`;
+
+exports[`names the fallback therapist identity in the voice authentication prompt: es 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Escriba su contraseña para cambiar lo que fallback-clinician puede escuchar"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Para su protección, escriba ahora su contraseña actual. Una sesión desbloqueada por sí sola no puede autorizar este cambio."
+  <label className="field">
+    <span className="field__label">
+      "Contraseña actual"
+    <input autoComplete="current-password" className="input" type="password" value="">
+  <div className="row row--wrap">
+    <button className="btn" disabled=true type="button">
+      "Verificar y continuar"
+    <button className="btn btn--ghost" disabled=false type="button">
+      "Cancelar"
+<section className="card">
+  <h2 className="card__title">
+    "Compartir con un terapeuta"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Conocimiento cero: su llave se envuelve a la llave pública de su terapeuta — el servidor nunca la ve, y nadie más tampoco."
+  <label className="field">
+    <span className="field__label">
+      "Código de emparejamiento"
+    <input className="input" placeholder="del portal de su terapeuta" type="text" value="">
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Buscar"
+<section className="card">
+  <h2 className="card__title">
+    "Sus permisos"
+  <div className="entry-card">
+    <div className="row" style={"gap":12,"alignItems":"center"}>
+      <span aria-hidden="true" className="avatar">
+        "F"
+      <div className="stack" style={"gap":2,"flex":1}>
+        <strong style={"fontSize":"var(--text-md)","color":"var(--text)"}>
+          "fallback-clinician"
+        <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+          "Compartiendo desde 2026-10-01"
+    <div className="row row--between">
+      <span className="note" style={"whiteSpace":"pre-wrap"}>
+        "Mi terapeuta no puede escuchar mis grabaciones"
+      <button aria-checked=false aria-label="Mi terapeuta no puede escuchar mis grabaciones" className="toggle" disabled=false role="switch" type="button">
+    <div className="row row--end">
+      <button className="btn btn--danger btn--small" disabled=false type="button">
+        "Revocar acceso""
+`;
+
+exports[`refuses an empty pairing code and trims a nonempty lookup before displaying real key verification details 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Share with a therapist"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Zero-knowledge: your key is wrapped to your therapist's public key — the server never sees it, and neither does anyone else."
+  <label className="field">
+    <span className="field__label">
+      "Pairing code"
+    <input className="input" placeholder="from your therapist's portal" type="text" value="  PAIR1234  ">
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Look up"
+  <p className="note" role="status" style={"whiteSpace":"pre-wrap"}>
+    "Therapist: Dr. Current"
+  <div className="stack" style={"gap":"var(--space-1)"}>
+    <span className="fingerprint">
+      "123 456"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "Their key id: server fingerprint"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "Your pairing id (also read it to them): sharing-behavior-owner"
+    <p className="note note--warn" style={"whiteSpace":"pre-wrap"}>
+      "Read this verification code to your therapist — in the room or on the phone — and make sure their portal shows exactly the same one before you share. If it does not match, STOP: a mismatch means the connection was tampered with."
+  <div className="stack" style={"gap":"var(--space-1)"}>
+    <span className="fingerprint">
+      "DERIVED_THERAPIST_FINGERPRINT"
+    <span className="row" style={"gap":8}>
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        <svg aria-hidden="true" fill="none" focusable="false" height=15 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=15>
+          <rect height="10.5" rx="2" width="10.5" x="9" y="9">
+          <path d="M6.5 15H5.5A1.5 1.5 0 0 1 4 13.5v-8A1.5 1.5 0 0 1 5.5 4h8A1.5 1.5 0 0 1 15 5.5v1">
+        "Copy fingerprint"
+  <p className="note note--warn" style={"whiteSpace":"pre-wrap"}>
+    "Read this fingerprint back to your therapist (in the room or on the phone). If it does not match what their portal shows, STOP — a mismatch means the key was substituted."
+  <label className="checkbox">
+    <input checked=false className="checkbox__input" type="checkbox">
+    <span aria-hidden="true" className="checkbox__box">
+      <span className="checkbox__check">
+        <svg aria-hidden="true" fill="none" focusable="false" height=13 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=13>
+          <path d="M5 12.5l4.5 4.5L19 7.5">
+    <span>
+      "We read the key fingerprint back to each other and it MATCHED. (A substituted key would decrypt nothing — but checking is the only proof the right therapist is on the other end.)"
+  <label className="checkbox">
+    <input checked=false className="checkbox__input" type="checkbox">
+    <span aria-hidden="true" className="checkbox__box">
+      <span className="checkbox__check">
+        <svg aria-hidden="true" fill="none" focusable="false" height=13 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=13>
+          <path d="M5 12.5l4.5 4.5L19 7.5">
+    <span>
+      "I understand: they can read my patterns and the decrypted entries behind them; every read is audit-logged; revoking ends access immediately but cannot unread what has already been seen."
+  <button className="btn" disabled=true type="button">
+    <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+      <circle cx="18" cy="5.5" r="2.4">
+      <circle cx="6" cy="12" r="2.4">
+      <circle cx="18" cy="18.5" r="2.4">
+      <path d="M8.2 10.8l7.6-4.1">
+      <path d="M8.2 13.2l7.6 4.1">
+    "Confirm and share"
+<section className="card">
+  <h2 className="card__title">
+    "Your grants"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "No active grants — your journal is shared with no one.""
+`;
+
+exports[`renders actual current and past grants, voice scope, fallback identity and dated disclosure in en 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Share with a therapist"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Zero-knowledge: your key is wrapped to your therapist's public key — the server never sees it, and neither does anyone else."
+  <label className="field">
+    <span className="field__label">
+      "Pairing code"
+    <input className="input" placeholder="from your therapist's portal" type="text" value="">
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Look up"
+<section className="card">
+  <h2 className="card__title">
+    "Your grants"
+  <div className="entry-card">
+    <div className="row" style={"gap":12,"alignItems":"center"}>
+      <span aria-hidden="true" className="avatar">
+        "DC"
+      <div className="stack" style={"gap":2,"flex":1}>
+        <strong style={"fontSize":"var(--text-md)","color":"var(--text)"}>
+          "Dr. Current"
+        <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+          "Sharing since 2026-10-01"
+    <div className="row row--between">
+      <span className="note" style={"whiteSpace":"pre-wrap"}>
+        "Therapist cannot hear my recordings"
+      <button aria-checked=false aria-label="Therapist cannot hear my recordings" className="toggle" disabled=false role="switch" type="button">
+    <div className="row row--end">
+      <button className="btn btn--danger btn--small" disabled=false type="button">
+        "Revoke access"
+  <div className="entry-card">
+    <div className="row" style={"gap":12,"alignItems":"center"}>
+      <span aria-hidden="true" className="avatar">
+        "F"
+      <div className="stack" style={"gap":2,"flex":1}>
+        <strong style={"fontSize":"var(--text-md)","color":"var(--text)"}>
+          "fallback-doctor"
+        <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+          "Sharing since 2026-10-01"
+    <div className="row row--between">
+      <span className="note" style={"whiteSpace":"pre-wrap"}>
+        "Therapist can hear my recordings"
+      <button aria-checked=true aria-label="Therapist can hear my recordings" className="toggle" disabled=false role="switch" type="button">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "Your therapist can already read your entries (and their English translation). Turning this on also lets them play the original voice recordings you keep — tone can carry what text does not. They keep this access only while sharing is active."
+    <div className="row row--end">
+      <button className="btn btn--danger btn--small" disabled=false type="button">
+        "Revoke access"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Revoked or ended: Dr. Previous.""
+`;
+
+exports[`renders actual current and past grants, voice scope, fallback identity and dated disclosure in es 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Compartir con un terapeuta"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Conocimiento cero: su llave se envuelve a la llave pública de su terapeuta — el servidor nunca la ve, y nadie más tampoco."
+  <label className="field">
+    <span className="field__label">
+      "Código de emparejamiento"
+    <input className="input" placeholder="del portal de su terapeuta" type="text" value="">
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Buscar"
+<section className="card">
+  <h2 className="card__title">
+    "Sus permisos"
+  <div className="entry-card">
+    <div className="row" style={"gap":12,"alignItems":"center"}>
+      <span aria-hidden="true" className="avatar">
+        "DC"
+      <div className="stack" style={"gap":2,"flex":1}>
+        <strong style={"fontSize":"var(--text-md)","color":"var(--text)"}>
+          "Dr. Current"
+        <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+          "Compartiendo desde 2026-10-01"
+    <div className="row row--between">
+      <span className="note" style={"whiteSpace":"pre-wrap"}>
+        "Mi terapeuta no puede escuchar mis grabaciones"
+      <button aria-checked=false aria-label="Mi terapeuta no puede escuchar mis grabaciones" className="toggle" disabled=false role="switch" type="button">
+    <div className="row row--end">
+      <button className="btn btn--danger btn--small" disabled=false type="button">
+        "Revocar acceso"
+  <div className="entry-card">
+    <div className="row" style={"gap":12,"alignItems":"center"}>
+      <span aria-hidden="true" className="avatar">
+        "F"
+      <div className="stack" style={"gap":2,"flex":1}>
+        <strong style={"fontSize":"var(--text-md)","color":"var(--text)"}>
+          "fallback-doctor"
+        <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+          "Compartiendo desde 2026-10-01"
+    <div className="row row--between">
+      <span className="note" style={"whiteSpace":"pre-wrap"}>
+        "Mi terapeuta puede escuchar mis grabaciones"
+      <button aria-checked=true aria-label="Mi terapeuta puede escuchar mis grabaciones" className="toggle" disabled=false role="switch" type="button">
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "Su terapeuta ya puede leer sus entradas (y su traducción al inglés). Activar esto también le permite reproducir las grabaciones de voz que conserve — el tono puede transmitir lo que el texto no. Conserva este acceso solo mientras el compartir esté activo."
+    <div className="row row--end">
+      <button className="btn btn--danger btn--small" disabled=false type="button">
+        "Revocar acceso"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Revocados o terminados: Dr. Previous.""
+`;
+
+exports[`requires fresh action-bound authentication, wraps the actual live key, and clears its transferred temporary key after grant 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Enter your password to share with Dr. Current"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "For your protection, type your current password now. An unlocked session alone cannot authorize this change."
+  <label className="field">
+    <span className="field__label">
+      "Current password"
+    <input autoComplete="current-password" className="input" type="password" value="">
+  <div className="row row--wrap">
+    <button className="btn" disabled=true type="button">
+      "Verify and continue"
+    <button className="btn btn--ghost" disabled=false type="button">
+      "Cancel"
+<section className="card">
+  <h2 className="card__title">
+    "Share with a therapist"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Zero-knowledge: your key is wrapped to your therapist's public key — the server never sees it, and neither does anyone else."
+  <label className="field">
+    <span className="field__label">
+      "Pairing code"
+    <input className="input" placeholder="from your therapist's portal" type="text" value="  PAIR1234  ">
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Look up"
+  <p className="note" role="status" style={"whiteSpace":"pre-wrap"}>
+    "Therapist: Dr. Current"
+  <div className="stack" style={"gap":"var(--space-1)"}>
+    <span className="fingerprint">
+      "123 456"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "Their key id: server fingerprint"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "Your pairing id (also read it to them): sharing-behavior-owner"
+    <p className="note note--warn" style={"whiteSpace":"pre-wrap"}>
+      "Read this verification code to your therapist — in the room or on the phone — and make sure their portal shows exactly the same one before you share. If it does not match, STOP: a mismatch means the connection was tampered with."
+  <div className="stack" style={"gap":"var(--space-1)"}>
+    <span className="fingerprint">
+      "DERIVED_THERAPIST_FINGERPRINT"
+    <span className="row" style={"gap":8}>
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        <svg aria-hidden="true" fill="none" focusable="false" height=15 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=15>
+          <rect height="10.5" rx="2" width="10.5" x="9" y="9">
+          <path d="M6.5 15H5.5A1.5 1.5 0 0 1 4 13.5v-8A1.5 1.5 0 0 1 5.5 4h8A1.5 1.5 0 0 1 15 5.5v1">
+        "Copy fingerprint"
+  <p className="note note--warn" style={"whiteSpace":"pre-wrap"}>
+    "Read this fingerprint back to your therapist (in the room or on the phone). If it does not match what their portal shows, STOP — a mismatch means the key was substituted."
+  <label className="checkbox">
+    <input checked=true className="checkbox__input" type="checkbox">
+    <span aria-hidden="true" className="checkbox__box">
+      <span className="checkbox__check">
+        <svg aria-hidden="true" fill="none" focusable="false" height=13 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=13>
+          <path d="M5 12.5l4.5 4.5L19 7.5">
+    <span>
+      "We read the key fingerprint back to each other and it MATCHED. (A substituted key would decrypt nothing — but checking is the only proof the right therapist is on the other end.)"
+  <label className="checkbox">
+    <input checked=true className="checkbox__input" type="checkbox">
+    <span aria-hidden="true" className="checkbox__box">
+      <span className="checkbox__check">
+        <svg aria-hidden="true" fill="none" focusable="false" height=13 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=13>
+          <path d="M5 12.5l4.5 4.5L19 7.5">
+    <span>
+      "I understand: they can read my patterns and the decrypted entries behind them; every read is audit-logged; revoking ends access immediately but cannot unread what has already been seen."
+  <button className="btn" disabled=false type="button">
+    <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+      <circle cx="18" cy="5.5" r="2.4">
+      <circle cx="6" cy="12" r="2.4">
+      <circle cx="18" cy="18.5" r="2.4">
+      <path d="M8.2 10.8l7.6-4.1">
+      <path d="M8.2 13.2l7.6 4.1">
+    "Confirm and share"
+<section className="card">
+  <h2 className="card__title">
+    "Your grants"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "No active grants — your journal is shared with no one.""
+`;
+
+exports[`requires two revocation confirmations and sends the exact consent with its revoke proof before refreshing 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Share with a therapist"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Zero-knowledge: your key is wrapped to your therapist's public key — the server never sees it, and neither does anyone else."
+  <label className="field">
+    <span className="field__label">
+      "Pairing code"
+    <input className="input" placeholder="from your therapist's portal" type="text" value="">
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Look up"
+<section className="card">
+  <h2 className="card__title">
+    "Your grants"
+  <div className="entry-card">
+    <div className="row" style={"gap":12,"alignItems":"center"}>
+      <span aria-hidden="true" className="avatar">
+        "DC"
+      <div className="stack" style={"gap":2,"flex":1}>
+        <strong style={"fontSize":"var(--text-md)","color":"var(--text)"}>
+          "Dr. Current"
+        <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+          "Sharing since 2026-10-01"
+    <div className="row row--between">
+      <span className="note" style={"whiteSpace":"pre-wrap"}>
+        "Therapist cannot hear my recordings"
+      <button aria-checked=false aria-label="Therapist cannot hear my recordings" className="toggle" disabled=false role="switch" type="button">
+    <div className="row row--wrap">
+      <button className="btn btn--danger btn--small" disabled=false type="button">
+        "Revoke access"
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Cancel""
+`;
+
+exports[`requires two revocation confirmations and sends the exact consent with its revoke proof before refreshing 2`] = `
+"<section className="card card--danger">
+  <h2 className="card__title">
+    "Enter your password to stop sharing"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "For your protection, type your current password now. An unlocked session alone cannot authorize this change."
+  <label className="field">
+    <span className="field__label">
+      "Current password"
+    <input autoComplete="current-password" className="input" type="password" value="">
+  <div className="row row--wrap">
+    <button className="btn btn--danger" disabled=true type="button">
+      "Verify and continue"
+    <button className="btn btn--ghost" disabled=false type="button">
+      "Cancel"
+<section className="card">
+  <h2 className="card__title">
+    "Share with a therapist"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Zero-knowledge: your key is wrapped to your therapist's public key — the server never sees it, and neither does anyone else."
+  <label className="field">
+    <span className="field__label">
+      "Pairing code"
+    <input className="input" placeholder="from your therapist's portal" type="text" value="">
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Look up"
+<section className="card">
+  <h2 className="card__title">
+    "Your grants"
+  <div className="entry-card">
+    <div className="row" style={"gap":12,"alignItems":"center"}>
+      <span aria-hidden="true" className="avatar">
+        "DC"
+      <div className="stack" style={"gap":2,"flex":1}>
+        <strong style={"fontSize":"var(--text-md)","color":"var(--text)"}>
+          "Dr. Current"
+        <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+          "Sharing since 2026-10-01"
+    <div className="row row--between">
+      <span className="note" style={"whiteSpace":"pre-wrap"}>
+        "Therapist cannot hear my recordings"
+      <button aria-checked=false aria-label="Therapist cannot hear my recordings" className="toggle" disabled=false role="switch" type="button">
+    <div className="row row--wrap">
+      <button className="btn btn--danger btn--small" disabled=false type="button">
+        "Revoke access"
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Cancel""
+`;
+
+exports[`retains the action and clears its password after fresh authentication refuses it: locked 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Enter your password to share with Dr. Current"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "For your protection, type your current password now. An unlocked session alone cannot authorize this change."
+  <label className="field">
+    <span className="field__label">
+      "Current password"
+    <input autoComplete="current-password" className="input" type="password" value="">
+  <div className="row row--wrap">
+    <button className="btn" disabled=true type="button">
+      "Verify and continue"
+    <button className="btn btn--ghost" disabled=false type="button">
+      "Cancel"
+<section className="card">
+  <h2 className="card__title">
+    "Share with a therapist"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Zero-knowledge: your key is wrapped to your therapist's public key — the server never sees it, and neither does anyone else."
+  <label className="field">
+    <span className="field__label">
+      "Pairing code"
+    <input className="input" placeholder="from your therapist's portal" type="text" value="  PAIR1234  ">
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Look up"
+  <p className="note" role="status" style={"whiteSpace":"pre-wrap"}>
+    "Therapist: Dr. Current"
+  <div className="stack" style={"gap":"var(--space-1)"}>
+    <span className="fingerprint">
+      "123 456"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "Their key id: server fingerprint"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "Your pairing id (also read it to them): sharing-behavior-owner"
+    <p className="note note--warn" style={"whiteSpace":"pre-wrap"}>
+      "Read this verification code to your therapist — in the room or on the phone — and make sure their portal shows exactly the same one before you share. If it does not match, STOP: a mismatch means the connection was tampered with."
+  <div className="stack" style={"gap":"var(--space-1)"}>
+    <span className="fingerprint">
+      "DERIVED_THERAPIST_FINGERPRINT"
+    <span className="row" style={"gap":8}>
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        <svg aria-hidden="true" fill="none" focusable="false" height=15 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=15>
+          <rect height="10.5" rx="2" width="10.5" x="9" y="9">
+          <path d="M6.5 15H5.5A1.5 1.5 0 0 1 4 13.5v-8A1.5 1.5 0 0 1 5.5 4h8A1.5 1.5 0 0 1 15 5.5v1">
+        "Copy fingerprint"
+  <p className="note note--warn" style={"whiteSpace":"pre-wrap"}>
+    "Read this fingerprint back to your therapist (in the room or on the phone). If it does not match what their portal shows, STOP — a mismatch means the key was substituted."
+  <label className="checkbox">
+    <input checked=true className="checkbox__input" type="checkbox">
+    <span aria-hidden="true" className="checkbox__box">
+      <span className="checkbox__check">
+        <svg aria-hidden="true" fill="none" focusable="false" height=13 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=13>
+          <path d="M5 12.5l4.5 4.5L19 7.5">
+    <span>
+      "We read the key fingerprint back to each other and it MATCHED. (A substituted key would decrypt nothing — but checking is the only proof the right therapist is on the other end.)"
+  <label className="checkbox">
+    <input checked=true className="checkbox__input" type="checkbox">
+    <span aria-hidden="true" className="checkbox__box">
+      <span className="checkbox__check">
+        <svg aria-hidden="true" fill="none" focusable="false" height=13 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=13>
+          <path d="M5 12.5l4.5 4.5L19 7.5">
+    <span>
+      "I understand: they can read my patterns and the decrypted entries behind them; every read is audit-logged; revoking ends access immediately but cannot unread what has already been seen."
+  <button className="btn" disabled=false type="button">
+    <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+      <circle cx="18" cy="5.5" r="2.4">
+      <circle cx="6" cy="12" r="2.4">
+      <circle cx="18" cy="18.5" r="2.4">
+      <path d="M8.2 10.8l7.6-4.1">
+      <path d="M8.2 13.2l7.6 4.1">
+    "Confirm and share"
+  <div className="banner banner--error" role="alert">
+    "The vault is locked — unlock again first."
+<section className="card">
+  <h2 className="card__title">
+    "Your grants"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "No active grants — your journal is shared with no one.""
+`;
+
+exports[`retains the action and clears its password after fresh authentication refuses it: no-account 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Enter your password to share with Dr. Current"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "For your protection, type your current password now. An unlocked session alone cannot authorize this change."
+  <label className="field">
+    <span className="field__label">
+      "Current password"
+    <input autoComplete="current-password" className="input" type="password" value="">
+  <div className="row row--wrap">
+    <button className="btn" disabled=true type="button">
+      "Verify and continue"
+    <button className="btn btn--ghost" disabled=false type="button">
+      "Cancel"
+<section className="card">
+  <h2 className="card__title">
+    "Share with a therapist"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Zero-knowledge: your key is wrapped to your therapist's public key — the server never sees it, and neither does anyone else."
+  <label className="field">
+    <span className="field__label">
+      "Pairing code"
+    <input className="input" placeholder="from your therapist's portal" type="text" value="  PAIR1234  ">
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Look up"
+  <p className="note" role="status" style={"whiteSpace":"pre-wrap"}>
+    "Therapist: Dr. Current"
+  <div className="stack" style={"gap":"var(--space-1)"}>
+    <span className="fingerprint">
+      "123 456"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "Their key id: server fingerprint"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "Your pairing id (also read it to them): sharing-behavior-owner"
+    <p className="note note--warn" style={"whiteSpace":"pre-wrap"}>
+      "Read this verification code to your therapist — in the room or on the phone — and make sure their portal shows exactly the same one before you share. If it does not match, STOP: a mismatch means the connection was tampered with."
+  <div className="stack" style={"gap":"var(--space-1)"}>
+    <span className="fingerprint">
+      "DERIVED_THERAPIST_FINGERPRINT"
+    <span className="row" style={"gap":8}>
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        <svg aria-hidden="true" fill="none" focusable="false" height=15 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=15>
+          <rect height="10.5" rx="2" width="10.5" x="9" y="9">
+          <path d="M6.5 15H5.5A1.5 1.5 0 0 1 4 13.5v-8A1.5 1.5 0 0 1 5.5 4h8A1.5 1.5 0 0 1 15 5.5v1">
+        "Copy fingerprint"
+  <p className="note note--warn" style={"whiteSpace":"pre-wrap"}>
+    "Read this fingerprint back to your therapist (in the room or on the phone). If it does not match what their portal shows, STOP — a mismatch means the key was substituted."
+  <label className="checkbox">
+    <input checked=true className="checkbox__input" type="checkbox">
+    <span aria-hidden="true" className="checkbox__box">
+      <span className="checkbox__check">
+        <svg aria-hidden="true" fill="none" focusable="false" height=13 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=13>
+          <path d="M5 12.5l4.5 4.5L19 7.5">
+    <span>
+      "We read the key fingerprint back to each other and it MATCHED. (A substituted key would decrypt nothing — but checking is the only proof the right therapist is on the other end.)"
+  <label className="checkbox">
+    <input checked=true className="checkbox__input" type="checkbox">
+    <span aria-hidden="true" className="checkbox__box">
+      <span className="checkbox__check">
+        <svg aria-hidden="true" fill="none" focusable="false" height=13 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=13>
+          <path d="M5 12.5l4.5 4.5L19 7.5">
+    <span>
+      "I understand: they can read my patterns and the decrypted entries behind them; every read is audit-logged; revoking ends access immediately but cannot unread what has already been seen."
+  <button className="btn" disabled=false type="button">
+    <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+      <circle cx="18" cy="5.5" r="2.4">
+      <circle cx="6" cy="12" r="2.4">
+      <circle cx="18" cy="18.5" r="2.4">
+      <path d="M8.2 10.8l7.6-4.1">
+      <path d="M8.2 13.2l7.6 4.1">
+    "Confirm and share"
+  <div className="banner banner--error" role="alert">
+    "No saved account on this device — sign in again."
+<section className="card">
+  <h2 className="card__title">
+    "Your grants"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "No active grants — your journal is shared with no one.""
+`;
+
+exports[`retains the action and clears its password after fresh authentication refuses it: offline 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Enter your password to share with Dr. Current"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "For your protection, type your current password now. An unlocked session alone cannot authorize this change."
+  <label className="field">
+    <span className="field__label">
+      "Current password"
+    <input autoComplete="current-password" className="input" type="password" value="">
+  <div className="row row--wrap">
+    <button className="btn" disabled=true type="button">
+      "Verify and continue"
+    <button className="btn btn--ghost" disabled=false type="button">
+      "Cancel"
+<section className="card">
+  <h2 className="card__title">
+    "Share with a therapist"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Zero-knowledge: your key is wrapped to your therapist's public key — the server never sees it, and neither does anyone else."
+  <label className="field">
+    <span className="field__label">
+      "Pairing code"
+    <input className="input" placeholder="from your therapist's portal" type="text" value="  PAIR1234  ">
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Look up"
+  <p className="note" role="status" style={"whiteSpace":"pre-wrap"}>
+    "Therapist: Dr. Current"
+  <div className="stack" style={"gap":"var(--space-1)"}>
+    <span className="fingerprint">
+      "123 456"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "Their key id: server fingerprint"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "Your pairing id (also read it to them): sharing-behavior-owner"
+    <p className="note note--warn" style={"whiteSpace":"pre-wrap"}>
+      "Read this verification code to your therapist — in the room or on the phone — and make sure their portal shows exactly the same one before you share. If it does not match, STOP: a mismatch means the connection was tampered with."
+  <div className="stack" style={"gap":"var(--space-1)"}>
+    <span className="fingerprint">
+      "DERIVED_THERAPIST_FINGERPRINT"
+    <span className="row" style={"gap":8}>
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        <svg aria-hidden="true" fill="none" focusable="false" height=15 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=15>
+          <rect height="10.5" rx="2" width="10.5" x="9" y="9">
+          <path d="M6.5 15H5.5A1.5 1.5 0 0 1 4 13.5v-8A1.5 1.5 0 0 1 5.5 4h8A1.5 1.5 0 0 1 15 5.5v1">
+        "Copy fingerprint"
+  <p className="note note--warn" style={"whiteSpace":"pre-wrap"}>
+    "Read this fingerprint back to your therapist (in the room or on the phone). If it does not match what their portal shows, STOP — a mismatch means the key was substituted."
+  <label className="checkbox">
+    <input checked=true className="checkbox__input" type="checkbox">
+    <span aria-hidden="true" className="checkbox__box">
+      <span className="checkbox__check">
+        <svg aria-hidden="true" fill="none" focusable="false" height=13 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=13>
+          <path d="M5 12.5l4.5 4.5L19 7.5">
+    <span>
+      "We read the key fingerprint back to each other and it MATCHED. (A substituted key would decrypt nothing — but checking is the only proof the right therapist is on the other end.)"
+  <label className="checkbox">
+    <input checked=true className="checkbox__input" type="checkbox">
+    <span aria-hidden="true" className="checkbox__box">
+      <span className="checkbox__check">
+        <svg aria-hidden="true" fill="none" focusable="false" height=13 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=13>
+          <path d="M5 12.5l4.5 4.5L19 7.5">
+    <span>
+      "I understand: they can read my patterns and the decrypted entries behind them; every read is audit-logged; revoking ends access immediately but cannot unread what has already been seen."
+  <button className="btn" disabled=false type="button">
+    <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+      <circle cx="18" cy="5.5" r="2.4">
+      <circle cx="6" cy="12" r="2.4">
+      <circle cx="18" cy="18.5" r="2.4">
+      <path d="M8.2 10.8l7.6-4.1">
+      <path d="M8.2 13.2l7.6 4.1">
+    "Confirm and share"
+  <div className="banner banner--error" role="alert">
+    "Cannot verify your password offline right now — try again when online."
+<section className="card">
+  <h2 className="card__title">
+    "Your grants"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "No active grants — your journal is shared with no one.""
+`;
+
+exports[`retains the action and clears its password after fresh authentication refuses it: wrong-password 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Enter your password to share with Dr. Current"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "For your protection, type your current password now. An unlocked session alone cannot authorize this change."
+  <label className="field">
+    <span className="field__label">
+      "Current password"
+    <input autoComplete="current-password" className="input" type="password" value="">
+  <div className="row row--wrap">
+    <button className="btn" disabled=true type="button">
+      "Verify and continue"
+    <button className="btn btn--ghost" disabled=false type="button">
+      "Cancel"
+<section className="card">
+  <h2 className="card__title">
+    "Share with a therapist"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Zero-knowledge: your key is wrapped to your therapist's public key — the server never sees it, and neither does anyone else."
+  <label className="field">
+    <span className="field__label">
+      "Pairing code"
+    <input className="input" placeholder="from your therapist's portal" type="text" value="  PAIR1234  ">
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Look up"
+  <p className="note" role="status" style={"whiteSpace":"pre-wrap"}>
+    "Therapist: Dr. Current"
+  <div className="stack" style={"gap":"var(--space-1)"}>
+    <span className="fingerprint">
+      "123 456"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "Their key id: server fingerprint"
+    <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+      "Your pairing id (also read it to them): sharing-behavior-owner"
+    <p className="note note--warn" style={"whiteSpace":"pre-wrap"}>
+      "Read this verification code to your therapist — in the room or on the phone — and make sure their portal shows exactly the same one before you share. If it does not match, STOP: a mismatch means the connection was tampered with."
+  <div className="stack" style={"gap":"var(--space-1)"}>
+    <span className="fingerprint">
+      "DERIVED_THERAPIST_FINGERPRINT"
+    <span className="row" style={"gap":8}>
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        <svg aria-hidden="true" fill="none" focusable="false" height=15 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=15>
+          <rect height="10.5" rx="2" width="10.5" x="9" y="9">
+          <path d="M6.5 15H5.5A1.5 1.5 0 0 1 4 13.5v-8A1.5 1.5 0 0 1 5.5 4h8A1.5 1.5 0 0 1 15 5.5v1">
+        "Copy fingerprint"
+  <p className="note note--warn" style={"whiteSpace":"pre-wrap"}>
+    "Read this fingerprint back to your therapist (in the room or on the phone). If it does not match what their portal shows, STOP — a mismatch means the key was substituted."
+  <label className="checkbox">
+    <input checked=true className="checkbox__input" type="checkbox">
+    <span aria-hidden="true" className="checkbox__box">
+      <span className="checkbox__check">
+        <svg aria-hidden="true" fill="none" focusable="false" height=13 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=13>
+          <path d="M5 12.5l4.5 4.5L19 7.5">
+    <span>
+      "We read the key fingerprint back to each other and it MATCHED. (A substituted key would decrypt nothing — but checking is the only proof the right therapist is on the other end.)"
+  <label className="checkbox">
+    <input checked=true className="checkbox__input" type="checkbox">
+    <span aria-hidden="true" className="checkbox__box">
+      <span className="checkbox__check">
+        <svg aria-hidden="true" fill="none" focusable="false" height=13 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=13>
+          <path d="M5 12.5l4.5 4.5L19 7.5">
+    <span>
+      "I understand: they can read my patterns and the decrypted entries behind them; every read is audit-logged; revoking ends access immediately but cannot unread what has already been seen."
+  <button className="btn" disabled=false type="button">
+    <svg aria-hidden="true" fill="none" focusable="false" height=17 stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth=1.8 viewBox="0 0 24 24" width=17>
+      <circle cx="18" cy="5.5" r="2.4">
+      <circle cx="6" cy="12" r="2.4">
+      <circle cx="18" cy="18.5" r="2.4">
+      <path d="M8.2 10.8l7.6-4.1">
+      <path d="M8.2 13.2l7.6 4.1">
+    "Confirm and share"
+  <div className="banner banner--error" role="alert">
+    "Wrong password."
+<section className="card">
+  <h2 className="card__title">
+    "Your grants"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "No active grants — your journal is shared with no one.""
+`;
+
+exports[`retains the grant and shows a failed revocation without claiming success: 0 1`] = `
+"<section className="card card--danger">
+  <h2 className="card__title">
+    "Enter your password to stop sharing"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "For your protection, type your current password now. An unlocked session alone cannot authorize this change."
+  <label className="field">
+    <span className="field__label">
+      "Current password"
+    <input autoComplete="current-password" className="input" type="password" value="">
+  <div className="row row--wrap">
+    <button className="btn btn--danger" disabled=true type="button">
+      "Verify and continue"
+    <button className="btn btn--ghost" disabled=false type="button">
+      "Cancel"
+<section className="card">
+  <h2 className="card__title">
+    "Share with a therapist"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Zero-knowledge: your key is wrapped to your therapist's public key — the server never sees it, and neither does anyone else."
+  <label className="field">
+    <span className="field__label">
+      "Pairing code"
+    <input className="input" placeholder="from your therapist's portal" type="text" value="">
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Look up"
+  <div className="banner banner--error" role="alert">
+    "Could not revoke."
+<section className="card">
+  <h2 className="card__title">
+    "Your grants"
+  <div className="entry-card">
+    <div className="row" style={"gap":12,"alignItems":"center"}>
+      <span aria-hidden="true" className="avatar">
+        "DC"
+      <div className="stack" style={"gap":2,"flex":1}>
+        <strong style={"fontSize":"var(--text-md)","color":"var(--text)"}>
+          "Dr. Current"
+        <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+          "Sharing since 2026-10-01"
+    <div className="row row--between">
+      <span className="note" style={"whiteSpace":"pre-wrap"}>
+        "Therapist cannot hear my recordings"
+      <button aria-checked=false aria-label="Therapist cannot hear my recordings" className="toggle" disabled=false role="switch" type="button">
+    <div className="row row--wrap">
+      <button className="btn btn--danger btn--small" disabled=false type="button">
+        "Revoke access"
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Cancel""
+`;
+
+exports[`retains the grant and shows a failed revocation without claiming success: 1 1`] = `
+"<section className="card card--danger">
+  <h2 className="card__title">
+    "Enter your password to stop sharing"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "For your protection, type your current password now. An unlocked session alone cannot authorize this change."
+  <label className="field">
+    <span className="field__label">
+      "Current password"
+    <input autoComplete="current-password" className="input" type="password" value="">
+  <div className="row row--wrap">
+    <button className="btn btn--danger" disabled=true type="button">
+      "Verify and continue"
+    <button className="btn btn--ghost" disabled=false type="button">
+      "Cancel"
+<section className="card">
+  <h2 className="card__title">
+    "Share with a therapist"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Zero-knowledge: your key is wrapped to your therapist's public key — the server never sees it, and neither does anyone else."
+  <label className="field">
+    <span className="field__label">
+      "Pairing code"
+    <input className="input" placeholder="from your therapist's portal" type="text" value="">
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Look up"
+  <div className="banner banner--error" role="alert">
+    "Could not revoke."
+<section className="card">
+  <h2 className="card__title">
+    "Your grants"
+  <div className="entry-card">
+    <div className="row" style={"gap":12,"alignItems":"center"}>
+      <span aria-hidden="true" className="avatar">
+        "DC"
+      <div className="stack" style={"gap":2,"flex":1}>
+        <strong style={"fontSize":"var(--text-md)","color":"var(--text)"}>
+          "Dr. Current"
+        <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+          "Sharing since 2026-10-01"
+    <div className="row row--between">
+      <span className="note" style={"whiteSpace":"pre-wrap"}>
+        "Therapist cannot hear my recordings"
+      <button aria-checked=false aria-label="Therapist cannot hear my recordings" className="toggle" disabled=false role="switch" type="button">
+    <div className="row row--wrap">
+      <button className="btn btn--danger btn--small" disabled=false type="button">
+        "Revoke access"
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Cancel""
+`;
+
+exports[`shows a load error while retaining the honest loading state 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Share with a therapist"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Zero-knowledge: your key is wrapped to your therapist's public key — the server never sees it, and neither does anyone else."
+  <label className="field">
+    <span className="field__label">
+      "Pairing code"
+    <input className="input" placeholder="from your therapist's portal" type="text" value="">
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Look up"
+  <div className="banner banner--error" role="alert">
+    "consent service temporarily unavailable"
+<section className="card">
+  <h2 className="card__title">
+    "Your grants"
+  <p className="note" role="status" style={"whiteSpace":"pre-wrap"}>
+    "Loading…""
+`;
+
+exports[`shows the appropriate failed lookup without stale therapist details: 0 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Share with a therapist"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Zero-knowledge: your key is wrapped to your therapist's public key — the server never sees it, and neither does anyone else."
+  <label className="field">
+    <span className="field__label">
+      "Pairing code"
+    <input className="input" placeholder="from your therapist's portal" type="text" value="  PAIR1234  ">
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Look up"
+  <div className="banner banner--error" role="alert">
+    "That code is not valid — codes expire after 15 minutes and work once."
+<section className="card">
+  <h2 className="card__title">
+    "Your grants"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "No active grants — your journal is shared with no one.""
+`;
+
+exports[`shows the appropriate failed lookup without stale therapist details: 1 1`] = `
+"<section className="card">
+  <h2 className="card__title">
+    "Share with a therapist"
+  <p className="note note--muted" style={"whiteSpace":"pre-wrap"}>
+    "Zero-knowledge: your key is wrapped to your therapist's public key — the server never sees it, and neither does anyone else."
+  <label className="field">
+    <span className="field__label">
+      "Pairing code"
+    <input className="input" placeholder="from your therapist's portal" type="text" value="  PAIR1234  ">
+  <button className="btn btn--ghost btn--small" disabled=false type="button">
+    "Look up"
+  <div className="banner banner--error" role="alert">
+    "pairing service unavailable"
+<section className="card">
+  <h2 className="card__title">
+    "Your grants"
+  <p className="note" style={"whiteSpace":"pre-wrap"}>
+    "No active grants — your journal is shared with no one.""
+`;

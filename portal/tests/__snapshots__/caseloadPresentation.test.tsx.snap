@@ -1,0 +1,2476 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`acknowledges the scan footprint, displays current triage counts and retains exact reviewed-date deltas > fresh scan replaces older summaries 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "BF90 212A DC0A C08D 3327 7DBF 4FE7 684F"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <div className="mb-14" data-testid="sensitive-banner">
+    <p className="note note--warn">
+      "1"
+      " of your patients "
+      "has a sensitive card"
+      " in their current patterns. Opening "
+      "that chart"
+      " puts the non-quoting card first — the wording itself is never echoed here."
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <div className="toolbar">
+    <button className="btn btn--small" disabled=false type="button">
+      "Scan caseload for triage"
+    <label className="toolbar__search">
+      "search"
+      " "
+      <input aria-label="Search patients by username" className="input" placeholder="username…" value="">
+    <label className="toolbar__sort">
+      "sort"
+      " "
+      <span className="select-wrap">
+        <select aria-label="Sort patients" className="select" value="shared">
+          <option value="shared">
+            "newest share"
+          <option value="username">
+            "username"
+          <option value="triage">
+            "triage"
+  <div className="mb-10">
+    <span className="hint">
+      "The triage scan fetches each patient's decrypted pattern counts sequentially — nothing is stored."
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Alpha"
+        <p className="note">
+          "sharing since "
+          "2026-09-04"
+          " · 0 patterns (scanned just now)"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Middle"
+        <p className="note">
+          "sharing since "
+          "2026-09-03"
+          " · 2 patterns (scanned just now)"
+          " · 2 new"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Zulu"
+        <p className="note">
+          "sharing since "
+          "2026-09-02"
+          " · 2 patterns (scanned just now)"
+          " · 1 new"
+          " · reviewed 2026-09-29"
+        <p className="note note--warn">
+          "a sensitive card is present — review ordering puts it first"
+        <p className="note">
+          "voice recordings shared"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "Dormant"
+        <p className="note">
+          "access ended "
+          "recently"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="row row--wrap">
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Show account security"
+      <span className="hint">
+        "Change your password, recover your sharing key after an interrupted change, or rotate a compromised sharing key — nothing runs until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`acknowledges the scan footprint, displays current triage counts and retains exact reviewed-date deltas > scan requires permission for server audit footprint 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "BF90 212A DC0A C08D 3327 7DBF 4FE7 684F"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <div className="mb-14" data-testid="sensitive-banner">
+    <p className="note note--warn">
+      "1"
+      " of your patients "
+      "has a sensitive card"
+      " in their current patterns. Opening "
+      "that chart"
+      " puts the non-quoting card first — the wording itself is never echoed here."
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <div className="toolbar">
+    <button className="btn btn--small" disabled=false type="button">
+      "Scan caseload for triage"
+    <label className="toolbar__search">
+      "search"
+      " "
+      <input aria-label="Search patients by username" className="input" placeholder="username…" value="">
+    <label className="toolbar__sort">
+      "sort"
+      " "
+      <span className="select-wrap">
+        <select aria-label="Sort patients" className="select" value="shared">
+          <option value="shared">
+            "newest share"
+          <option value="username">
+            "username"
+          <option value="triage">
+            "triage"
+            " (scan first)"
+  <div className="scan-confirm">
+    <p className="note note--warn">
+      "This scan downloads and decrypts every active patient's pattern data — one request and one audit entry per patient (their app can see that this portal read their patterns). The decrypted counts are held only for this screen; nothing is stored."
+    <label className="confirm-label">
+      <input aria-label="Do not ask again in this browser session" checked=false type="checkbox">
+      "Don't ask again in this browser session"
+    <div className="row">
+      <button className="btn btn--small" disabled=false type="button">
+        "Start the triage scan"
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Cancel"
+  <div className="mb-10">
+    <span className="hint">
+      "The triage scan fetches each patient's decrypted pattern counts sequentially — nothing is stored."
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Alpha"
+        <p className="note">
+          "sharing since "
+          "2026-09-04"
+          " · 0 patterns as of 2026-09-29"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Middle"
+        <p className="note">
+          "sharing since "
+          "2026-09-03"
+          " · 3 patterns as of 2026-09-29"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Zulu"
+        <p className="note">
+          "sharing since "
+          "2026-09-02"
+          " · 1 pattern as of 2026-09-29"
+        <p className="note note--warn">
+          "a sensitive card is present — review ordering puts it first"
+        <p className="note">
+          "voice recordings shared"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "Dormant"
+        <p className="note">
+          "access ended "
+          "recently"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="row row--wrap">
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Show account security"
+      <span className="hint">
+        "Change your password, recover your sharing key after an interrupted change, or rotate a compromised sharing key — nothing runs until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`acknowledges the scan footprint, displays current triage counts and retains exact reviewed-date deltas > sensitive-first then new-since-reviewed order 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "BF90 212A DC0A C08D 3327 7DBF 4FE7 684F"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <div className="mb-14" data-testid="sensitive-banner">
+    <p className="note note--warn">
+      "1"
+      " of your patients "
+      "has a sensitive card"
+      " in their current patterns. Opening "
+      "that chart"
+      " puts the non-quoting card first — the wording itself is never echoed here."
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <div className="toolbar">
+    <button className="btn btn--small" disabled=false type="button">
+      "Scan caseload for triage"
+    <label className="toolbar__search">
+      "search"
+      " "
+      <input aria-label="Search patients by username" className="input" placeholder="username…" value="">
+    <label className="toolbar__sort">
+      "sort"
+      " "
+      <span className="select-wrap">
+        <select aria-label="Sort patients" className="select" value="triage">
+          <option value="shared">
+            "newest share"
+          <option value="username">
+            "username"
+          <option value="triage">
+            "triage"
+  <div className="mb-10">
+    <span className="hint">
+      "The triage scan fetches each patient's decrypted pattern counts sequentially — nothing is stored."
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Zulu"
+        <p className="note">
+          "sharing since "
+          "2026-09-02"
+          " · 2 patterns (scanned just now)"
+          " · 1 new"
+          " · reviewed 2026-09-29"
+        <p className="note note--warn">
+          "a sensitive card is present — review ordering puts it first"
+        <p className="note">
+          "voice recordings shared"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Middle"
+        <p className="note">
+          "sharing since "
+          "2026-09-03"
+          " · 2 patterns (scanned just now)"
+          " · 2 new"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Alpha"
+        <p className="note">
+          "sharing since "
+          "2026-09-04"
+          " · 0 patterns (scanned just now)"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "Dormant"
+        <p className="note">
+          "access ended "
+          "recently"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="row row--wrap">
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Show account security"
+      <span className="hint">
+        "Change your password, recover your sharing key after an interrupted change, or rotate a compromised sharing key — nothing runs until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`does not retain any provider-held patient key after a failed or successful scan > failed scan preserves older summary while keys retire 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "BF90 212A DC0A C08D 3327 7DBF 4FE7 684F"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <div className="mb-14" data-testid="sensitive-banner">
+    <p className="note note--warn">
+      "1"
+      " of your patients "
+      "has a sensitive card"
+      " in their current patterns. Opening "
+      "that chart"
+      " puts the non-quoting card first — the wording itself is never echoed here."
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <div className="toolbar">
+    <button className="btn btn--small" disabled=false type="button">
+      "Scan caseload for triage"
+    <label className="toolbar__search">
+      "search"
+      " "
+      <input aria-label="Search patients by username" className="input" placeholder="username…" value="">
+    <label className="toolbar__sort">
+      "sort"
+      " "
+      <span className="select-wrap">
+        <select aria-label="Sort patients" className="select" value="shared">
+          <option value="shared">
+            "newest share"
+          <option value="username">
+            "username"
+          <option value="triage">
+            "triage"
+  <div className="mb-10">
+    <span className="hint">
+      "The triage scan fetches each patient's decrypted pattern counts sequentially — nothing is stored."
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Alpha"
+        <p className="note">
+          "sharing since "
+          "2026-09-04"
+          " · 0 patterns (scanned just now)"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Middle"
+        <p className="note">
+          "sharing since "
+          "2026-09-03"
+          " · 2 patterns (scanned just now)"
+          " · 2 new"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Zulu"
+        <p className="note">
+          "sharing since "
+          "2026-09-02"
+          " · 1 pattern as of 2026-09-29"
+        <p className="note note--warn">
+          "a sensitive card is present — review ordering puts it first"
+        <p className="note">
+          "voice recordings shared"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "Dormant"
+        <p className="note">
+          "access ended "
+          "recently"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="row row--wrap">
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Show account security"
+      <span className="hint">
+        "Change your password, recover your sharing key after an interrupted change, or rotate a compromised sharing key — nothing runs until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`lets a successful empty scan replace an older sensitive summary > zero-pattern scan overrides older warning 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "BF90 212A DC0A C08D 3327 7DBF 4FE7 684F"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <div className="toolbar">
+    <button className="btn btn--small" disabled=false type="button">
+      "Scan caseload for triage"
+    <label className="toolbar__search">
+      "search"
+      " "
+      <input aria-label="Search patients by username" className="input" placeholder="username…" value="">
+    <label className="toolbar__sort">
+      "sort"
+      " "
+      <span className="select-wrap">
+        <select aria-label="Sort patients" className="select" value="shared">
+          <option value="shared">
+            "newest share"
+          <option value="username">
+            "username"
+          <option value="triage">
+            "triage"
+  <div className="mb-10">
+    <span className="hint">
+      "The triage scan fetches each patient's decrypted pattern counts sequentially — nothing is stored."
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Alpha"
+        <p className="note">
+          "sharing since "
+          "2026-09-04"
+          " · 0 patterns (scanned just now)"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Middle"
+        <p className="note">
+          "sharing since "
+          "2026-09-03"
+          " · 0 patterns (scanned just now)"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Zulu"
+        <p className="note">
+          "sharing since "
+          "2026-09-02"
+          " · 0 patterns (scanned just now)"
+        <p className="note note--warn">
+          "a sensitive card is present — review ordering puts it first"
+        <p className="note">
+          "voice recordings shared"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "Dormant"
+        <p className="note">
+          "access ended "
+          "recently"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="row row--wrap">
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Show account security"
+      <span className="hint">
+        "Change your password, recover your sharing key after an interrupted change, or rotate a compromised sharing key — nothing runs until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`makes a failed scan row honest while preserving its older encrypted summary > failed patient scan retains dated summary 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "BF90 212A DC0A C08D 3327 7DBF 4FE7 684F"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <div className="mb-14" data-testid="sensitive-banner">
+    <p className="note note--warn">
+      "1"
+      " of your patients "
+      "has a sensitive card"
+      " in their current patterns. Opening "
+      "that chart"
+      " puts the non-quoting card first — the wording itself is never echoed here."
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <div className="toolbar">
+    <button className="btn btn--small" disabled=false type="button">
+      "Scan caseload for triage"
+    <label className="toolbar__search">
+      "search"
+      " "
+      <input aria-label="Search patients by username" className="input" placeholder="username…" value="">
+    <label className="toolbar__sort">
+      "sort"
+      " "
+      <span className="select-wrap">
+        <select aria-label="Sort patients" className="select" value="shared">
+          <option value="shared">
+            "newest share"
+          <option value="username">
+            "username"
+          <option value="triage">
+            "triage"
+  <div className="mb-10">
+    <span className="hint">
+      "The triage scan fetches each patient's decrypted pattern counts sequentially — nothing is stored."
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Alpha"
+        <p className="note">
+          "sharing since "
+          "2026-09-04"
+          " · 0 patterns (scanned just now)"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Middle"
+        <p className="note">
+          "sharing since "
+          "2026-09-03"
+          " · 2 patterns (scanned just now)"
+          " · 2 new"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Zulu"
+        <p className="note">
+          "sharing since "
+          "2026-09-02"
+          " · 1 pattern as of 2026-09-29"
+        <p className="note note--warn">
+          "a sensitive card is present — review ordering puts it first"
+        <p className="note">
+          "voice recordings shared"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "Dormant"
+        <p className="note">
+          "access ended "
+          "recently"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="row row--wrap">
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Show account security"
+      <span className="hint">
+        "Change your password, recover your sharing key after an interrupted change, or rotate a compromised sharing key — nothing runs until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`names every sensitive patient with plural grammar and preserves a failed scan's earlier warning > plural warning remains after failed scan 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "BF90 212A DC0A C08D 3327 7DBF 4FE7 684F"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <div className="mb-14" data-testid="sensitive-banner">
+    <p className="note note--warn">
+      "2"
+      " of your patients "
+      "have sensitive cards"
+      " in their current patterns. Opening "
+      "those charts"
+      " puts the non-quoting card first — the wording itself is never echoed here."
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <div className="toolbar">
+    <button className="btn btn--small" disabled=false type="button">
+      "Scan caseload for triage"
+    <label className="toolbar__search">
+      "search"
+      " "
+      <input aria-label="Search patients by username" className="input" placeholder="username…" value="">
+    <label className="toolbar__sort">
+      "sort"
+      " "
+      <span className="select-wrap">
+        <select aria-label="Sort patients" className="select" value="shared">
+          <option value="shared">
+            "newest share"
+          <option value="username">
+            "username"
+          <option value="triage">
+            "triage"
+  <div className="mb-10">
+    <span className="hint">
+      "The triage scan fetches each patient's decrypted pattern counts sequentially — nothing is stored."
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Alpha"
+        <p className="note">
+          "sharing since "
+          "2026-09-04"
+          " · 1 pattern as of 2026-09-29"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Middle"
+        <p className="note">
+          "sharing since "
+          "2026-09-03"
+          " · 1 pattern as of 2026-09-29"
+        <p className="note note--warn">
+          "a sensitive card is present — review ordering puts it first"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Zulu"
+        <p className="note">
+          "sharing since "
+          "2026-09-02"
+          " · 1 pattern as of 2026-09-29"
+        <p className="note note--warn">
+          "a sensitive card is present — review ordering puts it first"
+        <p className="note">
+          "voice recordings shared"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "Dormant"
+        <p className="note">
+          "access ended "
+          "recently"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="row row--wrap">
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Show account security"
+      <span className="hint">
+        "Change your password, recover your sharing key after an interrupted change, or rotate a compromised sharing key — nothing runs until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`names every sensitive patient with plural grammar and preserves a failed scan's earlier warning > two sensitive patients before scan 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "BF90 212A DC0A C08D 3327 7DBF 4FE7 684F"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <div className="mb-14" data-testid="sensitive-banner">
+    <p className="note note--warn">
+      "2"
+      " of your patients "
+      "have sensitive cards"
+      " in their current patterns. Opening "
+      "those charts"
+      " puts the non-quoting card first — the wording itself is never echoed here."
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <div className="toolbar">
+    <button className="btn btn--small" disabled=false type="button">
+      "Scan caseload for triage"
+    <label className="toolbar__search">
+      "search"
+      " "
+      <input aria-label="Search patients by username" className="input" placeholder="username…" value="">
+    <label className="toolbar__sort">
+      "sort"
+      " "
+      <span className="select-wrap">
+        <select aria-label="Sort patients" className="select" value="shared">
+          <option value="shared">
+            "newest share"
+          <option value="username">
+            "username"
+          <option value="triage">
+            "triage"
+            " (scan first)"
+  <div className="mb-10">
+    <span className="hint">
+      "The triage scan fetches each patient's decrypted pattern counts sequentially — nothing is stored."
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Alpha"
+        <p className="note">
+          "sharing since "
+          "2026-09-04"
+          " · 1 pattern as of 2026-09-29"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Middle"
+        <p className="note">
+          "sharing since "
+          "2026-09-03"
+          " · 1 pattern as of 2026-09-29"
+        <p className="note note--warn">
+          "a sensitive card is present — review ordering puts it first"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Zulu"
+        <p className="note">
+          "sharing since "
+          "2026-09-02"
+          " · 1 pattern as of 2026-09-29"
+        <p className="note note--warn">
+          "a sensitive card is present — review ordering puts it first"
+        <p className="note">
+          "voice recordings shared"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "Dormant"
+        <p className="note">
+          "access ended "
+          "recently"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="row row--wrap">
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Show account security"
+      <span className="hint">
+        "Change your password, recover your sharing key after an interrupted change, or rotate a compromised sharing key — nothing runs until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`renders consent grants and summary dates, then searches and orders the same accessible patients > alphabetical caseload 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "BF90 212A DC0A C08D 3327 7DBF 4FE7 684F"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <div className="mb-14" data-testid="sensitive-banner">
+    <p className="note note--warn">
+      "1"
+      " of your patients "
+      "has a sensitive card"
+      " in their current patterns. Opening "
+      "that chart"
+      " puts the non-quoting card first — the wording itself is never echoed here."
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <div className="toolbar">
+    <button className="btn btn--small" disabled=false type="button">
+      "Scan caseload for triage"
+    <label className="toolbar__search">
+      "search"
+      " "
+      <input aria-label="Search patients by username" className="input" placeholder="username…" value="">
+    <label className="toolbar__sort">
+      "sort"
+      " "
+      <span className="select-wrap">
+        <select aria-label="Sort patients" className="select" value="username">
+          <option value="shared">
+            "newest share"
+          <option value="username">
+            "username"
+          <option value="triage">
+            "triage"
+            " (scan first)"
+  <div className="mb-10">
+    <span className="hint">
+      "The triage scan fetches each patient's decrypted pattern counts sequentially — nothing is stored."
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Alpha"
+        <p className="note">
+          "sharing since "
+          "2026-09-04"
+          " · 0 patterns as of 2026-09-29"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Middle"
+        <p className="note">
+          "sharing since "
+          "2026-09-03"
+          " · 3 patterns as of 2026-09-29"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Zulu"
+        <p className="note">
+          "sharing since "
+          "2026-09-02"
+          " · 1 pattern as of 2026-09-29"
+        <p className="note note--warn">
+          "a sensitive card is present — review ordering puts it first"
+        <p className="note">
+          "voice recordings shared"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "Dormant"
+        <p className="note">
+          "access ended "
+          "recently"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="row row--wrap">
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Show account security"
+      <span className="hint">
+        "Change your password, recover your sharing key after an interrupted change, or rotate a compromised sharing key — nothing runs until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`renders consent grants and summary dates, then searches and orders the same accessible patients > empty filtered caseload 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "BF90 212A DC0A C08D 3327 7DBF 4FE7 684F"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <div className="mb-14" data-testid="sensitive-banner">
+    <p className="note note--warn">
+      "1"
+      " of your patients "
+      "has a sensitive card"
+      " in their current patterns. Opening "
+      "that chart"
+      " puts the non-quoting card first — the wording itself is never echoed here."
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <div className="toolbar">
+    <button className="btn btn--small" disabled=false type="button">
+      "Scan caseload for triage"
+    <label className="toolbar__search">
+      "search"
+      " "
+      <input aria-label="Search patients by username" className="input" placeholder="username…" value="unknown">
+    <label className="toolbar__sort">
+      "sort"
+      " "
+      <span className="select-wrap">
+        <select aria-label="Sort patients" className="select" value="username">
+          <option value="shared">
+            "newest share"
+          <option value="username">
+            "username"
+          <option value="triage">
+            "triage"
+            " (scan first)"
+  <div className="mb-10">
+    <span className="hint">
+      "The triage scan fetches each patient's decrypted pattern counts sequentially — nothing is stored."
+  <p className="note">
+    "No patients match “"
+    "unknown"
+    "”."
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "Dormant"
+        <p className="note">
+          "access ended "
+          "recently"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="row row--wrap">
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Show account security"
+      <span className="hint">
+        "Change your password, recover your sharing key after an interrupted change, or rotate a compromised sharing key — nothing runs until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`renders consent grants and summary dates, then searches and orders the same accessible patients > newest share and stopped consent 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "BF90 212A DC0A C08D 3327 7DBF 4FE7 684F"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <div className="mb-14" data-testid="sensitive-banner">
+    <p className="note note--warn">
+      "1"
+      " of your patients "
+      "has a sensitive card"
+      " in their current patterns. Opening "
+      "that chart"
+      " puts the non-quoting card first — the wording itself is never echoed here."
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <div className="toolbar">
+    <button className="btn btn--small" disabled=false type="button">
+      "Scan caseload for triage"
+    <label className="toolbar__search">
+      "search"
+      " "
+      <input aria-label="Search patients by username" className="input" placeholder="username…" value="">
+    <label className="toolbar__sort">
+      "sort"
+      " "
+      <span className="select-wrap">
+        <select aria-label="Sort patients" className="select" value="shared">
+          <option value="shared">
+            "newest share"
+          <option value="username">
+            "username"
+          <option value="triage">
+            "triage"
+            " (scan first)"
+  <div className="mb-10">
+    <span className="hint">
+      "The triage scan fetches each patient's decrypted pattern counts sequentially — nothing is stored."
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Alpha"
+        <p className="note">
+          "sharing since "
+          "2026-09-04"
+          " · 0 patterns as of 2026-09-29"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Middle"
+        <p className="note">
+          "sharing since "
+          "2026-09-03"
+          " · 3 patterns as of 2026-09-29"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Zulu"
+        <p className="note">
+          "sharing since "
+          "2026-09-02"
+          " · 1 pattern as of 2026-09-29"
+        <p className="note note--warn">
+          "a sensitive card is present — review ordering puts it first"
+        <p className="note">
+          "voice recordings shared"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "Dormant"
+        <p className="note">
+          "access ended "
+          "recently"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="row row--wrap">
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Show account security"
+      <span className="hint">
+        "Change your password, recover your sharing key after an interrupted change, or rotate a compromised sharing key — nothing runs until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`renders consent grants and summary dates, then searches and orders the same accessible patients > trimmed case-insensitive search 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "BF90 212A DC0A C08D 3327 7DBF 4FE7 684F"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <div className="mb-14" data-testid="sensitive-banner">
+    <p className="note note--warn">
+      "1"
+      " of your patients "
+      "has a sensitive card"
+      " in their current patterns. Opening "
+      "that chart"
+      " puts the non-quoting card first — the wording itself is never echoed here."
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <div className="toolbar">
+    <button className="btn btn--small" disabled=false type="button">
+      "Scan caseload for triage"
+    <label className="toolbar__search">
+      "search"
+      " "
+      <input aria-label="Search patients by username" className="input" placeholder="username…" value="  ALPHA  ">
+    <label className="toolbar__sort">
+      "sort"
+      " "
+      <span className="select-wrap">
+        <select aria-label="Sort patients" className="select" value="username">
+          <option value="shared">
+            "newest share"
+          <option value="username">
+            "username"
+          <option value="triage">
+            "triage"
+            " (scan first)"
+  <div className="mb-10">
+    <span className="hint">
+      "The triage scan fetches each patient's decrypted pattern counts sequentially — nothing is stored."
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Alpha"
+        <p className="note">
+          "sharing since "
+          "2026-09-04"
+          " · 0 patterns as of 2026-09-29"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "Dormant"
+        <p className="note">
+          "access ended "
+          "recently"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="row row--wrap">
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Show account security"
+      <span className="hint">
+        "Change your password, recover your sharing key after an interrupted change, or rotate a compromised sharing key — nothing runs until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`reports an authenticated summary with no supplied date as unknown > unknown authenticated summary date 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "BF90 212A DC0A C08D 3327 7DBF 4FE7 684F"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <div className="toolbar">
+    <button className="btn btn--small" disabled=false type="button">
+      "Scan caseload for triage"
+    <label className="toolbar__search">
+      "search"
+      " "
+      <input aria-label="Search patients by username" className="input" placeholder="username…" value="">
+    <label className="toolbar__sort">
+      "sort"
+      " "
+      <span className="select-wrap">
+        <select aria-label="Sort patients" className="select" value="shared">
+          <option value="shared">
+            "newest share"
+          <option value="username">
+            "username"
+          <option value="triage">
+            "triage"
+            " (scan first)"
+  <div className="mb-10">
+    <span className="hint">
+      "The triage scan fetches each patient's decrypted pattern counts sequentially — nothing is stored."
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Alpha"
+        <p className="note">
+          "sharing since "
+          "2026-09-04"
+          " · 1 pattern as of an unknown date"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Middle"
+        <p className="note">
+          "sharing since "
+          "2026-09-03"
+          " · 1 pattern as of an unknown date"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Zulu"
+        <p className="note">
+          "sharing since "
+          "2026-09-02"
+          " · 1 pattern as of an unknown date"
+        <p className="note">
+          "voice recordings shared"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "Dormant"
+        <p className="note">
+          "access ended "
+          "recently"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="row row--wrap">
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Show account security"
+      <span className="hint">
+        "Change your password, recover your sharing key after an interrupted change, or rotate a compromised sharing key — nothing runs until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`scans absent ciphertext without inventing a clinical pattern > scan honestly records zero available patterns 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "BF90 212A DC0A C08D 3327 7DBF 4FE7 684F"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <div className="toolbar">
+    <button className="btn btn--small" disabled=false type="button">
+      "Scan caseload for triage"
+    <label className="toolbar__search">
+      "search"
+      " "
+      <input aria-label="Search patients by username" className="input" placeholder="username…" value="">
+    <label className="toolbar__sort">
+      "sort"
+      " "
+      <span className="select-wrap">
+        <select aria-label="Sort patients" className="select" value="shared">
+          <option value="shared">
+            "newest share"
+          <option value="username">
+            "username"
+          <option value="triage">
+            "triage"
+  <div className="mb-10">
+    <span className="hint">
+      "The triage scan fetches each patient's decrypted pattern counts sequentially — nothing is stored."
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Alpha"
+        <p className="note">
+          "sharing since "
+          "2026-09-04"
+          " · 0 patterns (scanned just now)"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Middle"
+        <p className="note">
+          "sharing since "
+          "2026-09-03"
+          " · 0 patterns (scanned just now)"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Zulu"
+        <p className="note">
+          "sharing since "
+          "2026-09-02"
+          " · 0 patterns (scanned just now)"
+        <p className="note note--warn">
+          "a sensitive card is present — review ordering puts it first"
+        <p className="note">
+          "voice recordings shared"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "Dormant"
+        <p className="note">
+          "access ended "
+          "recently"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="row row--wrap">
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Show account security"
+      <span className="hint">
+        "Change your password, recover your sharing key after an interrupted change, or rotate a compromised sharing key — nothing runs until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`scans baseline without inventing a clinical pattern > scan honestly records zero available patterns 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "BF90 212A DC0A C08D 3327 7DBF 4FE7 684F"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <div className="toolbar">
+    <button className="btn btn--small" disabled=false type="button">
+      "Scan caseload for triage"
+    <label className="toolbar__search">
+      "search"
+      " "
+      <input aria-label="Search patients by username" className="input" placeholder="username…" value="">
+    <label className="toolbar__sort">
+      "sort"
+      " "
+      <span className="select-wrap">
+        <select aria-label="Sort patients" className="select" value="shared">
+          <option value="shared">
+            "newest share"
+          <option value="username">
+            "username"
+          <option value="triage">
+            "triage"
+  <div className="mb-10">
+    <span className="hint">
+      "The triage scan fetches each patient's decrypted pattern counts sequentially — nothing is stored."
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Alpha"
+        <p className="note">
+          "sharing since "
+          "2026-09-04"
+          " · 0 patterns (scanned just now)"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Middle"
+        <p className="note">
+          "sharing since "
+          "2026-09-03"
+          " · 0 patterns (scanned just now)"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Zulu"
+        <p className="note">
+          "sharing since "
+          "2026-09-02"
+          " · 0 patterns (scanned just now)"
+        <p className="note note--warn">
+          "a sensitive card is present — review ordering puts it first"
+        <p className="note">
+          "voice recordings shared"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "Dormant"
+        <p className="note">
+          "access ended "
+          "recently"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="row row--wrap">
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Show account security"
+      <span className="hint">
+        "Change your password, recover your sharing key after an interrupted change, or rotate a compromised sharing key — nothing runs until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`scans missing public key without inventing a clinical pattern > scan honestly records zero available patterns 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "BF90 212A DC0A C08D 3327 7DBF 4FE7 684F"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <div className="toolbar">
+    <button className="btn btn--small" disabled=false type="button">
+      "Scan caseload for triage"
+    <label className="toolbar__search">
+      "search"
+      " "
+      <input aria-label="Search patients by username" className="input" placeholder="username…" value="">
+    <label className="toolbar__sort">
+      "sort"
+      " "
+      <span className="select-wrap">
+        <select aria-label="Sort patients" className="select" value="shared">
+          <option value="shared">
+            "newest share"
+          <option value="username">
+            "username"
+          <option value="triage">
+            "triage"
+  <div className="mb-10">
+    <span className="hint">
+      "The triage scan fetches each patient's decrypted pattern counts sequentially — nothing is stored."
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Alpha"
+        <p className="note">
+          "sharing since "
+          "2026-09-04"
+          " · 0 patterns (scanned just now)"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Middle"
+        <p className="note">
+          "sharing since "
+          "2026-09-03"
+          " · 0 patterns (scanned just now)"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Zulu"
+        <p className="note">
+          "sharing since "
+          "2026-09-02"
+          " · 0 patterns (scanned just now)"
+        <p className="note note--warn">
+          "a sensitive card is present — review ordering puts it first"
+        <p className="note">
+          "voice recordings shared"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "Dormant"
+        <p className="note">
+          "access ended "
+          "recently"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="row row--wrap">
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Show account security"
+      <span className="hint">
+        "Change your password, recover your sharing key after an interrupted change, or rotate a compromised sharing key — nothing runs until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`scans missing wrapped key without inventing a clinical pattern > scan honestly records zero available patterns 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "BF90 212A DC0A C08D 3327 7DBF 4FE7 684F"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <div className="toolbar">
+    <button className="btn btn--small" disabled=false type="button">
+      "Scan caseload for triage"
+    <label className="toolbar__search">
+      "search"
+      " "
+      <input aria-label="Search patients by username" className="input" placeholder="username…" value="">
+    <label className="toolbar__sort">
+      "sort"
+      " "
+      <span className="select-wrap">
+        <select aria-label="Sort patients" className="select" value="shared">
+          <option value="shared">
+            "newest share"
+          <option value="username">
+            "username"
+          <option value="triage">
+            "triage"
+  <div className="mb-10">
+    <span className="hint">
+      "The triage scan fetches each patient's decrypted pattern counts sequentially — nothing is stored."
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Alpha"
+        <p className="note">
+          "sharing since "
+          "2026-09-04"
+          " · 0 patterns (scanned just now)"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Middle"
+        <p className="note">
+          "sharing since "
+          "2026-09-03"
+          " · 0 patterns (scanned just now)"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Zulu"
+        <p className="note">
+          "sharing since "
+          "2026-09-02"
+          " · 0 patterns (scanned just now)"
+        <p className="note note--warn">
+          "a sensitive card is present — review ordering puts it first"
+        <p className="note">
+          "voice recordings shared"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "Dormant"
+        <p className="note">
+          "access ended "
+          "recently"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="row row--wrap">
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Show account security"
+      <span className="hint">
+        "Change your password, recover your sharing key after an interrupted change, or rotate a compromised sharing key — nothing runs until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`shows scanning progress and stops further patient reads when the clinician leaves > scan pending 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "BF90 212A DC0A C08D 3327 7DBF 4FE7 684F"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <div className="mb-14" data-testid="sensitive-banner">
+    <p className="note note--warn">
+      "1"
+      " of your patients "
+      "has a sensitive card"
+      " in their current patterns. Opening "
+      "that chart"
+      " puts the non-quoting card first — the wording itself is never echoed here."
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <div className="toolbar">
+    <button className="btn btn--small" disabled=true type="button">
+      "Scanning caseload…"
+    <label className="toolbar__search">
+      "search"
+      " "
+      <input aria-label="Search patients by username" className="input" placeholder="username…" value="">
+    <label className="toolbar__sort">
+      "sort"
+      " "
+      <span className="select-wrap">
+        <select aria-label="Sort patients" className="select" value="shared">
+          <option value="shared">
+            "newest share"
+          <option value="username">
+            "username"
+          <option value="triage">
+            "triage"
+            " (scan first)"
+  <div className="mb-10">
+    <span className="hint">
+      "The triage scan fetches each patient's decrypted pattern counts sequentially — nothing is stored."
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Alpha"
+        <p className="note">
+          "sharing since "
+          "2026-09-04"
+          " · 0 patterns as of 2026-09-29"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Middle"
+        <p className="note">
+          "sharing since "
+          "2026-09-03"
+          " · 3 patterns as of 2026-09-29"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Zulu"
+        <p className="note">
+          "sharing since "
+          "2026-09-02"
+          " · 1 pattern as of 2026-09-29"
+        <p className="note note--warn">
+          "a sensitive card is present — review ordering puts it first"
+        <p className="note">
+          "voice recordings shared"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "Dormant"
+        <p className="note">
+          "access ended "
+          "recently"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="row row--wrap">
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Show account security"
+      <span className="hint">
+        "Change your password, recover your sharing key after an interrupted change, or rotate a compromised sharing key — nothing runs until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`uses authenticated payload date when summary update timestamp is invalid > invalid timestamp falls back to authenticated date 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "BF90 212A DC0A C08D 3327 7DBF 4FE7 684F"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <div className="mb-14" data-testid="sensitive-banner">
+    <p className="note note--warn">
+      "1"
+      " of your patients "
+      "has a sensitive card"
+      " in their current patterns. Opening "
+      "that chart"
+      " puts the non-quoting card first — the wording itself is never echoed here."
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <div className="toolbar">
+    <button className="btn btn--small" disabled=false type="button">
+      "Scan caseload for triage"
+    <label className="toolbar__search">
+      "search"
+      " "
+      <input aria-label="Search patients by username" className="input" placeholder="username…" value="">
+    <label className="toolbar__sort">
+      "sort"
+      " "
+      <span className="select-wrap">
+        <select aria-label="Sort patients" className="select" value="shared">
+          <option value="shared">
+            "newest share"
+          <option value="username">
+            "username"
+          <option value="triage">
+            "triage"
+            " (scan first)"
+  <div className="mb-10">
+    <span className="hint">
+      "The triage scan fetches each patient's decrypted pattern counts sequentially — nothing is stored."
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Alpha"
+        <p className="note">
+          "sharing since "
+          "2026-09-04"
+          " · 0 patterns as of 2026-09-29"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Middle"
+        <p className="note">
+          "sharing since "
+          "2026-09-03"
+          " · 3 patterns as of 2026-09-29"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Zulu"
+        <p className="note">
+          "sharing since "
+          "2026-09-02"
+          " · 1 pattern as of 2026-09-29"
+        <p className="note note--warn">
+          "a sensitive card is present — review ordering puts it first"
+        <p className="note">
+          "voice recordings shared"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "Dormant"
+        <p className="note">
+          "access ended "
+          "recently"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="row row--wrap">
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Show account security"
+      <span className="hint">
+        "Change your password, recover your sharing key after an interrupted change, or rotate a compromised sharing key — nothing runs until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`uses authenticated payload date when summary update timestamp is null > invalid timestamp falls back to authenticated date 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "BF90 212A DC0A C08D 3327 7DBF 4FE7 684F"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <div className="mb-14" data-testid="sensitive-banner">
+    <p className="note note--warn">
+      "1"
+      " of your patients "
+      "has a sensitive card"
+      " in their current patterns. Opening "
+      "that chart"
+      " puts the non-quoting card first — the wording itself is never echoed here."
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <div className="toolbar">
+    <button className="btn btn--small" disabled=false type="button">
+      "Scan caseload for triage"
+    <label className="toolbar__search">
+      "search"
+      " "
+      <input aria-label="Search patients by username" className="input" placeholder="username…" value="">
+    <label className="toolbar__sort">
+      "sort"
+      " "
+      <span className="select-wrap">
+        <select aria-label="Sort patients" className="select" value="shared">
+          <option value="shared">
+            "newest share"
+          <option value="username">
+            "username"
+          <option value="triage">
+            "triage"
+            " (scan first)"
+  <div className="mb-10">
+    <span className="hint">
+      "The triage scan fetches each patient's decrypted pattern counts sequentially — nothing is stored."
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Alpha"
+        <p className="note">
+          "sharing since "
+          "2026-09-04"
+          " · 0 patterns as of 2026-09-29"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Middle"
+        <p className="note">
+          "sharing since "
+          "2026-09-03"
+          " · 3 patterns as of 2026-09-29"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <section className="card">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name">
+          "Zulu"
+        <p className="note">
+          "sharing since "
+          "2026-09-02"
+          " · 1 pattern as of 2026-09-29"
+        <p className="note note--warn">
+          "a sensitive card is present — review ordering puts it first"
+        <p className="note">
+          "voice recordings shared"
+      <button className="btn" disabled=false type="button">
+        "Open patterns"
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "Dormant"
+        <p className="note">
+          "access ended "
+          "recently"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="row row--wrap">
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Show account security"
+      <span className="hint">
+        "Change your password, recover your sharing key after an interrupted change, or rotate a compromised sharing key — nothing runs until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;
+
+exports[`uses the requested search spelling only after trimming it in the empty-results message > trimmed empty-results search spelling 1`] = `
+"<main className="portal-main">
+  <header className="portal-head">
+    <h1>
+      "Patients — "
+      "Dr. Portal"
+    <button className="btn btn--small" disabled=false type="button">
+      "Sign out"
+  <section className="card">
+    <h2 className="card__title">
+      "Connect a new patient"
+    <p className="note">
+      "Generate a pairing code and read it to your patient. They enter it in their app, see your name, and confirm with their password. The code works once and expires in 15 minutes."
+    <p className="fingerprint" data-testid="key-fingerprint">
+      "BF90 212A DC0A C08D 3327 7DBF 4FE7 684F"
+    <p className="note">
+      "Your key fingerprint — ask your patient to read theirs back after they look you up; a mismatch means a key was substituted in transit."
+    <button className="btn" disabled=false type="button">
+      "Generate pairing code"
+  <div className="mb-14" data-testid="sensitive-banner">
+    <p className="note note--warn">
+      "1"
+      " of your patients "
+      "has a sensitive card"
+      " in their current patterns. Opening "
+      "that chart"
+      " puts the non-quoting card first — the wording itself is never echoed here."
+  <h3 className="section-label section-label--gap">
+    "ACTIVE"
+  <div className="toolbar">
+    <button className="btn btn--small" disabled=false type="button">
+      "Scan caseload for triage"
+    <label className="toolbar__search">
+      "search"
+      " "
+      <input aria-label="Search patients by username" className="input" placeholder="username…" value="  Nobody  ">
+    <label className="toolbar__sort">
+      "sort"
+      " "
+      <span className="select-wrap">
+        <select aria-label="Sort patients" className="select" value="shared">
+          <option value="shared">
+            "newest share"
+          <option value="username">
+            "username"
+          <option value="triage">
+            "triage"
+            " (scan first)"
+  <div className="mb-10">
+    <span className="hint">
+      "The triage scan fetches each patient's decrypted pattern counts sequentially — nothing is stored."
+  <p className="note">
+    "No patients match “"
+    "Nobody"
+    "”."
+  <h3 className="section-label section-label--gap">
+    "STOPPED SHARING"
+  <section className="card card--deep">
+    <div className="row-between">
+      <div>
+        <strong className="patient-name patient-name--sm">
+          "Dormant"
+        <p className="note">
+          "access ended "
+          "recently"
+          " — their entries and patterns are no longer reachable. Your notes about this patient stay."
+      <button className="btn btn--small" disabled=false type="button">
+        "Open my notes"
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "My access history"
+    <div className="row row--wrap">
+      <button className="btn btn--small" disabled=false type="button">
+        "Load access history"
+      <span className="hint">
+        "Every read and write this portal performed (newest 100) — nothing is loaded until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Account security"
+    <div className="row row--wrap">
+      <button className="btn btn--ghost btn--small" disabled=false type="button">
+        "Show account security"
+      <span className="hint">
+        "Change your password, recover your sharing key after an interrupted change, or rotate a compromised sharing key — nothing runs until you ask."
+  <section className="card card--deep">
+    <h2 className="card__title">
+      "Clinician data rights"
+    <p className="note">
+      "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
+`;

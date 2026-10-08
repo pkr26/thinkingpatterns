@@ -1,3 +1,4 @@
+import { runTestControl } from "./helpers/testControl";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import storage from "./helpers/storageMock";
 import { api } from "../src/api/client";
@@ -47,8 +48,8 @@ const cases: Array<[string, string, () => Promise<unknown>]> = [
 beforeEach(async () => {
   vi.restoreAllMocks();
   storage.__reset();
-  __resetLocalKeyLifecycleForTests();
-  setSecureStoreBackend(null);
+  runTestControl(__resetLocalKeyLifecycleForTests);
+  runTestControl(setSecureStoreBackend, null);
   await api.setSession("owner-token", USER, "alice");
 });
 
@@ -77,7 +78,7 @@ describe("tracked account metadata commits", () => {
     // Preference setters now report a retired completion to their caller
     // as well as joining the erasure drain. The already-dispatched physical
     // write must still be deleted before cleanup reports success.
-    if (slot === accountStorageKey.reminders(USER) || slot === accountStorageKey.measureReminders(USER)) {
+    if (slot === accountStorageKey.reminders(USER) || slot === accountStorageKey.measureReminders(USER) || slot === accountStorageKey.healthMirror(USER)) {
       await expect(pendingWrite).rejects.toThrow("deleted");
     } else {
       await pendingWrite;

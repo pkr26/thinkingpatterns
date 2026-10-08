@@ -363,6 +363,13 @@ export function sentimentComponents(text: string, language?: string): [number, n
  *  this per CORPUS window; the on-device estimate classifies the single
  *  text, which converges to the same answer for monolingual journals. */
 export function detectLanguage(text: string): "en" | "es" | "other" {
+  // The backend counts every alphabetic character before choosing an
+  // English/Spanish lexicon. A few Latin words in a mostly non-Latin
+  // journal must not outweigh the text the word tokenizer cannot score.
+  const folded = foldSentimentText(text.toLowerCase());
+  const latinLetters = (folded.match(/[a-z]/g) ?? []).length;
+  const letters = (folded.match(/\p{L}/gu) ?? []).length;
+  if (letters === 0 || latinLetters / letters <= 0.5) return text.length === 0 ? "en" : "other";
   const scored = tokenize(text).filter((t) => t.length >= 3);
   const det = T().languageDetection;
   // 2026-10-01 audit LOW (parity): the server (and the web twin) report

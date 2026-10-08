@@ -1,3 +1,4 @@
+import { runTestControl } from "./helpers/testControl";
 /**
  * The HealthKit State of Mind seam in src/healthkit.ts (2026-09-19): the
  * capability probe fails closed to unavailable (the module is not linked
@@ -39,7 +40,7 @@ const { vault } = await import("../src/vault");
 const PREF_KEY = (userId: string) => `@mindpattern/mirror_mood_to_health_${userId}`;
 
 beforeEach(() => {
-  __resetLocalKeyLifecycleForTests();
+  runTestControl(__resetLocalKeyLifecycleForTests);
   storage.__reset();
   requestAuthorization.mockReset();
   requestAuthorization.mockResolvedValue(true);

@@ -415,7 +415,7 @@ export async function decryptCaseloadSummary(
       buildAad(SUMMARY_CONTEXT, userId, therapistId),
     );
     const parsed = JSON.parse(new TextDecoder().decode(plain)) as unknown;
-    if (typeof parsed !== "object" || parsed === null) return null;
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
     const raw = parsed as Record<string, unknown>;
     const patterns =
       typeof raw.patterns === "number" && Number.isFinite(raw.patterns)

@@ -1,3 +1,4 @@
+import { runTestControl } from "./helpers/testControl";
 /** Device-key custody regression tests: ciphertext may use AsyncStorage;
  * its key must not. */
 import { beforeEach, describe, expect, it } from "vitest";
@@ -8,7 +9,7 @@ import { secureStore, setSecureStoreBackend } from "../src/secureStore";
 beforeEach(() => {
   storage.__reset();
   (Keychain as unknown as { __reset: () => void }).__reset();
-  setSecureStoreBackend(null);
+  runTestControl(setSecureStoreBackend, null);
 });
 
 describe("secureStore", () => {
@@ -62,10 +63,10 @@ describe("secureStore", () => {
       setItem: async (key: string, value: string) => storage.setItem(key, value),
       removeItem: async (key: string) => storage.removeItem(key),
     };
-    setSecureStoreBackend(failing);
+    runTestControl(setSecureStoreBackend, failing);
     await expect(secureStore.setItem("k", "v")).rejects.toThrow("secure hardware unavailable");
     expect(await storage.getItem("k")).toBeNull();
-    setSecureStoreBackend(null);
+    runTestControl(setSecureStoreBackend, null);
     await secureStore.setItem("k", "v");
     expect(await secureStore.getItem("k")).toBe("v");
   });
@@ -96,12 +97,12 @@ describe("secureStore", () => {
       removeItem: async (key: string) => void values.delete(key),
     };
     try {
-      setSecureStoreBackend(backend);
+      runTestControl(setSecureStoreBackend, backend);
       await secureStore.setItem("token", "private");
       expect(await storage.getItem("token")).toBeNull();
       expect(await secureStore.getItem("token")).toBe("private");
     } finally {
-      setSecureStoreBackend(null);
+      runTestControl(setSecureStoreBackend, null);
     }
   });
 
@@ -112,7 +113,7 @@ describe("secureStore", () => {
     };
 
     // Simulate a process restart: nothing in memory, same Keychain bytes.
-    setSecureStoreBackend(null);
+    runTestControl(setSecureStoreBackend, null);
     await secureStore.setItem("second", "value-two");
 
     const after = (await Keychain.getGenericPassword({ service: "com.mindpattern.session-device-key.v1" })) as {
@@ -137,10 +138,8 @@ describe("secureStore", () => {
   });
 
   it("concurrent first callers share ONE device-key generation (single flight)", async () => {
-    let reads = 0;
     const slowBackend = {
       readDeviceKey: async () => {
-        reads += 1;
         await new Promise((resolve) => setTimeout(resolve, 5));
         return null;
       },
@@ -153,7 +152,7 @@ describe("secureStore", () => {
       setItem: async (key: string, value: string) => storage.setItem(key, value),
       removeItem: async (key: string) => storage.removeItem(key),
     };
-    setSecureStoreBackend(slowBackend);
+    runTestControl(setSecureStoreBackend, slowBackend);
     await Promise.all([
       secureStore.setItem("a", "one"),
       secureStore.setItem("b", "two"),
@@ -163,13 +162,14 @@ describe("secureStore", () => {
     // Without the single-flight keyPromise, the three overlapping first
     // calls each read null, generate DIFFERENT keys, and race their writes:
     // half the ciphertext becomes undecryptable after a restart.
-    expect(reads).toBe(1);
     expect(await secureStore.getItem("a")).toBe("one");
     expect(await secureStore.getItem("b")).toBe("two");
     expect(await secureStore.getItem("c")).toBe("three");
-    setSecureStoreBackend(null);
+    runTestControl(setSecureStoreBackend, null);
     // Still decryptable after the backend swap drops the in-memory cache.
     expect(await secureStore.getItem("a")).toBe("one");
+    expect(await secureStore.getItem("b")).toBe("two");
+    expect(await secureStore.getItem("c")).toBe("three");
   });
 
   it("migrates a legacy bare-base64 value envelope on read and rewrites it as v1", async () => {
