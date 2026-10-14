@@ -6,7 +6,7 @@
 # build still uses the builder image's apt repository and PEP-517 build
 # dependencies. Dependabot (docker ecosystem, .github/dependabot.yml) will
 # propose digest bumps as new 3.14-slim images publish.
-FROM python:3.14-slim@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d AS wheels
+FROM python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170 AS wheels
 
 WORKDIR /wheels
 
@@ -21,7 +21,7 @@ RUN apt-get update \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-FROM python:3.14-slim@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d
+FROM python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170
 
 WORKDIR /srv
 
