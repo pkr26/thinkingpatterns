@@ -52,6 +52,7 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
   const [status, setStatus] = useState<string | null>(null);
   const [statusTone, setStatusTone] = useState<InlineStatusTone>("ok");
   const statusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const screenLifetime = useRef<object | null>(null);
   /** Live mirrors for the BackHandler subscription (audit 2026-09-28): a
    *  native-event listener outlives renders, so it must read refs, not the
    *  state captured when the listener was attached. */
@@ -76,7 +77,7 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
     const ownedKey = Buffer.from(draftKeyRef.current);
     const snapshot = { ...planRef.current };
     draftWrites.current = draftWrites.current.catch(() => {}).then(async () => {
-      try { assertLocalWritePermit(writePermit); await saveSafetyPlanDraft(ownedKey, owner, snapshot); }
+      try { if (!planIsDirty()) return; assertLocalWritePermit(writePermit); await saveSafetyPlanDraft(ownedKey, owner, snapshot); }
       finally { ownedKey.fill(0); }
     });
     // A failed draft never masquerades as an explicitly saved plan.
@@ -99,6 +100,8 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
   const planIsDirty = () => SAFETY_PLAN_FIELDS.some((field) => planRef.current[field] !== savedPlanRef.current[field]);
 
   const confirmDiscardPlan = (leave: () => void) => {
+    const lifetime = screenLifetime.current;
+    const ownsPublication = () => lifetime !== null && screenLifetime.current === lifetime;
     if (!planIsDirty()) {
       leave();
       return;
@@ -106,6 +109,7 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
     Alert.alert(tr("safetyplan.discardTitle"), tr("safetyplan.discardBody"), [
       { text: tr("safetyplan.discardCancel"), style: "cancel" },
       { text: tr("safetyplan.discardConfirm"), style: "destructive", onPress: async () => {
+        if (!ownsPublication()) return;
         try {
           const owner = ownerRef.current, key = draftKeyRef.current;
           if (!owner || !key) throw new Error("The plan owner is unavailable");
@@ -114,8 +118,8 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
           draftWrites.current = draftWrites.current.catch(() => {}).then(() => clearSafetyPlanDraft(owner, writePermit));
           await draftWrites.current;
           savedPlanRef.current = planRef.current;
-          leave();
-        } catch { Alert.alert(tr("safetyplan.saveFailedTitle"), tr("safetyplan.saveFailedBody")); }
+          if (ownsPublication()) leave();
+        } catch { if (ownsPublication()) Alert.alert(tr("safetyplan.saveFailedTitle"), tr("safetyplan.saveFailedBody")); }
       } },
     ]);
   };
@@ -128,6 +132,8 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
   };
 
   useEffect(() => {
+    const lifetime = {};
+    screenLifetime.current = lifetime;
     let cancelled = false;
     const hydrationEpoch = localWriteScopeEpoch(), hydrationOwner = vault.ownerUserId();
     const hydrationKey = vault.isUnlocked() ? vault.get().dataKey : null;
@@ -177,6 +183,7 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
       }
     })();
     return () => {
+      screenLifetime.current = null;
       cancelled = true;
       persistDraft();
       draftKeyRef.current?.fill(0); draftKeyRef.current = null;
@@ -217,6 +224,8 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
   }, [navigation]);
 
   const save = async () => {
+    const lifetime = screenLifetime.current;
+    const ownsPublication = () => lifetime !== null && screenLifetime.current === lifetime;
     if (busy) return;
     touchActivity();
     setBusy(true);
@@ -227,12 +236,14 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
       const userId = await api.getUserId();
       if (submitEpoch !== localWriteScopeEpoch()) throw new Error(tr("common.sessionDamagedTitle"));
       if (!userId) {
-        Alert.alert(tr("common.sessionDamagedTitle"), tr("measures.sessionDamagedBody"));
+        if (ownsPublication()) Alert.alert(tr("common.sessionDamagedTitle"), tr("measures.sessionDamagedBody"));
         return;
       }
       if (!vault.isUnlocked()) {
-        setLocked(true);
-        Alert.alert(tr("safetyplan.lockedTitle"), tr("safetyplan.lockedBody"));
+        if (ownsPublication()) {
+          setLocked(true);
+          Alert.alert(tr("safetyplan.lockedTitle"), tr("safetyplan.lockedBody"));
+        }
         return;
       }
       if (vault.ownerUserId() !== userId) throw new Error(tr("common.sessionDamagedTitle"));
@@ -249,10 +260,10 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
       });
       await draftWrites.current;
       if (!matchesSavedSnapshot()) persistDraft();
-      showStatus(tr("safetyplan.saved"), "ok");
+      if (lifetime !== null && screenLifetime.current === lifetime) showStatus(tr("safetyplan.saved"), "ok");
     } catch {
       // Nothing was lost: the fields are still on screen exactly as typed.
-      Alert.alert(tr("safetyplan.saveFailedTitle"), tr("safetyplan.saveFailedBody"));
+      if (ownsPublication()) Alert.alert(tr("safetyplan.saveFailedTitle"), tr("safetyplan.saveFailedBody"));
     } finally {
       setBusy(false);
     }

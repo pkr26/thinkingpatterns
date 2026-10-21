@@ -24,12 +24,12 @@ it("reports a logout body deadline instead of claiming revocation succeeded",asy
 });
 it.each([false,7,"unexpected"])("uses an object fallback for authenticated primitive JSON %s",async body=>{stubFetch(()=>jsonResponse(body));expect(await api.meta()).toEqual({});});
 it("rejects an empty session token with actionable copy",()=>{expect(()=>setSession(" \t","next","next")).toThrow("invalid empty session token");});
-it.each([()=>api.logout(),()=>api.exportAccountRaw()])("refuses a protected operation after signout",async invoke=>{clearSession();const fetch=stubFetch(()=>jsonResponse({}));await expect(invoke()).rejects.toMatchObject({name:"ApiError",status:0,message:"not signed in"});expect(fetch).not.toHaveBeenCalled();});
+it.each([()=>api.logout(),()=>api.exportAccountRaw()])("refuses a protected operation after signout (case #%#)",async invoke=>{clearSession();const fetch=stubFetch(()=>jsonResponse({}));await expect(invoke()).rejects.toMatchObject({name:"ApiError",status:0,message:"not signed in"});expect(fetch).not.toHaveBeenCalled();});
 
 it("keeps only nonempty access-log cursors",async()=>{
-  for(const cursor of ["  ","","cursor"]){const fetch=stubFetch((url,init)=>{expect(init.method).toBe("GET");expect(new URL(url).pathname).toBe("/api/v1/account/access-log");expect(new URL(url).searchParams.size).toBe(0);return jsonResponse([],{headers:{"X-Next-Cursor":cursor}});});expect(await api.accessLogPage()).toEqual({rows:[],nextCursor:cursor.trim()?cursor:null});expect(fetch).toHaveBeenCalledOnce();}
+  for(const cursor of ["  ","","\u00a0","cursor"]){const fetch=stubFetch((url,init)=>{expect(init.method).toBe("GET");expect(new URL(url).pathname).toBe("/api/v1/account/access-log");expect(new URL(url).searchParams.size).toBe(0);return jsonResponse([],{headers:{"X-Next-Cursor":cursor}});});expect(await api.accessLogPage()).toEqual({rows:[],nextCursor:cursor.trim()?cursor:null});expect(fetch).toHaveBeenCalledOnce();}
 });
-it.each(["0a".repeat(16)+"a","a"+"0a".repeat(16)])("refuses a consent id with an extra boundary character",id=>{const fetch=stubFetch(()=>new Response(null,{status:204}));expect(()=>api.rewrapConsent(id,"pub","key","proof")).toThrow("invalid consent id — refusing the request");expect(()=>api.revokeConsent(id,"proof")).toThrow("invalid consent id — refusing the request");expect(fetch).not.toHaveBeenCalled();});
+it.each(["0a".repeat(16)+"a","a"+"0a".repeat(16)])("refuses a consent id with an extra boundary character (case #%#)",id=>{const fetch=stubFetch(()=>new Response(null,{status:204}));expect(()=>api.rewrapConsent(id,"pub","key","proof")).toThrow("invalid consent id — refusing the request");expect(()=>api.revokeConsent(id,"proof")).toThrow("invalid consent id — refusing the request");expect(fetch).not.toHaveBeenCalled();});
 
 it.each(["measures","consents"])("rejects malformed %s revisions before transport",async resource=>{
   const fetch=stubFetch(()=>jsonResponse([]));const invoke=resource==="measures"?api.listMeasuresPage:api.listConsentsPage;
@@ -137,6 +137,8 @@ it("removes a complete URL while retaining text after its boundary",()=>{
   expect(detailToMessage("https://opaque.example/path keep",400)).toBe("keep");
   expect(detailToMessage("http:// words",400)).toBe("http:// words");
   expect(detailToMessage("http://opaque.example/path keep",400)).toBe("keep");
+  expect(detailToMessage("Visit https://help/recover now",400)).toBe("Visit now");
+  expect(detailToMessage("Visit http://192.0.2.1/recover now",400)).toBe("Visit now");
 });
 it("keeps raw export transport free of ambient browser credentials",async()=>{
   const fetch=stubFetch((_url,init)=>{expect(init.credentials).toBe("omit");expect(init.redirect).toBe("error");expect(init.cache).toBe("no-store");expect(init.referrerPolicy).toBe("no-referrer");return new Response(null);});

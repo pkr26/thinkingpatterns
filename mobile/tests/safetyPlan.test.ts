@@ -6,6 +6,7 @@
  * tests/measures.test.tsx / the pendingMeasure discipline — REAL envelope
  * crypto, the in-memory AsyncStorage mock, no module mocks.
  */
+import { createCipheriv, createDecipheriv } from "node:crypto";
 import { beforeEach, describe, expect, it } from "vitest";
 import { buildAad, encrypt } from "../src/crypto/envelope";
 import {
@@ -33,6 +34,37 @@ const aPlan = (): SafetyPlan => ({
   environmentSafer: "Meds stay at a friend's; no cords in my room",
 });
 
+
+// Independent storage oracle: neither production decrypt nor buildAad is used.
+const expectedStoredPlanJson = "{\"warningSigns\":\"Sleep slipping, skipping meals, canceling plans\",\"copingStrategies\":\"Cold water, a walk around the block, the breathing count\",\"peoplePlaces\":\"The library; my sister's kitchen\",\"askForHelp\":\"Ana — 555-0142\",\"professionals\":\"Dr. Okafor (Tue/Thu), the 988 line\",\"environmentSafer\":\"Meds stay at a friend's; no cords in my room\"}";
+const independentPlanAad = Buffer.from('["safety-plan","user-1"]', "utf8");
+
+class StoredPlanCiphertextRejection extends Error {
+  constructor() {
+    super("Stored safety-plan bytes are not the authenticated account envelope");
+    this.name = "StoredPlanCiphertextRejection";
+  }
+}
+
+function openStoredPlanIndependently(raw: string, key = Buffer.alloc(32, 7), aad = independentPlanAad): string {
+  const packed = Buffer.from(raw, "base64");
+  if (packed.toString("base64") !== raw || packed.length < 28) throw new StoredPlanCiphertextRejection();
+  try {
+    const decipher = createDecipheriv("aes-256-gcm", key, packed.subarray(0, 12));
+    decipher.setAAD(aad);
+    decipher.setAuthTag(packed.subarray(packed.length - 16));
+    return Buffer.concat([decipher.update(packed.subarray(12, packed.length - 16)), decipher.final()]).toString("utf8");
+  } catch (error) {
+    // Node22's genuine GCM authentication rejection is the only native error
+    // expected from deliberately invalid ciphertext. Provider faults stay setup.
+    if (error instanceof Error && error.constructor === Error && error.name === "Error"
+      && error.message === "Unsupported state or unable to authenticate data" && !("code" in error)) {
+      throw new StoredPlanCiphertextRejection();
+    }
+    throw new Error("SetupError: independent safety-plan crypto oracle encountered an unexpected native error", { cause: error });
+  }
+}
+
 /** Seed the slot directly, the way a hostile or half-written record would
  *  look: any blob "encrypted" under the given key and AAD. */
 async function seedSlot(userId: string, key: Buffer, plaintext: string, aadUser = userId): Promise<void> {
@@ -59,9 +91,28 @@ describe("safetyPlan: encrypted round-trip", () => {
     await saveSafetyPlan(dataKey, USER, aPlan());
     const raw = await storage.getItem(`@mindpattern/safety_plan_${USER}`);
     expect(raw).not.toBeNull();
-    expect(raw!).not.toContain("warningSigns");
-    expect(raw!).not.toContain("Ana");
-    expect(raw!).not.toContain("988");
+    let opened: string | undefined;
+    expect(() => { opened = openStoredPlanIndependently(raw!); }).not.toThrow();
+    expect(opened).toBe(expectedStoredPlanJson);
+
+    // A real authenticated envelope can begin with 988 by chance. Its nonce
+    // is independently authored here; production random encryption is untouched.
+    const nonce = Buffer.from("988AAAAAAAAAAAAA", "base64");
+    const cipher = createCipheriv("aes-256-gcm", Buffer.alloc(32, 7), nonce);
+    cipher.setAAD(Buffer.from('["safety-plan","user-1"]', "utf8"));
+    const ciphertext = Buffer.concat([cipher.update(Buffer.from(expectedStoredPlanJson, "utf8")), cipher.final()]);
+    const validPacked = Buffer.concat([nonce, ciphertext, cipher.getAuthTag()]);
+    const valid = validPacked.toString("base64");
+    expect(nonce).toHaveLength(12);
+    expect(valid.startsWith("988")).toBe(true);
+    expect(openStoredPlanIndependently(valid)).toBe(expectedStoredPlanJson);
+
+    const corruptedTag = Buffer.from(validPacked);
+    corruptedTag[corruptedTag.length - 1] = corruptedTag[corruptedTag.length - 1]! ^ 1;
+    expect(() => openStoredPlanIndependently(corruptedTag.toString("base64"))).toThrow(StoredPlanCiphertextRejection);
+    expect(() => openStoredPlanIndependently(valid, Buffer.alloc(32, 7), Buffer.from('["safety-plan","user-2"]', "utf8"))).toThrow(StoredPlanCiphertextRejection);
+    expect(() => openStoredPlanIndependently(valid, Buffer.alloc(32, 11))).toThrow(StoredPlanCiphertextRejection);
+    expect(() => openStoredPlanIndependently(expectedStoredPlanJson)).toThrow(StoredPlanCiphertextRejection);
   });
 
   it("every field survives the round trip, in the fixed display order", async () => {
@@ -109,7 +160,7 @@ describe("safetyPlan: hostile and oversized records", () => {
     await expect(loadSafetyPlan(dataKey, USER)).rejects.toThrow(SafetyPlanReadError);
 
     const missing = emptySafetyPlan();
-    delete (missing as Record<string, unknown>).professionals;
+    delete (missing as unknown as Record<string, unknown>).professionals;
     await seedSlot(USER, dataKey, JSON.stringify(missing));
     await expect(loadSafetyPlan(dataKey, USER)).rejects.toThrow(SafetyPlanReadError);
 
@@ -128,7 +179,10 @@ describe("safetyPlan: hostile and oversized records", () => {
 describe("safetyPlan: locked / wrong-key fallback", () => {
   it("a DIFFERENT key (account switch / rotation) fails closed", async () => {
     await saveSafetyPlan(dataKey, USER, aPlan());
-    await expect(loadSafetyPlan(otherKey, USER)).rejects.toThrow(SafetyPlanReadError);
+    const unreadable = loadSafetyPlan(otherKey, USER);
+    await expect(unreadable).rejects.toThrow(SafetyPlanReadError);
+    await expect(unreadable).rejects.toHaveProperty("name", "SafetyPlanReadError");
+    await expect(unreadable).rejects.toHaveProperty("message", expect.stringMatching(/\S/));
   });
 
   it("a blob bound to a DIFFERENT user (cross-account AAD) fails closed", async () => {

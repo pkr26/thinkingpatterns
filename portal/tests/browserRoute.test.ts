@@ -37,7 +37,7 @@ it.each(["a", "Z", "0", "_", "-", "Aa0_-", "x".repeat(128)])("reads and writes t
   expect(readPatientRoute()).toBe(id);
 });
 
-it.each(["", "x".repeat(129), "patient name", "patient/other", "é", "a.b", "a@b", "a\\b", "a?token=b", "a\n", "a:"])("refuses an unsupported identifier without changing browser history: %s", id => {
+it.each(["", "x".repeat(129), "patient name", "patient/other", "é", "a.b", "a@b", "a\\b", "a?token=b", "a\n", "a:"])("refuses an unsupported identifier without changing browser history (case #%#)", id => {
   const location = { hash: `#/patient/${id}` };
   const pushState = vi.fn();
   vi.stubGlobal("window", { location, history: { pushState } });

@@ -1,5 +1,5 @@
 {
-  "description": "Exact source security backports and Expo Gradle compiler compatibility patches. Upstream package versions and npm audit results remain unchanged.",
+  "description": "Exact source security backports and Expo native build compatibility patches. Upstream package versions and npm audit results remain unchanged.",
   "packages": [
     {
       "name": "braces",
@@ -54,6 +54,12 @@
           "path": "android/expo-gradle-plugin/build.gradle.kts",
           "before": "15f163cb092886b3d9baaf5bb14cf75a6661924890e32f5bb060138e0ff2af82",
           "after": "f43a78068aaa078c40a55f6d165be415971e80cd98e0993046933953561a209f"
+        },
+        {
+          "path": "scripts/ios/project_integrator.rb",
+          "before": "7deb5a7ed06637a266bbb9f8f9c6c394c2ccf42dbad2cd40aef04d5a46774120",
+          "after": "9d404145c40bfda1158eb890425c3780223cab20b62253dad9dd3d1f05cafff5",
+          "source": "https://github.com/expo/expo/commit/1ae6855e399930d57322c84cc73f76c36a8a3e62"
         }
       ]
     },
@@ -76,6 +82,30 @@
           "path": "android/cmake/main.cmake",
           "before": "e5fbe04cb6fefe02c15e6fbd45d47194b532bc6923443d3324a867029fd2265e",
           "after": "cf5abf1bda666868f35a48d764299c14da8ec870115377e2287b6b0306c03471"
+        }
+      ]
+    },
+    {
+      "name": "expo",
+      "version": "57.0.26",
+      "source": "https://github.com/expo/expo/commit/2ca97ce502a01b188c76dd1a4258d8dbd19fbb0e",
+      "files": [
+        {
+          "path": "ios/AppDelegates/ExpoReactNativeFactory.swift",
+          "before": "fff6c0bd8c132272675db99583e1cc990dc776820e12a60dfd4809337f7f6529",
+          "after": "9b022b6a83f62413f21b8852a05ed7c95fbe44832d5223e69bbca7008afd9581"
+        }
+      ]
+    },
+    {
+      "name": "react-native-health",
+      "version": "1.19.0",
+      "source": "https://github.com/facebook/react-native/blob/v0.87.1/packages/react-native/React/Base/RCTBridgeModuleDecorator.m",
+      "files": [
+        {
+          "path": "RCTAppleHealthKit/RCTAppleHealthKit.m",
+          "before": "5219bcd6db9dddf600a8c227ece6af358c6b739d30968b6f33e1b918f2c2b584",
+          "after": "b0f2e4278707531c7ad94b35ab93bc9333dcb3fcb9481f2219c077b5941f979b"
         }
       ]
     }

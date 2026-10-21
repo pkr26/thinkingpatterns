@@ -34,7 +34,7 @@ const {
   mirrorMoodCheckIn,
 } = await import("../src/healthkit");
 const storage = (await import("./helpers/storageMock")).default;
-const { captureLocalWritePermit, assertLocalWritePermit, changeLocalSessionOwner, __resetLocalKeyLifecycleForTests } = await import("../src/localWriteGuard");
+const { captureLocalWritePermit, assertLocalWritePermit, changeLocalSessionOwner, freezeLocalKeyWrites, markAccountDeleted, waitLocalWriteCommits, __resetLocalKeyLifecycleForTests } = await import("../src/localWriteGuard");
 const { vault } = await import("../src/vault");
 
 const PREF_KEY = (userId: string) => `@mindpattern/mirror_mood_to_health_${userId}`;
@@ -222,6 +222,38 @@ describe("the mirrorMoodToHealth preference (reminders.ts idiom)", () => {
     expect(await storage.getItem(PREF_KEY("user-1"))).toBe('{"enabled":true}');
     await setMoodMirrorPref("user-1", false);
     expect(await getMoodMirrorPref("user-1")).toBe(false);
+
+    // Preserve the first refusal observed when a completed native preference
+    // write meets rotation, then account deletion in the next microtask.
+    let completeNative!: () => void;
+    const nativeCompletion = new Promise<void>(resolve => { completeNative = resolve; });
+    let committed: Promise<void> | undefined;
+    const write = storage.setItem;
+    const heldWrite = vi.spyOn(storage, "setItem").mockImplementationOnce((key, value) => {
+      committed = write(key, value);
+      return nativeCompletion;
+    });
+    const setting = setMoodMirrorPref("user-1", true).then(() => null, error => error);
+    try {
+      await vi.waitFor(() => expect(committed).toBeDefined());
+      await committed;
+      freezeLocalKeyWrites("user-1");
+      completeNative();
+      queueMicrotask(() => markAccountDeleted("user-1"));
+      const refusal = await setting;
+      expect(
+        refusal,
+        `Healthkit202 expected={"name":"Error","message":"Key rotation is in progress; local writes are paused"}; received=${JSON.stringify(refusal instanceof Error ? { name: refusal.name, message: refusal.message } : refusal)}`,
+      ).toMatchObject({
+        name: "Error",
+        message: "Key rotation is in progress; local writes are paused",
+      });
+      await waitLocalWriteCommits("user-1");
+    } finally {
+      completeNative();
+      await setting;
+      heldWrite.mockRestore();
+    }
   });
 
   it.each([

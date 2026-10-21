@@ -24,7 +24,7 @@ function wire(envelope=ENVELOPE){return {key_scheme:envelope.scheme,salt:envelop
 beforeEach(async()=>{vi.restoreAllMocks();storage.__reset();runTestControl(setSecureStoreBackend,null);runTestControl(__resetLocalKeyLifecycleForTests);await api.setSession("envelope-token",USER,"alice");});
 afterEach(async()=>{vi.restoreAllMocks();await api.clearSession();vi.unstubAllGlobals();});
 
-it.each([null,undefined,0,"envelope",[],{},{salt:3,key_scheme:"v1"},{salt:Buffer.alloc(7).toString("base64"),key_scheme:"v1"},{...wire(),key_scheme:"v3"},{...wire(),kdf_params:null},{...wire(),kdf_params:{...PARAMS,algorithm:"argon2id"}},{...wire(),kdf_params:{...PARAMS,extra:1}},{...wire(),wrapped_data_key:0},{...wire(),wrapped_data_key:Buffer.alloc(59).toString("base64")},{...wire(),wrapped_data_key:Buffer.alloc(61).toString("base64")}])("refuses an unusable server envelope %j",raw=>{expect(sanitizeEnvelopeResponse(raw)).toBeNull();});
+it.each([null,undefined,0,"envelope",[],{},{salt:3,key_scheme:"v1"},{salt:Buffer.alloc(7).toString("base64"),key_scheme:"v1"},{...wire(),key_scheme:"v3"},{...wire(),kdf_params:null},{...wire(),kdf_params:{...PARAMS,algorithm:"argon2id"}},{...wire(),kdf_params:{...PARAMS,extra:1}},{...wire(),wrapped_data_key:0},{...wire(),wrapped_data_key:Buffer.alloc(59).toString("base64")},{...wire(),wrapped_data_key:Buffer.alloc(61).toString("base64")}])("refuses an unusable server envelope %j (case #%#)",raw=>{expect(sanitizeEnvelopeResponse(raw)).toBeNull();});
 it("accepts the minimum salt and ignores inert v1 envelope extras",()=>{
   const salt=Buffer.alloc(8,2).toString("base64");
   expect(sanitizeEnvelopeResponse({key_scheme:"v1",salt,kdf_params:"untrusted",wrapped_data_key:7})).toEqual({scheme:"v1",saltB64:salt,kdfParams:null,wrappedB64:null});

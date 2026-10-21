@@ -6,7 +6,7 @@ const source='export const enabled = true;\n';
 const mutant={id:'0',mutatorName:'BooleanLiteral',replacement:'false',location:{start:{line:1,column:24},end:{line:1,column:28}}};
 const sources=new Map([['src/example.ts',source],['src/types.ts','export type Flag = boolean;\n']]);
 const enumeration=[{...mutant,fileName:'src/example.ts'}];
-const input=(status,extra={})=>({path:status+'.json',sha256:status,evidence:['runner-witness.json'],report:{files:{'src/example.ts':{source,mutants:[{...mutant,status,...extra}]}},testFiles:{'tests/example.test.ts':{tests:[{id:'0',name:'public consumer'}]}}}});
+const input=(status,extra={})=>({path:status+'.json',sha256:status,evidence:['runner-witness.json'],report:{files:{'src/example.ts':{source,mutants:[{...mutant,status,testsCompleted:1,...extra}]}},testFiles:{'tests/example.test.ts':{tests:[{id:'0',name:'public consumer'}]}}}});
 test('unions overlapping operator runs once and preserves every raw observation',()=>{
  const report=mergeReports(sources,[input('Survived'),input('Killed',{killedBy:['0'],coveredBy:['0']})]);
  assert.equal(auditReport(sources,enumeration,report).runtimeKills,1);
@@ -45,6 +45,15 @@ test('a zero-test observation cannot replace an executed consumer observation',(
  const audit=auditReport(sources,enumeration,report);
  assert.equal(audit.counts.Survived,1); assert.equal(audit.runtimeKills,0); assert.equal(audit.unresolved,1);
  assert.equal(report.provenance[mutantKey('src/example.ts',mutant)].observations[1].zeroTestsCompleted,true);
+});
+test('worker faults and missing completion counts cannot displace executed evidence',()=>{
+ for(const invalid of [{statusReason:'Worker exited unexpectedly'},{statusReason:'Unhandled error in test worker'},{testsCompleted:undefined}]){
+  for(const observations of [[input('Survived'),input('Killed',invalid)],[input('Killed',invalid),input('Survived')]]){
+   const report=mergeReports(sources,observations), audit=auditReport(sources,enumeration,report);
+   assert.equal(audit.runtimeKills,0); assert.equal(audit.counts.Survived,1); assert.equal(audit.unresolved,1);
+   assert.equal(report.provenance[mutantKey('src/example.ts',mutant)].observations.length,2);
+  }
+ }
 });
 test('an uncovered replay cannot hide an earlier execution timeout',()=>{
  const report=mergeReports(sources,[input('Timeout'),input('NoCoverage')]);

@@ -15,8 +15,7 @@
  *    accessibility labels of both expanders.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import React from "react";
-import { ScrollView, Text, TouchableOpacity, View } from "react-native";
+import { Text, TouchableOpacity, View } from "react-native";
 
 vi.mock("../../src/api/client", async (importOriginal) => {
   const actualApi = await importOriginal<typeof import("../../src/api/client")>();
@@ -92,17 +91,13 @@ async function expandOneByOne(
   });
   for (let index = 0; index < cardToggles.length; index += 1) {
     await act(async () => {
-      (cardToggles[index].props as { onPress?: () => void }).onPress?.();
+      const toggle = cardToggles[index];
+      if (!toggle) throw new Error("Expected the current evidence-panel toggle");
+      (toggle.props as { onPress?: () => void }).onPress?.();
     });
     await flush();
     check(textOf(root), index);
   }
-}
-
-/** No rendered style object may equal this exactly. */
-function expectNoStyle(root: Awaited<ReturnType<typeof render>>, notExpected: Record<string, unknown>): void {
-  const hit = allStyles(root).some((s) => JSON.stringify(s) === JSON.stringify(notExpected));
-  if (hit) throw new Error(`style should NOT be rendered: ${JSON.stringify(notExpected)}`);
 }
 
 beforeEach(() => {
@@ -290,6 +285,26 @@ describe("InsightsScreen pins: describe() tolerates absent detail per kind", () 
     const text = textOf(root);
     expect(text).not.toContain("your entries read lower than usual");
     expect(text).toContain("Details for this observation are unavailable. Refresh your observations to see the evidence.");
+    // Keep every existing recorded surface intact, then exercise two further
+    // accepted encrypted cards in a separately retired public renderer.
+    await act(async () => root.unmount());
+    vi.mocked(api.insights).mockResolvedValue(insightWith([
+      { kind: "activity_diversity", label: "variety", occurrences: 4, confidence: 0.4 },
+      { kind: "avoidance", label: "work", occurrences: 4, confidence: 0.4 },
+    ]) as never);
+    const { default: TestRenderer } = await import("react-test-renderer");
+    let absentDetail: ReturnType<typeof TestRenderer.create> | undefined;
+    try {
+      await act(async () => { absentDetail = TestRenderer.create(<InsightsScreen />); });
+      for (let turn = 0; turn < 3; turn += 1) {
+        await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+      }
+      if (!absentDetail) throw new Error("SetupError: absent-detail public renderer missing");
+      expect(textOf(absentDetail), "authenticated absent-detail cards preserve the public unavailable-details copy").toContain("Details for this observation are unavailable. Refresh your observations to see the evidence.");
+    } finally {
+      const retiring = absentDetail;
+      if (retiring) await act(async () => retiring.unmount());
+    }
   });
 
   it("a steady topic without a share renders the sentence with nothing wedged in", async () => {
@@ -467,10 +482,14 @@ describe("InsightsScreen pins: card chrome, chips and styles", () => {
     ]) as never);
     const root = await render(<InsightsScreen />);
     await flush();
-    const colorOf = (node: unknown): unknown =>
-      ((node as { props: { style: unknown } }).props.style as Record<string, unknown>[]).flat().findLast(
-        (s) => s && typeof s === "object" && "color" in s,
-      )?.color;
+    const colorOf = (node: unknown): unknown => {
+      const styles = ((node as { props: { style: unknown } }).props.style as Record<string, unknown>[]).flat();
+      for (let index = styles.length - 1; index >= 0; index -= 1) {
+        const style = styles[index];
+        if (style && typeof style === "object" && "color" in style) return style.color;
+      }
+      return undefined;
+    };
     const chips = root.root.findAllByType(Text).filter((n) => String(n.props.children) === "THEME");
     expect(chips).toHaveLength(2);
     expect(colorOf(chips[0])).toBe("#a29a8c"); // presence → muted chip

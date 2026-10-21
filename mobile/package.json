@@ -16,7 +16,10 @@
     "typecheck": "tsc --noEmit",
     "postinstall": "node tools/apply_dependency_patches.mjs",
     "verify:dependency-patches": "node tools/verify_dependency_patches.mjs",
-    "audit:dependencies": "node tools/verify_dependency_patches.mjs && node --test tools/audit_dependencies.test.mjs && node tools/audit_dependencies.mjs"
+    "audit:dependencies": "node tools/verify_dependency_patches.mjs && node --test tools/audit_dependencies.test.mjs && node tools/audit_dependencies.mjs",
+    "test:gc:settled-slot": "node tools/run-native-gc.mjs settled-slot",
+    "test:gc:local-rekey-tail": "node tools/run-native-gc.mjs local-rekey-tail",
+    "verify:dependency-patches:ios": "node tools/apply_dependency_patches.mjs && BUNDLE_GEMFILE=ios/Gemfile bundle exec ruby tools/test_expo_xcconfig_backport.rb"
   },
   "overrides": {
     "decode-uri-component": "^0.5.0",

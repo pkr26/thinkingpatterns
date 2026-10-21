@@ -9,7 +9,7 @@ it.each([NaN, Infinity, -Infinity, -1, -0.5, 0.5, Number.MAX_SAFE_INTEGER + 1])(
   expect(() => verifyInsightsGeneration("patient", 0, 0)).not.toThrow();
 });
 
-it.each([undefined, null, "0", "1", {}, [], true])("rejects a nonnumeric encrypted generation %j", generation => {
+it.each([undefined, null, "0", "1", {}, [], true])("rejects a nonnumeric encrypted generation %j (case %#)", generation => {
   expect(() => verifyInsightsGeneration("patient", generation, 0)).toThrow("freshness check");
   expect(() => verifyInsightsGeneration("patient", 0, 0)).not.toThrow();
 });

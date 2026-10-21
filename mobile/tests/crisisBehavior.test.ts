@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
-import { beforeEach, it, vi } from "vitest";
+import { beforeEach, expect, it, vi } from "vitest";
 
 const corpus = JSON.parse(gunzipSync(readFileSync(new URL("../../shared/frontend_crisis_behavior.json.gz", import.meta.url))).toString("utf8")) as {
   rows: [string, boolean, boolean][];
@@ -37,3 +37,22 @@ it("preserves the exported cross-engine matching variants for real input text", 
     }
   }
 }, 30_000);
+
+
+it("keeps bare crisis language beside benign compounds in both matching channels", async () => {
+  const { detectCrisisLanguage, matchesCrisisSuppress } = await import("../src/crisisDetect");
+  const cases: [string, boolean][] = [
+    ["suicide", true],
+    ["suiciide", true],
+    ["suicide prevention", false],
+    ["suiciide prevention", false],
+    ["suicide squad", false],
+    ["suiciide squad", false],
+    ["suicide suicide prevention squad", true],
+    ["suiciide suicide prevention squad", true],
+  ];
+  for (const [text, expected] of cases) {
+    expect(detectCrisisLanguage(text), text).toBe(expected);
+    expect(matchesCrisisSuppress(text), text).toBe(expected);
+  }
+});

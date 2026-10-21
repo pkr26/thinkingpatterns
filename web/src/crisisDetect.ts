@@ -279,6 +279,7 @@ function normalizePrePunct(text: string): string {
 // Phonetic Extensions block (U+1D00-1D7F) - U+1D74 sat in the map
 // but outside the class, so the entry could never fire.
     .normalize("NFKC")
+    .toLowerCase()
     .replace(/\u2019/g, "'");
   out = foldLatinMarks(out);
   out = insertScriptBoundaries(out);
@@ -508,8 +509,8 @@ const SUPPRESS_CONCAT_PATTERNS: readonly RegExp[] = [
 /** Benign compounds are masked on the PRE-punctuation-fold text, matched
  *  as whole words joined by whitespace/hyphens only: punctuation between
  *  the words ("suicide, silence") is not the compound, so real ideation
- *  next to a masked word cannot be silenced. Longest-first so
- *  "suicide squad" can never eat only half of a longer entry. Non-ASCII
+ *  next to a masked word cannot be silenced. Every mask finds spans in
+ *  the same input before their union is replaced. Non-ASCII
  *  compounds (CJK, 2026-09-20 audit L-23) are masked as plain substrings:
  *  \b never fires next to CJK in either engine, so the anchored form
  *  would never match at all. */
@@ -521,14 +522,21 @@ const benignMask = (compound: string): RegExp => {
   }
   return new RegExp(words.map(escapeRe).join("[\\s\\-]+"), "gi");
 };
-const BENIGN_MASKS: readonly RegExp[] = [...CRISIS_BENIGN_COMPOUNDS]
-  .sort((a, b) => b.length - a.length)
-  .map(benignMask);
+const BENIGN_MASKS: readonly RegExp[] = CRISIS_BENIGN_COMPOUNDS.map(benignMask);
 
-function maskBenign(text: string): string {
-  let out = text;
-  for (const mask of BENIGN_MASKS) out = out.replace(mask, " ");
-  return out;
+function maskBenign(text: string, masks: readonly RegExp[] = BENIGN_MASKS): string {
+  let coverage: Uint8Array | undefined;
+  for (const mask of masks) {
+    for (const match of text.matchAll(mask)) {
+      coverage ??= new Uint8Array(text.length);
+      coverage.fill(1, match.index, match.index + match[0].length);
+    }
+  }
+  if (!coverage) return text;
+  const covered = coverage;
+  return text.replace(/[\s\S]/g, (character: string, offset: number) =>
+    covered[offset] === 1 ? " " : character,
+  );
 }
 
 // --- 2026-09-20 audit H-7: letter-doubling ---------------------------------
@@ -585,9 +593,8 @@ const SUPPRESS_FOLDED_CONCAT_PATTERNS: readonly RegExp[] = [
 // spellings ("awareness" -> "awarenes"): bare "suicide" is a dialog
 // pattern, so "suicide awareness" must stay masked in the folded channel
 // — including when the doubling is what hid it ("suiciide squaad").
-const BENIGN_MASKS_FOLDED: readonly RegExp[] = [...CRISIS_BENIGN_COMPOUNDS]
+const BENIGN_MASKS_FOLDED: readonly RegExp[] = CRISIS_BENIGN_COMPOUNDS
   .map(dedupFold)
-  .sort((a, b) => b.length - a.length)
   .map(benignMask);
 
 /** The letter-run-collapsed twins of every canonical variant (audit
@@ -595,8 +602,7 @@ const BENIGN_MASKS_FOLDED: readonly RegExp[] = [...CRISIS_BENIGN_COMPOUNDS]
  *  (primary, orphan, concat) per punctuation-fold variant; exported for
  *  the parity suite. */
 export function foldedVariants(text: string): string[] {
-  let folded = dedupFold(maskBenign(normalizePrePunct(text)));
-  for (const mask of BENIGN_MASKS_FOLDED) folded = folded.replace(mask, " ");
+  const folded = maskBenign(dedupFold(normalizePrePunct(text)), BENIGN_MASKS_FOLDED);
   const out: string[] = [];
   for (const tokens of variantTokenSets(normalizePrePunct(folded))) {
     out.push(primaryJoin(tokens), orphanGlue(tokens), concatJoin(tokens));

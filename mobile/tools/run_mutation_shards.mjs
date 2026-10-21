@@ -9,6 +9,8 @@ if (!planPath) throw new Error("usage: node tools/run_mutation_shards.mjs PLAN_J
 const plan = JSON.parse(readFileSync(resolve(mobile, planPath), "utf8"));
 const lanes = Number(lanesArgument);
 if (!Number.isInteger(lanes) || lanes < 1 || lanes > 4) throw new Error("LANES must be 1..4");
+const workersPerFile = Number(plan.workersPerFile ?? 1);
+if (!Number.isInteger(workersPerFile) || workersPerFile < 1 || workersPerFile > 4) throw new Error("workersPerFile must be 1..4");
 const results = [];
 let cursor = 0;
 async function runLane(lane) {
@@ -17,7 +19,7 @@ async function runLane(lane) {
     const output = resolve(mobile, plan.output, job.name);
     mkdirSync(output, { recursive: true });
     const log = openSync(join(output, "run.log"), "w");
-    const args = ["tools/run_frontend_mutation.mjs", "--mutate", job.files.join(","), "--reporters", "json,progress,mutation-events", "--concurrency", "1", "--timeoutMS", "2000"];
+    const args = ["tools/run_frontend_mutation.mjs", "--mutate", job.files.join(","), "--reporters", "json,progress,mutation-events", "--concurrency", String(workersPerFile), "--timeoutMS", String(plan.timeoutMS ?? 2000)];
     console.log(`${new Date().toISOString()} lane ${lane}: ${job.name} started`);
     const start = Date.now();
     const child = spawn(process.execPath, args, { cwd: mobile, stdio: ["ignore", log, log], env: { ...process.env, MOBILE_MUTATION_REPORT_DIR: output, MOBILE_MUTATION_TEST_FILES_JSON: JSON.stringify(job.tests) } });

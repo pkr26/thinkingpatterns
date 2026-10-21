@@ -1,21 +1,21 @@
 /** Exported EntryScreen + real HTTP/encrypted Native custody contracts.
  * Static session metadata is not an end-to-end Root account publisher. */
-import React from "react";
+import "react";
 import ReactTestRenderer, { act } from "react-test-renderer";
 import { beforeEach, afterEach, it, expect, vi } from "vitest";
-import { Alert, Keyboard, Text, TextInput, TouchableOpacity } from "react-native";
-import { api,getBaseUrl,setBaseUrl } from "../../src/api/client";
+import { Alert, Text, TextInput, TouchableOpacity } from "react-native";
+import { api } from "../../src/api/client";
 import { EntryScreen } from "../../src/screens/EntryScreen";
 import { ThemeProvider } from "../../src/theme";
 import { vault } from "../../src/vault";
 import { decryptEntry, decryptAudio } from "../../src/crypto/journalCrypto";
-import {encrypt,buildAad} from "../../src/crypto/envelope";
+import "../../src/crypto/envelope";
 import { abortInFlightAudioFlush,flushAudioQueue } from "../../src/audioQueue";
-import { fakeRecorderStatus,__resetAudioMock,AudioModule,recorderControls } from "../helpers/expoAudioMock";
+import { fakeRecorderStatus,__resetAudioMock } from "../helpers/expoAudioMock";
 import { journalDraftScope, loadJournalDraft, saveJournalDraft, newJournalDraft, __resetJournalDraftRuntimeForTests, waitJournalDraftWrites } from "../../src/journalDraft";
 import { queueLength, abortInFlightFlush } from "../../src/offlineQueue";
 import { accountStorageKey, ACCOUNT_STORAGE_PREFIX } from "../../src/accountStorage";
-import { recentMoods,recordMood, localDateISO } from "../../src/moodLog";
+import { recordMood, localDateISO } from "../../src/moodLog";
 import { installLocalDataKey,freezeLocalKeyWrites, __resetLocalKeyLifecycleForTests } from "../../src/localWriteGuard";
 import { secureStore, setSecureStoreBackend } from "../../src/secureStore";
 import { runTestControl } from "../helpers/testControl";
@@ -23,7 +23,7 @@ import storage from "../helpers/storageMock";
 import * as keychain from "../helpers/keychainMock";
 import * as files from "../helpers/expoFsMock";
 import { setLocale, t as tr } from "../../src/strings";
-import { emitAppState } from "../helpers/rnMock";
+import "../helpers/rnMock";
 import {takeStashedDraft,stashDraft,hasDraft} from "../../src/store";
 import {publicSurface} from "../helpers/publicSurface";
 import {assertPublicSurface} from "../helpers/publicSurfaceOracle";
@@ -32,9 +32,9 @@ import {engine} from "../../src/crypto/engine";
 import {nativeGrantedPress} from "../helpers/nativePressability";
 import {nativeInputChange} from "../helpers/nativeEntryEvents";
 import { StackRouter, CommonActions } from "@react-navigation/routers";
-import { Platform, Vibration } from "react-native";
-import { audioQueueStatus, listSavedAudio } from "../../src/audioQueue";
-import { setHapticsEnabled } from "../../src/haptics";
+import "react-native";
+import { audioQueueStatus } from "../../src/audioQueue";
+import "../../src/haptics";
 const router = StackRouter({ initialRouteName: "Entry" });
 const routeOptions = { routeNames: ["Entry", "SafetyPlan", "Crisis"], routeParamList: {}, routeGetIdList: {} };
 let nativeRoute = router.getInitialState(routeOptions);
@@ -46,7 +46,7 @@ let entryDispatchBoundary:(()=>Promise<void>)|undefined,requireAudioParent:boole
 let status: number, boundary: (() => Promise<void>) | undefined,headersBoundary:(()=>void)|undefined;
 let transcriptionBoundary:(()=>Promise<void>)|undefined,transcriptionLanguage:string|null,transcriptionEnglish:string|null,transcriptionOriginal:string;
 let stored: Map<string, Record<string, any>>, submitted: Record<string, any> | undefined;
-let attachments:Map<string,Record<string,any>>,audioStatus:number,translationStatus:number,transcribedBytes:string|undefined,transcribeCode:string|undefined;
+let attachments:Map<string,Record<string,any>>,audioStatus:number,translationStatus:number,transcribeCode:string|undefined;
 const SPOKEN="Mis palabras habladas siguen siendo mías",ENGLISH="My spoken words are still mine",SENSOR_BYTES=Buffer.from("Native microphone encoded AAC bytes");
 const releases: Array<() => void> = [];
 const physicalDraftRead=storage.getItem.bind(storage),physicalFileDelete=files.deleteAsync.getMockImplementation()!;
@@ -56,13 +56,13 @@ function words() { const flat = (v: unknown): string => Array.isArray(v) ? v.map
 function editor() { return root!.root.findAllByType(TextInput).find(node => node.props.accessibilityLabel === "Journal entry")!; }
 async function type(value: string) { await act(async () => editor().props.onChangeText(value)); }
 async function press(label: string, wait = true) { const node = root!.root.findAllByType(TouchableOpacity).find(n => n.props.accessibilityLabel === label); expect(node, label).toBeDefined(); await act(async () => { const result = node!.props.onPress(); if (wait) await result; }); }
-async function mount() { await act(async () => { root = ReactTestRenderer.create(<ThemeProvider><EntryScreen navigation={{ navigate: name => { nativeRoute = router.getStateForAction(nativeRoute, CommonActions.navigate(name), routeOptions)!; }, addListener: () => () => {} }}/></ThemeProvider>); }); await flush(); await vi.waitFor(() => expect(words()).not.toContain("Loading device draft")); }
+async function mount() { await act(async () => { root = ReactTestRenderer.create(<ThemeProvider><EntryScreen navigation={{ navigate: (name: string) => { const next = router.getStateForAction(nativeRoute, CommonActions.navigate(name), routeOptions); if (next) nativeRoute = next.stale === false ? next : router.getRehydratedState(next, routeOptions); }, addListener: () => () => {} }}/></ThemeProvider>); }); await flush(); await vi.waitFor(() => expect(words()).not.toContain("Loading device draft")); }
 function hold() { let entered = false, release!: () => void; const wait = new Promise<void>(resolve => { release = resolve; }); releases.push(release); return { run: async () => { entered = true; await wait; }, entered: () => entered, release }; }
 async function queued() { const receipts = await Promise.all((await storage.getAllKeys()).filter(key => key.startsWith(`${ACCOUNT_STORAGE_PREFIX.queue}.items.`)).map(async key => JSON.parse((await storage.getItem(key))!))); return receipts.flatMap(receipt => receipt.items); }
 beforeEach(async () => {
   vi.useRealTimers(); vi.restoreAllMocks();files.deleteAsync.mockImplementation(physicalFileDelete); setLocale("en"); storage.__reset(); files.__resetFiles(); __resetAudioMock(); keychain.__reset(); runTestControl(setSecureStoreBackend, null); runTestControl(__resetJournalDraftRuntimeForTests); runTestControl(__resetLocalKeyLifecycleForTests); abortInFlightFlush();abortInFlightAudioFlush(); vault.lock();
   await api.setSession("native entry bearer", USER, "alice"); vault.unlock({ masterKey: Buffer.alloc(32, 42), authKey: Buffer.alloc(32, 43), dataKey: Buffer.from(KEY) }, USER); installLocalDataKey(USER, vault.get().dataKey);
-  nativeRoute = router.getInitialState(routeOptions); status = 200; boundary = undefined;headersBoundary=undefined;entryDispatchBoundary=undefined;requireAudioParent=false;transcriptionBoundary=undefined;transcriptionLanguage="es";transcriptionEnglish=ENGLISH;transcriptionOriginal=SPOKEN; stored = new Map(); submitted = undefined;attachments=new Map();audioStatus=200;translationStatus=200;transcribedBytes=undefined;transcribeCode=undefined; vi.mocked(Alert.alert).mockClear();
+  nativeRoute = router.getInitialState(routeOptions); status = 200; boundary = undefined;headersBoundary=undefined;entryDispatchBoundary=undefined;requireAudioParent=false;transcriptionBoundary=undefined;transcriptionLanguage="es";transcriptionEnglish=ENGLISH;transcriptionOriginal=SPOKEN; stored = new Map(); submitted = undefined;attachments=new Map();audioStatus=200;translationStatus=200;transcribeCode=undefined; vi.mocked(Alert.alert).mockClear();
   takeStashedDraft(USER);
   // A Native storage read returns through its asynchronous bridge receipt.
   // Completed reads release their resources; there is no lifetime read cap.
@@ -71,7 +71,7 @@ beforeEach(async () => {
     const path = new URL(url).pathname, method = init.method ?? "GET";
     if(path.endsWith("/audio/transcriptions")||path.endsWith("/audio/translations")||path.endsWith("/audio/attachments")){
       const body=JSON.parse(String(init.body));let value:unknown={},nativeStatus=200;
-      if(path.endsWith("/audio/transcriptions")){transcribedBytes=body.audio_b64;nativeStatus=transcribeCode?400:200;value=transcribeCode?{code:transcribeCode,detail:"The Native transcription provider refused this take"}:{language:transcriptionLanguage,language_raw:"Spanish as reported by the provider",original_text:transcriptionOriginal,english_text:transcriptionEnglish};}
+      if(path.endsWith("/audio/transcriptions")){nativeStatus=transcribeCode?400:200;value=transcribeCode?{code:transcribeCode,detail:"The Native transcription provider refused this take"}:{language:transcriptionLanguage,language_raw:"Spanish as reported by the provider",original_text:transcriptionOriginal,english_text:transcriptionEnglish};}
       else if(path.endsWith("/audio/translations")){nativeStatus=translationStatus;value=nativeStatus===200?{english_text:"An independently translated edit"}:{code:"stt_upstream",detail:"The Native translation provider is temporarily unavailable"};}
       else{nativeStatus=requireAudioParent&&!stored.has(body.client_entry_id)?404:audioStatus;if(nativeStatus===200)attachments.set(body.client_entry_id,body);value=nativeStatus===200?{stored:true}:nativeStatus===404?{code:"unknown_entry",detail:"no entry with that client_entry_id"}:{code:"service_unavailable",detail:"The Native attachment store is temporarily unavailable"};}
       const response=new Response(JSON.stringify(value),{status:nativeStatus});Object.defineProperty(response,"url",{value:url});if(path.endsWith("/audio/transcriptions")){const json=response.json.bind(response);response.json=async()=>{const result=await json();await transcriptionBoundary?.();return result;};}return response;
@@ -124,10 +124,15 @@ it("a retired audio-parent receipt cannot start its successor credential's pendi
 });
 
 it("a replaced Native credential keeps its reviewed take after an older save's delayed deletion receipt",async()=>{
+ const restoreSnapshotDate = pinEntrySnapshotCalendar();
+ try {
+
  await mount();const priorUri=await recordVoice(),receipt=hold(),remove=files.deleteAsync.getMockImplementation()!,physicalKey=vault.get().dataKey;let first=true;
  files.deleteAsync.mockImplementation(async(uri,options)=>{await remove(uri,options);if(first&&uri===priorUri&&stored.size>0){first=false;await receipt.run();}});
  await press("Save entry",false);await vi.waitFor(()=>expect(receipt.entered()).toBe(true));await api.setSession("new same-key Native reviewed-take credential",USER,"alice");expect(vault.get().dataKey).toBe(physicalKey);receipt.release();await flush();
  expect(root!.root.findAllByType(TouchableOpacity).some(node=>node.props.accessibilityLabel===tr("entry.voiceDiscardTake"))).toBe(true);expect(words()).toContain(tr("entry.voiceReviewTitle"));assertPublicSurface(publicSurface(root!),0);
+
+ } finally { restoreSnapshotDate(); }
 });
 
 it("an explicitly disposed Entry view cannot publish a delayed Native crisis system window",async()=>{
@@ -164,19 +169,29 @@ it("a same-key Native credential replacement keeps its retired transcription out
 });
 
 it("a saved Native draft does not reappear when the new-editor random provider refuses after its server receipt",async()=>{
+ const restoreSnapshotDate = pinEntrySnapshotCalendar();
+ try {
+
  await mount();await type(ORIGINAL);const nativeRandom=engine.randomBytes.bind(engine);let refused=false;
  vi.spyOn(engine,"randomBytes").mockImplementation(size=>{if(size===16&&stored.size>0&&!refused){refused=true;throw new Error("Native secure random allocation refused");}return nativeRandom(size);});
  await press("Save entry");await flush();expect(refused).toBe(true);const journal=[...stored.values()][0]!;expect(decryptEntry({dataKey:KEY},USER,journal.client_entry_id,journal.blob,1).text).toBe(ORIGINAL);
  await act(async()=>root!.unmount());root=undefined;await mount();expect(editor().props.value).toBe("");assertPublicSurface(publicSurface(root!),0);
+
+ } finally { restoreSnapshotDate(); }
 });
 
 
 it("an accepted Native offline save cannot resurrect its already queued words after a held physical queue commit",async()=>{
+ const restoreSnapshotDate = pinEntrySnapshotCalendar();
+ try {
+
  await mount();await type(ORIGINAL);status=500;const held=hold(),write=storage.setItem.bind(storage);let first=true;
  vi.spyOn(storage,"setItem").mockImplementation(async(slot,value)=>{if(first&&slot.startsWith(ACCOUNT_STORAGE_PREFIX.queue+".items.")){first=false;await held.run();}return write(slot,value);});
  await press("Save entry",false);await vi.waitFor(()=>expect(held.entered()).toBe(true));await act(async()=>root!.unmount());root=undefined;held.release();await flush();await waitJournalDraftWrites();
  const entries=await queued();expect(entries).toHaveLength(1);expect(decryptEntry({dataKey:KEY},USER,entries[0].clientEntryId,entries[0].blobB64,1).text).toBe(ORIGINAL);
  await mount();expect(editor().props.value).toBe("");assertPublicSurface(publicSurface(root!),0);
+
+ } finally { restoreSnapshotDate(); }
 });
 
 it("a current Native journal refusal displays the installed system alert's actual title and acknowledgement",async()=>{
@@ -223,11 +238,16 @@ it("a same-key Native credential replacement keeps an old receipt cleanup failur
 });
 
 it("an offline Native voice save stays queued until its later explicit reconnect",async()=>{
+ const restoreSnapshotDate = pinEntrySnapshotCalendar();
+ try {
+
  requireAudioParent=true;await mount();await recordVoice();status=500;const write=storage.setItem.bind(storage);let recovered=false;
  vi.spyOn(storage,"setItem").mockImplementation(async(slot,value)=>{await write(slot,value);if(slot.startsWith(ACCOUNT_STORAGE_PREFIX.audioQueue)&&JSON.parse(value).parentPending===undefined){recovered=true;status=200;}});
  await press("Save entry");await flush();expect(recovered).toBe(true);expect(await queueLength(USER)).toBe(1);expect(stored.size).toBe(0);expect(attachments.size).toBe(0);expect(await audioQueueStatus(USER)).toEqual({total:1,needsAttention:0});
  await flushAudioQueue();expect(await queueLength(USER)).toBe(0);const parent=[...stored.values()][0]!;expect(decryptEntry({dataKey:KEY},USER,parent.client_entry_id,parent.blob,1).text).toBe(SPOKEN);expect(decryptAudio({dataKey:KEY},USER,parent.client_entry_id,attachments.get(parent.client_entry_id)!.blob)).toEqual(SENSOR_BYTES);
  assertPublicSurface(publicSurface(root!),0);
+
+ } finally { restoreSnapshotDate(); }
 });
 
 it("a retained Native replace confirmation cannot let an earlier transcription hide the current pending take",async()=>{
@@ -245,14 +265,22 @@ it("a retained Native replace confirmation cannot let an earlier transcription h
 });
 
 it("a late saved-take Native deletion receipt preserves a fresh public recording",async()=>{
+ const restoreSnapshotDate = pinEntrySnapshotCalendar();
+ try {
+
  await mount();const priorUri=await recordVoice(),receipt=hold(),remove=files.deleteAsync.getMockImplementation()!;let first=true;
  files.deleteAsync.mockImplementation(async(uri,options)=>{await remove(uri,options);if(first&&uri===priorUri&&stored.size>0){first=false;await receipt.run();}});
  await press("Save entry",false);await vi.waitFor(()=>expect(receipt.entered()).toBe(true));await press(tr("entry.voiceDiscardTake"));await flush();await press("Record instead");await flush();await vi.waitFor(()=>expect(words()).toContain("Recording…"));
  const freshUri=files.cacheDirectory+"independent-new-take-before-old-cleanup.m4a";fakeRecorderStatus.url=freshUri;files.__seedFile(freshUri,SENSOR_BYTES.toString("base64"));receipt.release();await flush();
  expect(words()).toContain("Recording…");expect(files.__hasFile(freshUri)).toBe(true);assertPublicSurface(publicSurface(root!),0);
+
+ } finally { restoreSnapshotDate(); }
 });
 
 it.each([[false,false],[true,false],[true,true]])("a retained Native replace confirmation protects its capture from an earlier save's cleanup (same Native beat %s, discard before confirm %s)",async(sameBeat,discardFirst)=>{
+ const restoreSnapshotDate = ["a replaced Native credential keeps its reviewed take after an older save's delayed deletion receipt", "a saved Native draft does not reappear when the new-editor random provider refuses after its server receipt", "an accepted Native offline save cannot resurrect its already queued words after a held physical queue commit", "an offline Native voice save stays queued until its later explicit reconnect", "a late saved-take Native deletion receipt preserves a fresh public recording", "a retained Native replace confirmation protects its capture from an earlier save's cleanup (same Native beat false, discard before confirm false)", "a retained Native replace confirmation protects its capture from an earlier save's cleanup (same Native beat true, discard before confirm false)", "a retained Native replace confirmation protects its capture from an earlier save's cleanup (same Native beat true, discard before confirm true)", "an acknowledged save removes its matching RAM fallback before delayed Native restore", "saving typed words during Native transcription preserves the finished take for review", "a held Native streak receipt cannot replace the current credential view's streak", "a changed public keep-recording pick remains in review after an older save's deletion receipt"].includes(expect.getState().currentTestName ?? "") ? pinEntrySnapshotCalendar() : () => {};
+ try {
+
  const device=installedNativeAlert();vi.spyOn(Alert,"alert").mockImplementation(device.alert);await mount();await type(ORIGINAL);const record=root!.root.findAllByType(TouchableOpacity).find(node=>node.props.accessibilityLabel==="Record instead")!,input=editor().props;
  await act(async()=>{record.props.onPress();nativeInputChange(input,"");record.props.onPress();});await flush();await vi.waitFor(()=>expect(words()).toContain("Recording…"));
  const priorUri=files.cacheDirectory+"independent-replace-saved-first.m4a";fakeRecorderStatus.url=priorUri;fakeRecorderStatus.durationMillis=4000;files.__seedFile(priorUri,SENSOR_BYTES.toString("base64"));await press("Stop recording");await vi.waitFor(()=>expect(editor().props.value).toBe(SPOKEN));
@@ -267,6 +295,8 @@ it.each([[false,false],[true,false],[true,true]])("a retained Native replace con
   }else await act(async()=>{confirm!.props.onPress();if(sameBeat)receipt.release();});await flush();await vi.waitFor(()=>expect(words()).toContain("Recording…"));
   const freshUri=files.cacheDirectory+"independent-replace-next-capture.m4a";fakeRecorderStatus.url=freshUri;files.__seedFile(freshUri,SENSOR_BYTES.toString("base64"));if(!sameBeat)receipt.release();await flush();expect(words()).toContain("Recording…");expect(files.__hasFile(freshUri)).toBe(true);assertPublicSurface(publicSurface(root!),0);
  }finally{await act(async()=>window!.unmount());}
+
+ } finally { restoreSnapshotDate(); }
 });
 
 
@@ -281,10 +311,15 @@ it("an accepted old save preserves a restored same-revision RAM fork's new words
 
 
 it("an acknowledged save removes its matching RAM fallback before delayed Native restore",async()=>{
+ const restoreSnapshotDate = pinEntrySnapshotCalendar();
+ try {
+
  const scope=await journalDraftScope(USER),device={...newJournalDraft(),revision:1,text:ORIGINAL};await saveJournalDraft(KEY,scope,device);
  const restore=hold(),receipt=hold(),get=secureStore.getItem.bind(secureStore);let users=0;
  vi.spyOn(secureStore,"getItem").mockImplementation(async slot=>{const value=await get(slot);if(slot==="@mindpattern/user_id"&&++users===2)await restore.run();return value;});
  await mount();boundary=receipt.run;await press("Save entry",false);await vi.waitFor(()=>expect(receipt.entered()).toBe(true));stashDraft(USER,device.text,device,scope.origin);receipt.release();await flush();await vi.waitFor(()=>expect(editor().props.value).toBe(""));restore.release();await flush();expect(editor().props.value).toBe("");assertPublicSurface(publicSurface(root!),0);
+
+ } finally { restoreSnapshotDate(); }
 });
 
 it("a retired key generation leaves the public matching RAM fallback available",async()=>{
@@ -299,17 +334,27 @@ it("a retired key generation leaves the public matching RAM fallback available",
 
 
 it("saving typed words during Native transcription preserves the finished take for review",async()=>{
+ const restoreSnapshotDate = pinEntrySnapshotCalendar();
+ try {
+
  await mount();const receipt=hold();transcriptionBoundary=receipt.run;await press("Record instead");await flush();await vi.waitFor(()=>expect(words()).toContain("Recording…"));await type(ORIGINAL);
  const uri=files.cacheDirectory+"independent-typing-during-transcription.m4a";fakeRecorderStatus.url=uri;fakeRecorderStatus.durationMillis=4000;files.__seedFile(uri,SENSOR_BYTES.toString("base64"));await press("Stop recording");await vi.waitFor(()=>expect(receipt.entered()).toBe(true));expect(words()).toContain(tr("entry.voiceTranscribing"));await press("Save entry");await flush();expect(files.__hasFile(uri)).toBe(true);receipt.release();await flush();
  await vi.waitFor(()=>expect(words()).toContain(tr("entry.voiceReviewTitle")));expect(files.__hasFile(uri)).toBe(true);assertPublicSurface(publicSurface(root!),0);
+
+ } finally { restoreSnapshotDate(); }
 });
 
 
 it("a held Native streak receipt cannot replace the current credential view's streak",async()=>{
+ const restoreSnapshotDate = pinEntrySnapshotCalendar();
+ try {
+
  const prior=new Date();prior.setDate(prior.getDate()-1);const older=new Date(prior);older.setDate(older.getDate()-1);await recordMood(KEY,USER,localDateISO(older),0);await recordMood(KEY,USER,localDateISO(prior),0);
  await mount();await vi.waitFor(()=>expect(words()).toContain(tr("common.streakMany",{count:2})));const receipt=hold(),read=storage.getItem.bind(storage),slot=accountStorageKey.moodLog(USER);let reads=0;
  vi.spyOn(storage,"getItem").mockImplementation(async key=>{const value=await read(key);if(key===slot&&++reads===2)await receipt.run();return value;});await type(ORIGINAL);await press("Save entry");await vi.waitFor(()=>expect(receipt.entered()).toBe(true));await api.setSession("new Native credential owns current streak",USER,"alice");receipt.release();await flush();
  expect(words()).toContain(tr("common.streakMany",{count:2}));expect(words()).not.toContain(tr("common.streakMany",{count:3}));assertPublicSurface(publicSurface(root!),0);
+
+ } finally { restoreSnapshotDate(); }
 });
 
 
@@ -340,6 +385,26 @@ it.each(["api","head-store","body-pin"] as const)("a paired Native %s credential
 
 
 it("a changed public keep-recording pick remains in review after an older save's deletion receipt",async()=>{
+ const restoreSnapshotDate = pinEntrySnapshotCalendar();
+ try {
+
  await mount();const uri=await recordVoice(),receipt=hold(),remove=files.deleteAsync.getMockImplementation()!;let first=true;files.deleteAsync.mockImplementation(async(path,options)=>{await remove(path,options);if(first&&path===uri&&stored.size>0){first=false;await receipt.run();}});
  await press("Save entry",false);await vi.waitFor(()=>expect(receipt.entered()).toBe(true));await press(tr("entry.voiceKeepOn"));receipt.release();await flush();expect(words()).toContain(tr("entry.voiceReviewTitle"));expect(root!.root.findAllByType(TouchableOpacity).some(node=>node.props.accessibilityLabel===tr("entry.voiceKeepOff"))).toBe(true);assertPublicSurface(publicSurface(root!),0);
+
+ } finally { restoreSnapshotDate(); }
 });
+
+function pinEntrySnapshotCalendar() {
+  const NativeDate = globalThis.Date;
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "Date");
+  if (!descriptor) throw new Error("SetupError: Native snapshot Date descriptor is unavailable");
+  // The approved chips use the local calendar day, independently of timezone.
+  // Date.now and every real timer/Promise remain native for finite deadlines.
+  const localNoon = new NativeDate(2026, 9, 7, 12).getTime();
+  Object.defineProperty(globalThis, "Date", { ...descriptor, value: new Proxy(NativeDate, {
+    construct(target, argumentsList, newTarget) {
+      return Reflect.construct(target, argumentsList.length ? argumentsList : [localNoon], newTarget);
+    },
+  }) });
+  return () => Object.defineProperty(globalThis, "Date", descriptor);
+}

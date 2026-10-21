@@ -1,0 +1,2 @@
+# Preserve the exact hash-pinned third-party backport, including upstream whitespace.
+mobile/tools/dependency-patches/react-native-health/RCTAppleHealthKit/RCTAppleHealthKit.m -whitespace

@@ -52,18 +52,54 @@ it("scrubs the host-returned decrypted draft buffer after validation and restora
   try{await expect(loadPortalDraft("therapist-1","patient-1",[key])).resolves.toEqual(state);expect(held).toHaveLength(1);expect(new Uint8Array(held[0]!).every(byte=>byte===0)).toBe(true);}finally{spy.mockRestore();}
 });
 
-it("serializes a third draft save behind a second save that is still committing",async()=>{
-  const releases:Array<()=>void>=[];const entered:Array<string>=[];
-  runTestControl(setKvBackendForTests, {getItem:async id=>stored.get(id)??null,setItem:async(id,value)=>{entered.push(value);await new Promise<void>(resolve=>{releases.push(resolve);});stored.set(id,value);},removeItem:async()=>{}});
-  const first=savePortalDraft("therapist-1","patient-1",key,state);
-  const second=savePortalDraft("therapist-1","patient-1",key,{...state,text:{general:"Second writing"}});
-  await vi.waitFor(()=>expect(releases).toHaveLength(1));releases[0]!();await first;
-  await vi.waitFor(()=>expect(releases).toHaveLength(2));
-  const third=savePortalDraft("therapist-1","patient-1",key,{...state,text:{general:"Third writing"}});
-  try{for(let step=0;step<10;step++)await Promise.resolve();expect(entered).toHaveLength(2);}finally{
-    releases[1]!();await second;await vi.waitFor(()=>expect(releases).toHaveLength(3));releases[2]!();await third;
+it("serializes a third draft save behind a second save that is still committing", async () => {
+  const releases: Array<() => void> = [];
+  const operations: Promise<unknown>[] = [];
+  let finishing = false;
+  const own = <T,>(operation: Promise<T>): Promise<T> => {
+    operations.push(operation);
+    void operation.catch(() => undefined);
+    return operation;
+  };
+  const entered: string[] = [];
+  try {
+    runTestControl(setKvBackendForTests, {
+      getItem: async id => stored.get(id) ?? null,
+      setItem: (id, value) => new Promise<void>(resolve => {
+        entered.push(value);
+        let released = false;
+        const release = () => {
+          if (released) return;
+          released = true;
+          stored.set(id, value);
+          resolve();
+        };
+        releases.push(release);
+        if (finishing) release();
+      }),
+      removeItem: async () => {},
+    });
+    const first = own(savePortalDraft("therapist-1", "patient-1", key, state));
+    const second = own(savePortalDraft("therapist-1", "patient-1", key, { ...state, text: { general: "Second writing" } }));
+    await vi.waitFor(() => expect(releases).toHaveLength(1));
+    releases[0]!();
+    await first;
+    await vi.waitFor(() => expect(releases).toHaveLength(2));
+    const third = own(savePortalDraft("therapist-1", "patient-1", key, { ...state, text: { general: "Third writing" } }));
+    for (let step = 0; step < 10; step++) await Promise.resolve();
+    expect(entered).toHaveLength(2);
+    releases[1]!();
+    await second;
+    await vi.waitFor(() => expect(releases).toHaveLength(3));
+    releases[2]!();
+    await third;
+    await expect(own(loadPortalDraft("therapist-1", "patient-1", [key]))).resolves.toMatchObject({ text: { general: "Third writing" } });
+  } finally {
+    finishing = true;
+    for (const release of releases) release();
+    // Every operation is awaited on success; drain without masking an earlier assertion.
+    await Promise.allSettled(operations);
   }
-  await expect(loadPortalDraft("therapist-1","patient-1",[key])).resolves.toMatchObject({text:{general:"Third writing"}});
 });
 
 it("binds encrypted drafts to the therapist and patient even if storage is copied", async () => {
@@ -110,19 +146,48 @@ it.each([false, true])("scrubs provider-held encryption inputs after a draft com
 });
 
 it("keeps the lifecycle drain pending until all committed writes finish", async () => {
-  let release!: () => void;
-  let entered!: () => void;
-  const entry = new Promise<void>(resolve => { entered = resolve; });
-  runTestControl(setKvBackendForTests, { getItem: async () => null, setItem: async () => { entered(); await new Promise<void>(resolve => { release = resolve; }); }, removeItem: async () => {} });
-  const write = savePortalDraft("therapist-1", "patient-1", key, state);
-  await entry;
+  const releases: Array<() => void> = [];
+  const operations: Promise<unknown>[] = [];
+  let finishing = false;
+  const own = <T,>(operation: Promise<T>): Promise<T> => {
+    operations.push(operation);
+    void operation.catch(() => undefined);
+    return operation;
+  };
+  let entered = false;
   let drained = false;
-  const drain = drainPortalDraftWritesForTests().then(() => { drained = true; });
   try {
+    runTestControl(setKvBackendForTests, {
+      getItem: async () => null,
+      setItem: () => new Promise<void>(resolve => {
+        entered = true;
+        let released = false;
+        const release = () => {
+          if (released) return;
+          released = true;
+          resolve();
+        };
+        releases.push(release);
+        if (finishing) release();
+      }),
+      removeItem: async () => {},
+    });
+    const write = own(savePortalDraft("therapist-1", "patient-1", key, state));
+    // An acknowledged no-op write must fail this contract rather than strand entry forever.
+    await vi.waitFor(() => expect(entered).toBe(true));
+    const drain = own(drainPortalDraftWritesForTests().then(() => { drained = true; }));
     for (let step = 0; step < 5; step++) await Promise.resolve();
     expect(drained).toBe(false);
-  } finally { release(); await write; await drain; }
-  expect(drained).toBe(true);
+    releases[0]!();
+    await write;
+    await drain;
+    expect(drained).toBe(true);
+  } finally {
+    finishing = true;
+    for (const release of releases) release();
+    // Every operation is awaited on success; drain without masking an earlier assertion.
+    await Promise.allSettled(operations);
+  }
 });
 
 it("accepts the documented size boundaries and a pattern-scoped operation", async () => {

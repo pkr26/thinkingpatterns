@@ -507,7 +507,7 @@ it("a confirmed erasure failure stays visible and retries without touching anoth
   const records=new Map([['mindpattern.safetyPlan.erased','encrypted plan'],['mindpattern.safetyPlan.other','other plan'],['mindpattern.erase.erased',JSON.stringify({v:1,owner:'erased',remoteConfirmed:true,keys:['mindpattern.safetyPlan.erased']})]]);
   setKvBackendForTests({getItem:async key=>records.get(key)??null,setItem:async(key,value)=>{records.set(key,value);},removeItem:async key=>{if(fail&&key==='mindpattern.safetyPlan.erased')throw new Error('storage denied');records.delete(key);},compareAndSet:async(key,before,after)=>{if((records.get(key)??null)!==before)return false;records.set(key,after);return true;},keys:async()=>[...records.keys()]});
   const root=await render(<App/>);await flush(10);expect(textOf(root)).toContain('Unfinished local deletion');expect(records.get('mindpattern.safetyPlan.erased')).toBe('encrypted plan');
-  fail=false;await press(root,'Retry local cleanup');await flush(10);expect(records.has('mindpattern.safetyPlan.erased')).toBe(false);expect(records.get('mindpattern.safetyPlan.other')).toBe('other plan');expect(textOf(root)).not.toContain('Unfinished local deletion');
+  fail=false;expect(buttonByLabel(root,'Retry local cleanup')).toBe(true);await press(root,'Retry local cleanup');await flush(10);expect(records.has('mindpattern.safetyPlan.erased')).toBe(false);expect(records.get('mindpattern.safetyPlan.other')).toBe('other plan');expect(textOf(root)).not.toContain('Unfinished local deletion');
 });
 
 it("an unconfirmed deletion never erases data until an explicit local-erasure action", async () => {

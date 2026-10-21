@@ -75,7 +75,7 @@ describe("mobile wire requests", () => {
     ["entry removal", () => api.deleteEntry("entry_1"), "DELETE", "/entries/entry_1", undefined],
     ["logout", () => api.logout(), "POST", "/auth/logout", undefined],
   ];
-  it.each(cases)("sends the documented %s request", async (_name, call, method, path, body, extra = {}, bearer = true) => {
+  it.each(cases)("sends the documented %s request (case #%#)", async (_name, call, method, path, body, extra = {}, bearer = true) => {
     const answer = { result: "native-response" }; const fetch = fetchWith(() => response(answer));
     expect(await call()).toEqual(answer); expect(fetch).toHaveBeenCalledOnce();
     const [url, init] = fetch.mock.calls[0]!;

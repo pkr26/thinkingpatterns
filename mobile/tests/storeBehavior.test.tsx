@@ -62,7 +62,7 @@ it("renders every safe session default and permits its public no-op callbacks ou
 it.each([0,0.75,7.9,3650,3651,10000])("renders an authoritative public progress value %s with its bounded integer semantics",async days=>{
  await mount();await act(async()=>{const read=await session.beginProgressRead();expect(read?.owner).toBe(USER);session.applyActiveDays(days,read!);});expect(state()).toMatchObject({days:Math.min(3650,Math.floor(days)),known:true,loading:false});
 });
-it.each([-1,NaN,Infinity,-Infinity,"12",null,undefined,{},[]])("retains known progress while refusing an invalid public value %j",async days=>{
+it.each([-1,NaN,Infinity,-Infinity,"12",null,undefined,{},[]])("retains known progress while refusing an invalid public value %j (case #%#)",async days=>{
  await mount();await act(async()=>{const read=await session.beginProgressRead();session.applyActiveDays(days,read!);});expect(state()).toMatchObject({days:5,known:true,loading:true});
 });
 it("retains authoritative progress when native JSON contains an overflowing numeric exponent",async()=>{
@@ -89,10 +89,10 @@ it("finishes a failed native credential read while retaining the last authoritat
 });
 it("locks the rendered vault at the exact native inactivity deadline",async()=>{
  await mount();vi.useFakeTimers();await act(async()=>vault.unlock({masterKey:Buffer.alloc(32),authKey:Buffer.alloc(32,2),dataKey:Buffer.alloc(32,3)},USER));expect(state().unlocked).toBe(true);
- await act(async()=>vi.advanceTimersByTimeAsync(299999));expect(state().unlocked).toBe(true);await act(async()=>vi.advanceTimersByTimeAsync(1));expect(state().unlocked).toBe(false);
+ await act(async()=>vi.advanceTimersByTimeAsync(299999) as unknown as Promise<void>);expect(state().unlocked).toBe(true);await act(async()=>vi.advanceTimersByTimeAsync(1) as unknown as Promise<void>);expect(state().unlocked).toBe(false);
 });
 it("restarts the native inactivity countdown from actual interaction",async()=>{
- await mount();vi.useFakeTimers();await act(async()=>vault.unlock({masterKey:Buffer.alloc(32),authKey:Buffer.alloc(32,2),dataKey:Buffer.alloc(32,3)},USER));await act(async()=>vi.advanceTimersByTimeAsync(120000));await act(async()=>session.touchActivity());await act(async()=>vi.advanceTimersByTimeAsync(180000));expect(state().unlocked).toBe(true);await act(async()=>vi.advanceTimersByTimeAsync(120000));expect(state().unlocked).toBe(false);
+ await mount();vi.useFakeTimers();await act(async()=>vault.unlock({masterKey:Buffer.alloc(32),authKey:Buffer.alloc(32,2),dataKey:Buffer.alloc(32,3)},USER));await act(async()=>vi.advanceTimersByTimeAsync(120000) as unknown as Promise<void>);await act(async()=>session.touchActivity());await act(async()=>vi.advanceTimersByTimeAsync(180000) as unknown as Promise<void>);expect(state().unlocked).toBe(true);await act(async()=>vi.advanceTimersByTimeAsync(120000) as unknown as Promise<void>);expect(state().unlocked).toBe(false);
 });
 it.each(["background","inactive"])("locks the actual native vault when AppState enters %s",async event=>{
  await mount();await act(async()=>vault.unlock({masterKey:Buffer.alloc(32),authKey:Buffer.alloc(32,2),dataKey:Buffer.alloc(32,3)},USER));expect(state().unlocked).toBe(true);await act(async()=>emitAppState(event));expect(state().unlocked).toBe(false);
@@ -101,7 +101,7 @@ it("wipes plaintext and rejects abandoned editor cleanup after native sign-out",
  await mount();await act(async()=>session.markLoggedIn());stashDraft(USER,"unsent old-account plaintext");expect(peekDraft(USER)).toBe("unsent old-account plaintext");await act(async()=>session.signOut());stashDraft(USER,"abandoned editor plaintext");expect(peekDraft(USER)).toBeNull();expect(state()).toMatchObject({auth:"loggedOut",unlocked:false,days:0,known:false,loading:false});expect(await api.getUserId()).toBeNull();
 });
 it("wipes plaintext and rendered progress on native server-origin retirement",async()=>{
- await mount();await act(async()=>session.markLoggedIn());stashDraft(USER,"old-origin plaintext");await act(async()=>setBaseUrl("https://another.native.test"));stashDraft(USER,"abandoned old-origin plaintext");expect(peekDraft(USER)).toBeNull();expect(state()).toMatchObject({auth:"loggedOut",unlocked:false,days:0,known:false,loading:false});expect(await api.getUserId()).toBeNull();
+ await mount();await act(async()=>session.markLoggedIn());stashDraft(USER,"old-origin plaintext");await act(async()=>setBaseUrl("https://another.native.test") as unknown as Promise<void>);stashDraft(USER,"abandoned old-origin plaintext");expect(peekDraft(USER)).toBeNull();expect(state()).toMatchObject({auth:"loggedOut",unlocked:false,days:0,known:false,loading:false});expect(await api.getUserId()).toBeNull();
 });
 it.each(["voice cleanup","erasure inventory"])("fails closed before session hydration after a native %s failure",async boundary=>{
  if(boundary==="voice cleanup")vi.spyOn(files,"deleteAsync").mockRejectedValue(new Error("native scratch disk unavailable"));else vi.spyOn(storage,"getAllKeys").mockRejectedValue(new Error("native erasure inventory unavailable"));
@@ -114,9 +114,9 @@ it("keeps native credential-read failure behind the logged-out gate during cold 
 it("retires the native deleted-account tuple and reports incomplete native erasure",async()=>{
  await mount();await act(async()=>session.markLoggedIn());stashDraft(USER,"deleted-account plaintext");vi.spyOn(files,"deleteAsync").mockRejectedValue(new Error("native erasure disk unavailable"));responseStatus=410;await act(async()=>session.refreshActiveDays());await vi.waitFor(()=>expect(state()).toMatchObject({auth:"loggedOut",days:0,known:false,loading:false,erasure:true}));expect(peekDraft(USER)).toBeNull();expect(await api.getUserId()).toBeNull();
 });
-it.each([-1,0,0.5,1.5,366,NaN,Infinity,"45",null,undefined,{},[]])("retains the default gate when native metadata supplies an invalid unlock-days value %j",async value=>{serverUnlockDays=value;await mount(30);});
+it.each([-1,0,0.5,1.5,366,NaN,Infinity,"45",null,undefined,{},[]])("retains the default gate when native metadata supplies an invalid unlock-days value %j (case #%#)",async value=>{serverUnlockDays=value;await mount(30);});
 it.each([1,365])("adopts the native metadata gate's inclusive boundary %s",async value=>{serverUnlockDays=value;await mount(value);});
-it.each([-1,0.5,"12",null,undefined,{},[],NaN,Infinity])("retains known progress when an actual native HTTP refresh returns %j",async value=>{
+it.each([-1,0.5,"12",null,undefined,{},[],NaN,Infinity])("retains known progress when an actual native HTTP refresh returns %j (case #%#)",async value=>{
  await mount();serverDays=value;await act(async()=>session.refreshActiveDays());expect(state()).toMatchObject({days:typeof value==="number"&&Number.isFinite(value)&&value>=0?Math.floor(value):5,known:true,loading:false});
 });
 it("retains known progress and finishes loading after an actual native server failure",async()=>{await mount();responseStatus=500;await act(async()=>session.refreshActiveDays());expect(state()).toMatchObject({auth:"loggedIn",days:5,known:true,loading:false});});
@@ -170,7 +170,7 @@ it("clears the visible count when native owner storage disappears before an ordi
  await mount();await api.clearSession();await act(async()=>session.refreshActiveDays());expect(state()).toMatchObject({days:0,known:false,loading:false});
 });
 it("locks the native vault on origin retirement even when no parent timer can still run",async()=>{
- await mount();await act(async()=>vault.unlock({masterKey:Buffer.alloc(32),authKey:Buffer.alloc(32,2),dataKey:Buffer.alloc(32,3)},USER));await act(async()=>setBaseUrl("https://new-origin.native.test"));expect(vault.isUnlocked()).toBe(false);expect(state()).toMatchObject({auth:"loggedOut",unlocked:false});
+ await mount();await act(async()=>vault.unlock({masterKey:Buffer.alloc(32),authKey:Buffer.alloc(32,2),dataKey:Buffer.alloc(32,3)},USER));await act(async()=>setBaseUrl("https://new-origin.native.test") as unknown as Promise<void>);expect(vault.isUnlocked()).toBe(false);expect(state()).toMatchObject({auth:"loggedOut",unlocked:false});
 });
 it("removes the native AppState subscription and prevents a ghost idle timer after provider unmount",async()=>{
  await mount();vi.useFakeTimers();await act(async()=>vault.unlock({masterKey:Buffer.alloc(32),authKey:Buffer.alloc(32,2),dataKey:Buffer.alloc(32,3)},USER));await act(async()=>{root!.unmount();root=undefined;});vault.unlock({masterKey:Buffer.alloc(32),authKey:Buffer.alloc(32,12),dataKey:Buffer.alloc(32,13)},USER);emitAppState("background");await vi.advanceTimersByTimeAsync(300000);expect(vault.isUnlocked()).toBe(true);expect(vault.get().dataKey).toEqual(Buffer.alloc(32,13));
@@ -234,7 +234,7 @@ it("keeps an accepted login when old boot's last native erasure inventory still 
 });
 
 it("uploads retained authenticated native voice ciphertext when the application returns to the foreground",async()=>{
- await mount();const dataKey=Buffer.alloc(32,17),blob=encryptAudio({dataKey},USER,"foreground-voice",Buffer.from("the account's retained spoken words"));await enqueueAudio({userId:USER,clientEntryId:"foreground-voice",...blob,mime:"audio/m4a",durationSeconds:4});const transport=fetch,received:Record<string,unknown>[]=[];vi.stubGlobal("fetch",async(url:string,init:RequestInit)=>{if(new URL(url).pathname.endsWith("/audio/attachments")){received.push(JSON.parse(String(init.body)));const response=new Response("{}",{status:200});Object.defineProperty(response,"url",{value:url});return response;}return transport(url,init);});await act(async()=>emitAppState("active"));await vi.waitFor(async()=>expect(await audioQueueCount(USER)).toBe(0));expect(received).toHaveLength(1);expect(decryptAudio({dataKey},USER,"foreground-voice",String(received[0].blob))).toEqual(Buffer.from("the account's retained spoken words"));
+ await mount();const dataKey=Buffer.alloc(32,17),blob=encryptAudio({dataKey},USER,"foreground-voice",Buffer.from("the account's retained spoken words"));await enqueueAudio({userId:USER,clientEntryId:"foreground-voice",...blob,mime:"audio/m4a",durationSeconds:4});const transport=fetch,received:Record<string,unknown>[]=[];vi.stubGlobal("fetch",async(url:string,init:RequestInit)=>{if(new URL(url).pathname.endsWith("/audio/attachments")){received.push(JSON.parse(String(init.body)));const response=new Response("{}",{status:200});Object.defineProperty(response,"url",{value:url});return response;}return transport(url,init);});await act(async()=>emitAppState("active"));await vi.waitFor(async()=>expect(await audioQueueCount(USER)).toBe(0));expect(received).toHaveLength(1);expect(decryptAudio({dataKey},USER,"foreground-voice",String(received[0]!.blob))).toEqual(Buffer.from("the account's retained spoken words"));
 });
 
 it.each(["origin change","sign-out"])("preserves the physical queue retirement outcome when an old malformed native row spans %s",async retirement=>{
@@ -258,7 +258,7 @@ it.each(["origin change","sign-out","ownerless deletion"])("admits the current n
 });
 
 it("keeps a replacement login's erasure status when old deleted-account cleanup finishes its final native inventory",async()=>{
- await mount();const read=storage.getAllKeys;let count=0,release:()=>void=()=>{},ready!:()=>void;const started=new Promise<void>(resolve=>{ready=resolve;});vi.spyOn(storage,"getAllKeys").mockImplementation(async()=>{const value=await read();if(++count===3){ready();await new Promise<void>(resolve=>{release=resolve;});}return value;});responseStatus=410;const deleted=api.insights().catch(()=>{});await deleted;await new Promise<void>(resolve=>setImmediate(resolve));await new Promise<void>(resolve=>setImmediate(resolve));let replacement:Promise<void>|undefined;try{let adopted=false;replacement=api.setSession("replacement-bearer",OTHER,"bob").then(()=>{adopted=true;});await new Promise<void>(resolve=>setImmediate(resolve));await new Promise<void>(resolve=>setImmediate(resolve));expect(adopted).toBe(true);responseStatus=200;await act(async()=>session.markLoggedIn());await act(async()=>{release();await deleted;for(let i=0;i<256;i++)await Promise.resolve();});expect(state()).toMatchObject({auth:"loggedIn",erasure:false});expect(await secureStore.getItem("@mindpattern/token")).toBe("replacement-bearer");}finally{release();await deleted;await replacement;}
+ await mount();const read=storage.getAllKeys;let count=0,release:()=>void=()=>{};vi.spyOn(storage,"getAllKeys").mockImplementation(async()=>{const value=await read();if(++count===3){await new Promise<void>(resolve=>{release=resolve;});}return value;});responseStatus=410;const deleted=api.insights().catch(()=>{});await deleted;await new Promise<void>(resolve=>setImmediate(resolve));await new Promise<void>(resolve=>setImmediate(resolve));let replacement:Promise<void>|undefined;try{let adopted=false;replacement=api.setSession("replacement-bearer",OTHER,"bob").then(()=>{adopted=true;});await new Promise<void>(resolve=>setImmediate(resolve));await new Promise<void>(resolve=>setImmediate(resolve));expect(adopted).toBe(true);responseStatus=200;await act(async()=>session.markLoggedIn());await act(async()=>{release();await deleted;for(let i=0;i<256;i++)await Promise.resolve();});expect(state()).toMatchObject({auth:"loggedIn",erasure:false});expect(await secureStore.getItem("@mindpattern/token")).toBe("replacement-bearer");}finally{release();await deleted;await replacement;}
 });
 
 it.each(["current deletion","replacement login"])("scopes a Native erasure-origin provider failure to the %s receipt",async retirement=>{
@@ -268,4 +268,72 @@ it.each(["current deletion","replacement login"])("scopes a Native erasure-origi
 
 it("retires process-owned plaintext when an admitted Native origin change completes after provider unmount",async()=>{
  await mount();await act(async()=>{session.markLoggedIn();vault.unlock({masterKey:Buffer.alloc(32),authKey:Buffer.alloc(32,2),dataKey:Buffer.alloc(32,3)},USER);});stashDraft(USER,"old server's private unsent words");const read=storage.getItem;let first=true,release:()=>void=()=>{},ready!:()=>void;const started=new Promise<void>(resolve=>{ready=resolve;});vi.spyOn(storage,"getItem").mockImplementation(async key=>{const value=await read(key);if(first&&key==="@mindpattern/base_url"){first=false;ready();await new Promise<void>(resolve=>{release=resolve;});}return value;});const pending=setBaseUrl("https://another.native.test");await Promise.race([started,pending]);await act(async()=>{root!.unmount();root=undefined;});try{release();expect(await pending).toBeNull();expect(vault.isUnlocked()).toBe(false);expect(peekDraft(USER)).toBeNull();expect(await secureStore.getItem("@mindpattern/token")).toBeNull();}finally{release();await pending;}
+});
+
+
+it("keeps the newer native unknown-progress read loading after a held obsolete owner read finishes",async()=>{
+ await mount();
+ const read=secureStore.getItem;let first=true,release:()=>void=()=>{},ready!:()=>void;
+ const started=new Promise<void>(resolve=>{ready=resolve;});
+ vi.spyOn(secureStore,"getItem").mockImplementation(async key=>{
+  const value=await read(key);
+  if(key==="@mindpattern/user_id"&&first){first=false;ready();await new Promise<void>(resolve=>{release=resolve;});}
+  return value;
+ });
+ let older!:ReturnType<typeof session.beginProgressRead>;
+ await act(async()=>{older=session.beginProgressRead();await started;});
+ // The new account's genuine receipt clears the old count and owns the loading flag.
+ await api.setSession("new-native-bearer",OTHER,"bob");
+ let newer!:Awaited<ReturnType<typeof session.beginProgressRead>>;
+ await act(async()=>{newer=await session.beginProgressRead();});
+ expect(newer?.owner).toBe(OTHER);
+ expect(state()).toMatchObject({days:0,known:false,loading:true});
+ try{
+  let retired!:Awaited<typeof older>;
+  await act(async()=>{release();retired=await older;});
+  expect(retired).toBeNull();
+  expect(state().loading).toBe(true);
+  expect(state()).toMatchObject({days:0,known:false});
+  // Only the new screen read's actual publication may finish its loading phase.
+  await act(async()=>session.applyActiveDays(9,newer!));
+  expect(state()).toMatchObject({days:9,known:true,loading:false});
+ }finally{release();await older;}
+});
+
+it("keeps the current Native reminder intent after a retired boot owner read spans same-owner credential renewal",async()=>{
+ await storage.setItem("@mindpattern/reminder.migration.v2.done","1");
+ const read=secureStore.getItem;let reads=0,releaseOwner:()=>void=()=>{},ownerReady!:()=>void;
+ const ownerStarted=new Promise<void>(resolve=>{ownerReady=resolve;});
+ vi.spyOn(secureStore,"getItem").mockImplementation(async key=>{
+  const value=await read(key);
+  if(key==="@mindpattern/user_id"&&++reads===2){ownerReady();await new Promise<void>(resolve=>{releaseOwner=resolve;});}
+  return value;
+ });
+ await mount();await ownerStarted;
+ // Same owner changes the credential scope without retiring this provider's generation.
+ await act(async()=>api.setSession("renewed-native-bearer",USER,"alice"));
+ await setReminderEnabled(USER,true);
+ let permissionReady!:()=>void,allowCurrentPermission:()=>void=()=>{},permissionOpen=false,permissionOrdinal=0;
+ const laterPermissionReleases=new Set<()=>void>();
+ const permissionStarted=new Promise<void>(resolve=>{permissionReady=resolve;});
+ notificationDevice.permission=async()=>{
+  const ordinal=permissionOrdinal++;
+  if(!permissionOpen){
+   if(ordinal===0){permissionReady();await new Promise<void>(resolve=>{allowCurrentPermission=resolve;});}
+   else await new Promise<void>(resolve=>{laterPermissionReleases.add(resolve);});
+  }
+  return {authorizationStatus:1};
+ };
+ const allowAllPermissions=()=>{permissionOpen=true;allowCurrentPermission();for(const release of laterPermissionReleases)release();laterPermissionReleases.clear();};
+ const current=syncReminderSchedule(USER);await permissionStarted;
+ try{
+  releaseOwner();for(let i=0;i<256;i++)await Promise.resolve();
+  allowAllPermissions();
+  expect(await current).toBe(true);
+  expect(notificationDevice.rows.has("mindpattern-daily-reminder")).toBe(true);
+  expect(await secureStore.getItem("@mindpattern/token")).toBe("renewed-native-bearer");
+ }finally{
+  releaseOwner();allowAllPermissions();await current;
+  for(let i=0;i<256;i++)await Promise.resolve();
+ }
 });

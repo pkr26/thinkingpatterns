@@ -6,8 +6,8 @@ import { runTestControl } from "../helpers/testControl";
  * destructive delete, the recovered-entries surface, and the About section.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import React from "react";
-import { Alert, AppState, Platform, Share, Switch, TextInput } from "react-native";
+import "react";
+import { Alert, AppState, Platform, Share, Switch, TextInput } from "../helpers/rnMock";
 import * as Keychain from "react-native-keychain";
 import { emitAppState } from "../helpers/rnMock";
 
@@ -24,7 +24,7 @@ vi.mock("../../src/api/client", async (importOriginal) => {
 });
 
 const authKeyB64 = () => authKey.toString("base64");
-const verifyPasswordForVault = vi.fn(async () => ({ ok: true as const, verifierB64: authKeyB64() }));
+const verifyPasswordForVault = vi.fn<typeof import("../../src/reauth").verifyPasswordForVault>(async () => ({ ok: true as const, verifierB64: authKeyB64() }));
 vi.mock("../../src/reauth", async (importOriginal) => {
   // The error classifiers stay REAL: the screen branches 403-vs-401 on them.
   const actual = await importOriginal<typeof import("../../src/reauth")>();
@@ -94,18 +94,18 @@ vi.mock("../../src/store", async (importOriginal) => {
 // this build — module absent. SettingsScreen AND reminderSync both import
 // from nativeFeatures, so the mock makes the sync observable here.
 const reminderCapabilityResult = { available: false, reason: "notification module not linked in this build" };
-const reminderCapability = vi.fn(() => reminderCapabilityResult);
-const scheduleDailyReminder = vi.fn(async () => true);
+const reminderCapability = vi.fn<typeof import("../../src/nativeFeatures").reminderCapability>(() => reminderCapabilityResult);
+const scheduleDailyReminder = vi.fn<typeof import("../../src/nativeFeatures").scheduleDailyReminder>(async () => true);
 const cancelDailyReminder = vi.fn(async () => true);
-const scheduleMeasureReminder = vi.fn(async () => true);
+const scheduleMeasureReminder = vi.fn<typeof import("../../src/nativeFeatures").scheduleMeasureReminder>(async () => true);
 vi.mock("../../src/nativeFeatures", () => ({
   reminderCapability: () => reminderCapability(),
-  scheduleDailyReminder: (...args: unknown[]) => scheduleDailyReminder(...(args as [number, number])),
+  scheduleDailyReminder: (...args: unknown[]) => scheduleDailyReminder(...(args as Parameters<typeof import("../../src/nativeFeatures").scheduleDailyReminder>)),
   cancelDailyReminder: (...args: unknown[]) => cancelDailyReminder(...(args as [])),
   // 2026-09-27 clinical wave: the opt-in check-in reminder rides the same
   // nativeFeatures seam (own stable id); deletion cancels both schedules.
   cancelMeasureReminder: async () => true,
-  scheduleMeasureReminder: (...args: unknown[]) => scheduleMeasureReminder(...(args as [Date])),
+  scheduleMeasureReminder: (...args: unknown[]) => scheduleMeasureReminder(...(args as Parameters<typeof import("../../src/nativeFeatures").scheduleMeasureReminder>)),
   // L-9 (2026-09-28): the one-time orphan sweep runs inside every
   // syncReminderSchedule; stubbed to a no-op here (its own seam is covered
   // in tests/nativeFeatures.test.ts against the real module).
@@ -117,7 +117,7 @@ vi.mock("../../src/nativeFeatures", () => ({
 // (getMoodMirrorPref/setMoodMirrorPref/clearMoodMirrorPref) stays REAL so
 // the per-account record round-trips through storage exactly as shipped.
 const healthKitCapabilityResult = { available: false, reason: "health module not linked in this build" };
-const healthKitCapability = vi.fn(() => healthKitCapabilityResult);
+const healthKitCapability = vi.fn<typeof import("../../src/healthkit").healthKitCapability>(() => healthKitCapabilityResult);
 const ensureStateOfMindWriteAccess = vi.fn(async () => true);
 vi.mock("../../src/healthkit", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/healthkit")>();
@@ -459,8 +459,8 @@ describe("SettingsScreen chrome", () => {
       .findAllByType(Switch)
       .find((n) => n.props.accessibilityLabel === "Allow third-party transcript translation");
     expect(sw).toBeDefined();
-    expect(sw.props.value).toBe(true);
-    expect(sw.props.trackColor).toEqual({ true: "#b7d5b2", false: "#232019" });
+    expect(sw!.props.value).toBe(true);
+    expect(sw!.props.trackColor).toEqual({ true: "#b7d5b2", false: "#232019" });
   });
 
   it("renders an empty, idle form before the stored URL resolves", async () => {
@@ -517,7 +517,7 @@ describe("SettingsScreen chrome", () => {
 
   it("shows the LLM switch off before the stored consent resolves", async () => {
     vi.mocked(api.meta).mockResolvedValue({ llm_available: true } as never);
-    let resolveConsent!: (v: unknown) => void;
+    let resolveConsent!: (v: Awaited<ReturnType<typeof api.getLlmConsent>>) => void;
     vi.mocked(api.getLlmConsent).mockImplementation(
       () => new Promise((resolve) => (resolveConsent = resolve)),
     );
@@ -542,14 +542,14 @@ describe("SettingsScreen chrome", () => {
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
     const sw = root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow third-party transcript translation")!;
-    expect(sw.props.value).toBe(false);
+    expect(sw!.props.value).toBe(false);
     expect(textOf(root)).toContain("earlier choice no longer authorizes transcript translation");
     expect(textOf(root)).toContain("Translation is off");
   });
 
   it("disables the switch and buttons while the verified consent save is busy, and resets after", async () => {
     vi.mocked(api.meta).mockResolvedValue({ llm_available: true } as never);
-    let resolveSave!: (v: unknown) => void;
+    let resolveSave!: (v: Awaited<ReturnType<typeof api.setLlmConsent>>) => void;
     vi.mocked(api.setLlmConsent).mockImplementation(
       () => new Promise((resolve) => (resolveSave = resolve)),
     );
@@ -564,18 +564,18 @@ describe("SettingsScreen chrome", () => {
     await typeInto(root, "password", "correct horse");
     await firePress(root, "Confirm with password");
     await flush();
-    expect(root.root.findAllByType(Switch)[0].props.disabled).toBe(true);
+    expect(root.root.findAllByType(Switch)[0]!.props.disabled).toBe(true);
     await act(async () => {
       resolveSave?.({ enabled: true, active_for_current_policy: true });
     });
     await flush();
-    expect(root.root.findAllByType(Switch)[0].props.disabled).toBe(false);
+    expect(root.root.findAllByType(Switch)[0]!.props.disabled).toBe(false);
 
     // busy reset in finally: a second toggle round-trip works.
     vi.mocked(api.setLlmConsent).mockResolvedValue({ enabled: false, active_for_current_policy: false } as never);
     const sw1 = root.root.findAllByType(Switch)[0];
     await act(async () => {
-      (sw1.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(false);
+      (sw1!.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(false);
     });
     await flush();
     await reauth(root);
@@ -689,11 +689,11 @@ describe("LLM consent toggle", () => {
   it("requires the typed password and publishes the server's answer", async () => {
     const root = await renderWithLlm();
     const sw = root.root.findAllByType(Switch)[0];
-    expect(sw.props.value).toBe(false);
+    expect(sw!.props.value).toBe(false);
 
     const { act } = await import("../helpers/rtr");
     await act(async () => {
-      (sw.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
+      (sw!.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
     });
     await flush();
     // Nothing was sent yet: the re-auth card is up, not a network call.
@@ -713,7 +713,7 @@ describe("LLM consent toggle", () => {
     const sw = root.root.findAllByType(Switch)[0];
     const { act } = await import("../helpers/rtr");
     await act(async () => {
-      (sw.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
+      (sw!.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
     });
     await flush();
     await reauth(root, "wrong guess");
@@ -728,7 +728,7 @@ describe("LLM consent toggle", () => {
     const sw = root.root.findAllByType(Switch)[0];
     const { act } = await import("../helpers/rtr");
     await act(async () => {
-      (sw.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
+      (sw!.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
     });
     await flush();
     await reauth(root);
@@ -743,7 +743,7 @@ describe("LLM consent toggle", () => {
     const sw = root.root.findAllByType(Switch)[0];
     const { act } = await import("../helpers/rtr");
     await act(async () => {
-      (sw.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
+      (sw!.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
     });
     await flush();
     await reauth(root);
@@ -983,7 +983,7 @@ describe("verification-failure branching (403 vs 401)", () => {
     const sw = root.root.findAllByType(Switch)[0];
     const { act } = await import("../helpers/rtr");
     await act(async () => {
-      (sw.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
+      (sw!.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
     });
     await flush();
     await reauth(root);
@@ -1003,7 +1003,7 @@ describe("verification-failure branching (403 vs 401)", () => {
     const sw = root.root.findAllByType(Switch)[0];
     const { act } = await import("../helpers/rtr");
     await act(async () => {
-      (sw.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
+      (sw!.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
     });
     await flush();
     await reauth(root);
@@ -1065,7 +1065,7 @@ describe("theme radio initial value", () => {
   it("shows the provider default while the persisted read is in flight — never a palette-derived value", async () => {
     // Dark OS palette + persisted "system": the old derived init selected
     // "Dark" on the first paint, as if the user had pinned an override.
-    const { useColorScheme } = await import("react-native");
+    const { useColorScheme } = await import("../helpers/rnMock");
     useColorScheme.mockReturnValue("dark");
     let resolveStored!: (v: string | null) => void;
     const original = storage.getItem;
@@ -1211,7 +1211,7 @@ describe("About and Advanced sections", () => {
     expect(textOf(root)).toContain("Evening 20:00");
     expect(textOf(root)).toContain("21:30");
     const custom = root.root.findAll((n) => n.props.accessibilityLabel === "Reminder time: 21:30")[0];
-    expect(custom.props.accessibilityState).toEqual({ selected: true });
+    expect(custom!.props.accessibilityState).toEqual({ selected: true });
   });
 
   it("renders the version without the server part when meta has none", async () => {
@@ -1248,10 +1248,10 @@ describe("daily reminder section (module linked)", () => {
   it("toggling on persists the per-account opt-in and schedules at the stored time", async () => {
     const root = await renderWithReminders();
     const sw = root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Daily reminder")!;
-    expect(sw.props.disabled).toBe(false);
+    expect(sw!.props.disabled).toBe(false);
     const { act } = await import("../helpers/rtr");
     await act(async () => {
-      (sw.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
+      (sw!.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
     });
     await flush();
     expect(await storage.getItem("@mindpattern/reminders_user-1")).toContain("\"enabled\":true");
@@ -1269,10 +1269,10 @@ describe("daily reminder section (module linked)", () => {
     await storage.setItem("@mindpattern/reminders_user-1", JSON.stringify({ enabled: true, hour: 9, minute: 0 }));
     const root = await renderWithReminders();
     const sw = root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Daily reminder")!;
-    expect(sw.props.value).toBe(true);
+    expect(sw!.props.value).toBe(true);
     const { act } = await import("../helpers/rtr");
     await act(async () => {
-      (sw.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(false);
+      (sw!.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(false);
     });
     await flush();
     expect(await storage.getItem("@mindpattern/reminders_user-1")).toContain("\"enabled\":false");
@@ -1288,8 +1288,8 @@ describe("daily reminder section (module linked)", () => {
     expect(await storage.getItem("@mindpattern/reminders_user-1")).toContain("\"hour\":9");
     const morning = root.root.findAll((n) => n.props.accessibilityLabel === "Reminder time: Morning 9:00")[0];
     const evening = root.root.findAll((n) => n.props.accessibilityLabel === "Reminder time: Evening 20:00")[0];
-    expect(morning.props.accessibilityState).toEqual({ selected: true });
-    expect(evening.props.accessibilityState).toEqual({ selected: false });
+    expect(morning!.props.accessibilityState).toEqual({ selected: true });
+    expect(evening!.props.accessibilityState).toEqual({ selected: false });
     // A preset that matches leaves no duplicate custom chip.
     expect(textOf(root)).not.toContain("9:00\n"); // no second 9:00 chip beyond the preset
   });
@@ -1302,7 +1302,7 @@ describe("daily reminder section (module linked)", () => {
     const sw = root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Daily reminder")!;
     const { act } = await import("../helpers/rtr");
     await act(async () => {
-      (sw.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
+      (sw!.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
     });
     await flush();
     expect(Alert.alert).toHaveBeenCalledWith("Reminder not scheduled", expect.stringContaining("device settings"));
@@ -1316,7 +1316,7 @@ describe("daily reminder section (module linked)", () => {
     const sw = root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Daily reminder")!;
     const { act } = await import("../helpers/rtr");
     await act(async () => {
-      (sw.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
+      (sw!.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
     });
     await flush();
     expect(await storage.getItem("@mindpattern/reminders_user-1")).toBeNull();
@@ -1338,9 +1338,9 @@ describe("Health mirror section (module absent — this build)", () => {
     const root = await render(<SettingsScreen navigation={nav as never} />);
     await flush();
     const sw = mirrorSwitch(root);
-    expect(sw.props.value).toBe(false);
-    expect(sw.props.disabled).toBe(true);
-    expect(sw.props.accessibilityState).toEqual({ checked: false, disabled: true });
+    expect(sw!.props.value).toBe(false);
+    expect(sw!.props.disabled).toBe(true);
+    expect(sw!.props.accessibilityState).toEqual({ checked: false, disabled: true });
     // The disclosure states all three facts: what is written, that
     // Fathom never READS from Health, and what off means.
     expect(textOf(root)).toContain("written to the Health app on this device");
@@ -1371,10 +1371,10 @@ describe("Health mirror toggle (module linked)", () => {
     const sw = root.root
       .findAllByType(Switch)
       .find((n) => n.props.accessibilityLabel === "Mirror mood check-ins to the Health app")!;
-    expect(sw.props.disabled).toBe(false);
+    expect(sw!.props.disabled).toBe(false);
     const { act } = await import("../helpers/rtr");
     await act(async () => {
-      (sw.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
+      (sw!.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
     });
     await flush();
     expect(await storage.getItem("@mindpattern/mirror_mood_to_health_user-1")).toBe('{"enabled":true}');
@@ -1394,7 +1394,7 @@ describe("Health mirror toggle (module linked)", () => {
       .find((n) => n.props.accessibilityLabel === "Mirror mood check-ins to the Health app")!;
     const { act } = await import("../helpers/rtr");
     await act(async () => {
-      (sw.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
+      (sw!.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
     });
     await flush();
     expect(Alert.alert).toHaveBeenCalledWith("Health access not granted", expect.stringContaining("privacy settings"));
@@ -1407,10 +1407,10 @@ describe("Health mirror toggle (module linked)", () => {
     const sw = root.root
       .findAllByType(Switch)
       .find((n) => n.props.accessibilityLabel === "Mirror mood check-ins to the Health app")!;
-    expect(sw.props.value).toBe(true);
+    expect(sw!.props.value).toBe(true);
     const { act } = await import("../helpers/rtr");
     await act(async () => {
-      (sw.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(false);
+      (sw!.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(false);
     });
     await flush();
     expect(await storage.getItem("@mindpattern/mirror_mood_to_health_user-1")).toBe('{"enabled":false}');
@@ -1429,7 +1429,7 @@ describe("Health mirror toggle (module linked)", () => {
         .find((n) => n.props.accessibilityLabel === "Mirror mood check-ins to the Health app")!;
       const { act } = await import("../helpers/rtr");
       await act(async () => {
-        (sw.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
+        (sw!.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
       });
       await flush();
       expect(Alert.alert).toHaveBeenCalledWith("Could not save", "The Health preference wasn't saved — try again.");
@@ -1447,7 +1447,7 @@ describe("Health mirror toggle (module linked)", () => {
       .find((n) => n.props.accessibilityLabel === "Mirror mood check-ins to the Health app")!;
     const { act } = await import("../helpers/rtr");
     await act(async () => {
-      (sw.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
+      (sw!.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
     });
     await flush();
     expect(await storage.getItem("@mindpattern/mirror_mood_to_health_user-1")).toBeNull();
@@ -1470,11 +1470,11 @@ describe("biometric unlock toggle", () => {
     const root = await render(<SettingsScreen navigation={nav as never} />);
     await flush();
     const sw = root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Biometric unlock")!;
-    expect(sw.props.value).toBe(false);
+    expect(sw!.props.value).toBe(false);
     expect(textOf(root)).toContain("Your password always keeps working.");
     const { act } = await import("../helpers/rtr");
     await act(async () => {
-      (sw.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
+      (sw!.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
     });
     await flush();
     // The confirmation states the trade BEFORE anything is stored.
@@ -1512,7 +1512,7 @@ describe("biometric unlock toggle", () => {
     const sw = root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Biometric unlock")!;
     const { act } = await import("../helpers/rtr");
     await act(async () => {
-      (sw.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
+      (sw!.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
     });
     await flush();
     await pressAlertButton("Cancel");
@@ -1527,10 +1527,10 @@ describe("biometric unlock toggle", () => {
     const root = await render(<SettingsScreen navigation={nav as never} />);
     await flush();
     const sw = root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Biometric unlock")!;
-    expect(sw.props.value).toBe(true);
+    expect(sw!.props.value).toBe(true);
     const { act } = await import("../helpers/rtr");
     await act(async () => {
-      (sw.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(false);
+      (sw!.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(false);
     });
     await flush();
     expect(await Keychain.getGenericPassword({ service: "com.mindpattern.biometric-unlock.v1.user-1" })).toBe(false);
@@ -1555,8 +1555,8 @@ describe("accessibility", () => {
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
     const sw = root.root.findAllByType(Switch)[0];
-    expect(sw.props.accessibilityLabel).toBe("Allow third-party transcript translation");
-    expect(sw.props.accessibilityState).toEqual({ checked: false, disabled: false });
+    expect(sw!.props.accessibilityLabel).toBe("Allow third-party transcript translation");
+    expect(sw!.props.accessibilityState).toEqual({ checked: false, disabled: false });
   });
 
   it("labels the inputs explicitly", async () => {
@@ -1800,7 +1800,6 @@ describe("scheme-aware change-password copy", () => {
 // --- independent audit 2026-09-27 (coverage): the appearance, reminder,
 // check-in cadence, sign-out, and navigation sections — the behavioral
 // branches the functions gate needs.
-const { Switch } = await import("../helpers/rnMock");
 
 /** independent audit 2026-09-27 (coverage): find a Switch by its
  *  accessibilityLabel — the reminder/biometrics/haptics rows each carry
@@ -2016,7 +2015,7 @@ describe("voice journaling consent (VOICE_PLAN 2026-09-29, audit C5)", () => {
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
     const sw = root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow voice journaling")!;
-    expect(sw.props.value).toBe(false);
+    expect(sw!.props.value).toBe(false);
     expect(textOf(root)).toContain("earlier choice no longer authorizes uploads");
     expect(textOf(root)).toContain("Voice journaling is off");
   });
@@ -2028,9 +2027,9 @@ describe("voice journaling consent (VOICE_PLAN 2026-09-29, audit C5)", () => {
     await flush();
     const { act } = await import("../helpers/rtr");
     const sw = root.root.findAllByType(Switch).find((n) => n.props.accessibilityLabel === "Allow voice journaling")!;
-    expect(sw.props.value).toBe(false);
+    expect(sw!.props.value).toBe(false);
     await act(async () => {
-      (sw.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
+      (sw!.props as { onValueChange?: (v: boolean) => unknown }).onValueChange?.(true);
     });
     await flush();
     // The password card names the action; nothing was sent yet.
@@ -2356,16 +2355,16 @@ describe("Settings native permission, dialog, and acknowledged cleanup boundarie
   });
   it("native destructive confirmations distinguish cancellation from deletion", async () => {
     const root = await render(<SettingsScreen navigation={nav} />); await flush(); await pressLabel(root, "Delete my account and data");
-    expect(lastAlert()[2].map(({ text, style }: { text: string; style?: string }) => ({ text, style }))).toEqual([{ text: "Cancel", style: "cancel" }, { text: "Continue", style: "destructive" }]); await pressAlertButton("Continue");
-    expect(lastAlert()[2].map(({ text, style }: { text: string; style?: string }) => ({ text, style }))).toEqual([{ text: "Cancel", style: "cancel" }, { text: "Continue to password", style: "destructive" }]); await act(async () => root.unmount());
+    expect(lastAlert()[2]!.map(({ text, style }: { text: string; style?: string }) => ({ text, style }))).toEqual([{ text: "Cancel", style: "cancel" }, { text: "Continue", style: "destructive" }]); await pressAlertButton("Continue");
+    expect(lastAlert()[2]!.map(({ text, style }: { text: string; style?: string }) => ({ text, style }))).toEqual([{ text: "Cancel", style: "cancel" }, { text: "Continue to password", style: "destructive" }]); await act(async () => root.unmount());
   });
   it("the native biometric explanation gives cancellation its native role", async () => {
     keychainMock.__setBiometryType("FaceID"); const root = await render(<SettingsScreen navigation={nav} />); await flush(); await act(async () => switchByA11y(root, "Biometric unlock").props.onValueChange(true)); await flush();
-    expect(lastAlert()[2].map(({ text, style }: { text: string; style?: string }) => ({ text, style }))).toEqual([{ text: "Cancel", style: "cancel" }, { text: "Enable", style: undefined }]); await act(async () => root.unmount());
+    expect(lastAlert()[2]!.map(({ text, style }: { text: string; style?: string }) => ({ text, style }))).toEqual([{ text: "Cancel", style: "cancel" }, { text: "Enable", style: undefined }]); await act(async () => root.unmount());
   });
   it("the replacement recovery confirmation marks its native cancel button", async () => {
     vi.mocked(api.recoveryStatus).mockResolvedValue({ enabled: true, set_at: "2026-10-01" } as never); const root = await render(<SettingsScreen navigation={nav} />); await flush(); await pressLabel(root, "Replace kit key");
-    expect(lastAlert()[2].map(({ text, style }: { text: string; style?: string }) => ({ text, style }))).toEqual([{ text: "Cancel", style: "cancel" }, { text: "Replace kit key", style: undefined }]); await act(async () => root.unmount());
+    expect(lastAlert()[2]!.map(({ text, style }: { text: string; style?: string }) => ({ text, style }))).toEqual([{ text: "Cancel", style: "cancel" }, { text: "Replace kit key", style: undefined }]); await act(async () => root.unmount());
   });
   it.each(["native inventory", "sign-out"] as const)("confirmed server deletion reports incomplete %s cleanup", async failure => {
     const root = await render(<SettingsScreen navigation={nav} />); await flush(); const nativeInventory = failure === "native inventory" ? vi.spyOn(storage, "getAllKeys").mockRejectedValue(new Error("Native storage unavailable")) : null;

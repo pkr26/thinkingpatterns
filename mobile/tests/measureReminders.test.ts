@@ -189,6 +189,22 @@ describe("measureReminderDue (PURE, local calendar semantics)", () => {
     expect(measureReminderDue("2026-08-01", 0, now)).toBe(false);
     expect(measureReminderDue("2026-08-01", -4, now)).toBe(false);
     expect(measureReminderDue("2026-08-01", 2.5, now)).toBe(false);
+
+    // A real local calendar can skip an entire civil day. Native Date
+    // normalizes Apia's absent 2011-12-30 to the next day; that must not
+    // turn a hostile completion stamp into a due check-in.
+    const originalTimezone = process.env.TZ;
+    try {
+      process.env.TZ = "Pacific/Apia";
+      const skippedDay = new Date(2011, 11, 30);
+      expect([skippedDay.getFullYear(), skippedDay.getMonth() + 1, skippedDay.getDate()]).toEqual([2011, 12, 31]);
+      const afterCadence = new Date(2012, 0, 20, 12);
+      expect(measureReminderDue("2011-12-31", 2, afterCadence)).toBe(true);
+      expect(measureReminderDue("2011-12-30", 2, afterCadence)).toBe(false);
+    } finally {
+      if (originalTimezone === undefined) delete process.env.TZ;
+      else process.env.TZ = originalTimezone;
+    }
   });
 });
 

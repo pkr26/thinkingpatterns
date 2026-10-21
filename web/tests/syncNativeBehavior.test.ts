@@ -74,6 +74,11 @@ it("refuses the vault's foreign owner before Native HTTP or crypto admission", a
   vault.unlock({ authKey: key(), dataKey: key() }, "another-owner");
   const fetch = stubFetch(() => { throw new Error("foreign vault must not dispatch HTTP"); });
   expect(await reconcileInsights()).toEqual({ kind: "locked" }); expect(fetch).not.toHaveBeenCalled();
+  setSession("public empty-owner token", "", "tester");
+  vault.unlock({ authKey: key(), dataKey: key() }, "");
+  const unverified = stubFetch(() => jsonResponse({ phase: "baseline", active_days: 1, streak: 1, days_remaining: 29, blob: null }));
+  expect(await reconcileInsights()).toEqual({ kind: "locked" });
+  expect(unverified).not.toHaveBeenCalled();
 });
 it("reports a missing session as locked without sending Native HTTP", async () => {
   clearSession(); const fetch = stubFetch(() => { throw new Error("signed-out reconcile must not dispatch HTTP"); });
@@ -96,6 +101,17 @@ it("keeps a protected API refusal quiet after a same-owner key replacement", asy
 it("refuses a baseline summary received after a same-owner key replacement", async () => {
   stubFetch(() => { retire("fresh-key"); return jsonResponse({ phase: "baseline", active_days: 1, streak: 1, days_remaining: 29, blob: null }); });
   expect(await reconcileInsights()).toEqual({ kind: "locked" });
+  // The public vault contract permits a shared buffer to be adopted for a different owner.
+  // Its object identity alone must not authorize the previous account's baseline result.
+  installSession(owner);
+  vault.unlock({ authKey: key(), dataKey: key() }, owner);
+  const sharedKeys = vault.get();
+  stubFetch(() => {
+    vault.unlock(sharedKeys, "replacement-account");
+    return jsonResponse({ phase: "baseline", active_days: 1, streak: 1, days_remaining: 29, blob: null });
+  });
+  expect(await reconcileInsights()).toEqual({ kind: "locked" });
+  expect(physical.has(stateKey)).toBe(false);
 });
 it("does not mislabel a sanitized server error or a non-session 410 as credential rotation", async () => {
   stubFetch(() => jsonResponse({ detail: "maintenance unavailable" }, { status: 503 }));

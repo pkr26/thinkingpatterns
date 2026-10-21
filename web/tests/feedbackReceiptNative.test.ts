@@ -21,7 +21,40 @@ describe("acknowledged native feedback receipts",()=>{
  it("keeps newer identical taps after the queue evicts the first submitted occurrence",async()=>{for(let i=0;i<64;i++)await recordFeedbackTap(KEY,USER,"topic:same",true);const receipt=await snapshot();await recordFeedbackTap(KEY,USER,"topic:same",true);await clearFeedback(USER,await kv.captureWritePermit(USER,KEY),{dataKey:KEY,receipt});expect(await output()).toEqual({feedback:[{pid:"topic:same",resonated:true}],muted:[],unmuted:[]});});
  it("consumes exactly the submitted taps and mute history while preserving later event order",async()=>{await recordFeedbackTap(KEY,USER,"topic:old",true);await recordPatternMute(KEY,USER,"topic:mutable",false);await recordPatternMute(KEY,USER,"topic:mutable",true);const receipt=await snapshot();await recordFeedbackTap(KEY,USER,"topic:new-1",false);await recordPatternMute(KEY,USER,"topic:mutable",false);await recordFeedbackTap(KEY,USER,"topic:new-2",true);await clearFeedback(USER,await kv.captureWritePermit(USER,KEY),{dataKey:KEY,receipt});expect(await output()).toEqual({feedback:[{pid:"topic:new-1",resonated:false},{pid:"topic:new-2",resonated:true}],muted:[],unmuted:["topic:mutable"]});expect(map.get(SLOT)).not.toContain("topic:");});
  it("replaying a consumed receipt cannot remove a later event with the same words and choice",async()=>{await recordFeedbackTap(KEY,USER,"topic:same",true);const receipt=await snapshot(),permit=await kv.captureWritePermit(USER,KEY);await clearFeedback(USER,permit,{dataKey:KEY,receipt});expect(await output()).toBeNull();await recordFeedbackTap(KEY,USER,"topic:same",true);await clearFeedback(USER,permit,{dataKey:KEY,receipt});expect(await output()).toEqual({feedback:[{pid:"topic:same",resonated:true}],muted:[],unmuted:[]});});
- it("legacy receipts count duplicate id-less occurrences without deleting a later current-producer tap",async()=>{const legacy=[{pid:"topic:same",resonated:true},{pid:"topic:same",resonated:true},{pid:"topic:other",mute:false}];const bytes=await encrypt(KEY,new TextEncoder().encode(JSON.stringify(legacy)),buildAad("feedback-local",USER));await kv.setItem(SLOT,toBase64(bytes),await kv.captureWritePermit(USER,KEY));const receipt=await snapshot();await recordFeedbackTap(KEY,USER,"topic:same",true);await clearFeedback(USER,await kv.captureWritePermit(USER,KEY),{dataKey:KEY,receipt});expect(await output()).toEqual({feedback:[{pid:"topic:same",resonated:true}],muted:[],unmuted:[]});});
+ it("legacy receipts count duplicate id-less occurrences without deleting a later current-producer tap",async()=>{const legacy=[{pid:"topic:same",resonated:true},{pid:"topic:same",resonated:true},{pid:"topic:other",mute:false}];const bytes=await encrypt(KEY,new TextEncoder().encode(JSON.stringify(legacy)),buildAad("feedback-local",USER));await kv.setItem(SLOT,toBase64(bytes),await kv.captureWritePermit(USER,KEY));const receipt=await snapshot();await recordFeedbackTap(KEY,USER,"topic:same",true);await clearFeedback(USER,await kv.captureWritePermit(USER,KEY),{dataKey:KEY,receipt});expect(await output()).toEqual({feedback:[{pid:"topic:same",resonated:true}],muted:[],unmuted:[]});
+  // A historical id-less writer can append while two complete recompute receipts are outstanding.
+  // Every acknowledgement below uses the whole receipt produced by buildFeedbackBlob.
+  const histories: Array<{
+    delivered: FeedbackReceipt["events"][number];
+    later: FeedbackReceipt["events"][number];
+    expected: {feedback: Array<{pid:string;resonated:boolean}>; muted:string[]; unmuted:string[]};
+    identified?: boolean;
+  }> = [
+    {delivered:{pid:"topic:old",resonated:true},later:{pid:"topic:unsubmitted",resonated:true},expected:{feedback:[{pid:"topic:unsubmitted",resonated:true}],muted:[],unmuted:[]}},
+    {delivered:{pid:"topic:old",resonated:true},later:{pid:"topic:old",resonated:false},expected:{feedback:[{pid:"topic:old",resonated:false}],muted:[],unmuted:[]}},
+    {delivered:{pid:"topic:old",mute:true},later:{pid:"topic:old",mute:false},expected:{feedback:[],muted:[],unmuted:["topic:old"]}},
+    {delivered:{pid:"topic:identified",resonated:true},later:{pid:"topic:identified",resonated:true},identified:true,expected:{feedback:[{pid:"topic:identified",resonated:true}],muted:[],unmuted:[]}},
+    {delivered:{pid:"topic:old",resonated:true,mute:true},later:{pid:"topic:old",mute:true},expected:{feedback:[],muted:["topic:old"],unmuted:[]}},
+  ];
+  const storeHistorical = async (events: FeedbackReceipt["events"]) => {
+    const sealed = await encrypt(KEY,new TextEncoder().encode(JSON.stringify(events)),buildAad("feedback-local",USER));
+    await kv.setItem(SLOT,toBase64(sealed),await kv.captureWritePermit(USER,KEY));
+  };
+  for (const history of histories) {
+    await clearFeedback(USER,await kv.captureWritePermit(USER,KEY));
+    if (history.identified) await recordFeedbackTap(KEY,USER,history.delivered.pid,true);
+    else await storeHistorical([history.delivered]);
+    const first = await snapshot();
+    const stillSubmitted = {pid:"topic:still-submitted",resonated:false};
+    await storeHistorical([...first.events,stillSubmitted]);
+    const both = await snapshot();
+    await clearFeedback(USER,await kv.captureWritePermit(USER,KEY),{dataKey:KEY,receipt:first});
+    expect(await output()).toEqual({feedback:[stillSubmitted],muted:[],unmuted:[]});
+    await storeHistorical([stillSubmitted,history.later]);
+    await clearFeedback(USER,await kv.captureWritePermit(USER,KEY),{dataKey:KEY,receipt:both});
+    expect(await output()).toEqual(history.expected);
+  }
+ });
  it("a native rewrite failure keeps the recoverable queue intact for the same receipt retry",async()=>{await recordFeedbackTap(KEY,USER,"topic:old",true);const receipt=await snapshot(),permit=await kv.captureWritePermit(USER,KEY);await recordFeedbackTap(KEY,USER,"topic:late",false);const raw=map.get(SLOT);vi.spyOn(crypto.subtle,"encrypt").mockRejectedValueOnce(new DOMException("native cipher unavailable","OperationError"));await expect(clearFeedback(USER,permit,{dataKey:KEY,receipt})).rejects.toThrow("native cipher unavailable");expect(map.get(SLOT)).toBe(raw);await clearFeedback(USER,permit,{dataKey:KEY,receipt});expect(await output()).toEqual({feedback:[{pid:"topic:late",resonated:false}],muted:[],unmuted:[]});});
  it("a receipt never exposes local event identities in the server-bound payload",async()=>{await recordFeedbackTap(KEY,USER,"topic:opaque",false);const receipt=await snapshot();expect(receipt.events[0]!.event_id).toBeTypeOf("string");expect(await output()).toEqual({feedback:[{pid:"topic:opaque",resonated:false}],muted:[],unmuted:[]});});
  it("a native lock refusal keeps the existing queue and rejects the public acknowledgement",async()=>{await recordFeedbackTap(KEY,USER,"topic:retained",true);const receipt=await snapshot(),raw=map.get(SLOT);vi.stubGlobal("navigator",{locks:{request:async()=>{throw new Error("native lock unavailable");}}});await expect(clearFeedback(USER,await kv.captureWritePermit(USER,KEY),{dataKey:KEY,receipt})).rejects.toThrow("native lock unavailable");expect(map.get(SLOT)).toBe(raw);});

@@ -3,7 +3,7 @@
  * locate touchables by their label, fire handler props, and drive Alert
  * dialog button callbacks.
  */
-import ReactTestRenderer, { act, ReactTestInstance } from "react-test-renderer";
+import TestRenderer, { act, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
 import React from "react";
 import { Text, TouchableOpacity, Alert, TextInput, Switch } from "./rnMock";
 import { publicSurface } from "./publicSurface";
@@ -29,7 +29,7 @@ export async function render(ui: React.ReactElement): Promise<ReactTestRenderer>
   currentScenario();
   let renderer!: ReactTestRenderer;
   await act(async () => {
-    renderer = ReactTestRenderer.create(ui);
+    renderer = TestRenderer.create(ui);
   });
   rendered.push(renderer);
   inspectPublicSurfaces();

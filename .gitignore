@@ -76,6 +76,11 @@ reports/mutation-2026-10-05/history-january-pristine.json
 reports/mutation-2026-10-05/history-native-before.json
 reports/mutation-2026-10-05/insights-native-schema-current-baseline.json
 
+# Local frontend campaign evidence, private copies and session orchestration.
+reports/frontend-campaigns-2026-10-07/
+reports/frontend-campaigns/
+tools/frontend-campaigns/
+
 # October 4 raw audit evidence stays local. Curated findings, remediation,
 # and compact mutation results are published in docs/archive/audits/2026-10-04/.
 reports/independent-audit-2026-10-04/
@@ -87,6 +92,7 @@ mobile/ios/DerivedData/
 mobile/ios/*.xcuserstate
 mobile/ios/*.xcworkspace/xcuserdata/
 mobile/ios/.bundle/
+mobile/ios/.xcode.env.local
 mobile/ios/vendor/
 mobile/android/local.properties
 mobile/android/.kotlin/

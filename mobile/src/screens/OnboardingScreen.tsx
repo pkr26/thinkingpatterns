@@ -21,6 +21,8 @@ import { hasSeenOnboarding, loadOnboardingPanel, recordOnboardingSeen, saveOnboa
 import { setReminderEnabled } from "../reminders";
 import { useReminderPreferenceIntent } from "../reminderPreferences";
 import { syncReminderSchedule } from "../reminderSync";
+import { localWriteScopeEpoch } from "../localWriteGuard";
+import { vault } from "../vault";
 import { t as tr } from "../strings";
 
 interface Panel {
@@ -61,12 +63,15 @@ export function OnboardingScreen({ navigation }: { navigation: any }): React.JSX
   // Double-tap guard: two presses inside one frame both pass a state-only
   // check — the ref is synchronous (the Entry screen's savingRef pattern).
   const busyRef = useRef(false);
+  const finishLifetime = useRef<object | null>({});
 
   useEffect(() => {
     // Landing here with the acknowledgment already recorded should be
     // impossible (the navigator routes here once) — if it happens, go
     // straight to the journal instead of lecturing twice.
     let cancelled = false;
+    const view = {};
+    finishLifetime.current = view;
     api
       .getUserId()
       .then(async (userId) => {
@@ -83,18 +88,26 @@ export function OnboardingScreen({ navigation }: { navigation: any }): React.JSX
     // of restarting at panel 1.
     return () => {
       cancelled = true;
+      if (finishLifetime.current === view) finishLifetime.current = null;
     };
     },
      [navigation]);
 
   const finish = async () => {
-    if (busyRef.current) return;
+    const view = finishLifetime.current;
+    if (!view || busyRef.current) return;
+    const epoch = localWriteScopeEpoch();
+    const finishOwner = vault.ownerUserId();
+    const current = () => finishLifetime.current === view && localWriteScopeEpoch() === epoch && vault.ownerUserId() === finishOwner;
     busyRef.current = true;
     setBusy(true);
     const userId = await api.getUserId().catch(() => null);
+    if (!current()) return;
     if (userId) {
+      if (finishOwner !== null && userId !== finishOwner) return;
       // Losing this write just shows the panels once more — never block on it.
       await recordOnboardingSeen(userId).catch(() => {});
+      if (!current()) return;
     }
     navigation.replace("Entry");
   };

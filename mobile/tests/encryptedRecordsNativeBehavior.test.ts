@@ -98,6 +98,82 @@ it("Native whole-account forgetting clears persisted and process-only observatio
   await observeEntryVersions(USER, KEY, [{ clientEntryId: "native-entry", contentVersion: 8 }]); await noteV2Bound(USER, KEY, "native-entry");
   await forgetAllEntryVersions(USER); expect(await knownEntryVersion(USER, KEY, "native-entry")).toBeNull(); expect(await isV2Bound(USER, KEY, "native-entry")).toBe(false);
   expect(await storage.getItem(accountStorageKey.entryVersions(USER))).toBeNull(); expect(await storage.getItem(accountStorageKey.entryV2Bound(USER))).toBeNull();
+  const resetResults: Array<{ boundary: string; refuseVersionWrite: boolean; error: unknown; known: number | null; bound: boolean; versionRaw: string | null; boundRaw: string | null }> = [];
+  for (const boundary of ["read", "write"] as const) for (const refuseVersionWrite of [false, true]) {
+    await observeEntryVersions(USER, KEY, [{ clientEntryId: "before-account-reset", contentVersion: 8 }]);
+    await noteV2Bound(USER, KEY, "before-account-reset");
+    installLocalDataKey(USER, NEXT);
+    const get = storage.getItem.bind(storage), set = storage.setItem.bind(storage);
+    let release!: () => void, entered = false;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const read = vi.spyOn(storage, "getItem").mockImplementation(async name => {
+      const value = await get(name);
+      if (boundary === "read" && name === accountStorageKey.entryVersions(USER) && !entered) { entered = true; await held; }
+      return value;
+    });
+    const write = vi.spyOn(storage, "setItem").mockImplementation(async (name, value) => {
+      if (boundary === "write" && name === accountStorageKey.entryVersions(USER) && !entered) { entered = true; await held; }
+      if (refuseVersionWrite && name === accountStorageKey.entryVersions(USER)) throw new Error("Native version-map unavailable");
+      await set(name, value);
+    });
+    const rebound = rebindEntryVersions(USER, KEY, NEXT).then(() => ({ error: null }), error => ({ error }));
+    try {
+      await vi.waitFor(() => expect(entered).toBe(true));
+      const forgetting = forgetAllEntryVersions(USER);
+      if (boundary === "read") await forgetting;
+      release(); await forgetting;
+      resetResults.push({ boundary, refuseVersionWrite, error: (await rebound).error,
+        known: await knownEntryVersion(USER, NEXT, "before-account-reset"),
+        bound: await isV2Bound(USER, NEXT, "before-account-reset"),
+        versionRaw: await get(accountStorageKey.entryVersions(USER)), boundRaw: await get(accountStorageKey.entryV2Bound(USER)) });
+    } finally {
+      release(); await rebound; read.mockRestore(); write.mockRestore();
+      installLocalDataKey(USER, KEY); await forgetAllEntryVersions(USER);
+    }
+  }
+  expect(resetResults).toEqual(["read", "write"].flatMap(boundary => [false, true].map(refuseVersionWrite =>
+    ({ boundary, refuseVersionWrite, error: null, known: null, bound: false, versionRaw: null, boundRaw: null }))));
+  const get = storage.getItem.bind(storage);
+  let release!: () => void, entered = false;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const read = vi.spyOn(storage, "getItem").mockImplementation(async name => {
+    const value = await get(name);
+    if (name === accountStorageKey.entryVersions(USER) && !entered) { entered = true; await held; }
+    return value;
+  });
+  const oldForget = forgetEntryVersion(USER, KEY, "fresh-after-reset").then(() => ({ error: null }), error => ({ error }));
+  try {
+    await vi.waitFor(() => expect(entered).toBe(true));
+    await forgetAllEntryVersions(USER);
+    await noteV2Bound(USER, KEY, "fresh-after-reset");
+    release(); expect((await oldForget).error).toBeNull();
+    expect(await isV2Bound(USER, KEY, "fresh-after-reset")).toBe(true);
+  } finally { release(); await oldForget; read.mockRestore(); await forgetAllEntryVersions(USER); }
+
+  const remove = storage.removeItem.bind(storage);
+  let releaseReset!: () => void, resetEntered = false;
+  const resetHeld = new Promise<void>(resolve => { releaseReset = resolve; });
+  const removal = vi.spyOn(storage, "removeItem").mockImplementation(async name => {
+    if (name === accountStorageKey.entryVersions(USER) && !resetEntered) { resetEntered = true; await resetHeld; }
+    await remove(name);
+  });
+  const firstReset = forgetAllEntryVersions(USER).then(() => ({ error: null }), error => ({ error }));
+  let queuedNote: Promise<{ error: unknown }> | undefined, queuedObservation: Promise<unknown> | undefined, secondReset: Promise<{ error: unknown }> | undefined;
+  try {
+    await vi.waitFor(() => expect(resetEntered).toBe(true));
+    queuedNote = noteV2Bound(USER, KEY, "old-queued-note").then(() => ({ error: null }), error => ({ error }));
+    queuedObservation = observeEntryVersions(USER, KEY, [{ clientEntryId: "old-queued-observation", contentVersion: 9 }]).then(value => ({ error: null, value }), error => ({ error, value: null }));
+    secondReset = forgetAllEntryVersions(USER).then(() => ({ error: null }), error => ({ error }));
+    releaseReset();
+    expect((await firstReset).error).toBeNull(); expect((await secondReset).error).toBeNull();
+    expect((await queuedNote).error).toBeNull();
+    expect(await queuedObservation).toEqual({ error: null, value: { rolledBack: [], advanced: false } });
+    expect(await knownEntryVersion(USER, KEY, "old-queued-observation")).toBeNull();
+    expect(await isV2Bound(USER, KEY, "old-queued-note")).toBe(false);
+    expect(await get(accountStorageKey.entryVersions(USER))).toBeNull(); expect(await get(accountStorageKey.entryV2Bound(USER))).toBeNull();
+  } finally {
+    releaseReset(); await Promise.all([firstReset, queuedNote, queuedObservation, secondReset]); removal.mockRestore(); await forgetAllEntryVersions(USER);
+  }
 });
 it("Native version rebinding survives a restart under the installed replacement key", async () => {
   await observeEntryVersions(USER, KEY, [{ clientEntryId: "native-entry", contentVersion: 8 }]); await noteV2Bound(USER, KEY, "native-entry");
@@ -168,7 +244,7 @@ it("Native persisted observation bytes live in their registered account slots", 
   await observeEntryVersions(USER, KEY, [{ clientEntryId: "native-entry", contentVersion: 8 }]); await noteV2Bound(USER, KEY, "native-entry");
   expect(await storage.getItem(accountStorageKey.entryVersions(USER))).not.toBeNull(); expect(await storage.getItem(accountStorageKey.entryV2Bound(USER))).not.toBeNull();
 });
-it.each([NaN, Infinity, -Infinity, "unknown", false])("Native mood edit energy %j preserves the prior valid answer", async energy => {
+it.each([NaN, Infinity, -Infinity, "unknown", false])("Native mood edit energy %j preserves the prior valid answer (case #%#)", async energy => {
   await recordMood(KEY, USER, "2026-10-07", 0.2, 0.75); await recordMood(KEY, USER, "2026-10-07", -0.2, energy as never);
   expect(await recentMoods(KEY, USER)).toEqual([{ date: "2026-10-07", value: -0.2, energy: 0.75 }]);
 });

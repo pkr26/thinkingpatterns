@@ -3,6 +3,7 @@
  *  revoke), settings (LLM consent, access log, export download, queue
  *  recovery, rotation flow, delete gates). Real crypto; fetch stubs. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createCipheriv, createDecipheriv } from "node:crypto";
 import { MeasuresView } from "../src/views/Measures";
 import { ShareView } from "../src/views/Share";
 import { SettingsView } from "../src/views/Settings";
@@ -13,6 +14,51 @@ import { isDisabled, press, pressSwitch, render, settle, textOf, textOfNode, typ
 
 const ORIGIN = "http://localhost:5173";
 const USER = "user-1";
+
+// Independently authenticate nonce(12)||ciphertext||tag(16); short Base64
+// substrings have no plaintext meaning. Account/context bindings are literal.
+class CiphertextOracleRejection extends Error {}
+function independentlyOpenMeasureBlob(raw: string, key: Buffer, aad: Buffer): string {
+  try {
+    const blob = Buffer.from(raw, "base64");
+    if (blob.length < 28 || blob.toString("base64") !== raw) throw new CiphertextOracleRejection("Invalid encrypted envelope");
+    const decipher = createDecipheriv("aes-256-gcm", key, blob.subarray(0, 12));
+    decipher.setAAD(aad);
+    decipher.setAuthTag(blob.subarray(-16));
+    return Buffer.concat([decipher.update(blob.subarray(12, -16)), decipher.final()]).toString("utf8");
+  } catch (error) {
+    if (error instanceof CiphertextOracleRejection) throw error;
+    if (error instanceof Error && error.constructor === Error && error.name === "Error" && !("code" in error)
+        && error.message === "Unsupported state or unable to authenticate data") {
+      throw new CiphertextOracleRejection("Native AES-GCM authentication refused the envelope", { cause: error });
+    }
+    throw new Error("SetupError: unexpected native AES-GCM oracle failure", { cause: error });
+  }
+}
+
+function checkIndependentMeasureOracle(literal: "phq2" | "phq9", key: Buffer, aad: Buffer, plaintext: string): void {
+  const nonce = Buffer.alloc(12);
+  Buffer.from(literal, "base64").copy(nonce);
+  const seal = (text: string): Buffer => {
+    const cipher = createCipheriv("aes-256-gcm", key, nonce);
+    cipher.setAAD(aad);
+    return Buffer.concat([nonce, cipher.update(text, "utf8"), cipher.final(), cipher.getAuthTag()]);
+  };
+  const blob = seal(plaintext); const raw = blob.toString("base64");
+  expect(raw).toContain(literal);
+  expect(independentlyOpenMeasureBlob(raw, key, aad)).toBe(plaintext);
+  const corrupt = Buffer.from(blob);
+  corrupt[corrupt.length - 1] = corrupt[corrupt.length - 1]! ^ 1;
+  expect(() => independentlyOpenMeasureBlob(corrupt.toString("base64"), key, aad)).toThrow(CiphertextOracleRejection);
+  expect(() => independentlyOpenMeasureBlob(raw, Buffer.alloc(32, 9), aad)).toThrow(CiphertextOracleRejection);
+  expect(() => independentlyOpenMeasureBlob(raw, key, Buffer.from('["wrong-context","user-1"]'))).toThrow(CiphertextOracleRejection);
+  expect(() => independentlyOpenMeasureBlob(raw, key, Buffer.from(aad.toString("utf8").replace("user-1", "user-2")))).toThrow(CiphertextOracleRejection);
+  expect(() => independentlyOpenMeasureBlob(plaintext, key, aad)).toThrow(CiphertextOracleRejection);
+  expect(() => independentlyOpenMeasureBlob(Buffer.from(plaintext).toString("base64"), key, aad)).toThrow(CiphertextOracleRejection);
+  expect(() => independentlyOpenMeasureBlob(raw, Buffer.alloc(31, 4), aad)).toThrow(/^SetupError:/);
+  const otherPlaintext = plaintext + " ";
+  expect(independentlyOpenMeasureBlob(seal(otherPlaintext).toString("base64"), key, aad)).not.toBe(plaintext);
+}
 
 const memoryBackend = (): KvBackend => {
   const map = new Map<string, string>();
@@ -84,11 +130,25 @@ describe("MeasuresView", () => {
     for (let index = 0; index < 9; index += 1) {
       await pressNth(root, index === 8 ? "More than half the days" : "Not at all", index);
     }
+    const completionStartedAt = Date.now();
     await press(root, "Save measure");
     await settle(40, 4);
     expect(created).not.toBeNull();
-    // The wire blob is opaque ciphertext:
-    expect(created!.blob).not.toContain("phq9");
+    const key = Buffer.alloc(32, 8);
+    const aad = Buffer.from(JSON.stringify(["measure", "user-1", created!.client_measure_id]), "utf8");
+    let opened: string | null = null;
+    expect(() => { opened = independentlyOpenMeasureBlob(created!.blob, key, aad); }).not.toThrow();
+    let parsed: unknown = null;
+    expect(() => { parsed = JSON.parse(opened!); }).not.toThrow();
+    expect(parsed).toEqual({ v: 1, measure: "phq9", score: 2, item9: 2, completed_at: expect.any(String) });
+    const payload = parsed as { completed_at: string };
+    const expectedPlaintext = JSON.stringify({ v: 1, measure: "phq9", score: 2, item9: 2, completed_at: payload.completed_at });
+    expect(opened).toBe(expectedPlaintext);
+    expect(Number.isFinite(Date.parse(payload.completed_at))).toBe(true);
+    expect(new Date(payload.completed_at).toISOString()).toBe(payload.completed_at);
+    expect(Date.parse(payload.completed_at)).toBeGreaterThanOrEqual(completionStartedAt);
+    expect(Date.parse(payload.completed_at)).toBeLessThanOrEqual(Date.now());
+    checkIndependentMeasureOracle("phq9", key, aad, expectedPlaintext);
     // The item-9 pointer appears AFTER the save:
     expect(textOf(root)).toContain("thoughts of self-harm");
     expect(textOf(root)).toContain("does not monitor this response");

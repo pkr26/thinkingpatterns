@@ -99,29 +99,35 @@ describe("sharing client methods", () => {
       row(`revoked-${index}`),
     );
     const active = row("active-grant", "active");
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: string | URL | Request) => {
-        const url = String(input);
-        if (url.includes("offset=0")) {
-          return jsonResponse(revoked, 200, DEFAULT_BASE_URL, {
-            "X-Next-Offset": "200",
+    for (const protocol of ["snapshot", "legacy"] as const) {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: string | URL | Request) => {
+          const url = String(input);
+          if (url.includes("offset=0")) {
+            return jsonResponse(revoked, 200, DEFAULT_BASE_URL, protocol === "snapshot" ? {
+              "X-Next-Offset": "200",
+              "X-Consents-Revision": "77",
+            } : {});
+          }
+          expect(url).toContain("offset=200");
+          if (protocol === "snapshot") {
+            expect(url).toContain("expected_revision=77");
+          } else {
+            expect(new URL(url).searchParams.has("expected_revision")).toBe(false);
+          }
+          return jsonResponse([active], 200, DEFAULT_BASE_URL, protocol === "snapshot" ? {
             "X-Consents-Revision": "77",
-          });
-        }
-        expect(url).toContain("offset=200");
-        expect(url).toContain("expected_revision=77");
-        return jsonResponse([active], 200, DEFAULT_BASE_URL, {
-          "X-Consents-Revision": "77",
-        });
-      }),
-    );
+          } : {});
+        }),
+      );
 
-    const consents = await api.listConsents();
-    expect(consents).toHaveLength(201);
-    expect(consents.find((consent) => consent.status === "active")?.id).toBe(
-      "active-grant",
-    );
+      const consents = await api.listConsents();
+      expect(consents).toHaveLength(201);
+      expect(consents.find((consent) => consent.status === "active")?.id).toBe(
+        "active-grant",
+      );
+    }
   });
 
   it("restarts a changed consent snapshot from page zero and deduplicates boundary rows", async () => {
@@ -185,7 +191,7 @@ describe("sharing client methods", () => {
       (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls,
     ).toHaveLength(0);
     // The refusal is a local ApiError, not a thrown string.
-    await api.revokeConsent("short").catch((err: unknown) => {
+    await (api.revokeConsent as (consentId: string) => ReturnType<typeof api.revokeConsent>)("short").catch((err: unknown) => {
       expect(err).toBeInstanceOf(ApiError);
     });
   });

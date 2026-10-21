@@ -154,6 +154,91 @@ it("does not send another bearer revocation after a failed MFA handoff has alrea
 it("renders empty login, registration and all missing-field gates",async()=>{
  const root=await rootView();output(root,"empty login");await press(root,"Create a therapist account instead");await flush();expect(root.root.findAllByType("input").find(node=>node.props.type==="checkbox")!.props.checked).toBe(false);output(root,"empty registration");
  await typeInto(root,"Username","doctor");output(root,"username alone");await typeInto(root,"Password","Strong!pass123");output(root,"confirmation and age missing");await typeInto(root,"Repeat password","Strong!pass123");output(root,"age missing");
+
+ {
+ // A new visit must announce a fresh policy check, not the previous visit's
+ // result or an unrelated hidden sign-in value. Profiler reads committed
+ // public host status text; it does not read hook state or invoke handlers.
+ const {Profiler}=await import("react");
+ let observedRoot:Awaited<ReturnType<typeof render>>|undefined;
+ const committedPolicy:string[]=[];
+ const hostText=(node:unknown):string=>typeof node==="string"||typeof node==="number"?String(node):Array.isArray(node)?node.map(hostText).join(""):node&&typeof node==="object"?hostText((node as {children?:unknown}).children):"";
+ const recordHostStatus=(node:unknown):void=>{
+  if(Array.isArray(node)){node.forEach(recordHostStatus);return;}
+  if(!node||typeof node!=="object")return;
+  const host=node as {type?:unknown;props?:Record<string,unknown>;children?:unknown[]};
+  if(host.type==="p"&&host.props?.role==="status")committedPolicy.push(hostText(host.children));
+  host.children?.forEach(recordHostStatus);
+ };
+ let releasePolicy!:(value:{sharing_available:boolean})=>void;
+ const pendingPolicy=new Promise<{sharing_available:boolean}>(resolve=>{releasePolicy=resolve;});
+ vi.mocked(auth.meta).mockResolvedValueOnce({sharing_available:false}).mockImplementationOnce(()=>pendingPolicy);
+ observedRoot=await render(<Profiler id="public enrollment policy commits" onRender={()=>{if(observedRoot)recordHostStatus(observedRoot.toJSON());}}><LoginView onReady={async()=>{}}/></Profiler>);
+ try {
+  await press(observedRoot,"Create a therapist account instead");await flush();
+  expect(observedRoot.root.findAllByType("p").filter(node=>node.props.role==="status").map(node=>hostText(node.children)))
+   .toContain("New clinician enrollment is unavailable on this server. Contact your organization administrator.");
+  await press(observedRoot,"Back to sign in");await flush();
+  committedPolicy.length=0;
+  await press(observedRoot,"Create a therapist account instead");await flush();
+  expect(committedPolicy.length).toBeGreaterThan(0);
+  expect(committedPolicy.every(text=>text==="Checking this server's clinician enrollment policy…"),"Portal Login185/187 must publish only a fresh checking policy status while the new lookup is pending").toBe(true);
+ } finally {
+  releasePolicy({sharing_available:true});await flush();
+ }
+ }
+ {
+ // A mounted consumer can request registration through the public DOM button
+ // during its layout effect. Observe committed status text while policy is
+ // pending; no private callback, hook value, or Promise-job budget is used.
+ const {createRequire}=await import("node:module");
+ const {JSDOM}=createRequire(import.meta.url)("jsdom") as {
+   JSDOM:new(html:string,options:{url:string})=>{window:Window & typeof globalThis & {close:()=>void}};
+ };
+ const dom=new JSDOM("<!doctype html><html><body></body></html>",{url:"http://localhost:5173"});
+ let domRoot:import("react-dom/client").Root|undefined;
+ let releasePolicy!:(value:Awaited<ReturnType<typeof auth.meta>>)=>void;
+ const pendingPolicy=new Promise<Awaited<ReturnType<typeof auth.meta>>>(resolve=>{releasePolicy=resolve;});
+ vi.mocked(auth.meta).mockImplementationOnce(()=>pendingPolicy);
+ try{
+   vi.stubGlobal("window",dom.window);
+   vi.stubGlobal("document",dom.window.document);
+   vi.stubGlobal("navigator",dom.window.navigator);
+   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT",true);
+   const {createRoot}=await import("react-dom/client");
+   const {Profiler,useLayoutEffect}=await import("react");
+   const container=document.createElement("div");document.body.append(container);
+   const registrationCommits:string[][]=[];
+   const click:{found:boolean;disabled:boolean|null;trusted:boolean|null}={found:false,disabled:null,trusted:null};
+   function RegistrationConsumer():React.JSX.Element{
+     useLayoutEffect(()=>{
+       const button=[...container.querySelectorAll("button")].find(item=>item.textContent==="Create a therapist account instead");
+       click.found=!!button;click.disabled=button?.disabled??null;
+       if(button&&!button.disabled){
+         button.addEventListener("click",event=>{click.trusted=event.isTrusted;},{once:true});
+         button.click();
+       }
+     },[]);
+     return <LoginView onReady={async()=>{}}/>;
+   }
+   const observeCommit=()=>{
+     if([...container.querySelectorAll("button")].some(button=>button.textContent==="Create account")){
+       registrationCommits.push([...container.querySelectorAll('[role="status"]')].map(node=>node.textContent??""));
+     }
+   };
+   domRoot=createRoot(container);
+   await act(async()=>domRoot!.render(<Profiler id="first-registration-status" onRender={observeCommit}><RegistrationConsumer/></Profiler>));
+   expect(click).toEqual({found:true,disabled:false,trusted:false});
+   expect(registrationCommits.length).toBeGreaterThan(0);
+   expect(registrationCommits.every(status=>status.length===1&&status[0]==="Checking this server's clinician enrollment policy…"),"Every first-visit registration commit must expose the pending clinician-policy status").toBe(true);
+ }finally{
+   try{await act(async()=>{releasePolicy({sharing_available:true});await pendingPolicy;});}
+   finally{
+     try{if(domRoot)await act(async()=>domRoot!.unmount());}
+     finally{dom.window.close();vi.unstubAllGlobals();}
+   }
+ }
+ }
 });
 it.each([0,403,409,429,500,501,400])("shows actionable registration failure %i and clears submission secrets",async status=>{
  const root=await rootView();await registration(root);await typeInto(root,"Clinician enrollment token","  organization-secret  ");

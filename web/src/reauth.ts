@@ -43,16 +43,17 @@ export async function verifyPasswordForVault(password: string): Promise<ReauthRe
     }
     if (!current()) return { ok: false, reason: "locked" };
     salt = fromBase64(saltResponse.salt);
-    let iterations: number | undefined;
     if (envelope.key_scheme === "v2") {
       if (envelope.kdf_params == null) return { ok: false, reason: "offline" };
       try {
-        iterations = validateKdfParams(envelope.kdf_params).iterations;
+        validateKdfParams(envelope.kdf_params);
       } catch {
         return { ok: false, reason: "offline" };
       }
     }
-    derived = await derivePatientKeys(await deriveMasterKey(password, salt, iterations));
+    // Authentication retains the pinned login schedule; envelope parameters
+    // describe only the independent data-key wrapping cost.
+    derived = await derivePatientKeys(await deriveMasterKey(password, salt));
     if (!current()) return { ok: false, reason: "locked" };
     if (!keysEqual(derived.authKey, original.authKey)) {
       await new Promise((resolve) => setTimeout(resolve, LOCAL_MISMATCH_DELAY_MS));

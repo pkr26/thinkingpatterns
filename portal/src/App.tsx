@@ -60,6 +60,7 @@ export function App(): React.JSX.Element {
     let generation = 0;
     let alive = true;
     const followHistory = async (): Promise<void> => {
+      if (!alive || sessionRef.current !== session) return;
       const request = ++generation;
       const patientId = readPatientRoute();
       if (!patientId) { setView({ kind: "patients" }); return; }
@@ -67,12 +68,12 @@ export function App(): React.JSX.Element {
       // A URL alone never grants chart access or creates a patient object.
       try {
         const patients = await api.patients();
-        if (!alive || request !== generation) return;
+        if (!alive || request !== generation || sessionRef.current !== session) return;
         const patient = patients.find(row => row.user_id === patientId);
         if (patient) setView({ kind: "patient", patient });
         else { setNotice("That patient is not available to this account."); setView({ kind: "patients" }); }
       } catch (error) {
-        if (!alive || request !== generation) return;
+        if (!alive || request !== generation || sessionRef.current !== session) return;
         setNotice(displayError(error, "The patient could not be opened. Retry when connected."));
         setView({ kind: "patients" });
       }

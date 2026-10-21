@@ -86,16 +86,47 @@ beforeEach(()=>{
 });
 afterEach(()=>{vi.restoreAllMocks();vi.useRealTimers();vi.unstubAllGlobals();});
 
+// Forward every native console call; observe only React's list-identity diagnostics.
+function observeNativeListKeys() {
+  let warningCount = 0;
+  const nativeError = console.error.bind(console);
+  const observer = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+    nativeError(...args);
+    const diagnostic = args[0];
+    if (typeof diagnostic === "string" && (
+      diagnostic.startsWith('Each child in a list should have a unique "key" prop.') ||
+      diagnostic.startsWith("Encountered two children with the same key,")
+    )) warningCount += 1;
+  });
+  return { get count() { return warningCount; }, restore: () => observer.mockRestore() };
+}
+
 it("prints the selected pattern's own notes and preserves the sensitive card's non-quoting heading",async()=>{
+ const listKeys = observeNativeListKeys();
+ try {
  provider.decryptInsights.mockResolvedValueOnce({state_seq:7,stats:{patterns:[pattern("recurring_phrase",{sensitive:true})]}});vi.mocked(api.notes).mockResolvedValueOnce({notes:[note("specific","recurring_phrase:work")],nextOffset:null});
  const root=await chart();await press(root,"See the evidence");await flush();expect(textOf(root)).toContain("A difficult thought has been returning");expect(textOf(root)).toContain("Therapist notes (this pattern)");expect(textOf(root)).toContain("Clinical text client-specific");
+ await act(async () => { root.unmount(); });
+ // Authenticated compatibility payloads may omit the optional stable pid.
+ // Distinct accepted patterns still require distinct native React identities.
+ const legacyPatterns = [pattern("temporal"), pattern("link")].map(value => ({ ...value, detail: {} }));
+ provider.decryptInsights.mockResolvedValueOnce({ state_seq: 7, stats: { patterns: legacyPatterns } });
+ const legacy = await chart();
+ expect(textOf(legacy)).toContain("work");
+ expect(legacy.root.findAllByType("div").filter(node => node.props.className === "print-item")).toHaveLength(2);
+ expect(listKeys.count).toBe(0);
+ } finally { listKeys.restore(); }
 });
 
 it("plots three chronological mood observations across the full visible chart width",async()=>{
+ const listKeys = observeNativeListKeys();
+ try {
  provider.decryptInsights.mockResolvedValueOnce({state_seq:7,stats:{patterns:[pattern("temporal",{evidence_dates:["2026-09-03","2026-09-01","2026-09-02"]})]}});
  vi.mocked(api.patientEntries).mockImplementationOnce(async(_id,params)=>{expect(params).toMatchObject({since:"2026-09-01",until:"2026-09-03"});return {entries:[3,1,2].map(day=>({id:`entry-${day}`,client_entry_id:`entry-${day}`,entry_date:`2026-09-0${day}`,received_at:`2026-09-0${day}`,blob:"sealed"})),nextOffset:null};});
  provider.decryptEntry.mockImplementation(async(_key,_owner,row)=>({text:"work",sentiment:Number(row.client_entry_id.at(-1))-2}));const root=await chart();await press(root,"See the evidence");await flush(10);
  const svg=root.root.findAllByType("svg").find(node=>String(node.props["aria-label"]).startsWith("Mood over the 3"))!;expect(svg.findByType("path").props.d).toBe("M0.0,45.0 L160.0,24.0 L320.0,3.0");
+ expect(listKeys.count).toBe(0);
+ } finally { listKeys.restore(); }
 });
 
 it.each([200,201])("enforces the %i-row evidence aggregate across individually permitted pages",async count=>{
@@ -243,11 +274,26 @@ it.each(["legacy", "no observations", "empty", "baseline", "not computed"])("ren
 });
 
 it.each([61,62])("shows every recorded instrument and states the %i-reading trend-window truncation",async count=>{
+ const listKeys = observeNativeListKeys();
+ try {
   const readings:import("../src/crypto").MeasureReading[]=Array.from({length:count},(_,i)=>({measure:"phq9",score:i%28,item9:i===count-1?1:0,completedAt:null,measureDate:new Date(Date.UTC(2026,6,i+1)).toISOString().slice(0,10)}));
   readings.push({measure:"gad7",score:0,completedAt:null,measureDate:"2026-09-04"},{measure:"gad7",score:2,completedAt:null,measureDate:"2026-09-01"},{measure:"phq2",score:4,completedAt:null,measureDate:"2026-09-03"});
   vi.mocked(api.patientMeasures).mockResolvedValueOnce({measures:readings.map((r,i)=>({id:`m${i}`,client_measure_id:`cm${i}`,received_at:r.measureDate,measure_date:r.measureDate,blob:"sealed",created_at:r.measureDate})),nextOffset:null});
   const byDate=[...readings];provider.decryptMeasure.mockImplementation(async()=>byDate.shift()!);
   const root=await chart();await vi.waitFor(()=>expect(textOf(root)).toContain(`Recorded measures (${count+3})`));output(root,"all instruments, chronological curves, item nine and explicit omitted count");
+ await act(async () => { root.unmount(); });
+ const flagged: import("../src/crypto").MeasureReading[] = [
+   { measure: "phq9", score: 6, item9: 1, completedAt: null, measureDate: "2026-09-01" },
+   { measure: "phq9", score: 7, item9: 2, completedAt: null, measureDate: "2026-09-02" },
+ ];
+ vi.mocked(api.patientMeasures).mockResolvedValueOnce({ measures: flagged.map((reading, index) => ({ id: `flag-${index}`, client_measure_id: `flag-client-${index}`, measure_date: reading.measureDate, received_at: reading.measureDate, blob: "sealed" })), nextOffset: null });
+ provider.decryptMeasure.mockResolvedValueOnce(flagged[0]!).mockResolvedValueOnce(flagged[1]!);
+ const multiple = await chart();
+ await vi.waitFor(() => expect(textOf(multiple)).toContain("Recorded measures (2)"));
+ expect(multiple.root.findAllByType("div").filter(node => node.props.className === "measure-flag")).toHaveLength(2);
+ expect(multiple.root.findAllByType("p").filter(node => node.props.className === "print-line print-flag")).toHaveLength(2);
+ expect(listKeys.count).toBe(0);
+ } finally { listKeys.restore(); }
 });
 
 async function evidence(translation: { english_text?: string | null; transcript_lang?: string } | undefined = undefined, expiresAt = "2026-10-07T00:00:00Z") {

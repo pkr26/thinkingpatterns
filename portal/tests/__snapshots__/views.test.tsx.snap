@@ -238,13 +238,13 @@ exports[`PatientView > covers the remaining describe arms: inertia, instability,
     <div className="tpl-row">
       <span className="hint tpl-row__label">
         "Start from:"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Session focus"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Observed together"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Homework / between-session plan"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Questions for next visit"
     <textarea aria-label="New note about this patient" className="textarea" disabled=false maxLength=100000 placeholder="Note about this patient…" rows=3 value="">
     <div>
@@ -401,13 +401,13 @@ exports[`PatientView > renders pattern cards, the sensitive card non-quoting, an
     <div className="tpl-row">
       <span className="hint tpl-row__label">
         "Start from:"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Session focus"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Observed together"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Homework / between-session plan"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Questions for next visit"
     <textarea aria-label="New note about this patient" className="textarea" disabled=false maxLength=100000 placeholder="Note about this patient…" rows=3 value="">
     <div>
@@ -573,13 +573,13 @@ exports[`PatientView > renders pattern cards, the sensitive card non-quoting, an
     <div className="tpl-row">
       <span className="hint tpl-row__label">
         "Start from:"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Session focus"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Observed together"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Homework / between-session plan"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Questions for next visit"
     <textarea aria-label="New note about this pattern" className="textarea" disabled=false maxLength=100000 placeholder="Note about this pattern…" rows=3 value="">
     <div>
@@ -751,15 +751,15 @@ exports[`PatientView > shows an honest placeholder for notes it cannot decrypt >
     <div className="tpl-row">
       <span className="hint tpl-row__label">
         "Start from:"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Session focus"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Observed together"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Homework / between-session plan"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Questions for next visit"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Copy forward last note"
     <textarea aria-label="New note about this patient" className="textarea" disabled=false maxLength=100000 placeholder="Note about this patient…" rows=3 value="">
     <div>
@@ -875,13 +875,13 @@ exports[`PatientView > shows the baseline phase note without unwrapping > baseli
     <div className="tpl-row">
       <span className="hint tpl-row__label">
         "Start from:"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Session focus"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Observed together"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Homework / between-session plan"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Questions for next visit"
     <textarea aria-label="New note about this patient" className="textarea" disabled=false maxLength=100000 placeholder="Note about this patient…" rows=3 value="">
     <div>
@@ -1006,15 +1006,15 @@ exports[`PatientView 2026-09-17 wave > note editing round-trips through the PATC
     <div className="tpl-row">
       <span className="hint tpl-row__label">
         "Start from:"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Session focus"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Observed together"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Homework / between-session plan"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Questions for next visit"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Copy forward last note"
     <textarea aria-label="New note about this patient" className="textarea" disabled=false maxLength=100000 placeholder="Note about this patient…" rows=3 value="">
     <div>
@@ -1201,13 +1201,13 @@ exports[`PatientView item-9 surfacing (2026-09-27) > an endorsed item 9 renders 
     <div className="tpl-row">
       <span className="hint tpl-row__label">
         "Start from:"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Session focus"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Observed together"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Homework / between-session plan"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Questions for next visit"
     <textarea aria-label="New note about this patient" className="textarea" disabled=false maxLength=100000 placeholder="Note about this patient…" rows=3 value="">
     <div>
@@ -1393,13 +1393,13 @@ exports[`PatientView recorded measures (MBC, 2026-09-19) > renders decrypted mea
     <div className="tpl-row">
       <span className="hint tpl-row__label">
         "Start from:"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Session focus"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Observed together"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Homework / between-session plan"
-      <button className="tpl-chip" type="button">
+      <button className="tpl-chip" disabled=false type="button">
         "Questions for next visit"
     <textarea aria-label="New note about this patient" className="textarea" disabled=false maxLength=100000 placeholder="Note about this patient…" rows=3 value="">
     <div>

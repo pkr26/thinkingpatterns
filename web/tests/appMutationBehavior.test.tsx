@@ -157,7 +157,7 @@ it("drains parked writing on a connectivity event only while a session owns the 
   expect(flushQueueOnReconnect).not.toHaveBeenCalled();expect(textOf(root)).toContain("Sign in");
 });
 
-it.each([new Error("Remote cleanup is pending"), "untyped remote cleanup failure"])("retains pending account cleanup after an authoritative deletion cannot finish", async fault => {
+it.each([new Error("Remote cleanup is pending"), "untyped remote cleanup failure"])("retains pending account cleanup after an authoritative deletion cannot finish (case #%#)", async fault => {
   const root = await signedIn();state.pending = [{ owner: "shell-owner", remoteConfirmed: true }];
   vi.mocked(confirmRemoteLocalErasure).mockRejectedValueOnce(fault);vi.mocked(abortInFlightFlush).mockClear();
   stubFetch(() => jsonResponse({ detail: "deleted", code: "account_deleted" }, { status: 410 }));
@@ -167,7 +167,7 @@ it.each([new Error("Remote cleanup is pending"), "untyped remote cleanup failure
   expect(abortInFlightFlush).toHaveBeenCalledOnce();expect(textOf(root)).toContain("Sign in");
 });
 
-it.each([new Error("Flag cleanup is pending"), "untyped flag cleanup failure"])("keeps device sign-out cleanup failures visible", async fault => {
+it.each([new Error("Flag cleanup is pending"), "untyped flag cleanup failure"])("keeps device sign-out cleanup failures visible (case #%#)", async fault => {
   const root = await signedIn();const remove = vi.spyOn(kv, "removeItem").mockRejectedValueOnce(fault);
   try {
     await more(root, "Sign out (this device)");await flush(15);
@@ -531,7 +531,7 @@ it.each([401, 410])("locks for authoritative HTTP %i and only seals live writing
   else { expect(preserveActiveDraft).toHaveBeenCalled(); expect(preserveSafetyPlan).toHaveBeenCalled(); }
 });
 
-it.each([new Error("Keep the encrypted originals"), "untyped recovery failure"])("opens Settings honestly when sign-in migration recovery fails", async failure => {
+it.each([new Error("Keep the encrypted originals"), "untyped recovery failure"])("opens Settings honestly when sign-in migration recovery fails (case #%#)", async failure => {
   vi.mocked(hasLocalRotation).mockRejectedValueOnce(failure);
   const root = await signedIn();
   expect(textOf(root)).toContain("Settings screen");
@@ -549,7 +549,7 @@ it("resumes a pending migration before entering the journal and repeats onboardi
   expect(textOf(root)).toContain("Finish introduction");
 });
 
-it.each([new Error("Cleanup permission denied"), "untyped cleanup failure"])("announces confirmation failures while retaining the account cleanup control", async failure => {
+it.each([new Error("Cleanup permission denied"), "untyped cleanup failure"])("announces confirmation failures while retaining the account cleanup control (case #%#)", async failure => {
   state.erasures = [{ owner: "old-owner", remoteConfirmed: false }];
   vi.mocked(confirmLocalErasure).mockRejectedValueOnce(failure);
   const root = await render(<App />); await flush(10);

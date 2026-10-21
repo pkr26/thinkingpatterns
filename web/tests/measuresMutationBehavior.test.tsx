@@ -1,10 +1,12 @@
-import { act } from "react";
+import { act, useState } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { MeasuresView } from "../src/views/Measures";
 import { decrypt, encrypt, fromBase64, toBase64 } from "../src/crypto/core";
 import { buildAad } from "../src/crypto/aad";
 import { kv, setKvBackendForTests } from "../src/kvstore";
 import { loadPendingMeasure, savePendingMeasure } from "../src/pendingMeasure";
+import * as pendingService from "../src/pendingMeasure";
+import { api, ApiError } from "../src/api/client";
 import { readMeasureCadence, writeMeasureCadence } from "../src/measureCadence";
 import { __setLocaleForTests, t } from "../src/strings";
 import { vault } from "../src/vault";
@@ -96,6 +98,117 @@ it("changing only one answer after an offline attempt mints a fresh id; an uncha
   await pick(root, 1, 2); await press(root, "Save measure"); await settle(15, 4);
   expect(attempts[2]).not.toBe(attempts[0]);
   expect((await loadPendingMeasure(key(), OWNER))!.picks).toEqual([1, 2]);
+  // Public same-owner route retirement with explicitly controlled slow service completion.
+  // The helper's actual result is retained; the delivery Promise is deliberately separate.
+  await act(async () => { root.unmount(); });
+  for (const boundary of ["permit", "post-success", "clear-success", "post-conflict", "clear-conflict"] as const) {
+    resetTestState(); setKvBackendForTests(memoryKvBackend()); installSession(OWNER);
+    vault.unlock({ authKey: key(), dataKey: key() }, OWNER);
+    const retained = { kind: "phq2" as const, clientMeasureId: `current-acknowledged-${boundary}`, picks: [2, 3], date: "2026-10-05" };
+    const conflict = boundary === "post-conflict" || boundary === "clear-conflict";
+    let release!: () => void, reached = false, armed = true, retired = false;
+    const deliveryGate = new Promise<void>(resolve => { release = resolve; });
+    type Owned = { label: string; promise: Promise<unknown>; allowed?: (reason: unknown) => boolean };
+    const owned: Owned[] = [], restorers: Array<() => void> = [];
+    const originalLoad = pendingService.loadPendingMeasure;
+    let routed: Awaited<ReturnType<typeof render>> | undefined;
+    const native = globalThis.crypto;
+    const own = <T,>(label: string, promise: Promise<T>, allowed?: (reason: unknown) => boolean): Promise<T> => {
+      owned.push({ label, promise, ...(allowed ? { allowed } : {}) }); void promise.catch(() => undefined); return promise;
+    };
+    const delayActualResult = <T,>(label: string, original: Promise<T>): Promise<T> => own(`controlled delivery: ${label}`, (async () => {
+      const actual = await original; reached = true; await deliveryGate; return actual;
+    })());
+    const drain = async (): Promise<void> => {
+      release(); let count = -1; let failed = false; let failure: unknown;
+      while (count !== owned.length) {
+        count = owned.length; const snapshot = [...owned];
+        const results = await Promise.allSettled(snapshot.map(row => row.promise));
+        results.forEach((result, index) => { if (result.status === "rejected" && !snapshot[index]!.allowed?.(result.reason)) { if (!failed) failure = result.reason; failed = true; } });
+        await act(async () => { await Promise.resolve(); });
+      }
+      if (failed) throw failure;
+    };
+    try {
+    const subtle = new Proxy(native.subtle, { get(target, property) {
+      const value = Reflect.get(target, property, target);
+      if (typeof value !== "function") return value;
+      return (...args: unknown[]) => {
+        const result = value.apply(target, args);
+        if (result && typeof result.then === "function") own(`native ${String(property)}`, result);
+        return result;
+      };
+    } });
+    vi.stubGlobal("crypto", new Proxy(native, { get(target, property) {
+      if (property === "subtle") return subtle;
+      const value = Reflect.get(target, property, target); return typeof value === "function" ? value.bind(target) : value;
+    } }));
+    const capture = kv.captureWritePermit.bind(kv);
+    const captureSpy = vi.spyOn(kv, "captureWritePermit").mockImplementation((...args) => {
+      const original = own("actual captureWritePermit", capture(...args));
+      if (armed && boundary === "permit") { armed = false; return delayActualResult("captureWritePermit", original); }
+      return original;
+    }); restorers.push(() => captureSpy.mockRestore());
+    const get = kv.getItem.bind(kv), set = kv.setItem.bind(kv), remove = kv.removeItem.bind(kv);
+    const getSpy = vi.spyOn(kv, "getItem").mockImplementation((...args) => own("actual kv.getItem", get(...args)));
+    const setSpy = vi.spyOn(kv, "setItem").mockImplementation((...args) => own("actual kv.setItem", set(...args)));
+    const removeSpy = vi.spyOn(kv, "removeItem").mockImplementation((...args) => own("actual kv.removeItem", remove(...args)));
+    restorers.push(() => getSpy.mockRestore(), () => setSpy.mockRestore(), () => removeSpy.mockRestore());
+    const clear = pendingService.clearPendingMeasure;
+    const clearSpy = vi.spyOn(pendingService, "clearPendingMeasure").mockImplementation((...args) => {
+      const original = own("actual clearPendingMeasure", clear(...args));
+      if (armed && (boundary === "clear-success" || boundary === "clear-conflict")) { armed = false; return delayActualResult("clearPendingMeasure", original); }
+      return original;
+    }); restorers.push(() => clearSpy.mockRestore());
+    const create = api.createMeasure, list = api.listMeasuresPage;
+    const createSpy = vi.spyOn(api, "createMeasure").mockImplementation((...args) => own("actual api.createMeasure", create(...args), reason => conflict && reason instanceof ApiError && reason.status === 409));
+    const listSpy = vi.spyOn(api, "listMeasuresPage").mockImplementation((...args) => own("actual api.listMeasuresPage", list(...args)));
+    restorers.push(() => createSpy.mockRestore(), () => listSpy.mockRestore());
+    const retiredHistoryWires: Array<{ method: string; path: string; authorization: string }> = [];
+    stubFetch((url, init) => {
+      const path = new URL(url).pathname;
+      if (!path.endsWith("/measures")) return jsonResponse({}, { status: 404 });
+      const authorization = String((init.headers as Record<string, string>).Authorization ?? "");
+      if (!authorization.startsWith("Bearer ")) throw new Error("SetupError: questionnaire fixture requires an authenticated API request");
+      if (init.method !== "POST") {
+        if (retired) retiredHistoryWires.push({ method: "GET", path, authorization });
+        return jsonResponse([], { headers: { "X-Measures-Revision": "8" } });
+      }
+      const body = JSON.parse(String(init.body)) as { client_measure_id: string; blob: string };
+      if (body.client_measure_id === retained.clientMeasureId) throw new Error("SetupError: the current acknowledged record is verified before any remount retry");
+      const response = () => conflict ? jsonResponse({ detail: "already recorded" }, { status: 409 }) : jsonResponse({ id: "accepted-old-questionnaire" }, { status: 201 });
+      if (boundary === "post-success" || boundary === "post-conflict") {
+        reached = true; return own("controlled HTTP response delivery", deliveryGate.then(response));
+      }
+      return response();
+    });
+    function SameOwnerRoutes(): React.JSX.Element {
+      const [show, setShow] = useState(true);
+      return <><button onClick={show ? () => setShow(false) : undefined} disabled={!show}>Leave questionnaire</button><button onClick={!show ? () => setShow(true) : undefined} disabled={show}>Open questionnaire</button>{show ? <MeasuresView onCrisis={() => undefined} /> : <p>Current account home</p>}</>;
+    }
+      routed = await render(<SameOwnerRoutes />); await settle(15, 3);
+      expect(textOf(routed)).toContain(t("measures.emptyNote"));
+      await press(routed, "PHQ-2"); await pick(routed, 0, 1); await pick(routed, 1, 2);
+      await press(routed, "Save measure");
+      try { await vi.waitFor(() => { if (!reached) throw new Error("controlled original service result has not reached its boundary"); }, { timeout: 10_000 }); }
+      catch (cause) { throw new Error(`SetupError: genuine ${boundary} completion was not observed`, { cause }); }
+      await press(routed, "Leave questionnaire"); retired = true;
+      if (!textOf(routed).includes("Current account home")) throw new Error("SetupError: the enabled public route did not retire its questionnaire");
+      // A separate current service acknowledges a distinct real encrypted snapshot.
+      await pendingService.savePendingMeasure(key(), OWNER, retained);
+      expect(await originalLoad(key(), OWNER)).toEqual(retained);
+      release(); await drain();
+      if (boundary === "clear-success" || boundary === "clear-conflict") {
+        expect(retiredHistoryWires, "A retired questionnaire cannot start another authenticated history request after its acknowledged pending clear").toEqual([]);
+      } else {
+        expect(await originalLoad(key(), OWNER), "A retired questionnaire cannot overwrite or clear the newer acknowledged encrypted pending questionnaire").toEqual(retained);
+      }
+    } finally {
+      release();
+      try { if (routed) await act(async () => { routed!.unmount(); }); await drain(); }
+      finally { restorers.reverse().forEach(restore => restore()); vi.stubGlobal("crypto", native); }
+    }
+  }
 });
 
 it("switching instruments after an offline attempt sends the current instrument and its current picks", async () => {
@@ -111,6 +224,117 @@ it("switching instruments after an offline attempt sends the current instrument 
   await press(root, "Save measure"); await settle(15, 4);
   expect(attempts[1]!.id).not.toBe(attempts[0]!.id);
   expect(attempts[1]!.payload).toMatchObject({ measure: "gad7", score: 14 });
+  // The native DOM observer measures an actual committed instrument change,
+  // before its passive reset's separate state update commits. It clicks only
+  // the current enabled Save control; C's authored incomplete error stays the oracle.
+  await act(async () => { root.unmount(); });
+  {
+    const { createRequire } = await import("node:module");
+    const { JSDOM } = createRequire(import.meta.url)("jsdom") as {
+      JSDOM: new (html: string, options: { url: string }) => { window: Window & typeof globalThis & { close: () => void } };
+    };
+    const { webcrypto } = await import("node:crypto");
+    for (const mode of ["length", "kind"] as const) {
+      const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "http://localhost:5173" });
+      // Reuse the same declared Web Locks emulator installed by browserSetup,
+      // as in the measured jsdom-environment probe. No capability fault is injected.
+      if (globalThis.navigator?.locks) Object.defineProperty(dom.window.navigator, "locks", { configurable: true, value: globalThis.navigator.locks });
+      let domRoot: import("react-dom/client").Root | undefined;
+      let observer: MutationObserver | undefined;
+      let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+      const ownedFetches: Promise<Response>[] = [], offlineErrors = new Set<unknown>();
+      try {
+        vi.stubGlobal("window", dom.window); vi.stubGlobal("document", dom.window.document);
+        vi.stubGlobal("navigator", dom.window.navigator); vi.stubGlobal("crypto", webcrypto);
+        resetTestState();
+        const owner = "native-dom-measure-window"; installSession(owner);
+        const dataKey = new Uint8Array(new ArrayBuffer(32)).fill(31);
+        vault.unlock({ authKey: new Uint8Array(new ArrayBuffer(32)).fill(19), dataKey }, owner);
+        const pending = { kind: "phq2" as const, clientMeasureId: "controlled-existing-phq2-" + mode, picks: [1, 1], date: "2026-10-05" };
+        await savePendingMeasure(dataKey, owner, pending);
+        if ((await loadPendingMeasure(dataKey, owner))?.clientMeasureId !== pending.clientMeasureId) throw new Error("SetupError: native encrypted pending round trip");
+        const posts: Array<{ id: string; date: string; payload: unknown }> = []; let inFetch = 0;
+        stubFetch((url, init) => {
+          const original = (async (): Promise<Response> => {
+            const pathname = new URL(url).pathname;
+            if (pathname.endsWith("/measures") && init.method === "POST") {
+              inFetch++;
+              try {
+                const body = JSON.parse(String(init.body));
+                const plain = await decrypt(dataKey, fromBase64(body.blob), buildAad("measure", owner, body.client_measure_id));
+                try { posts.push({ id: body.client_measure_id, date: body.measure_date, payload: JSON.parse(new TextDecoder().decode(plain)) }); }
+                finally { plain.fill(0); }
+              } finally { inFetch--; }
+              const offline = new TypeError("Controlled native offline submit"); offlineErrors.add(offline); throw offline;
+            }
+            if (pathname.endsWith("/measures") && (init.method === undefined || init.method === "GET")) return jsonResponse([], { headers: { "X-Measures-Revision": "1" } });
+            throw new Error("SetupError: unexpected controlled request " + String(init.method) + " " + pathname);
+          })();
+          ownedFetches.push(original); void original.catch(() => undefined); return original;
+        });
+        const { createRoot } = await import("react-dom/client");
+        const container = document.createElement("div"); document.body.append(container); domRoot = createRoot(container);
+        const button = (label: string) => [...container.querySelectorAll("button")].find(n => n.textContent === label);
+        const active = () => container.querySelector('[role="radio"][aria-checked="true"]')?.textContent;
+        const progress = () => container.querySelector('[role="progressbar"]')?.getAttribute("aria-label") ?? "";
+        const until = async (label: string, condition: () => boolean): Promise<void> => {
+          const deadline = performance.now() + 8000; // Date alone is frozen by this owning file.
+          while (!condition()) {
+            if (performance.now() > deadline) throw new Error("SetupError: timeout waiting for " + label);
+            await act(async () => { await new Promise<void>(resolve => setTimeout(resolve, 5)); });
+          }
+        };
+        await act(async () => domRoot!.render(<MeasuresView onCrisis={() => { throw new Error("SetupError: no PHQ-9 safety endorsement in this schedule"); }} />));
+        await until("original restored encrypted offline questionnaire", () => posts.length === 1 && inFetch === 0 && active() === "PHQ-2" && button(t("measures.save")) !== undefined && !button(t("measures.save"))!.disabled && container.textContent!.includes(t("measures.pendingOfflineNote")));
+        expect(posts[0]!.id).toBe(pending.clientMeasureId); expect(posts[0]!.payload).toMatchObject({ measure: "phq2", score: 2 });
+        if (mode === "length") {
+          await act(async () => button("PHQ-9")!.click());
+          await until("settled nine empty answers", () => active() === "PHQ-9" && progress().includes("0 of 9"));
+          for (let i = 0; i < 9; i++) {
+            const picks = [...container.querySelectorAll("button")].filter(n => n.textContent === t("measures.option1"));
+            if (picks.length !== 9) throw new Error("SetupError: nine public answer chips absent");
+            await act(async () => picks[i]!.click());
+          }
+          if (!progress().includes("9 of 9")) throw new Error("SetupError: nine current public answer values absent");
+        }
+        const nextLabel = mode === "length" ? "PHQ-2" : "GAD-7", expectedProgress = mode === "length" ? "9 of 2" : "2 of 7";
+        const snapshots: Array<{ active: string | null | undefined; progress: string; saveEnabled: boolean; clicked: boolean }> = [];
+        let clicked = false, resolveObserved!: () => void;
+        const observed = new Promise<void>(resolve => { resolveObserved = resolve; });
+        observer = new dom.window.MutationObserver(() => {
+          if (active() !== nextLabel) return;
+          const save = button(t("measures.save")); const snapshot = { active: active(), progress: progress(), saveEnabled: !!save && !save.disabled, clicked: false }; snapshots.push(snapshot);
+          if (!clicked && snapshot.progress.includes(expectedProgress) && snapshot.saveEnabled) {
+            clicked = true; snapshot.clicked = true; observer!.disconnect(); save!.click(); resolveObserved();
+          }
+        });
+        observer.observe(container, { subtree: true, childList: true, attributes: true, characterData: true });
+        // The critical two native clicks deliberately run outside act's all-work
+        // drain. Its diagnostic warnings are retained, with no global waiver.
+        if (!button(nextLabel) || button(nextLabel)!.disabled) throw new Error("SetupError: current enabled segmented control absent");
+        button(nextLabel)!.click();
+        await Promise.race([observed, new Promise<void>(resolve => { deadlineTimer = setTimeout(resolve, 1500); })]);
+        observer.disconnect(); if (deadlineTimer) clearTimeout(deadlineTimer);
+        if (clicked) await until("public controlled save attempt settles", () => inFetch === 0 && !!button(t("measures.save")) && !button(t("measures.save"))!.disabled && (posts.length > 1 || container.querySelector('[role="alert"]') !== null));
+        const retained = await loadPendingMeasure(dataKey, owner);
+        console.log("MEASURES_PUBLIC_WINDOW " + JSON.stringify({ mode, nextLabel, expectedProgress, clicked, snapshots, initialPosts: 1, posts, error: [...container.querySelectorAll('[role="alert"]')].map(n => n.textContent), pending: retained, finalProgress: progress() }));
+        expect(clicked, "The native DOM observer must actually witness the committed stale-answer window").toBe(true);
+        expect(posts, "The current questionnaire refuses incomplete new-instrument answers instead of reusing an old pending record").toHaveLength(1);
+        expect(container.textContent).toContain(t("measures.incomplete"));
+        expect(retained?.clientMeasureId).toBe(pending.clientMeasureId);
+      } finally {
+        observer?.disconnect(); if (deadlineTimer) clearTimeout(deadlineTimer);
+        try {
+          if (domRoot) await act(async () => domRoot!.unmount());
+          let count = -1;
+          while (count !== ownedFetches.length) {
+            count = ownedFetches.length;
+            for (const result of await Promise.allSettled([...ownedFetches])) if (result.status === "rejected" && !offlineErrors.has(result.reason)) throw result.reason;
+          }
+        } finally { dom.window.close(); vi.unstubAllGlobals(); resetTestState(); }
+      }
+    }
+  }
 });
 
 it.each([false, true])("offline PHQ-9 item nine support is honest for endorsement=%s and resets on instrument switch", async endorsed => {

@@ -94,7 +94,7 @@ it.each([{key_scheme:"v2",salt:SALT.toString("base64"),kdf_params:{algorithm:"ar
 });
 it("classifies an unavailable native envelope cipher without claiming a wrong password",async()=>{
  v2();const create=engine.createDecipheriv;
- vi.spyOn(engine,"createDecipheriv").mockImplementation((...args)=>{const native=create(...args);const aad=native.setAAD.bind(native);native.setAAD=((value:Buffer,...rest:any[])=>{if(value.toString().includes('"context":"envelope"'))throw new Error("native envelope cipher unavailable");return aad(value,...rest);}) as typeof native.setAAD;return native;});
+ vi.spyOn(engine,"createDecipheriv").mockImplementation((...args)=>{const native=create(...args);const aad=native.setAAD.bind(native);native.setAAD=((value:Buffer,...rest:[])=>{if(value.toString().includes('"context":"envelope"'))throw new Error("native envelope cipher unavailable");return aad(value,...rest);}) as typeof native.setAAD;return native;});
  expect(await rotatePassword(input)).toEqual({ok:false,stage:"verify",reason:"server",detail:"the stored key envelope is malformed"});expect(processingKeys).toEqual([]);
 });
 it.each(["v1","v2"] as const)("erases every owned %s derivation after completion and keeps adopted keys independent",async target=>{
@@ -109,7 +109,7 @@ it.each(["v1","v2"] as const)("erases every owned %s derivation after completion
 it.each(["v1","v2"] as const)("erases owned %s key material after a native provider refuses wrapping",async target=>{
  if(target==="v2")v2();const deriveKeys=journalCrypto.deriveKeysAsync,owned:Buffer[]=[];
  vi.spyOn(journalCrypto,"deriveKeysAsync").mockImplementation(async(...args)=>{const keys=await deriveKeys(...args);owned.push(keys.masterKey,keys.authKey,keys.dataKey);return keys;});
- const create=engine.createCipheriv;vi.spyOn(engine,"createCipheriv").mockImplementation((...args)=>{const native=create(...args),aad=native.setAAD.bind(native);native.setAAD=((value:Buffer,...rest:any[])=>{if(value.toString().includes(target==="v2"?'"context":"envelope"':'"local-rekey"'))throw new Error("native wrap unavailable");return aad(value,...rest);}) as typeof native.setAAD;return native;});
+ const create=engine.createCipheriv;vi.spyOn(engine,"createCipheriv").mockImplementation((...args)=>{const native=create(...args),aad=native.setAAD.bind(native);native.setAAD=((value:Buffer,...rest:[])=>{if(value.toString().includes(target==="v2"?'"context":"envelope"':'"local-rekey"'))throw new Error("native wrap unavailable");return aad(value,...rest);}) as typeof native.setAAD;return native;});
  expect(await rotatePassword(input)).toMatchObject({ok:false,stage:"verify",reason:target==="v2"?"offline":"queue-blocked"});for(const key of owned)expect(key).toEqual(Buffer.alloc(key.length));
 });
 it.each(["v1","v2"] as const)("retires a %s relogin that returned a different account before adopting its credential",async target=>{
@@ -232,7 +232,7 @@ it("retires a failed native biometric password proof when its auth-key allocatio
 it("erases the actual old v2 master allocation after its native unwrap provider fails",async()=>{
  v2();const deriveMaster=kdf.deriveMasterKeyAsync,owned:Buffer[]=[];
  vi.spyOn(kdf,"deriveMasterKeyAsync").mockImplementation(async(...args)=>{const key=await deriveMaster(...args);owned.push(key);return key;});
- const create=engine.createDecipheriv;vi.spyOn(engine,"createDecipheriv").mockImplementation((...args)=>{const native=create(...args),aad=native.setAAD.bind(native);native.setAAD=((value:Buffer,...rest:any[])=>{if(value.toString().includes('"context":"envelope"'))throw new Error("native envelope cipher unavailable");return aad(value,...rest);}) as typeof native.setAAD;return native;});
+ const create=engine.createDecipheriv;vi.spyOn(engine,"createDecipheriv").mockImplementation((...args)=>{const native=create(...args),aad=native.setAAD.bind(native);native.setAAD=((value:Buffer,...rest:[])=>{if(value.toString().includes('"context":"envelope"'))throw new Error("native envelope cipher unavailable");return aad(value,...rest);}) as typeof native.setAAD;return native;});
  expect(await rotatePassword(input)).toEqual({ok:false,stage:"verify",reason:"server",detail:"the stored key envelope is malformed"});expect(owned.length).toBeGreaterThan(0);for(const key of owned)expect(key).toEqual(Buffer.alloc(32));
 });
 it.each(Array.from({length:12},(_,i)=>i+1))("rejects a native password proof after auth-key replacement at completion microtask %s",async turns=>{
@@ -322,7 +322,7 @@ it.each(retirementPhases.flatMap(({phase,count})=>Array.from({length:count},(_,i
  try{for(let i=0;i<256;i++)await Promise.resolve();expect(retired).toBe(true);expect(settled).toBe(true);expect(await pending).toEqual({ok:false,stage:"verify",reason:"server",detail:undefined});expect(vault.get().dataKey).toEqual(Buffer.alloc(32,13));}finally{release();await pending;}
 });
 it("retires a native v2 cipher authentication error before classifying its previous envelope",async()=>{
- v2();const create=engine.createDecipheriv;vi.spyOn(engine,"createDecipheriv").mockImplementation((...args)=>{const native=create(...args),aad=native.setAAD.bind(native);native.setAAD=((value:Buffer,...rest:any[])=>{if(value.toString().includes('"context":"envelope"')){vault.unlock({masterKey:Buffer.alloc(32),authKey:Buffer.from(OLD_KEYS.authKey),dataKey:Buffer.alloc(32,13)},USER);throw new Error("native envelope cipher unavailable");}return aad(value,...rest);}) as typeof native.setAAD;return native;});
+ v2();const create=engine.createDecipheriv;vi.spyOn(engine,"createDecipheriv").mockImplementation((...args)=>{const native=create(...args),aad=native.setAAD.bind(native);native.setAAD=((value:Buffer,...rest:[])=>{if(value.toString().includes('"context":"envelope"')){vault.unlock({masterKey:Buffer.alloc(32),authKey:Buffer.from(OLD_KEYS.authKey),dataKey:Buffer.alloc(32,13)},USER);throw new Error("native envelope cipher unavailable");}return aad(value,...rest);}) as typeof native.setAAD;return native;});
  expect(await rotatePassword(input)).toEqual({ok:false,stage:"verify",reason:"server",detail:undefined});expect(vault.get().dataKey).toEqual(Buffer.alloc(32,13));
 });
 it("locks an old v1 vault after native salt entropy fails following password derivation",async()=>{
@@ -376,4 +376,16 @@ it.each(Array.from({length:24},(_,i)=>i+1))("preserves a replacement native vaul
 it.each(Array.from({length:16},(_,i)=>i+1))("preserves native unlock cache custody at relogin username-delivery microtask %s",async turns=>{
  v2();let retired=false,scheduled=false;const write=storage.setItem;vi.spyOn(storage,"setItem").mockImplementation(async(key,value)=>{await write(key,value);if(key==="@mindpattern/username"&&!scheduled){scheduled=true;let remaining=turns;const next=()=>{if(--remaining>0)queueMicrotask(next);else{retired=true;vault.unlock({masterKey:Buffer.alloc(32),authKey:Buffer.from(OLD_KEYS.authKey),dataKey:Buffer.alloc(32,13)},USER);}};queueMicrotask(next);}});
  expect(await rotatePassword(input)).toEqual({ok:false,stage:"verify",reason:"server",detail:undefined});expect(retired).toBe(true);expect(vault.get().dataKey).toEqual(Buffer.alloc(32,13));expect(await api.getCachedSalt("alice")).toBe(SALT.toString("base64"));
+});
+
+it.each(["salt","verifier"] as const)("refuses an independently prepared native checkpoint with mismatched %s metadata",async field=>{
+ const salt=Buffer.alloc(16,12),keys=derive(NEW,salt);
+ await storage.setItem(accountStorageKey.pendingRotationSalt(USER),salt.toString("base64"));
+ await prepareLocalRekey(USER,OLD_KEYS.dataKey,keys.dataKey,{oldSaltB64:SALT.toString("base64")});
+ const {operationId}=await localRekeyRequest(USER,keys.dataKey),different=Buffer.from(field==="salt"?salt:keys.authKey);different[0]=different[0]!^1;
+ const body={operation_id:operationId,new_salt:(field==="salt"?different:salt).toString("base64"),new_verifier:(field==="verifier"?different:keys.authKey).toString("base64"),consent_wraps:[]};
+ await storeLocalRekeyRequest(USER,keys.dataKey,body);
+ expect(await rotatePassword(input)).toEqual({ok:false,stage:"verify",reason:"queue-blocked"});
+ expect(processingKeys).toEqual([]);expect(rekeyBody).toBeNull();
+ expect(await pendingLocalRekey(USER)).toBe(true);expect((await localRekeyRequest(USER,keys.dataKey)).body).toEqual(body);
 });

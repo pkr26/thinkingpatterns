@@ -48,11 +48,32 @@ function tamperSealed(key: string, plain: string): void {
 
 describe("checkAnalysisGeneration", () => {
   it("passes and pins when payload matches echo and advances", async () => {
+    // BEGIN resource metadata receiver observation
+    const nativeSet = Map.prototype.set;
+    const receivers: Map<unknown, unknown>[] = [], tails: Promise<unknown>[] = [];
+    const observer = vi.spyOn(Map.prototype, "set").mockImplementation(function (this: Map<unknown, unknown>, owner: unknown, value: unknown) {
+      const result = nativeSet.call(this, owner, value);
+      if (owner === "u1" && value instanceof Promise) {
+        if (!receivers.includes(this)) receivers.push(this);
+        tails.push(value);
+      }
+      return result;
+    });
+    try {
+    // END resource metadata receiver observation
     await expect(checkAnalysisGeneration("u1", 3, 3)).resolves.toBeUndefined();
     expect(await secureStore.getItem("mindpattern.stateSeq.u1")).toBe("3");
     // Sealed on disk: the raw stored bytes are the secureStore envelope,
     // never a plaintext decimal a local attacker could simply lower.
     expect(store.get("mindpattern.stateSeq.u1")).toMatch(/^\{"v":1,"c":"/);
+    // BEGIN resource metadata settled ownership assertion
+    await Promise.all(tails); await Promise.resolve();
+    expect(receivers).toHaveLength(1);
+    expect(receivers[0]!.has("u1"), "settled freshness check metadata must release its owner").toBe(false);
+    } finally {
+      observer.mockRestore();
+    }
+    // END resource metadata settled ownership assertion
   });
 
   it("rejects a replayed-older blob: payload disagrees with the echo", async () => {

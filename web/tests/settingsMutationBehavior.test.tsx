@@ -120,13 +120,18 @@ it.each(["llm", "voice"] as const)("requires fresh authentication for processing
 
 it.each(["llm", "voice", "delete"] as const)("does not dispatch a new %s commit after its authenticated view has been retired", async kind => {
   vi.mocked(reauth.freshStepUp).mockRestore();
-  const password = "fresh long retirement passphrase", salt = Buffer.alloc(16, 37), master = pbkdf2Sync(password, salt, 100_000, 32, "sha256"), authKey = new Uint8Array(hkdfSync("sha256", master, new Uint8Array(32), Buffer.from("mindpattern/auth/v1"), 32));
+  const actualFresh = reauth.freshStepUp, originals: Promise<reauth.FreshStepUpResult>[] = [];
+  const observingFresh = vi.spyOn(reauth, "freshStepUp").mockImplementation((...args) => {
+    const original = actualFresh(...args); originals.push(original); void original.catch(() => undefined); return original;
+  });
+  const password = "fresh long retirement passphrase", salt = Buffer.alloc(16, 37), master = pbkdf2Sync(password, salt, 600_000, 32, "sha256"), authKey = new Uint8Array(hkdfSync("sha256", master, new Uint8Array(32), Buffer.from("mindpattern/auth/v1"), 32));
   vault.unlock({ authKey, dataKey: new Uint8Array(32).fill(61) }, owner);
   vi.spyOn(auth, "saltFor").mockResolvedValue({ salt: salt.toString("base64") });
   vi.mocked(api.keyEnvelope).mockResolvedValue({ key_scheme: "v2", salt: salt.toString("base64"), kdf_params: { algorithm: "pbkdf2-sha256", version: 1, iterations: 100_000 }, wrapped_data_key: "existing encrypted envelope" });
   const granted = deferred<Awaited<ReturnType<typeof api.stepUp>>>(), stepUp = vi.spyOn(api, "stepUp").mockReturnValue(granted.promise);
   const commit = kind === "llm" ? vi.spyOn(api, "setLlmConsent").mockResolvedValue(llm(true)) : kind === "voice" ? vi.spyOn(api, "setVoiceConsent").mockResolvedValue(voice(true)) : vi.spyOn(api, "deleteAccount").mockResolvedValue(null);
   const root = await mount();
+  try {
   if (kind === "delete") { await typeInto(root, t("settings.deleteConfirmLabel"), "DELETE"); await press(root, t("settings.deleteButton")); }
   else await pressSwitch(root, t(kind === "llm" ? "settings.llmStatusOff" : "settings.voiceStatusOff"));
   await typeInto(root, t("settings.reauthPasswordField"), password); await press(root, t("settings.reauthConfirm"));
@@ -134,6 +139,23 @@ it.each(["llm", "voice", "delete"] as const)("does not dispatch a new %s commit 
   expect(stepUp).toHaveBeenCalledExactlyOnceWith(Buffer.from(authKey).toString("base64"), kind === "llm" ? "llm_consent" : kind === "voice" ? "voice_consent" : "account_delete");
   await act(async () => { root.unmount(); }); await act(async () => { granted.resolve({ proof: "authorized original-account proof", expires_in: 300, action: kind === "llm" ? "llm_consent" : kind === "voice" ? "voice_consent" : "account_delete" }); }); await flush();
   expect(commit).not.toHaveBeenCalled(); expect(await pendingLocalErasures()).toEqual([]);
+  } finally {
+    // Failure in any old assertion must still retire the UI/API owner,
+    // release the declared proof gate, and finish its real KDF/key cleanup.
+    clearSession(); vault.lock();
+    try {
+      await act(async () => {
+        root.unmount();
+        granted.resolve({ proof: "authorized original-account proof", expires_in: 300,
+          action: kind === "llm" ? "llm_consent" : kind === "voice" ? "voice_consent" : "account_delete" });
+        let count = -1;
+        while (count !== originals.length) {
+          count = originals.length;
+          for (const result of await Promise.allSettled([...originals])) if (result.status === "rejected") throw result.reason;
+        }
+      });
+    } finally { observingFresh.mockRestore(); }
+  }
 });
 
 it("shows the sensitive action as working and disables its confirm/cancel controls until authentication settles", async () => {
@@ -259,11 +281,39 @@ it("retains known metadata controls while a public retry honestly returns to its
 });
 
 it("does not publish an old account's policy or rekey hint after its accepted native legacy migration finishes for a replacement session", async () => {
-  const slot = `mindpattern.rekeyHint.${owner}`, records = new Map<string, string>(), pending = deferred<void>(), began = deferred<void>(); platform.localStore.set(slot, "1");
-  setKvBackendForTests({ getItem: async key => records.get(key) ?? null, setItem: async (key, value) => { records.set(key, value); if (key === slot) { began.resolve(); await pending.promise; } }, removeItem: async key => { records.delete(key); }, keys: async () => [...records.keys()] });
-  vi.mocked(api.keyEnvelope).mockResolvedValue({ key_scheme: "v2", salt: "public-salt", kdf_params: null, wrapped_data_key: "authenticated envelope" }); const root = await render(<SettingsView onLockdown={() => {}} />); await began.promise; const before = publicSurface(root.toJSON());
-  clearSession(); installSession("replacement-settings-owner", "replacement-settings-user"); vault.unlock({ authKey: new Uint8Array(32).fill(73), dataKey: new Uint8Array(32).fill(75) }, "replacement-settings-owner"); await act(async () => { pending.resolve(); }); await flush();
-  expect(publicSurface(root.toJSON())).toBe(before); expect(textOf(root)).not.toContain(t("settings.rekeyHintNote")); expect(vault.ownerUserId()).toBe("replacement-settings-owner");
+  const slot = `mindpattern.rekeyHint.${owner}`, records = new Map<string, string>(), pending = deferred<void>();
+  let admitted = false, root: Root | undefined;
+  platform.localStore.set(slot, "1");
+  setKvBackendForTests({ getItem: async key => records.get(key) ?? null, setItem: async (key, value) => { records.set(key, value); if (key === slot) { admitted = true; await pending.promise; } }, removeItem: async key => { records.delete(key); }, keys: async () => [...records.keys()] });
+  const originals: Promise<unknown>[] = [];
+  const own = <T,>(promise: Promise<T>): Promise<T> => { originals.push(promise); void promise.catch(() => undefined); return promise; };
+  const get = kv.getItem, set = kv.setItem, remove = kv.removeItem;
+  const observingGet = vi.spyOn(kv, "getItem").mockImplementation((...args) => own(get(...args)));
+  const observingSet = vi.spyOn(kv, "setItem").mockImplementation((...args) => own(set(...args)));
+  const observingRemove = vi.spyOn(kv, "removeItem").mockImplementation((...args) => own(remove(...args)));
+  const drain = async () => {
+    for (;;) {
+      const count = originals.length;
+      await Promise.allSettled([...originals]);
+      if (count === originals.length) return;
+    }
+  };
+  try {
+    vi.mocked(api.keyEnvelope).mockResolvedValue({ key_scheme: "v2", salt: "public-salt", kdf_params: null, wrapped_data_key: "authenticated envelope" });
+    root = await render(<SettingsView onLockdown={() => {}} />);
+    await vi.waitFor(() => { expect(admitted).toBe(true); expect(observingSet).toHaveBeenCalledWith(slot, "1"); }, { timeout: 1000, interval: 10 });
+    const before = publicSurface(root.toJSON());
+    clearSession(); installSession("replacement-settings-owner", "replacement-settings-user"); vault.unlock({ authKey: new Uint8Array(32).fill(73), dataKey: new Uint8Array(32).fill(75) }, "replacement-settings-owner"); await act(async () => { pending.resolve(); }); await flush();
+    expect(publicSurface(root.toJSON())).toBe(before); expect(textOf(root)).not.toContain(t("settings.rekeyHintNote")); expect(vault.ownerUserId()).toBe("replacement-settings-owner");
+  } finally {
+    clearSession(); vault.lock();
+    try { await act(async () => { root?.unmount(); }); }
+    finally {
+      pending.resolve();
+      try { await act(async () => { await drain(); }); await flush(); }
+      finally { observingRemove.mockRestore(); observingSet.mockRestore(); observingGet.mockRestore(); }
+    }
+  }
 });
 
 it("does not publish old account queue inventory after a held actual native read completes for a replacement session", async () => {

@@ -3,7 +3,7 @@ import { runTestControl } from "./helpers/testControl";
  * prove ownership retirement, not physical-device scheduling or provider I/O. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import storage from "./helpers/storageMock";
-import { api } from "../src/api/client";
+import { api, getBaseUrl, setBaseUrl } from "../src/api/client";
 import { setSecureStoreBackend } from "../src/secureStore";
 import { vault } from "../src/vault";
 import { localWriteScopeEpoch, __resetLocalKeyLifecycleForTests } from "../src/localWriteGuard";
@@ -88,7 +88,7 @@ describe("password rotation ownership", () => {
     stubRouting(); const params = defaultKdfParams(), key = Buffer.from(vault.get().dataKey);
     const master = deriveMasterKey(PASSWORD, SALT, params.iterations), kek = envelopeKek(master, SALT);
     const wrapped = wrapDataKey(key, kek, input.username, params).toString("base64"); master.fill(0); kek.fill(0); key.fill(0);
-    vi.mocked(api.keyEnvelope).mockResolvedValue({ key_scheme: "v2", salt: SALT.toString("base64"), kdf_params: params, wrapped_data_key: wrapped });
+    vi.mocked(api.keyEnvelope).mockResolvedValue({ key_scheme: "v2", salt: SALT.toString("base64"), kdf_params: { ...params }, wrapped_data_key: wrapped });
     vi.spyOn(api, "openProcessingSession").mockResolvedValue({ session_token: "current-key-probe", expires_in_seconds: 30 });
   }
   it("does not cache, re-login or lock a replacement after an uncertain old credential transaction", async () => {
@@ -98,6 +98,61 @@ describe("password rotation ownership", () => {
     await started.promise; const replacement = await replace(); held.resolve({ ok: true });
     expect(await pending).toMatchObject({ ok: false, reason: "server" }); expect(cache).not.toHaveBeenCalled(); expect(login).not.toHaveBeenCalled();
     expect(vault.get().dataKey).toBe(replacement.dataKey); expect(vault.ownerUserId()).toBe(OTHER);
+
+    // Exercise the public cache reader after a separate, successfully
+    // acknowledged rotation login is retired at its caller continuation.
+    // A same-origin path change has one admission epoch; a cross-origin
+    // change has a second epoch and is deliberately not this producer.
+    cache.mockRestore(); login.mockRestore(); vi.mocked(api.getCachedSalt).mockRestore();
+    const previousUrl = await getBaseUrl();
+    const sourceUrl = "https://rotation-owner.example.test/first";
+    const replacementUrl = "https://rotation-owner.example.test/second";
+    const write = storage.setItem.bind(storage);
+    let acknowledgementClaimed = false;
+    let originChange: ReturnType<typeof setBaseUrl> | undefined;
+    let attempt: ReturnType<typeof rotatePassword> | undefined;
+    let writeObserver: { mockRestore(): void } | undefined;
+    try {
+      expect(await setBaseUrl(sourceUrl)).toBeNull();
+      await api.setSession("original retry bearer", USER, "original"); unlock(USER); v2();
+      vi.mocked(api.changePassword).mockResolvedValue({ ok: true });
+      vi.spyOn(api, "login").mockResolvedValue({ token: "acknowledged rotated bearer", user_id: USER });
+      await api.cacheSalt(input.username, SALT.toString("base64"));
+      expect(await api.getCachedSalt(input.username)).toBe(SALT.toString("base64"));
+      writeObserver = vi.spyOn(storage, "setItem").mockImplementation((slot, value) => {
+        const actualWrite = write(slot, value);
+        if (slot !== "@mindpattern/token" || acknowledgementClaimed) return actualWrite;
+        acknowledgementClaimed = true;
+        // Delegate the exact encrypted bytes before delivering the ordinary
+        // AsyncStorage Promise receipt. Six explicit deliveries correspond
+        // to the installed secureStore/credential/adoptSession wrapper path;
+        // they are a finite producer premise, not a turn-budget oracle.
+        return new Promise<void>((resolve, reject) => {
+          void actualWrite.then(() => setImmediate(() => {
+            resolve();
+            queueMicrotask(() => queueMicrotask(() => queueMicrotask(() =>
+              queueMicrotask(() => queueMicrotask(() => queueMicrotask(() => {
+                originChange = setBaseUrl(replacementUrl);
+                void originChange.catch(() => {});
+              }))))));
+          }), reject);
+        });
+      });
+      attempt = rotatePassword(input);
+      expect(await attempt).toMatchObject({ ok: false, reason: "server" });
+      expect(originChange).toBeDefined();
+      expect(await originChange).toBeNull();
+      expect(await getBaseUrl()).toBe(replacementUrl);
+      expect(await api.getUserId()).toBe(USER);
+      // The replacement endpoint has not supplied this username's salt.
+      expect(await api.getCachedSalt(input.username)).toBeNull();
+    } finally {
+      try { if (attempt) await attempt.catch(() => {}); }
+      finally {
+        try { if (originChange) await originChange.catch(() => {}); }
+        finally { writeObserver?.mockRestore(); await setBaseUrl(previousUrl); }
+      }
+    }
   });
   it("allows its own fresh biometric proof to replace only its placeholder auth key", async () => {
     unlock(USER, true); v2(); vi.mocked(reauth.verifyPasswordForVault).mockRestore();

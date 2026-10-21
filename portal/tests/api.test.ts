@@ -48,6 +48,11 @@ describe("normalizeBaseUrl", () => {
     expect(normalizeBaseUrl("  http://localhost:8000 ")).toBe(
       "http://localhost:8000",
     );
+    // Normalize the same native primitive URL input before rejecting actual
+    // query/fragment content: empty trailing delimiters remain canonical.
+    expect(normalizeBaseUrl("https://clinic.test/path///")).toBe("https://clinic.test/path");
+    expect(normalizeBaseUrl("https://clinic.test/#///")).toBe("https://clinic.test");
+    expect(normalizeBaseUrl("https://clinic.test/?///")).toBe("https://clinic.test");
   });
   it("returns empty for garbage", () => {
     expect(normalizeBaseUrl("not a url")).toBe("");

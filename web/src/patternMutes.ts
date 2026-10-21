@@ -65,8 +65,10 @@ export async function writeMutedPids(dataKey: Bytes, userId: string, pids: Itera
   const keyCopy = new Uint8Array(new ArrayBuffer(dataKey.length));
   keyCopy.set(dataKey);
   try {
-    const permit=await kv.captureWritePermit(userId,keyCopy);
+    const permitPromise=kv.captureWritePermit(userId,keyCopy);
+    void permitPromise.catch(() => zeroize(keyCopy));
     await serialized(async () => {
+      const permit=await permitPromise;
       const payload = new TextEncoder().encode(JSON.stringify([...pids]));
       try {
         const blob = await encrypt(keyCopy, payload, buildAad("pattern-mutes", userId));

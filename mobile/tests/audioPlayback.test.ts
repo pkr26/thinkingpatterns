@@ -23,6 +23,7 @@ describe("kept recording playback lifecycle", () => {
   it("does not allocate a scratch file after fetch-time cancellation", async () => {
     await expect(playVoiceAttachment({ fetchBlob: async () => blob(), keys: { dataKey: key }, userId, clientEntryId, cancelled: () => true })).rejects.toThrow("Playback cancelled");
     expect(fs.writeAsStringAsync).not.toHaveBeenCalled();
+    expect(fs.deleteAsync).not.toHaveBeenCalled();
   });
   it("releases successfully when cold-start cleanup already removed the plaintext file", async () => {
     const playing = await playVoiceAttachment({ fetchBlob: async () => blob(), keys: { dataKey: key }, userId, clientEntryId });
@@ -54,6 +55,7 @@ describe("kept recording playback lifecycle", () => {
   it("preserves fetch failures even if no plaintext buffer or scratch exists", async () => {
     const failure = new Error("attachment missing");
     await expect(playVoiceAttachment({ fetchBlob: async () => { throw failure; }, keys: { dataKey: key }, userId, clientEntryId })).rejects.toBe(failure);
+    expect(fs.deleteAsync).not.toHaveBeenCalled();
   });
   it("releases crypto consumer buffers while leaving the caller's live vault key intact", async () => {
     const decrypt = crypto.decryptAudio;

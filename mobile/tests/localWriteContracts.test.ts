@@ -1,4 +1,7 @@
 import { beforeEach, expect, it } from "vitest";
+// BEGIN resource metadata Vitest observer import
+import { vi } from "vitest";
+// END resource metadata Vitest observer import
 import { runTestControl } from "./helpers/testControl";
 import { __resetLocalKeyLifecycleForTests, advanceLocalWriteScope, assertLocalTransitionScope, assertLocalWritePermit, captureLocalWritePermit, captureOpaqueLocalWritePermit, changeLocalOrigin, changeLocalSessionOwner, clearLocalKeyState, commitActiveAccountWrite, commitLocalErasureWrite, commitLocalTransitionWrite, commitLocalWrite, commitOriginErasureWrite, freezeLocalKeyWrites, hydrateLocalSessionOwner, installLocalDataKey, localKeyGeneration, localWriteScopeEpoch, markAccountDeleted, waitLocalWriteCommits } from "../src/localWriteGuard";
 const user = "11111111111111111111111111111111", other = "22222222222222222222222222222222", key = Buffer.alloc(32, 5), nextKey = Buffer.alloc(32, 6);
@@ -106,7 +109,7 @@ it("checks transition owner, epoch, and generation before invoking a native chec
 });
 
 it("runs a current account metadata write and rejects a retired owner before native admission", async () => {
-  changeLocalSessionOwner(user); await expect(commitActiveAccountWrite(user, async () => "metadata")).resolves.toBe("metadata");
+  changeLocalSessionOwner(user); installLocalDataKey(user, key); await expect(commitActiveAccountWrite(user, async () => "metadata")).resolves.toBe("metadata");
   changeLocalSessionOwner(other); let wrote = false;
   expect(() => commitActiveAccountWrite(user, async () => { wrote = true; })).toThrow("account/session"); expect(wrote).toBe(false);
 });
@@ -120,29 +123,78 @@ it.each(["account", "origin"] as const)("allows %s erasure for tombstones but re
 });
 
 it("drains all owner and unattributable origin commits before reporting administrative completion", async () => {
+  // BEGIN resource metadata receiver observation
+  const nativeSet = Map.prototype.set, receivers: Map<unknown, unknown>[] = [];
+  const observer = vi.spyOn(Map.prototype, "set").mockImplementation(function (this: Map<unknown, unknown>, owner: unknown, value: unknown) {
+    const result = nativeSet.call(this, owner, value);
+    if (owner === user && value instanceof Set && !receivers.includes(this)) receivers.push(this);
+    return result;
+  });
+  // END resource metadata receiver observation
   const ownerGate = deferred(), otherGate = deferred(), originGate = deferred(), epoch = localWriteScopeEpoch();
+  // BEGIN resource metadata gate ownership
+  try {
+  // END resource metadata gate ownership
   const first = commitLocalWrite(captureLocalWritePermit(user, key), () => ownerGate.promise);
   const second = commitLocalWrite(captureLocalWritePermit(other, key), () => otherGate.promise);
   const third = commitOriginErasureWrite(epoch, () => originGate.promise);
   let drained = false; const drain = waitLocalWriteCommits().then(() => { drained = true; });
   await turn(); expect(drained).toBe(false); ownerGate.resolve(); await first; await turn(); expect(drained).toBe(false);
   otherGate.resolve(); await second; await turn(); expect(drained).toBe(false); originGate.resolve(); await third; await drain; expect(drained).toBe(true);
+  // BEGIN resource metadata settled ownership assertion
+  expect(receivers).toHaveLength(1);
+  expect(receivers[0]!.has(user), "settled native commit metadata must release its owner").toBe(false);
+  } finally {
+    ownerGate.resolve(); otherGate.resolve(); originGate.resolve();
+    try { await waitLocalWriteCommits(); } finally { observer.mockRestore(); }
+  }
+  // END resource metadata settled ownership assertion
 });
 
 it("an account-specific drain does not wait for another owner's held native commit", async () => {
-  const gate = deferred(), commit = commitLocalWrite(captureLocalWritePermit(other, key), () => gate.promise);
-  let drained = false; const drain = waitLocalWriteCommits(user).then(() => { drained = true; });
-  await turn(); expect(drained).toBe(true); gate.resolve(); await commit; await drain;
+  const gate = deferred(), pending: Promise<unknown>[] = [];
+  try {
+    const commit = commitLocalWrite(captureLocalWritePermit(other, key), () => gate.promise); pending.push(commit);
+    let drained = false; const drain = waitLocalWriteCommits(user).then(() => { drained = true; }); pending.push(drain);
+    await turn(); expect(drained).toBe(true); gate.resolve(); await commit; await drain;
+  } finally {
+    gate.resolve();
+    await Promise.allSettled(pending);
+  }
+
+  // No account string may share the unattributable origin-retirement lane.
+  for (const owner of ["", "\0origin-erasure"]) {
+    const originReceipt = deferred();
+    const originCommit = commitOriginErasureWrite(localWriteScopeEpoch(), () => originReceipt.promise);
+    let ownerDrained = false;
+    const ownerDrain = waitLocalWriteCommits(owner).then(() => { ownerDrained = true; });
+    try {
+      // An actual host-task checkpoint drains already-runnable reactions;
+      // the unrelated origin receipt remains explicitly held throughout.
+      await turn();
+      expect(ownerDrained).toBe(true);
+    } finally {
+      originReceipt.resolve();
+      await originCommit;
+      await ownerDrain;
+    }
+  }
 });
 
 it("keeps second and newly admitted third writes tracked after the first write settles", async () => {
-  const gates = [deferred(), deferred(), deferred()], permit = captureLocalWritePermit(user, key);
-  const first = commitLocalWrite(permit, () => gates[0]!.promise), second = commitLocalWrite(permit, () => gates[1]!.promise);
-  gates[0]!.resolve(); await first;
-  const third = commitLocalWrite(permit, () => gates[2]!.promise);
-  let drained = false; const drain = waitLocalWriteCommits(user).then(() => { drained = true; });
-  await turn(); expect(drained).toBe(false); gates[1]!.resolve(); await second; await turn(); expect(drained).toBe(false);
-  gates[2]!.resolve(); await third; await drain;
+  const gates = [deferred(), deferred(), deferred()], permit = captureLocalWritePermit(user, key), pending: Promise<unknown>[] = [];
+  try {
+    const first = commitLocalWrite(permit, () => gates[0]!.promise); pending.push(first);
+    const second = commitLocalWrite(permit, () => gates[1]!.promise); pending.push(second);
+    gates[0]!.resolve(); await first;
+    const third = commitLocalWrite(permit, () => gates[2]!.promise); pending.push(third);
+    let drained = false; const drain = waitLocalWriteCommits(user).then(() => { drained = true; }); pending.push(drain);
+    await turn(); expect(drained).toBe(false); gates[1]!.resolve(); await second; await turn(); expect(drained).toBe(false);
+    gates[2]!.resolve(); await third; await drain;
+  } finally {
+    for (const gate of gates) gate.resolve();
+    await Promise.allSettled(pending);
+  }
 });
 
 it("a failed native write is surfaced while allowing the remaining administrative drain to finish", async () => {

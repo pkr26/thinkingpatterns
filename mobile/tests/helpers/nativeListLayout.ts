@@ -29,7 +29,7 @@ export function nativeWritingAtScrollOffset<T>(data:T[],keyExtractor:(item:T,ind
   const Metrics=loadNative("ListMetricsAggregator").default;
   const metrics=new Metrics();let y=0;
   const props={data,keyExtractor,getItem:(rows:T[],index:number)=>rows[index],getItemCount:(rows:T[])=>rows.length};
-  lengths.forEach((height,index)=>{metrics.notifyCellLayout({cellIndex:index,cellKey:keyExtractor(data[index],index),orientation:{horizontal:false,rtl:false},layout:{x:0,y,width:320,height}});y+=height;});
+  lengths.forEach((height,index)=>{metrics.notifyCellLayout({cellIndex:index,cellKey:keyExtractor(data[index]!,index),orientation:{horizontal:false,rtl:false},layout:{x:0,y,width:320,height}});y+=height;});
   metrics.notifyListContentLayout({orientation:{horizontal:false,rtl:false},layout:{width:320,height:y}});
   const index=loadNative("VirtualizeUtils").elementsThatOverlapOffsets([offset],props,metrics)[0];
   return index===undefined?undefined:data[index];

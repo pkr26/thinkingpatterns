@@ -84,6 +84,8 @@ export function SafetyPlanView(props: { onCrisis: () => void }): React.JSX.Eleme
     try {
       const submitted = planRef.current;
       await saveSafetyPlan(vault.get().dataKey, owner, submitted);
+      // A successful save supersedes restores that captured older storage.
+      generation.current += 1;
       if (planRef.current === submitted) {
         dirtyRef.current = false;
         dirtyFields.current.clear();

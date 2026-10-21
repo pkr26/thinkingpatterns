@@ -18,7 +18,7 @@
  */
 // @ts-nocheck -- Mutation cases omit navigation and access native mock-only methods and renderer props.
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
 import { Alert, Text } from "react-native";
 
@@ -79,13 +79,30 @@ const { localDateISO } = await import("../../src/moodLog");
 const { peekDraft } = await import("../../src/store");
 const { EntryScreen } = await import("../../src/screens/EntryScreen");
 const { vault } = await import("../../src/vault");
-const { render, flush, textOf, allText, pressLabel, typeInto, touchableByLabel, inputByPlaceholder, act, expectStyle } = await import("../helpers/rtr");
+const { render: renderScreen, flush, textOf, allText, pressLabel, typeInto, touchableByLabel, inputByPlaceholder, act, expectStyle } = await import("../helpers/rtr");
 const { resetApi } = await import("../helpers/apiMock");
 const storage = (await import("../helpers/storageMock")).default;
 
 const keys = { masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.alloc(32, 2) };
 const nav = { navigate: vi.fn() };
 const touchActivity = vi.fn();
+
+// A scenario owns every renderer it opens. Retire its draft timer and drain
+// the encrypted backup before the next fixture clears storage/key ownership.
+const activeScreens = new Set<Awaited<ReturnType<typeof renderScreen>>>();
+const { waitJournalDraftWrites } = await import("../../src/journalDraft");
+async function render(ui: React.ReactElement) {
+  const screen = await renderScreen(ui);
+  activeScreens.add(screen);
+  return screen;
+}
+afterEach(async () => {
+  await act(async () => {
+    for (const screen of activeScreens) screen.unmount();
+    activeScreens.clear();
+  });
+  await waitJournalDraftWrites();
+});
 
 beforeEach(async () => {
   resetApi(api as never);

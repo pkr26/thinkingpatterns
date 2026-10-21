@@ -169,7 +169,12 @@ describe("offline queue scope", () => {
     );
     const flushing = flushQueue("alice");
     await new Promise((resolve) => setTimeout(resolve, 0));
+    try {
     abortInFlightFlush();
+    await clearQueue("alice");
+    const { buildAad, encrypt } = await import("../src/crypto/envelope");
+    const fresh = { ...entry("alice", "a-1"), blobB64: encrypt(Buffer.alloc(32, 17), Buffer.from(JSON.stringify({ text: "fresh same-id retained writing" })), buildAad("entry", "alice", "a-1", "1")).toString("base64") };
+    await enqueue(fresh);
     release();
 
     // The upload reached the server, but the local commit was fence-
@@ -179,6 +184,8 @@ describe("offline queue scope", () => {
     expect(await flushing).toBe(0);
     expect(await queueLength("alice")).toBe(1);
     expect(await rejectedEntries("alice")).toEqual([]);
+    expect(JSON.parse((await storage.getItem(await itemsKeyContaining("a-1")))!).items).toEqual([fresh]);
+    } finally { release(); await flushing; }
   });
 });
 
@@ -928,6 +935,10 @@ describe("mutation hardening (2026-09-18)", () => {
   });
 
   it("requeueRejected is a no-op for an empty store, skips queued ids, and respects capacity", async () => {
+    const unavailable = new Error("native recovery storage is read-only");
+    const write = vi.spyOn(storage, "setItem").mockRejectedValue(unavailable), remove = vi.spyOn(storage, "removeItem").mockRejectedValue(unavailable);
+    try { await expect(requeueRejected("alice")).resolves.toBe(0); }
+    finally { write.mockRestore(); remove.mockRestore(); }
     expect(await requeueRejected("alice")).toBe(0);
 
     // A rejected id that is already back in the queue is skipped; a second
@@ -1025,7 +1036,7 @@ describe("quarantine and rejected store bounds (M-M2, 2026-09-26)", () => {
     // over the cap — survived instead of emptying the store.
     expect(after).toHaveLength(1);
     expect(after[0]).toBe(oversizeCorrupt);
-    expect(Buffer.byteLength(after[0], "utf8")).toBeGreaterThan(MAX_QUEUE_BYTES);
+    expect(Buffer.byteLength(after[0]!, "utf8")).toBeGreaterThan(MAX_QUEUE_BYTES);
   });
 
   it("readItems still resolves when the QUARANTINE row itself is unreadable (the catch never wedges)", async () => {

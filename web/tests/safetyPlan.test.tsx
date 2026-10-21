@@ -4,6 +4,7 @@
  *  restore, and the crisis dialog's unlocked-only link. Real WebCrypto,
  *  memory kv backend, no network — the plan is local by design. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createCipheriv, createDecipheriv } from "node:crypto";
 import { SafetyPlanView } from "../src/views/SafetyPlan";
 import {
   clearSafetyPlan,
@@ -46,6 +47,49 @@ const PLAN: SafetyPlan = {
   saferEnvironment: "ask M. to hold the pills bottle",
 };
 
+// Authenticate the on-disk envelope with an independent implementation and
+// independently authored account binding. Short words can occur in Base64.
+const STORAGE_KEY = Buffer.alloc(32, 4);
+const STORAGE_AAD = Buffer.from('["safety-plan","user-1"]', "utf8");
+class PlanEnvelopeRejection extends Error {
+  constructor() { super("Stored plan is not an authenticated account envelope"); this.name = "PlanEnvelopeRejection"; }
+}
+function independentlyOpenPlan(raw: string, key = STORAGE_KEY, aad = STORAGE_AAD): string {
+  const blob = Buffer.from(raw, "base64");
+  if (blob.length < 28 || blob.toString("base64") !== raw) throw new PlanEnvelopeRejection();
+  try {
+    const decipher = createDecipheriv("aes-256-gcm", key, blob.subarray(0, 12));
+    decipher.setAAD(aad);
+    decipher.setAuthTag(blob.subarray(-16));
+    return Buffer.concat([decipher.update(blob.subarray(12, -16)), decipher.final()]).toString("utf8");
+  } catch (error) {
+    if (error instanceof Error && error.constructor === Error && error.name === "Error"
+      && error.message === "Unsupported state or unable to authenticate data" && !("code" in error)) {
+      throw new PlanEnvelopeRejection();
+    }
+    throw new Error("SetupError: unexpected independent plan crypto oracle failure", { cause: error });
+  }
+}
+
+function checkIndependentPlanOracle(): void {
+  const nonce = Buffer.alloc(12);
+  Buffer.from("988A", "base64").copy(nonce);
+  const cipher = createCipheriv("aes-256-gcm", STORAGE_KEY, nonce);
+  cipher.setAAD(STORAGE_AAD);
+  const plaintext = JSON.stringify(PLAN);
+  const blob = Buffer.concat([nonce, cipher.update(plaintext, "utf8"), cipher.final(), cipher.getAuthTag()]);
+  const raw = blob.toString("base64");
+  expect(raw).toContain("988");
+  expect(independentlyOpenPlan(raw)).toBe(plaintext);
+  const corrupt = Buffer.from(blob);
+  corrupt[corrupt.length - 1] = corrupt[corrupt.length - 1]! ^ 1;
+  expect(() => independentlyOpenPlan(corrupt.toString("base64"))).toThrow(PlanEnvelopeRejection);
+  expect(() => independentlyOpenPlan(raw, Buffer.alloc(32, 9))).toThrow(PlanEnvelopeRejection);
+  expect(() => independentlyOpenPlan(raw, STORAGE_KEY, Buffer.from('["safety-plan","user-2"]'))).toThrow(PlanEnvelopeRejection);
+  expect(() => independentlyOpenPlan(plaintext)).toThrow(PlanEnvelopeRejection);
+  expect(() => independentlyOpenPlan(Buffer.from(plaintext).toString("base64"))).toThrow(PlanEnvelopeRejection);
+}
+
 beforeEach(() => {
   resetTestState();
   setKvBackendForTests(memoryBackend());
@@ -64,8 +108,10 @@ describe("safetyPlan storage (the entryDraft/pendingMeasure idiom)", () => {
     const { kv } = await import("../src/kvstore");
     const raw = await kv.getItem(`mindpattern.safetyPlan.${USER}`);
     expect(raw).not.toBeNull();
-    expect(raw!).not.toContain("short fuse");
-    expect(raw!).not.toContain("988");
+    let opened: string | undefined;
+    expect(() => { opened = independentlyOpenPlan(raw!); }).not.toThrow();
+    expect(opened).toBe(JSON.stringify(PLAN));
+    checkIndependentPlanOracle();
     const loaded = await loadSafetyPlan(vault.get().dataKey, USER);
     expect(loaded).toEqual(PLAN);
   });
@@ -122,7 +168,9 @@ describe("SafetyPlanView", () => {
     const { kv } = await import("../src/kvstore");
     const raw = await kv.getItem(`mindpattern.safetyPlan.${USER}`);
     expect(raw).not.toBeNull();
-    expect(raw!).not.toContain("short fuse");
+    let opened: string | undefined;
+    expect(() => { opened = independentlyOpenPlan(raw!); }).not.toThrow();
+    expect(opened).toBe(JSON.stringify(PLAN));
     // Remount: the stored plan comes back on screen (a textarea's value is
     // a prop, not text — assert it on the controls themselves).
     root = await render(<SafetyPlanView onCrisis={() => undefined} />);

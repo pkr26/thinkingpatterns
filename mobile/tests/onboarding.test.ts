@@ -128,6 +128,19 @@ describe("E-10 panel persistence (audit round 2, 2026-09-21, F-11)", () => {
     expect(await loadOnboardingPanel(PANEL_COUNT, "panel-user-a")).toBe(1);
     await saveOnboardingPanel(2, "panel-user-a");
     expect(await loadOnboardingPanel(PANEL_COUNT, "panel-user-a")).toBe(2);
+
+    // A current per-account resume position takes precedence over an older
+    // unowned legacy slot; reading it must not migrate or consume that slot.
+    const currentPanelSlot = panelKey("panel-user-a"), legacyPanelSlot = "@mindpattern/onboarding_panel";
+    await storage.setItem(currentPanelSlot, "2");
+    await storage.setItem(legacyPanelSlot, "1");
+    try {
+      expect(await loadOnboardingPanel(5, "panel-user-a"), "An existing account resume panel takes precedence over stale global legacy state").toBe(2);
+      expect(await storage.getItem(currentPanelSlot)).toBe("2");
+      expect(await storage.getItem(legacyPanelSlot)).toBe("1");
+    } finally {
+      await storage.removeItem(legacyPanelSlot);
+    }
   });
 
   it("never adopts an out-of-bounds or malformed stored index — the flow restarts at panel 1", async () => {

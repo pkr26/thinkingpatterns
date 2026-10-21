@@ -15,6 +15,34 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { buildAad } from "./crypto/aad";
 import { decrypt, encrypt } from "./crypto/envelope";
 import { accountStorageKey } from "./accountStorage";
+import { commitLocalErasureWrite, localWriteScopeEpoch } from "./localWriteGuard";
+
+
+// A completed account reset wins work admitted before it. Reads already waiting
+// on native storage may finish against detached mirrors, but cannot republish
+// those mirrors or write their bytes after the reset's ordered deletion.
+const resetGenerations = new Map<string, number>();
+const entryWrites = new Map<string, Promise<void>>();
+const entryResets = new Map<string, Promise<void>>();
+const resetGeneration = (userId: string) => resetGenerations.get(userId) ?? 0;
+
+function queueEntryWrite(userId: string, write: () => Promise<void>): Promise<void> {
+  const pending = (entryWrites.get(userId) ?? Promise.resolve()).catch(() => {}).then(write);
+  entryWrites.set(userId, pending);
+  const clear = () => { if (entryWrites.get(userId) === pending) entryWrites.delete(userId); };
+  void pending.then(clear, clear);
+  return pending;
+}
+
+function commitEntryWrite(userId: string, permit: LocalWritePermit, mirror: Map<string, number> | Set<string>, write: () => Promise<void>): Promise<void> {
+  const generation = resetGeneration(userId);
+  return commitLocalWrite(permit, () => queueEntryWrite(userId, async () => {
+    if (generation !== resetGeneration(userId) ||
+        (memoryMirror.get(userId) !== mirror && v2BoundMirror.get(userId) !== mirror)) return;
+    assertLocalWritePermit(permit);
+    await write();
+  }));
+}
 
 // IDs authenticated with v2 AAD cannot use the legacy unversioned fallback.
 // The encrypted persisted set and process mirror enforce the same rule.
@@ -25,6 +53,7 @@ function v2BoundKey(userId: string): string {
 }
 
 async function loadV2Bound(userId: string, dataKey: Buffer): Promise<Set<string>> {
+  while (entryResets.has(userId)) await entryResets.get(userId);
   let bound = v2BoundMirror.get(userId);
   if (!bound) {
     bound = new Set();
@@ -54,7 +83,7 @@ async function persistV2Bound(userId: string, dataKey: Buffer, bound: Set<string
   const payload = Buffer.from(JSON.stringify([...bound]), "utf8");
   try {
     const blob = encrypt(dataKey, payload, buildAad("entry-v2-bound", userId));
-    await commitLocalWrite(permit, () => AsyncStorage.setItem(v2BoundKey(userId), blob.toString("base64")));
+    await commitEntryWrite(userId, permit, bound, () => AsyncStorage.setItem(v2BoundKey(userId), blob.toString("base64")));
   } finally {
     payload.fill(0);
   }
@@ -64,10 +93,12 @@ async function persistV2Bound(userId: string, dataKey: Buffer, bound: Set<string
  *  fallback is refused for the id from now on. */
 export async function noteV2Bound(userId: string, dataKey: Buffer, clientEntryId: string): Promise<void> {
   const permit = captureLocalWritePermit(userId, dataKey);
+  const generation = resetGeneration(userId);
   const keyCopy = Buffer.from(dataKey);
   try {
     const bound = await loadV2Bound(userId, keyCopy);
     assertLocalWritePermit(permit);
+    if (generation !== resetGeneration(userId)) return;
     if (bound.has(clientEntryId)) return;
     bound.add(clientEntryId);
     await persistV2Bound(userId, keyCopy, bound, permit);
@@ -101,6 +132,7 @@ function loadMirror(userId: string): Map<string, number> {
 /** Decrypt the persisted map; absent/corrupt yields an empty map (the
  *  in-memory mirror remains authoritative for this session). */
 async function loadStored(userId: string, dataKey: Buffer): Promise<Map<string, number>> {
+  while (entryResets.has(userId)) await entryResets.get(userId);
   const mirror = loadMirror(userId);
   let raw: string | null = null;
   try {
@@ -128,7 +160,7 @@ async function loadStored(userId: string, dataKey: Buffer): Promise<Map<string, 
 async function persist(userId: string, dataKey: Buffer, mirror: Map<string, number>, permit: LocalWritePermit): Promise<void> {
   if (mirror.size === 0) {
     try {
-      await commitLocalWrite(permit, () => AsyncStorage.removeItem(storageKey(userId)));
+      await commitEntryWrite(userId, permit, mirror, () => AsyncStorage.removeItem(storageKey(userId)));
     } catch {
       /* best effort */
     }
@@ -140,7 +172,7 @@ async function persist(userId: string, dataKey: Buffer, mirror: Map<string, numb
   try {
     const blob = encrypt(dataKey, plaintext, buildAad("entry-versions", userId));
     try {
-      await commitLocalWrite(permit, () => AsyncStorage.setItem(storageKey(userId), blob.toString("base64")));
+      await commitEntryWrite(userId, permit, mirror, () => AsyncStorage.setItem(storageKey(userId), blob.toString("base64")));
     } catch {
       // best effort: the mirror holds for this session; next change retries.
     }
@@ -162,10 +194,12 @@ export async function observeEntryVersions(
   rows: ReadonlyArray<{ clientEntryId: string; contentVersion: number }>,
 ): Promise<VersionObservation> {
   const permit = captureLocalWritePermit(userId, dataKey);
+  const generation = resetGeneration(userId);
   const keyCopy = Buffer.from(dataKey);
   try {
     const mirror = await loadStored(userId, keyCopy);
     assertLocalWritePermit(permit);
+    if (generation !== resetGeneration(userId)) return { rolledBack: [], advanced: false };
     const rolledBack: string[] = [];
     let advanced = false;
     for (const row of rows) {
@@ -202,14 +236,18 @@ export async function knownEntryVersion(
  * same id legitimately restarts at version 1). */
 export async function forgetEntryVersion(userId: string, dataKey: Buffer, clientEntryId: string): Promise<void> {
   const permit = captureLocalWritePermit(userId, dataKey);
+  const generation = resetGeneration(userId);
   const keyCopy = Buffer.from(dataKey);
   try {
     const mirror = await loadStored(userId, keyCopy);
     assertLocalWritePermit(permit);
+    if (generation !== resetGeneration(userId)) return;
     if (mirror.delete(clientEntryId)) await persist(userId, keyCopy, mirror, permit);
+    if (generation !== resetGeneration(userId)) return;
     // Deleting the entry also removes its required-AAD-version marker.
     const bound = await loadV2Bound(userId, keyCopy);
     assertLocalWritePermit(permit);
+    if (generation !== resetGeneration(userId)) return;
     if (bound.delete(clientEntryId)) await persistV2Bound(userId, keyCopy, bound, permit);
   } finally {
     keyCopy.fill(0);
@@ -219,14 +257,20 @@ export async function forgetEntryVersion(userId: string, dataKey: Buffer, client
 /** Forget everything for a user (sign-out / account deletion / origin
  * switch / data-key rotation re-keys the store anyway). */
 export async function forgetAllEntryVersions(userId: string): Promise<void> {
+  resetGenerations.set(userId, resetGeneration(userId) + 1);
   memoryMirror.delete(userId);
   v2BoundMirror.delete(userId);
-  try {
-    await AsyncStorage.removeItem(storageKey(userId));
-    await AsyncStorage.removeItem(v2BoundKey(userId));
-  } catch {
-    /* nothing to forget */
-  }
+  const pending = commitLocalErasureWrite(userId, localWriteScopeEpoch(), () => queueEntryWrite(userId, async () => {
+    try {
+      await AsyncStorage.removeItem(storageKey(userId));
+      await AsyncStorage.removeItem(v2BoundKey(userId));
+    } catch {
+      /* nothing to forget */
+    }
+  }));
+  entryResets.set(userId, pending);
+  try { await pending; }
+  finally { if (entryResets.get(userId) === pending) entryResets.delete(userId); }
 }
 
 /** Re-key the persisted map after a data-key rotation (rotation.ts): load
@@ -236,11 +280,14 @@ export async function forgetAllEntryVersions(userId: string): Promise<void> {
  *  correctness). */
 export async function rebindEntryVersions(userId: string, oldDataKey: Buffer, newDataKey: Buffer): Promise<void> {
   const permit = captureLocalWritePermit(userId, newDataKey);
+  const generation = resetGeneration(userId);
   const mirror = await loadStored(userId, oldDataKey);
   assertLocalWritePermit(permit);
-  memoryMirror.set(userId, mirror);
+  if (generation !== resetGeneration(userId) || memoryMirror.get(userId) !== mirror) return;
   await persist(userId, newDataKey, mirror, permit);
+  if (generation !== resetGeneration(userId)) return;
   const bound = await loadV2Bound(userId, oldDataKey);
+  if (generation !== resetGeneration(userId)) return;
   await persistV2Bound(userId, newDataKey, bound, permit);
 }
 

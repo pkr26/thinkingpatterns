@@ -64,6 +64,17 @@ function parsePlan(raw: string | null): SafetyPlan | null {
   }
 }
 
+const planWrites = new Map<string, Promise<unknown>>();
+function serializePlanWrite<T>(userId: string, operation: () => Promise<T>): Promise<T> {
+  const run = (planWrites.get(userId) ?? Promise.resolve()).then(operation, operation);
+  const tail = run.catch(() => undefined);
+  planWrites.set(userId, tail);
+  void tail.then(() => {
+    if (planWrites.get(userId) === tail) planWrites.delete(userId);
+  });
+  return run;
+}
+
 /** Seal the plan under the data key. An all-empty plan clears the slot
  *  (the caller never wants a erased plan resurrected over a blank
  *  editor). Throws on a storage failure — the view surfaces it, the plan
@@ -73,10 +84,17 @@ export async function saveSafetyPlan(dataKey: Bytes, userId: string, plan: Safet
   const keyCopy=new Uint8Array(dataKey);
   const payload = new TextEncoder().encode(JSON.stringify(plan));
   try {
-    const permit=await kv.captureWritePermit(userId,keyCopy);
-    if (safetyPlanIsEmpty(plan)) {await clearSafetyPlan(userId,permit);return;}
-    const blob = await encrypt(keyCopy, payload, buildAad("safety-plan", userId));
-    await kv.setItem(key(userId), toBase64(blob),permit);
+    const permitPromise = kv.captureWritePermit(userId,keyCopy);
+    // Enqueue before awaiting the captured permit so later writes stay ordered.
+    const queued = serializePlanWrite(userId, async () => {
+      const permit = await permitPromise;
+      if (safetyPlanIsEmpty(plan)) {await kv.removeItem(key(userId),permit);return;}
+      const blob = await encrypt(keyCopy, payload, buildAad("safety-plan", userId));
+      await kv.setItem(key(userId), toBase64(blob),permit);
+    });
+    void queued.catch(() => undefined);
+    await permitPromise;
+    await queued;
   } finally {
     zeroize(payload,keyCopy);
   }
@@ -103,7 +121,7 @@ export async function loadSafetyPlan(dataKey: Bytes, userId: string): Promise<Sa
 /** The plan's custody ended: erased field-by-field, or the account is
  *  gone (deletion's per-account sweep). */
 export async function clearSafetyPlan(userId: string,permit?:WritePermit): Promise<void> {
-  await kv.removeItem(key(userId),permit);
+  await serializePlanWrite(userId, () => kv.removeItem(key(userId),permit));
 }
 
 /** Rotation parity with the B-7 rewrap family: re-seal an existing plan

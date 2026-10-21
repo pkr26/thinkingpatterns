@@ -132,6 +132,7 @@ class TestDualVariantAndMasking:
         for text in (
             "k ill myself",
             "o ff myself tonight",
+            "𝐎 𝐅𝐅 𝐌𝐘𝐒𝐄𝐋𝐅",
             "k i ll myself",
             "s uicide is on my mind",
         ):
@@ -486,3 +487,19 @@ def test_carried_forward_label_alone_marks_the_public_card_sensitive():
         cards = [card for card in result.surfaced if card.detail["pattern_pid"] == record.pid]
         assert len(cards) == 1, "the carried-forward card still surfaces during its grace period"
         assert (cards[0].detail.get("sensitive") is True) is expected
+
+
+def test_bare_crisis_beside_benign_compounds_reaches_both_public_tiers():
+    cases = (
+        ("suicide", True),
+        ("suiciide", True),
+        ("suicide prevention", False),
+        ("suiciide prevention", False),
+        ("suicide squad", False),
+        ("suiciide squad", False),
+        ("suicide suicide prevention squad", True),
+        ("suiciide suicide prevention squad", True),
+    )
+    for text, expected in cases:
+        assert crisis.matches_dialog(text) is expected, text
+        assert crisis.matches_suppress(text) is expected, text

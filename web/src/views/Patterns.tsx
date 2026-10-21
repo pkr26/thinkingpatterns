@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { matchesCrisisSuppress } from "../crisisDetect";
 import { displayError } from "../errors";
+import { usePatientOperation, type PatientOperation } from "../patientOperation";
 import { recentMoods } from "../moodLog";
 import { recordPatternMute } from "../questionFeedback";
 import { adoptLegacyPlaintextMutes, writeMutedPids } from "../patternMutes";
@@ -126,6 +127,7 @@ function MoodTrendChart({ days }: { days: { date: string; value: number }[] }): 
 }
 
 export function PatternsView(props: { onCrisis: () => void }): React.JSX.Element {
+  const beginOperation = usePatientOperation();
   // The trend bars draw with JS-side palette values — re-render on theme
   // flips (auto mode included; audit 2026-09-26 fix).
   usePaletteVersion();
@@ -134,15 +136,16 @@ export function PatternsView(props: { onCrisis: () => void }): React.JSX.Element
   const [patterns, setPatterns] = useState<PatternPayload[] | null>(null);
   const [muted, setMuted] = useState<Set<string>>(new Set());
   const [localTrend, setLocalTrend] = useState<{ date: string; value: number }[]>([]);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ text: string; operation: PatientOperation; run: number } | null>(null);
   const [error, setError] = useState("");
   const generation = useRef(0);
 
   const load = useCallback(async (): Promise<void> => {
     const run = generation.current + 1;
     generation.current = run;
-    const owner = vault.ownerUserId();
-    if (!owner || !vault.isUnlocked()) {
+    const operation = beginOperation();
+    const owner = operation?.owner;
+    if (!owner || !operation) {
       setError(t("common.sessionLocked"));
       return;
     }
@@ -151,7 +154,7 @@ export function PatternsView(props: { onCrisis: () => void }): React.JSX.Element
       kind: "error",
       message: displayError(err, t("errors.generic")),
     }) as ReconcileOutcome);
-    if (generation.current !== run) return;
+    if (generation.current !== run || !operation.viewCurrent()) return;
     if (outcome.kind === "credentialRotated" || outcome.kind === "locked") {
       setError(t("errors.sessionEndedWeb"));
       return;
@@ -172,8 +175,8 @@ export function PatternsView(props: { onCrisis: () => void }): React.JSX.Element
     // Immediate re-check after the awaits above (audit 2026-09-26 LOW): a
     // lock that landed mid-reconcile is a quiet no-op, never
     // vault.get()'s throw as an unhandled rejection.
-    if (!vault.isUnlocked()) return;
-    const keys = vault.get();
+    if (!operation.current()) return;
+    const keys = operation.keys;
     const summary = outcome.summary;
     if (!summary || generation.current !== run) {
       if (!summary) setError(t("insights.summaryFailedWeb"));
@@ -196,23 +199,35 @@ export function PatternsView(props: { onCrisis: () => void }): React.JSX.Element
         const stats = payload.stats as { patterns?: PatternPayload[] } | undefined;
         setPatterns(Array.isArray(stats?.patterns) ? stats!.patterns! : []);
         // The one-time threshold-crossing notice (P6.5).
-        if (summary.phase !== "baseline" && !(await thresholdNoticeShown(owner))) {
-          await recordThresholdNotice(owner);
-          setNotice(t("insights.thresholdNotice"));
+        if (summary.phase !== "baseline") {
+          const shown = await thresholdNoticeShown(owner);
+          if (generation.current !== run || !operation.current()) return;
+          if (!shown) {
+            setNotice({ text: t("insights.thresholdNotice"), operation, run });
+          }
         }
       } catch {
-        setError(t("insights.decryptFailedWeb"));
+        if (generation.current === run && operation.current()) setError(t("insights.decryptFailedWeb"));
       }
     } else {
       setPatterns([]);
     }
     void recentMoods(keys.dataKey, owner, 30)
       .then((days) => {
-        if (generation.current !== run) return;
+        if (generation.current !== run || !operation.current()) return;
         setLocalTrend(days.map((d) => ({ date: d.date, value: d.value })));
       })
       .catch(() => undefined);
-  }, []);
+  }, [beginOperation]);
+
+  // A durable “shown” stamp follows the committed notice. A view retired
+  // before that commit must leave the next mounted view its first notice.
+  useEffect(() => {
+    if (!notice || generation.current !== notice.run || !notice.operation.current()) return;
+    void recordThresholdNotice(notice.operation.owner).catch(() => {
+      if (generation.current === notice.run && notice.operation.current()) setError(t("insights.decryptFailedWeb"));
+    });
+  }, [notice]);
 
   useEffect(() => {
     const owner = vault.ownerUserId();
@@ -257,7 +272,7 @@ export function PatternsView(props: { onCrisis: () => void }): React.JSX.Element
 
   return (
     <>
-      {notice && <Note role="status" tone="ok">{notice}</Note>}
+      {notice && <Note role="status" tone="ok">{notice.text}</Note>}
       <Card title={t("insights.titleWeb")}>
         {phase === "baseline" || phase === null ? (
           <>

@@ -92,6 +92,10 @@ describe("detectCrisisLanguage — true positives", () => {
     expect(detectCrisisLanguage("I WANT TO DIE")).toBe(true);
     expect(detectCrisisLanguage("I wAnT tO eNd It AlL")).toBe(true);
     expect(detectCrisisLanguage("SUICIDAL")).toBe(true);
+    // BEGIN crisis compatibility case
+    // NFKC creates ASCII capitals after the first lowercase pass.
+    expect(detectCrisisLanguage("𝐎 𝐅𝐅 𝐌𝐘𝐒𝐄𝐋𝐅"), "compatibility capitals retain the public partial-split dialog detection").toBe(true);
+    // END crisis compatibility case
   });
 
   it("fires when the phrase is buried in a longer entry", () => {

@@ -40,7 +40,7 @@ import { playVoiceAttachment, type PlayingVoice } from "../audio/playback";
 import { createAudioPlayer } from "expo-audio";
 import {forgetEntryVersion, observeEntryVersions , isV2Bound, noteV2Bound} from "../entryVersions";
 import { MoodCalendar } from "../components/MoodCalendar";
-import { filterEntries, monthLabel } from "../historyFind";
+import { filterEntries } from "../historyFind";
 import { vault } from "../vault";
 import { assertLocalWritePermit, captureLocalWritePermit } from "../localRekey";
 import { localWriteScopeEpoch } from "../localWriteGuard";
@@ -284,7 +284,17 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
   useEffect(() => () => { conflictDecision.current?.("cancel"); }, []);
   const playbackEpoch = useRef(0);
   const preparingPlayback = useRef(false);
-  const playbackMounted = useRef(true);
+  const historyMounted = useRef(true);
+  const captureHistoryLifetime = () => {
+    const scope = localWriteScopeEpoch();
+    const owner = vault.ownerUserId();
+    const dataKey = vault.canReauthenticate() ? vault.get().dataKey : null;
+    return () => historyMounted.current && scope === localWriteScopeEpoch()
+      && vault.ownerUserId() === owner
+      && (dataKey === null
+        ? !vault.canReauthenticate()
+        : vault.canReauthenticate() && vault.get().dataKey === dataKey);
+  };
   const audioPlayerRef = useRef<ReturnType<typeof createAudioPlayer> | null>(null);
 
   const stopPlayback = useCallback(async (): Promise<void> => {
@@ -298,15 +308,15 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
     audioPlayerRef.current = null;
     const playing = playingVoiceRef.current;
     playingVoiceRef.current = null;
-    if (playbackMounted.current) setPlayingId(null);
+    if (historyMounted.current) setPlayingId(null);
     if (playing) await playing.release();
   }, []);
 
   useEffect(() => {
-    playbackMounted.current = true;
+    historyMounted.current = true;
     const unsubscribe = vault.subscribe(() => { if (!vault.isUnlocked()) void stopPlayback(); });
     return () => {
-      playbackMounted.current = false;
+      historyMounted.current = false;
       unsubscribe();
       void stopPlayback();
     };
@@ -322,7 +332,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
       if (!vault.isUnlocked()) return;
       preparingPlayback.current = true;
       const operation = ++playbackEpoch.current;
-      const cancelled = () => !playbackMounted.current || operation !== playbackEpoch.current || !vault.isUnlocked();
+      const cancelled = () => !historyMounted.current || operation !== playbackEpoch.current || !vault.isUnlocked();
       const keys = { dataKey: Buffer.from(vault.get().dataKey) };
       try {
         const userId = await api.getUserId();
@@ -342,7 +352,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
         audioPlayerRef.current = player;
         player.play();
       } catch {
-        if (operation !== playbackEpoch.current || !playbackMounted.current) return;
+        if (operation !== playbackEpoch.current || !historyMounted.current) return;
         // Audit M1: a failure after the scratch file exists must clear the
         // ref AND release it — a stale ref would make the NEXT attempt
         // overwrite it and orphan the decrypted cache file forever.
@@ -416,6 +426,8 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
    *  This is how history older than the newest-500 window becomes
    *  reachable without unbounded downloads. */
   const handleCalendarViewChange = useCallback((year: number, month: number) => {
+    const ownsRead = captureHistoryLifetime();
+    if (!ownsRead()) return;
     touchActivity();
     const monthKey = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}`;
     if (loadedMonthsRef.current.has(monthKey)) return;
@@ -432,20 +444,20 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
     void (async () => {
       try {
         const userId = await api.getUserId();
-        if (epoch !== monthFetchEpochRef.current || !userId || !vault.isUnlocked()) return;
+        if (!ownsRead() || epoch !== monthFetchEpochRef.current || !userId || !vault.isUnlocked()) return;
         const next = month === 12 ? { y: year + 1, m: 1 } : { y: year, m: month + 1 };
         // The calendar already supplies normalized months. Format those
         // values directly: Date.UTC remaps years 0–99 into 1900–1999.
         const start = monthStartISO;
         const end = `${String(next.y).padStart(4, "0")}-${String(next.m).padStart(2, "0")}-01`;
         const rows = await api.listEntriesWindow(start, end);
-        if (epoch !== monthFetchEpochRef.current) return;
+        if (!ownsRead() || epoch !== monthFetchEpochRef.current) return;
         if (rows.length === 0) {
-          showStatus(tr("history.monthEmpty", { month: monthLabel(year, month) }), "neutral");
+          showStatus(tr("history.monthEmpty"), "neutral");
           return;
         }
         const { decrypted, failed } = await decryptRowsWithVersions(userId, vault.get().dataKey, rows);
-        if (epoch !== monthFetchEpochRef.current) return;
+        if (!ownsRead() || epoch !== monthFetchEpochRef.current) return;
         setEntries((current) => {
           // Existing rows win (already verified); only genuinely new ids
           // join — a refetch of a loaded month is a no-op.
@@ -467,7 +479,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
         if (failed > 0) setUnreadable((n) => n + failed);
         showStatus(tr("history.monthLoaded", { count: decrypted.length }), "ok");
       } catch {
-        if (epoch !== monthFetchEpochRef.current) return;
+        if (!ownsRead() || epoch !== monthFetchEpochRef.current) return;
         loadedMonthsRef.current.delete(monthKey);
         showStatus(tr("history.monthLoadFailed"), "neutral");
       }
@@ -482,6 +494,8 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
   };
 
   const load = useCallback(async (afterRevisionConflict = false) => {
+    const ownsRead = captureHistoryLifetime();
+    if (!ownsRead()) return;
     const loadEpoch = ++historyLoadEpochRef.current;
     // Initial pages deliberately do not carry expected_revision: they obtain
     // the snapshot token for this walk. A legacy server returns no token.
@@ -514,20 +528,20 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
     }
     try {
       const userId = await api.getUserId();
-      if (loadEpoch !== historyLoadEpochRef.current) return;
+      if (!ownsRead() || loadEpoch !== historyLoadEpochRef.current) return;
       if (!userId) throw new Error(tr("common.accountMissing"));
       const page = await api.listEntriesPage({
         limit: SERVER_PAGE_SIZE,
         offset: 0,
         pageBytes: ENTRY_PAGE_BYTES,
       });
-      if (loadEpoch !== historyLoadEpochRef.current) return;
+      if (!ownsRead() || loadEpoch !== historyLoadEpochRef.current) return;
       const rows = page.entries;
       // Tampered, wrong-key and rolled-back blobs are skipped (never
       // rendered raw) and counted so the user knows the list is short by
       // exactly that many.
       const { decrypted, failed } = await decryptRowsWithVersions(userId, vault.get().dataKey, rows);
-      if (loadEpoch !== historyLoadEpochRef.current) return;
+      if (!ownsRead() || loadEpoch !== historyLoadEpochRef.current) return;
       // WEB_PLAN S-8 (2026-09-25): EVERY row failing to decrypt with a live
       // session is the remote-rekey signature — the data key changed on
       // another device. Audit 2026-09-28 (MEDIUM): route this to the
@@ -559,15 +573,15 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
       // payload mood, but the device-local log usually has the day's value.
       try {
         const days = await recentMoods(vault.get().dataKey, userId, 400);
-        if (loadEpoch !== historyLoadEpochRef.current) return;
+        if (!ownsRead() || loadEpoch !== historyLoadEpochRef.current) return;
         const map: Record<string, number> = {};
         for (const day of days) map[day.date] = day.value;
         setLogMoods(map);
       } catch {
-        if (loadEpoch === historyLoadEpochRef.current) setLogMoods({});
+        if (ownsRead() && loadEpoch === historyLoadEpochRef.current) setLogMoods({});
       }
     } catch (err) {
-      if (loadEpoch !== historyLoadEpochRef.current) return;
+      if (!ownsRead() || loadEpoch !== historyLoadEpochRef.current) return;
       entriesRevisionRef.current = null;
       if (err instanceof ApiError && err.status === 0) {
         // No connection: an honest explanation beats a fake-empty list.
@@ -584,7 +598,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
         setError(requestFailureCopy(err));
       }
     } finally {
-      if (loadEpoch === historyLoadEpochRef.current) {
+      if (ownsRead() && loadEpoch === historyLoadEpochRef.current) {
         historyReloadingRef.current = false;
         setLoading(false);
       }
@@ -659,6 +673,8 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
    * and calendar labels below make clear that they cover downloaded history,
    * rather than silently decrypting a whole account in the background. */
   const loadOlder = async () => {
+    const ownsRead = captureHistoryLifetime();
+    if (!ownsRead()) return;
     if (historyReloadingRef.current || loadingMoreRef.current || !hasMore || nextOffset === null) return;
     const remainingRows = MAX_HISTORY_ROWS - loadedCiphertextRowsRef.current;
     if (
@@ -676,7 +692,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
     const expectedRevision = entriesRevisionRef.current;
     try {
       const userId = await api.getUserId();
-      if (loadEpoch !== historyLoadEpochRef.current) return;
+      if (!ownsRead() || loadEpoch !== historyLoadEpochRef.current) return;
       if (!userId) throw new Error(tr("common.accountMissing"));
       const offset = nextOffset;
       const page = await api.listEntriesPage({
@@ -685,7 +701,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
         pageBytes: ENTRY_PAGE_BYTES,
         ...(expectedRevision === null ? {} : { expectedRevision }),
       });
-      if (loadEpoch !== historyLoadEpochRef.current) return;
+      if (!ownsRead() || loadEpoch !== historyLoadEpochRef.current) return;
       const receivedRevision = page.revision ?? null;
       // A PINNED continuation must land on the exact snapshot it pinned:
       // anything else means the journal moved under the walk, and the only
@@ -713,7 +729,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
         vault.get().dataKey,
         rows,
       );
-      if (loadEpoch !== historyLoadEpochRef.current) return;
+      if (!ownsRead() || loadEpoch !== historyLoadEpochRef.current) return;
       setEntries((previous) => {
         const byId = new Map(previous.map((entry) => [entry.clientEntryId, entry]));
         for (const entry of incoming) byId.set(entry.clientEntryId, entry);
@@ -735,7 +751,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
       // like nothing happened.
       setShown((previous) => previous + SERVER_PAGE_SIZE);
     } catch (err) {
-      if (loadEpoch !== historyLoadEpochRef.current) return;
+      if (!ownsRead() || loadEpoch !== historyLoadEpochRef.current) return;
       if (err instanceof ApiError && err.status === 409) {
         showStatus(tr("history.snapshotReload"), "neutral");
         void load(true);
@@ -743,8 +759,10 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
         Alert.alert(tr("history.loadOlderFailedTitle"), requestFailureCopy(err));
       }
     } finally {
-      loadingMoreRef.current = false;
-      setLoadingMore(false);
+      if (ownsRead()) {
+        loadingMoreRef.current = false;
+        setLoadingMore(false);
+      }
     }
   };
 
@@ -769,7 +787,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
    *  hygiene write must never fail the (already committed) server action.
    *  removeMoodDay snapshots the key at ITS call time, and vault.get()
    *  throws when a lock landed mid-delete — both degrade quietly here. */
-  const forgetLocalMoodDay = (entry: HistoryEntry) => {
+  const forgetLocalMoodDay = (entry: Pick<HistoryEntry, "entryDate">) => {
     const owner = vault.ownerUserId();
     const scope = localWriteScopeEpoch();
     void (async () => {
@@ -791,13 +809,13 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
     });
   };
 
-  const runDelete = async (entry: HistoryEntry) => {
-    if (busyRef.current) return;
-    const deleteScope = localWriteScopeEpoch();
+  const runDelete = async (entry: Pick<HistoryEntry, "clientEntryId" | "entryDate">, ownsDialog: () => boolean) => {
+    if (!ownsDialog() || busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
     try {
       await api.deleteEntry(entry.clientEntryId);
+      if (!ownsDialog()) return;
       // M-2: the row is gone; forget its version mark so a later recreate
       // of the same id (legitimately version 1 again) does not false-alarm.
       // 2026-09-26 audit LOW: the mark store is keyed BY USER — an
@@ -808,11 +826,11 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
       // app logs nothing), and the cost of a skip is one false alarm on a
       // future recreate of the same id — never corrupted state.
       const deleteUserId = await api.getUserId().catch(() => null);
-      if (deleteScope !== localWriteScopeEpoch()) return;
+      if (!ownsDialog()) return;
       if (deleteUserId) {
         await forgetEntryVersion(deleteUserId, vault.get().dataKey, entry.clientEntryId).catch(() => {});
       }
-      if (deleteScope !== localWriteScopeEpoch()) return;
+      if (!ownsDialog()) return;
       // L-67: this device just moved the collection revision; the walk's
       // token must be re-acquired or the next "Load older" 409-restarts
       // and wipes the filters.
@@ -823,7 +841,7 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
       setMode({ kind: "list" });
       showStatus(tr("history.entryDeleted"), "neutral");
     } catch (err) {
-      if (deleteScope !== localWriteScopeEpoch()) return;
+      if (!ownsDialog()) return;
       if (err instanceof ApiError && err.status === 404) {
         // Already gone server-side: the end state the user asked for.
         invalidateEntriesRevision(); // the server state moved all the same
@@ -837,28 +855,35 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
         Alert.alert(tr("history.couldNotDeleteTitle"), requestFailureCopy(err));
       }
     } finally {
-      busyRef.current = false;
-      setBusy(false);
+      if (ownsDialog()) {
+        busyRef.current = false;
+        setBusy(false);
+      }
     }
   };
 
   /** Calm double confirmation: scope first ("every device"), permanence
    *  second. Neither dialog rushes or shames. */
   const confirmDelete = (entry: HistoryEntry) => {
+    const ownsDialog = captureHistoryLifetime();
+    if (!ownsDialog()) return;
+    const deleteTarget = { clientEntryId: entry.clientEntryId, entryDate: entry.entryDate };
     Alert.alert(tr("history.deleteConfirmTitle"), tr("history.deleteConfirmBody"), [
       { text: tr("common.cancel"), style: "cancel" },
       {
         text: tr("common.delete"),
         style: "destructive",
-        onPress: () =>
+        onPress: () => {
+          if (!ownsDialog()) return;
           Alert.alert(tr("common.finalConfirmation"), tr("history.finalConfirmBody"), [
             { text: tr("common.cancel"), style: "cancel" },
             {
               text: tr("common.deletePermanently"),
               style: "destructive",
-              onPress: () => void runDelete(entry),
+              onPress: () => void runDelete(deleteTarget, ownsDialog),
             },
-          ]),
+          ]);
+        },
       },
     ]);
   };

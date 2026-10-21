@@ -211,8 +211,26 @@ it.each(["text","mood","energy","sleep","tags"] as const)("a Native rollover can
  const scope=await journalDraftScope(USER),original={...newJournalDraft(),revision:Number.MAX_SAFE_INTEGER,text:"The Native rollover source with a complete field receipt",mood:-.5,energy:1,sleep:2,tags:["work"]};await saveJournalDraft(KEY,scope,original);await mount();const replacement={...original,[field]:({text:"The separate Native receipt's words",mood:.75,energy:4,sleep:5,tags:["family"]} as Record<string,unknown>)[field]};await storage.removeItem(scope.slot);await saveJournalDraft(KEY,scope,replacement);const wire=await storage.getItem(scope.slot);await type("These rollover edits must not replace the conflicting Native receipt");await act(async()=>emitAppState("background"));await waitJournalDraftWrites();await flush();expect(await storage.getItem(scope.slot)).toBe(wire);expect((await loadJournalDraft(KEY,scope))!.draft).toEqual(replacement);expect(editor().props.value).toBe("These rollover edits must not replace the conflicting Native receipt");expect(words()).toContain(tr("entry.deviceDraft.error"));
 });
 
+function pinEntrySnapshotCalendar() {
+  const NativeDate = globalThis.Date;
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "Date");
+  if (!descriptor) throw new Error("SetupError: Native snapshot Date descriptor is unavailable");
+  // The approved chips use the local calendar day, independently of timezone.
+  // Date.now and every real timer/Promise remain native for finite deadlines.
+  const localNoon = new NativeDate(2026, 9, 7, 12).getTime();
+  Object.defineProperty(globalThis, "Date", { ...descriptor, value: new Proxy(NativeDate, {
+    construct(target, argumentsList, newTarget) {
+      return Reflect.construct(target, argumentsList.length ? argumentsList : [localNoon], newTarget);
+    },
+  }) });
+  return () => Object.defineProperty(globalThis, "Date", descriptor);
+}
+
 it.each([true,false])("a held actual Native transcription has a reviewed visible pending and review surface with english=%s",async english=>{
+ const restoreDate = pinEntrySnapshotCalendar();
+ try {
  transcriptionLanguage=english?"es":null;transcriptionEnglish=english?ENGLISH:null;await mount();const held=hold();transcriptionBoundary=held.run;const uri=await recordNativeVoice(false);await vi.waitFor(()=>expect(held.entered()).toBe(true));expect(words()).toContain(tr("entry.voiceTranscribing"));expect(editor().props.value).toBe("");assertPublicSurface(publicSurface(root!),0);held.release();await flush();await vi.waitFor(()=>expect(editor().props.value).toBe(SPOKEN));expect(words()).toContain(english?"es":"Spanish as reported by the provider");expect(words().includes(ENGLISH)).toBe(english);assertPublicSurface(publicSurface(root!),1);expect(files.__hasFile(uri)).toBe(true);
+ } finally { restoreDate(); }
 });
 it("fresh actual typing while a Native transcription response is held keeps the newer words and saves their independently translated meaning",async()=>{
  await mount();const held=hold();transcriptionBoundary=held.run;await recordNativeVoice(false);await vi.waitFor(()=>expect(held.entered()).toBe(true));const latest="Estas palabras nuevas no se deben reemplazar";await type(latest);held.release();await flush();await vi.waitFor(()=>expect(words()).not.toContain(tr("entry.voiceTranscribing")));expect(editor().props.value).toBe(latest);await press("Keep the recording for 30 days — tap to turn off");await press("Save entry");await flush();const receipt=[...stored.values()][0]!;expect(decryptEntry({dataKey:KEY},USER,receipt.client_entry_id,receipt.blob,1)).toMatchObject({text:latest,english_text:"An independently translated edit"});
@@ -263,7 +281,10 @@ it.each([200,422])("every owned Native save and backup key is erased after statu
  status=code;const from=Buffer.from.bind(Buffer),owned:Buffer[]=[];vi.spyOn(Buffer,"from").mockImplementation(((...args:unknown[])=>{const result=(from as(...values:unknown[])=>Buffer)(...args);if(Buffer.isBuffer(args[0])&&args[0].length===32&&(args[0].equals(KEY)||args[0].every(byte=>byte===43))&&result!==args[0])owned.push(result);return result;})as typeof Buffer.from);await mount();await type(ORIGINAL);await press("Save entry");await flush();await act(async()=>root!.unmount());root=undefined;await waitJournalDraftWrites();await recentMoods(KEY,USER);await flush();expect(owned.length).toBeGreaterThan(1);expect(owned.every(copy=>copy.every(byte=>byte===0))).toBe(true);expect(vault.get().dataKey).toEqual(KEY);
 });
 it.each(["permission","prepare"])("a genuine Native %s refusal has a reviewed accessible microphone failure surface",async refusal=>{
+ const restoreDate = pinEntrySnapshotCalendar();
+ try {
  if(refusal==="permission")AudioModule.requestRecordingPermissionsAsync.mockResolvedValueOnce({granted:false});else recorderControls.prepareToRecordAsync.mockRejectedValueOnce(new Error("The Native microphone provider is unavailable"));await mount();await press("Record instead");await flush();expect(words()).toContain(tr(refusal==="permission"?"entry.voiceMicDenied":"entry.voiceRecordFailed"));expect(editor().props.value).toBe("");assertPublicSurface(publicSurface(root!),0);
+ } finally { restoreDate(); }
 });
 it("a retired Native save cannot overwrite a replacement origin's actual plaintext RAM fallback after its owner lookup completes",async()=>{
  const actual=await vi.importActual<typeof import("../../src/store")>("../../src/store"),prior=await getBaseUrl();let provider:ReturnType<typeof ReactTestRenderer.create>|undefined,live:ReturnType<typeof actual.useSession>;function NativeOwner(){live=actual.useSession();return <Text accessibilityLabel="Actual Native origin owner">{live.authStatus}</Text>;}try{await act(async()=>{provider=ReactTestRenderer.create(<actual.SessionProvider><NativeOwner/></actual.SessionProvider>);});await vi.waitFor(()=>expect(live.authStatus).toBe("loggedIn"));await mount();await type("These old-origin words must not replace the newly owned fallback");const held=hold(),read=secureStore.getItem.bind(secureStore);let first=true;vi.spyOn(secureStore,"getItem").mockImplementation(async slot=>{const value=await read(slot);if(first&&slot==="@mindpattern/user_id"){first=false;await held.run();}return value;});await press("Save entry",false);await vi.waitFor(()=>expect(held.entered()).toBe(true));await act(async()=>root!.unmount());root=undefined;await waitJournalDraftWrites();expect(await setBaseUrl("https://entry-replacement-origin.example")).toBeNull();await api.setSession("a real independently accepted replacement origin session",USER,"alice");const next=Buffer.alloc(32,93);vault.unlock({masterKey:Buffer.alloc(32,91),authKey:Buffer.alloc(32,92),dataKey:next},USER);installLocalDataKey(USER,next);await act(async()=>live.markLoggedIn());const scope=await journalDraftScope(USER),current={...newJournalDraft(),revision:1,text:"The replacement origin's actual RAM words remain owned"};stashDraft(USER,current.text,current,scope.origin);held.release();await flush();expect(takeStashedDraft(USER,scope.origin)).toBe(current.text);expect(stored.size).toBe(0);}finally{for(const release of releases)release();await setBaseUrl(prior);await api.setSession("restored Native fixture owner",USER,"alice");await act(async()=>live!.markLoggedIn());if(provider)await act(async()=>provider!.unmount());}

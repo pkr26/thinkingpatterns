@@ -30,7 +30,7 @@ export function installedPressability() {
 }
 
 /** A touch granted while enabled can release after React replaces config. */
-export function nativeGrantedPress(props: { disabled?: boolean; onPress: () => void }) {
+export function nativeGrantedPress(props: Record<string, unknown>) {
   const NativePressability = installedPressability();
   const responder = new NativePressability({ ...props, delayLongPress: 60_000 });
   const handlers = responder.getEventHandlers();
@@ -38,7 +38,7 @@ export function nativeGrantedPress(props: { disabled?: boolean; onPress: () => v
   if (!handlers.onStartShouldSetResponder(event)) throw new Error("Native touch was not admitted");
   handlers.onResponderGrant(event);
   return {
-    configure: (next: { disabled?: boolean; onPress: () => void }) => responder.configure({ ...next, delayLongPress: 60_000 }),
+    configure: (next: Record<string, unknown>) => responder.configure({ ...next, delayLongPress: 60_000 }),
     release: () => handlers.onResponderRelease(event),
     dispose: () => responder.reset(),
   };

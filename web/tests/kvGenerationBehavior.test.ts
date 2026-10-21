@@ -150,7 +150,7 @@ it("preserves a browser enumeration failure instead of reporting an empty device
     const request = original.apply(this, args); request.addEventListener("error", () => { browserError = request.error; }); queueMicrotask(() => this.transaction.abort()); return request;
   });
   try { await kv.keys(); throw new Error("expected failed enumeration"); }
-  catch (error) { expect(error).toBeInstanceOf(StorageReadError); expect(browserError).toMatchObject({ name: "AbortError" }); expect((error as Error).cause).toBe(browserError); }
+  catch (error) { expect(error).toBeInstanceOf(StorageReadError); expect(browserError).toMatchObject({ name: "AbortError" }); expect((error as Error).cause).toBe(browserError); expect(displayError(error, "Could not change the password.")).toContain("Retry before replacing or deleting stored records."); }
   vi.restoreAllMocks(); expect(await kv.keys()).toEqual(["retained"]);
 });
 it("keeps a deleted account fenced after checkpoint cleanup and never revives its generation", async () => {

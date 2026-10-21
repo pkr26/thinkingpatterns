@@ -179,6 +179,7 @@ function useVoicePlayback(unwrapKey: () => Promise<Uint8Array<ArrayBuffer> | nul
         const patientId = entry.patientUserId;
         if (!patientId) return;
         const fetched = await api.patientAudio(patientId, entry.audio.attachment_id);
+        if (operation !== playbackGeneration.current) { dataKey.fill(0); return; }
         const plain = await decryptAudio(dataKey, patientId, entry.client_entry_id!, fetched.blob);
         dataKey.fill(0);
         if (operation !== playbackGeneration.current) { plain.fill(0); return; }
@@ -539,6 +540,52 @@ async function loadStableCollection<T>(load: () => Promise<T>): Promise<T> {
   }
 }
 
+/** The initial chart and conflict recovery share the same bounded snapshot traversal. */
+async function loadPatientNotes(userId: string, current: () => boolean): Promise<Note[] | null> {
+  return loadStableCollection(async (): Promise<Note[] | null> => {
+    if (!current()) return null;
+    const rows: Note[] = [];
+    let offset = 0;
+    let revision: string | undefined;
+    // One extra request is a bounded terminal probe: compatibility mode
+    // infers a cursor from a headerless full final page, so exactly twenty
+    // complete pages must be allowed to prove there is no twenty-first.
+    for (let page = 0; page <= MAX_NOTE_PAGES; page += 1) {
+      if (!current()) return null;
+      const currentPage = await api.notes(
+        userId,
+        revision === undefined ? { offset } : { offset, expectedRevision: revision },
+      );
+      if (!current()) return null;
+      // A revision must be present on the first modern page and stay
+      // constant thereafter. A header appearing only after a legacy
+      // first page cannot prove that the already-retained rows belong to
+      // its snapshot, so fail rather than silently mixing histories.
+      if (revision === undefined && currentPage.revision !== undefined) {
+        if (offset !== 0) {
+          throw new Error("server changed the note pagination protocol mid-load");
+        }
+        revision = currentPage.revision;
+      } else if (revision !== undefined && currentPage.revision !== revision) {
+        throw new Error("server returned an inconsistent note snapshot revision");
+      }
+      if (page === MAX_NOTE_PAGES) {
+        if (currentPage.notes.length > 0) {
+          throw new Error("note history exceeds this portal's safe page limit");
+        }
+        break;
+      }
+      if (rows.length + currentPage.notes.length > MAX_NOTES_PER_LOAD) {
+        throw new Error("note history exceeds this portal's safe entry limit");
+      }
+      rows.push(...currentPage.notes);
+      if (currentPage.nextOffset === null) break;
+      offset = currentPage.nextOffset;
+    }
+    return rows;
+  });
+}
+
 /** 2026-09-26 audit L: analysis-generation rollback guard — the portal
  *  mirror of the patient clients' stateSeqGuard (web/src/stateSeqGuard.ts).
  *  AES-GCM authenticates WHO and WHAT a ciphertext belongs to, never WHICH
@@ -803,45 +850,8 @@ export function PatientView(props: {
     // therapist's own record.  Load them independently of insights so an
     // early baseline return cannot silently hide existing notes.
     const notesLoad = (async (): Promise<void> => {
-      const noteRows = await loadStableCollection(async (): Promise<Note[]> => {
-        const rows: Note[] = [];
-        let offset = 0;
-        let revision: string | undefined;
-        // One extra request is a bounded terminal probe: compatibility mode
-        // infers a cursor from a headerless full final page, so exactly twenty
-        // complete pages must be allowed to prove there is no twenty-first.
-        for (let page = 0; page <= MAX_NOTE_PAGES; page += 1) {
-          const currentPage = await api.notes(
-            patient.user_id,
-            revision === undefined ? { offset } : { offset, expectedRevision: revision },
-          );
-          // A revision must be present on the first modern page and stay
-          // constant thereafter. A header appearing only after a legacy
-          // first page cannot prove that the already-retained rows belong to
-          // its snapshot, so fail rather than silently mixing histories.
-          if (revision === undefined && currentPage.revision !== undefined) {
-            if (offset !== 0) {
-              throw new Error("server changed the note pagination protocol mid-load");
-            }
-            revision = currentPage.revision;
-          } else if (revision !== undefined && currentPage.revision !== revision) {
-            throw new Error("server returned an inconsistent note snapshot revision");
-          }
-          if (page === MAX_NOTE_PAGES) {
-            if (currentPage.notes.length > 0) {
-              throw new Error("note history exceeds this portal's safe page limit");
-            }
-            break;
-          }
-          if (rows.length + currentPage.notes.length > MAX_NOTES_PER_LOAD) {
-            throw new Error("note history exceeds this portal's safe entry limit");
-          }
-          rows.push(...currentPage.notes);
-          if (currentPage.nextOffset === null) break;
-          offset = currentPage.nextOffset;
-        }
-        return rows;
-      });
+      const noteRows = await loadPatientNotes(patient.user_id, () => operation === loadGeneration.current);
+      if (!noteRows) return;
       const opened: OpenNote[] = [];
       for (const row of noteRows) {
         try {
@@ -1202,6 +1212,7 @@ export function PatientView(props: {
   const saveNoteEdit = async (note: OpenNote) => {
     if (!draftReady || !editing || busy || note.unreadable) return;
     const submitted = { ...editing, text: editing.text.trim() };
+    const operation = loadGeneration.current;
     setBusy(true);
     setError("");
     try {
@@ -1230,14 +1241,19 @@ export function PatientView(props: {
       if (!mounted.current) return;
       if (err instanceof ApiError && err.status === 409) {
         try {
-          const result = await api.notes(patient.user_id);
-          const latest = result.notes.find(row => row.id === note.id);
+          const rows = await loadPatientNotes(patient.user_id, () => mounted.current && operation === loadGeneration.current);
+          if (!rows || !mounted.current || operation !== loadGeneration.current) return;
+          const latest = rows.find(row => row.id === note.id);
           if (latest) {
             const text = await decryptNoteAny(session.noteKeyV2, session.noteKey, session.userId, patient.user_id, latest.client_note_id, latest.blob, session.historicalNoteKeys);
-            if (mounted.current) setNotes(prev => prev.map(row => row.id === latest.id ? { ...latest, text } : row));
+            if (!mounted.current || operation !== loadGeneration.current) return;
+            setNotes(prev => prev.map(row => row.id === latest.id ? { ...latest, text } : row));
           }
           setError("This note changed on another device. Your draft is preserved. Compare the current saved text below before retrying your edit.");
-        } catch { setError("This note changed on another device. Your draft is preserved, but the current saved version could not be loaded. Retry when connected."); }
+        } catch {
+          if (!mounted.current || operation !== loadGeneration.current) return;
+          setError("This note changed on another device. Your draft is preserved, but the current saved version could not be loaded. Retry when connected.");
+        }
         return;
       }
       setError(displayError(err, "could not save the note edit"));
@@ -1407,6 +1423,7 @@ export function PatientView(props: {
             ))}
           </dl>
           <Button label="Back to all patterns" small onPress={() => {
+            voicePlayback.release();
             drilldownGeneration.current += 1;
             setSelected(null);
             setEntries(null);
@@ -1684,8 +1701,12 @@ export function PatientView(props: {
             <button
               key={tpl}
               type="button"
-              onClick={() => setDraft(draft.trim() ? `${draft.trimEnd()}
-${tpl}` : tpl)}
+              onClick={() => {
+                if (!draftReady) return;
+                setDraft(draft.trim() ? `${draft.trimEnd()}
+${tpl}` : tpl);
+              }}
+              disabled={!draftReady}
               className="tpl-chip"
             >
               {tpl.split("\n")[0]!.split(":")[0]}
@@ -1695,6 +1716,7 @@ ${tpl}` : tpl)}
             <button
               type="button"
               onClick={() => {
+                if (!draftReady) return;
                 // H-13 (2026-09-20): notes arrive created_at ASCENDING, so
                 // the newest note — the one "copy forward" promises — is the
                 // LAST element.  `[0]` seeded the draft with the oldest
@@ -1703,6 +1725,7 @@ ${tpl}` : tpl)}
                 const source = chartNotes.filter(note => !note.unreadable).at(-1);
                 if (source) setDraft(source.text);
               }}
+              disabled={!draftReady}
               className="tpl-chip"
             >
               Copy forward last note

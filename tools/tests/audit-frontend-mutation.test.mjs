@@ -9,7 +9,7 @@ const mutant = { id: '0', mutatorName: 'BooleanLiteral', replacement: 'false',
 const sources = new Map([['src/example.ts', source], ['src/types.ts', 'export type Flag = boolean;\n']]);
 const enumeration = [{ ...mutant, fileName: 'src/example.ts' }];
 function report(status = 'Killed') {
-  return { files: { 'src/example.ts': { source, mutants: [{ ...mutant, status }] } } };
+  return { files: { 'src/example.ts': { source, mutants: [{ ...mutant, status, testsCompleted: 1 }] } } };
 }
 
 test('accepts complete current-source inventory, including zero-operator modules', () => {
@@ -125,5 +125,18 @@ test('zero-test runner observations cannot earn runtime kills or equivalent clos
     if (status === 'Survived') assert.throws(()=>auditReport(sources,enumeration,empty,[{
       key:mutantKey('src/example.ts',mutant),disposition:'Equivalent',contract:'Public behavior.',reason:'Guard redundancy.',evidence:['review.json'],
     }]),/valid test observation/);
+  }
+});
+
+test('missing completion counts and mislabeled worker faults remain unresolved', () => {
+  for (const count of [undefined, null, -1, 1.5, '1']) {
+    const observation = report(); observation.files['src/example.ts'].mutants[0].testsCompleted = count;
+    const result = auditReport(sources, enumeration, observation);
+    assert.equal(result.runtimeKills, 0); assert.equal(result.unresolved, 1);
+  }
+  for (const reason of ['Worker exited unexpectedly', 'Unhandled error in test worker', 'Worker failed with code 1', 'beforeAll failed', 'afterEach failure', 'Failed to collect test', 'Test runner failed', 'ExecutionError: producer did not complete', 'SetupError: unsupported fixture', 'MemoWitnessScheduleFault: producer order missed']) {
+    const observation = report(); observation.files['src/example.ts'].mutants[0].statusReason = reason;
+    const result = auditReport(sources, enumeration, observation);
+    assert.equal(result.runtimeKills, 0); assert.equal(result.runnerFaultFailures, 1); assert.equal(result.unresolved, 1);
   }
 });

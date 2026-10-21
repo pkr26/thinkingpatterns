@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { decrypt, encrypt, fromBase64, toBase64 } from "../src/crypto/core";
 import { buildAad } from "../src/crypto/aad";
 import { kv, setKvBackendForTests } from "../src/kvstore";
+import { newWriteGeneration, StorageCommitError, writeGenerationKey } from "../src/kvstore";
 import { readMutedPids, writeMutedPids, adoptLegacyPlaintextMutes } from "../src/patternMutes";
 import { buildFeedbackBlob, recordFeedbackTap, recordPatternMute } from "../src/questionFeedback";
 import { savePendingMeasure, loadPendingMeasure, clearPendingMeasure, type PendingMeasure } from "../src/pendingMeasure";
@@ -69,6 +70,103 @@ it.each(["mute read", "mute write", "feedback append", "feedback recompute", "fa
   vi.mocked(encrypt).mock.calls.forEach(([, plaintext]) => expect(plaintext).toEqual(new Uint8Array(plaintext.length)));
   for (const result of await Promise.allSettled(vi.mocked(decrypt).mock.results.map(row => row.value as Promise<Uint8Array>))) if (result.status === "fulfilled") expect(result.value).toEqual(new Uint8Array(result.value.length));
   expect(key).toEqual(new Uint8Array(32).fill(17));
+  // A rejected permit owns its copied key even while an earlier public
+  // read keeps the serialized mute queue pending. Only the declared Map
+  // storage response is held; native key-tag crypto and permit rejection run.
+  if (operation === "mute write") {
+    const slot = `mindpattern.patternMutes.v1.${owner}`, generation = writeGenerationKey(owner);
+    const retained = records.get(slot); if (typeof retained !== "string") throw new Error("SetupError: genuine retained mute ciphertext missing");
+    records.set(generation, await newWriteGeneration(owner, key));
+    let entered!: () => void, open!: () => void;
+    const enteredPromise = new Promise<void>(resolve => { entered = resolve; }), gate = new Promise<void>(resolve => { open = resolve; });
+    let held = false, holdNextMuteRead = true, slotWrites = 0;
+    const release = () => { held = false; open(); };
+    const backendOriginals: Promise<unknown>[] = [];
+    const ownBackend = <T,>(original: Promise<T>): Promise<T> => { backendOriginals.push(original); void original.catch(() => undefined); return original; };
+    const setup = (label: string, cause?: unknown) => new Error("SetupError: rejected mute permit: " + label, cause === undefined ? undefined : { cause });
+    async function completed<T>(original: Promise<T>, label: string): Promise<T> {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try { return await Promise.race([original, new Promise<never>((_yes, no) => { timer = setTimeout(() => no(setup(label + " did not finish")), 5000); })]); }
+      finally { if (timer !== undefined) clearTimeout(timer); }
+    }
+    setKvBackendForTests({
+      getItem(name) {
+        const value = records.get(name) ?? null;
+        return ownBackend((async () => {
+          if (name === slot && holdNextMuteRead) { holdNextMuteRead = false; held = true; entered(); await gate; }
+          return value;
+        })());
+      },
+      setItem(name, value) { return ownBackend((async () => { if (name === slot) slotWrites++; records.set(name, value); })()); },
+      removeItem(name) { return ownBackend((async () => { records.delete(name); })()); },
+      keys() { return ownBackend(Promise.resolve([...records.keys()])); },
+    });
+    let predecessor: ReturnType<typeof readMutedPids> | undefined, writing: ReturnType<typeof writeMutedPids> | undefined;
+    let capture: ReturnType<typeof kv.captureWritePermit> | undefined, copiedKey: Parameters<typeof kv.captureWritePermit>[1];
+    let predecessorState = "pending", writeState = "not started";
+    const originalCapture = kv.captureWritePermit;
+    let restoreCapture: (() => void) | undefined;
+    try {
+      predecessor = readMutedPids(key, owner);
+      void predecessor.then(() => { predecessorState = "fulfilled"; }, () => { predecessorState = "rejected"; });
+      await completed(enteredPromise, "original earlier public mute read admission");
+      const marker = JSON.parse(records.get(generation)!);
+      records.set(generation, JSON.stringify({ ...marker, deleted: true }));
+      const captureObserver = vi.spyOn(kv, "captureWritePermit").mockImplementation((...args) => {
+        copiedKey = args[1]; const original = originalCapture(...args); capture = original;
+        // Observe and return the identical original Promise. The shipping
+        // immediate zeroize rejection reaction is registered after return.
+        void original.catch(() => undefined); return original;
+      });
+      restoreCapture = () => captureObserver.mockRestore();
+      writing = writeMutedPids(key, owner, ["must not replace retained mutes"]); writeState = "pending";
+      void writing.then(() => { writeState = "fulfilled"; }, () => { writeState = "rejected"; });
+      expect(captureObserver).toHaveBeenCalledTimes(1);
+      const original = capture, ownedCopy = copiedKey;
+      if (!original || !ownedCopy || ownedCopy === key || ownedCopy.buffer === key.buffer) throw setup("same original capture or distinct owned key copy missing");
+      // This allSettled observer is registered only after writeMutedPids has
+      // registered its own immediate rejection reaction. Promise FIFO owns
+      // the boundary; there is no sleep/turn or private mutex inspection.
+      const captureOutcome = await completed(Promise.allSettled([original]), "same original deleted-generation permit rejection");
+      const refused = captureOutcome[0]; if (!refused || refused.status !== "rejected") throw setup("real deleted generation did not refuse the original permit");
+      expect(refused.reason).toBeInstanceOf(StorageCommitError);
+      expect(held).toBe(true); expect(predecessorState).toBe("pending"); expect(writeState).toBe("pending");
+      expect([...ownedCopy], "A rejected native write permit retires its copied mute key while the earlier public read still owns the queue").toEqual(Array(32).fill(0));
+      expect([...key]).toEqual(Array(32).fill(17));
+      expect(slotWrites).toBe(0); expect(records.get(slot)).toBe(retained);
+      release();
+      expect(await completed(predecessor, "released same original public mute read")).toEqual(new Set(["retained"]));
+      const writeOutcome = await completed(Promise.allSettled([writing]), "same queued public mute write rejection");
+      const rejected = writeOutcome[0]; if (!rejected || rejected.status !== "rejected") throw setup("queued mute write did not retain its original permit refusal");
+      expect(rejected.reason).toBe(refused.reason);
+      expect([...ownedCopy]).toEqual(Array(32).fill(0)); expect([...key]).toEqual(Array(32).fill(17));
+      expect(slotWrites).toBe(0); expect(records.get(slot)).toBe(retained);
+    } finally {
+      // Release before any drain, including when the key-lifetime assertion
+      // failed. Only the genuine capture/write StorageCommitError is admitted.
+      release();
+      try {
+        const cleanupFaults: unknown[] = [];
+        if (predecessor) {
+          const settled = await completed(Promise.allSettled([predecessor]), "original read cleanup");
+          if (settled[0]?.status !== "fulfilled") cleanupFaults.push(setup("original predecessor read failed during cleanup", settled[0]));
+        }
+        if (capture || writing) {
+          if (!capture || !writing) cleanupFaults.push(setup("partial original capture/write ownership"));
+          const settled = await completed(Promise.allSettled([capture, writing]), "original capture and queued write cleanup");
+          const first = settled[0], second = settled[1];
+          if (first?.status !== "rejected" || !(first.reason instanceof StorageCommitError) || second?.status !== "rejected" || second.reason !== first.reason) cleanupFaults.push(setup("cleanup did not retain identical genuine permit/write rejection", settled));
+        }
+        for (;;) {
+          const originals = [...backendOriginals];
+          const settled = await completed(Promise.allSettled(originals), "all original Map storage producers cleanup");
+          const failed = settled.find(value => value.status === "rejected"); if (failed) cleanupFaults.push(setup("original Map storage producer rejected", failed));
+          if (originals.length === backendOriginals.length) break;
+        }
+        if (cleanupFaults.length) throw setup("one or more original cleanup producers failed", cleanupFaults);
+      } finally { restoreCapture?.(); setKvBackendForTests(null); }
+    }
+  }
 });
 it("rejects a coercible array snooze and keeps unknown questionnaire history suppressed", () => {
   const pref = parseCadence(JSON.stringify({ enabled: true, intervalWeeks: 4, snoozedUntil: ["2026-10-05"] })); expect(pref.snoozedUntil).toBeNull();

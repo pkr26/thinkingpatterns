@@ -6,7 +6,7 @@ import { accountStorageKey } from "../src/accountStorage";
 import * as feedback from "../src/questionFeedback";
 import * as envelope from "../src/crypto/envelope";
 import { engine } from "../src/crypto/engine";
-import { captureLocalWritePermit, installLocalDataKey, markAccountDeleted, __resetLocalKeyLifecycleForTests } from "../src/localWriteGuard";
+import { captureLocalWritePermit, installLocalDataKey, markAccountDeleted, localWriteScopeEpoch, __resetLocalKeyLifecycleForTests } from "../src/localWriteGuard";
 import { runTestControl } from "./helpers/testControl";
 import storage from "./helpers/storageMock";
 const USER = "a".repeat(32), KEY = Buffer.alloc(32, 21);
@@ -18,10 +18,10 @@ const queued = async () => { const raw = await storage.getItem(accountStorageKey
 beforeEach(async()=>{vi.restoreAllMocks();storage.__reset();runTestControl(__resetLocalKeyLifecycleForTests);vault.lock();await api.setSession("Native receipt bearer",USER,"alice");vault.unlock({masterKey:Buffer.alloc(32,3),authKey:Buffer.alloc(32,4),dataKey:Buffer.from(KEY)},USER);installLocalDataKey(USER,vault.get().dataKey);});
 afterEach(async()=>{vi.restoreAllMocks();vault.lock();await api.clearSession();});
 it("an initially retired Native feedback builder does not wait on an unavailable encrypted read",async()=>{
- let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;});vi.spyOn(storage,"getItem").mockImplementation(()=>gate.then(()=>null));let finished=false;const result=feedback.buildFeedbackBlob(KEY,USER,undefined,()=>false).catch(error=>{finished=true;return error;});try{await Promise.race([result,new Promise(resolve=>setTimeout(resolve,120))]);expect(finished).toBe(true);}finally{release();await result;}
+ let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;});vi.spyOn(storage,"getItem").mockImplementation(()=>gate.then(()=>null));let finished=false;const result=feedback.buildFeedbackBlob(KEY,USER,undefined,()=>false).catch(error=>{finished=true;return error;});try{await Promise.race([result,new Promise(resolve=>setTimeout(resolve,120))]);expect(finished).toBe(true);expect(await result).toMatchObject({name:"Error",message:"The feedback view has retired"});}finally{release();await result;}
 });
 it.each(["receipt","legacy"] as const)("an initially retired Native %s clear refuses before waiting behind an accepted unavailable append",async mode=>{
- await feedback.recordFeedbackTap(KEY,USER,"earlier",true);const {receipt}=await sealed(),get=storage.getItem.bind(storage);let entered=false,release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;});vi.spyOn(storage,"getItem").mockImplementation(async name=>{const raw=await get(name);if(name===accountStorageKey.feedback(USER)){entered=true;await gate;}return raw;});const first=feedback.recordFeedbackTap(KEY,USER,"accepted",false);await vi.waitFor(()=>expect(entered).toBe(true));let finished=false;const result=feedback.clearFeedback(USER,captureLocalWritePermit(USER,KEY),mode==="receipt"?{dataKey:KEY,receipt}:undefined,()=>false).catch(error=>{finished=true;return error;});try{await Promise.race([result,new Promise(resolve=>setTimeout(resolve,120))]);expect(finished).toBe(true);}finally{release();await Promise.all([first,result]);}
+ await feedback.recordFeedbackTap(KEY,USER,"earlier",true);const {receipt}=await sealed(),get=storage.getItem.bind(storage);let entered=false,release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;});vi.spyOn(storage,"getItem").mockImplementation(async name=>{const raw=await get(name);if(name===accountStorageKey.feedback(USER)){entered=true;await gate;}return raw;});const first=feedback.recordFeedbackTap(KEY,USER,"accepted",false);await vi.waitFor(()=>expect(entered).toBe(true));let finished=false;const result=feedback.clearFeedback(USER,captureLocalWritePermit(USER,KEY),mode==="receipt"?{dataKey:KEY,receipt}:undefined,()=>false).catch(error=>{finished=true;return error;});try{await Promise.race([result,new Promise(resolve=>setTimeout(resolve,120))]);expect(finished).toBe(true);expect(await result).toMatchObject({name:"Error",message:"The feedback view has retired"});}finally{release();await Promise.all([first,result]);}
 });
 it("a Native builder retired between its receipt decoder and await continuation refuses its returned encrypted blob",async()=>{
  await feedback.recordFeedbackTap(KEY,USER,"earlier",true);const get=storage.getItem.bind(storage);let current=true,first=true;vi.spyOn(storage,"getItem").mockImplementation(async name=>{const raw=await get(name);if(first&&name===accountStorageKey.feedback(USER)){first=false;queueMicrotask(()=>queueMicrotask(()=>{current=false;}));}return raw;});await expect(feedback.buildFeedbackBlob(KEY,USER,undefined,()=>current)).rejects.toBeInstanceOf(Error);
@@ -40,6 +40,36 @@ it.each(["build","receipt clear"] as const)("a Native %s read delivered after vi
 });
 it.each(["receipt clear","legacy clear"] as const)("a queued Native %s retires before dispatching an unavailable old-view read or erasure",async mode=>{
  await feedback.recordFeedbackTap(KEY,USER,"earlier",true);const {receipt}=await sealed(),slot=accountStorageKey.feedback(USER),get=storage.getItem.bind(storage);let entered=false,first=true,current=true,allowFresh=false,releaseFirst!:()=>void,releaseLate!:()=>void;const firstGate=new Promise<void>(resolve=>{releaseFirst=resolve;}),lateGate=new Promise<void>(resolve=>{releaseLate=resolve;});vi.spyOn(storage,"getItem").mockImplementation(async name=>{const raw=await get(name);if(name===slot){if(first){first=false;entered=true;await firstGate;}else if(!current&&!allowFresh)await lateGate;}return raw;});const remove=storage.removeItem.bind(storage);vi.spyOn(storage,"removeItem").mockImplementation(async name=>{if(name===slot&&!current&&!allowFresh)await lateGate;return remove(name);});const firstAppend=feedback.recordFeedbackTap(KEY,USER,"accepted",false);await vi.waitFor(()=>expect(entered).toBe(true));const stale=feedback.clearFeedback(USER,captureLocalWritePermit(USER,KEY),mode==="receipt clear"?{dataKey:KEY,receipt}:undefined,()=>current).catch(error=>error);current=false;releaseFirst();let finished=false,fresh:Promise<void>=Promise.resolve();const settled=stale.then(()=>{finished=true;});try{await Promise.race([settled,new Promise(resolve=>setTimeout(resolve,120))]);expect(finished).toBe(true);allowFresh=true;fresh=feedback.recordFeedbackTap(KEY,USER,"current",true);await fresh;}finally{releaseFirst();releaseLate();await Promise.all([firstAppend,stale,fresh]);}expect((await queued()).map((event:feedback.FeedbackTap)=>event.pid)).toEqual(["earlier","accepted","current"]);
+ if(mode==="legacy clear") {
+  // A real account transition retires both the public view receipt and
+  // captured write permit while this clear waits behind a native read.
+  vi.restoreAllMocks();
+  await api.setSession("queued feedback original bearer",USER,"alice");
+  const nativeRead=storage.getItem.bind(storage),beforeWire=await nativeRead(slot);
+  const viewEpoch=localWriteScopeEpoch(),stillOwned=()=>localWriteScopeEpoch()===viewEpoch;
+  let blockedRead=false,holdOnce=true,releaseQueuedAppend:()=>void=()=>{};
+  const nativeGate=new Promise<void>(resolve=>{releaseQueuedAppend=resolve;});
+  let blockedAppend:Promise<unknown>=Promise.resolve(),queuedClear:Promise<unknown>=Promise.resolve();
+  vi.spyOn(storage,"getItem").mockImplementation(async name=>{
+   const value=await nativeRead(name);
+   if(name===slot&&holdOnce){holdOnce=false;blockedRead=true;await nativeGate;}
+   return value;
+  });
+  try {
+   blockedAppend=feedback.recordFeedbackTap(KEY,USER,"accepted before account retirement",true).catch(error=>error);
+   await vi.waitFor(()=>expect(blockedRead).toBe(true));
+   const permit=captureLocalWritePermit(USER,KEY);
+   queuedClear=feedback.clearFeedback(USER,permit,undefined,stillOwned).catch(error=>error);
+   await api.setSession("queued feedback replacement bearer","b".repeat(32),"bob");
+   releaseQueuedAppend();
+   const failure=await queuedClear;await blockedAppend;
+   expect(failure,"a queued legacy feedback clear preserves its public view-retirement refusal before account-permit refusal").toHaveProperty("message","The feedback view has retired");
+   expect(await nativeRead(slot)).toBe(beforeWire);
+  } finally {
+   releaseQueuedAppend();await Promise.allSettled([blockedAppend,queuedClear]);vi.restoreAllMocks();
+  }
+ }
+
 });
 it("acknowledging an earlier Native feedback blob preserves a later tap for the next recompute",async()=>{
  await feedback.recordPatternMute(KEY,USER,"topic:earlier",true);let receipt:Receipt={events:[{pid:"topic:earlier",mute:true}]};const blob=await prepare(KEY,USER,value=>{receipt=value;});expect(decode(blob!)).toEqual({feedback:[],muted:["topic:earlier"],unmuted:[]});
@@ -48,6 +78,41 @@ it("acknowledging an earlier Native feedback blob preserves a later tap for the 
 async function sealed() { let receipt:Receipt|undefined;const blob=await prepare(KEY,USER,value=>{receipt=value;});expect(blob).toBeTruthy();expect(receipt).toBeDefined();return {blob:blob!,receipt:receipt!}; }
 it("Native event ids are fresh internal metadata and never enter the server feedback payload",async()=>{
  await feedback.recordFeedbackTap(KEY,USER,"same",true);await feedback.recordFeedbackTap(KEY,USER,"same",true);await feedback.recordPatternMute(KEY,USER,"same",false);const {blob,receipt}=await sealed();expect(receipt.events).toHaveLength(3);expect(new Set(receipt.events.map(event=>event.event_id)).size).toBe(3);receipt.events.forEach(event=>expect(event.event_id).toMatch(/^[A-Za-z0-9+/]{22}==$/));expect(decode(blob)).toEqual({feedback:[{pid:"same",resonated:true},{pid:"same",resonated:true}],muted:[],unmuted:["same"]});
+ // A public deadline may pass while the ordinary synchronous cipher finishes.
+ // Delegate every crypto byte; model elapsed wall time only at that completion.
+ const deadlineSlot = accountStorageKey.feedback(USER), beforeDeadlineWire = await storage.getItem(deadlineSlot);
+ const deadlineBefore = (await queued()).map((event: { pid: string }) => event.pid);
+ const clockStartedAt = Date.UTC(2026, 9, 20, 12), expiresAt = clockStartedAt + 1;
+ let deadlineAppend: Promise<void> | null = null;
+ try {
+  vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(clockStartedAt);
+  const nativeCreate = engine.createCipheriv.bind(engine);
+  vi.spyOn(engine, "createCipheriv").mockImplementation((...args) => {
+   const cipher = nativeCreate(...args), nativeFinal = cipher.final.bind(cipher);
+   vi.spyOn(cipher, "final").mockImplementation(() => {
+    const encrypted = nativeFinal();
+    vi.setSystemTime(expiresAt);
+    return encrypted;
+   });
+   return cipher;
+  });
+  deadlineAppend = feedback.recordFeedbackTap(KEY, USER, "expired-after-cipher", false, () => Date.now() < expiresAt);
+  const deadlineOutcome = await deadlineAppend.then(
+   () => ({ status: "fulfilled" as const }),
+   error => ({ status: "rejected" as const, message: error instanceof Error ? error.message : String(error) }),
+  );
+  expect(Date.now(), "The delegated feedback encryption completed at the expired deadline").toBe(expiresAt);
+  expect(deadlineOutcome, "A public feedback deadline that expires during encryption refuses the durable append")
+   .toEqual({ status: "rejected", message: "The feedback view has retired" });
+  expect(await storage.getItem(deadlineSlot), "Expired feedback leaves the authenticated stored wire unchanged").toBe(beforeDeadlineWire);
+ } finally {
+  try { if (deadlineAppend) await Promise.allSettled([deadlineAppend]); }
+  finally { vi.restoreAllMocks(); vi.useRealTimers(); }
+ }
+ await feedback.recordFeedbackTap(KEY, USER, "fresh-after-deadline", false);
+ expect((await queued()).map((event: { pid: string }) => event.pid)).toEqual([...deadlineBefore, "fresh-after-deadline"]);
+ expect(KEY).toEqual(Buffer.alloc(32, 21));
+
 });
 it("identical Native late taps survive consumption of only the earlier event id",async()=>{
  await feedback.recordFeedbackTap(KEY,USER,"same",true);const {receipt}=await sealed();await feedback.recordFeedbackTap(KEY,USER,"same",true);await consume(USER,captureLocalWritePermit(USER,KEY),{dataKey:KEY,receipt});expect((await queued()).map((event:feedback.FeedbackTap)=>({pid:event.pid,resonated:event.resonated}))).toEqual([{pid:"same",resonated:true}]);
@@ -79,6 +144,25 @@ it.each(["append-first","consume-first"])("the Native %s lane preserves the late
 });
 it.each(["delete","rewrite"])("Native %s acknowledgment refuses a retired scope and preserves its account wire",async mode=>{
  await feedback.recordFeedbackTap(KEY,USER,"earlier",true);const {receipt}=await sealed();if(mode==="rewrite")await feedback.recordFeedbackTap(KEY,USER,"later",false);const read=storage.getItem.bind(storage),before=await read(accountStorageKey.feedback(USER));let entered=false,release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;});vi.spyOn(storage,"getItem").mockImplementation(async name=>{const value=await read(name);if(name===accountStorageKey.feedback(USER)){entered=true;await gate;}return value;});const pending=consume(USER,captureLocalWritePermit(USER,KEY),{dataKey:KEY,receipt});const observed=pending.catch(error=>error);await vi.waitFor(()=>expect(entered).toBe(true));await api.setSession("replacement Native receipt bearer","b".repeat(32),"bob");release();expect(await observed).toBeInstanceOf(Error);expect(await read(accountStorageKey.feedback(USER))).toBe(before);
+ // A caller-owned receipt can release its view when its entries are consumed.
+ // Read the real prepared entries unchanged; cancellation is a real vault lock,
+ // while the public ownership predicate only reads the current view snapshot.
+ vi.restoreAllMocks();
+ await api.setSession("Native receipt access cancellation bearer",USER,"alice");
+ const viewKey=Buffer.from(KEY);
+ vault.unlock({masterKey:Buffer.alloc(32,3),authKey:Buffer.alloc(32,4),dataKey:viewKey},USER);
+ installLocalDataKey(USER,viewKey);
+ const slot=accountStorageKey.feedback(USER),wireBeforeCancellation=await storage.getItem(slot);
+ const ownedReceipt:feedback.FeedbackReceipt={get events(){vault.lock();return receipt.events;}};
+ const pendingReceiptClear=feedback.clearFeedback(USER,captureLocalWritePermit(USER,viewKey),{dataKey:viewKey,receipt:ownedReceipt},()=>vault.isUnlocked()&&vault.ownerUserId()===USER&&vault.get().dataKey===viewKey);
+ try {
+  await expect(pendingReceiptClear).rejects.toThrow("The feedback view has retired");
+  expect(await storage.getItem(slot)).toBe(wireBeforeCancellation);
+ } finally {
+  await pendingReceiptClear.catch(()=>{});
+  vault.lock();
+ }
+
 });
 it.each(["wire-cipher-refusal","callback-refusal","successful-clear","rewrite-refusal"])("Native %s retires all actual owned feedback key and plaintext buffers",async outcome=>{
  await feedback.recordFeedbackTap(KEY,USER,"earlier",true);let receipt:Receipt;const before=await sealed();receipt=before.receipt;if(outcome==="rewrite-refusal")await feedback.recordFeedbackTap(KEY,USER,"later",false);const keys:Buffer[]=[],plains:Buffer[]=[],original=envelope.encrypt;vi.spyOn(envelope,"encrypt").mockImplementation((...args)=>{keys.push(args[0]);plains.push(args[1]);if(outcome==="wire-cipher-refusal")throw new Error("Native cipher refused");return original(...args);});
@@ -114,7 +198,9 @@ it.each(["tap", "mute"] as const)("a Native %s caller admits feedback only while
   await append("current view", () => true);
   const before = await queued();
   expect(before).toHaveLength(1);
-  await expect(append("retired view", () => false)).rejects.toBeInstanceOf(Error);
+  const refused = append("retired view", () => false);
+  await expect(refused).rejects.toBeInstanceOf(Error);
+  await expect(refused).rejects.toThrow("The feedback view has retired");
   expect(await queued()).toEqual(before);
 });
 

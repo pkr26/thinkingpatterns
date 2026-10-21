@@ -9,6 +9,7 @@
  *  store option VALUES and selection compares values. */
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createCipheriv, createDecipheriv } from "node:crypto";
 import { MeasuresView } from "../src/views/Measures";
 import { measurePayload, measureScore, optionSelected } from "../src/measures";
 import { clearPendingMeasure, loadPendingMeasure, savePendingMeasure, type PendingMeasure } from "../src/pendingMeasure";
@@ -25,11 +26,59 @@ import {
 } from "../src/measureCadence";
 import { localDateISO } from "../src/dates";
 import { vault } from "../src/vault";
+// BEGIN measures retired operation import
+import { clearSession, setSession, sessionAbortSignal } from "../src/api/client";
+// END measures retired operation import
 import { installSession, jsonResponse, resetTestState, stubFetch } from "./helpers/api";
 import { press, render, settle, textOf, textOfNode } from "./helpers/rtr";
 
 const ORIGIN = "http://localhost:5173";
 const USER = "user-1";
+
+// Independently authenticate nonce(12)||ciphertext||tag(16); short Base64
+// substrings have no plaintext meaning. Account/context bindings are literal.
+class CiphertextOracleRejection extends Error {}
+function independentlyOpenMeasureBlob(raw: string, key: Buffer, aad: Buffer): string {
+  try {
+    const blob = Buffer.from(raw, "base64");
+    if (blob.length < 28 || blob.toString("base64") !== raw) throw new CiphertextOracleRejection("Invalid encrypted envelope");
+    const decipher = createDecipheriv("aes-256-gcm", key, blob.subarray(0, 12));
+    decipher.setAAD(aad);
+    decipher.setAuthTag(blob.subarray(-16));
+    return Buffer.concat([decipher.update(blob.subarray(12, -16)), decipher.final()]).toString("utf8");
+  } catch (error) {
+    if (error instanceof CiphertextOracleRejection) throw error;
+    if (error instanceof Error && error.constructor === Error && error.name === "Error" && !("code" in error)
+        && error.message === "Unsupported state or unable to authenticate data") {
+      throw new CiphertextOracleRejection("Native AES-GCM authentication refused the envelope", { cause: error });
+    }
+    throw new Error("SetupError: unexpected native AES-GCM oracle failure", { cause: error });
+  }
+}
+
+function checkIndependentMeasureOracle(literal: "phq2" | "phq9", key: Buffer, aad: Buffer, plaintext: string): void {
+  const nonce = Buffer.alloc(12);
+  Buffer.from(literal, "base64").copy(nonce);
+  const seal = (text: string): Buffer => {
+    const cipher = createCipheriv("aes-256-gcm", key, nonce);
+    cipher.setAAD(aad);
+    return Buffer.concat([nonce, cipher.update(text, "utf8"), cipher.final(), cipher.getAuthTag()]);
+  };
+  const blob = seal(plaintext); const raw = blob.toString("base64");
+  expect(raw).toContain(literal);
+  expect(independentlyOpenMeasureBlob(raw, key, aad)).toBe(plaintext);
+  const corrupt = Buffer.from(blob);
+  corrupt[corrupt.length - 1] = corrupt[corrupt.length - 1]! ^ 1;
+  expect(() => independentlyOpenMeasureBlob(corrupt.toString("base64"), key, aad)).toThrow(CiphertextOracleRejection);
+  expect(() => independentlyOpenMeasureBlob(raw, Buffer.alloc(32, 9), aad)).toThrow(CiphertextOracleRejection);
+  expect(() => independentlyOpenMeasureBlob(raw, key, Buffer.from('["wrong-context","user-1"]'))).toThrow(CiphertextOracleRejection);
+  expect(() => independentlyOpenMeasureBlob(raw, key, Buffer.from(aad.toString("utf8").replace("user-1", "user-2")))).toThrow(CiphertextOracleRejection);
+  expect(() => independentlyOpenMeasureBlob(plaintext, key, aad)).toThrow(CiphertextOracleRejection);
+  expect(() => independentlyOpenMeasureBlob(Buffer.from(plaintext).toString("base64"), key, aad)).toThrow(CiphertextOracleRejection);
+  expect(() => independentlyOpenMeasureBlob(raw, Buffer.alloc(31, 4), aad)).toThrow(/^SetupError:/);
+  const otherPlaintext = plaintext + " ";
+  expect(independentlyOpenMeasureBlob(seal(otherPlaintext).toString("base64"), key, aad)).not.toBe(plaintext);
+}
 
 const memoryBackend = (): KvBackend => {
   const map = new Map<string, string>();
@@ -245,7 +294,11 @@ describe("MeasuresView offline persistence (audit 2026-09-26 LOW: the offline ga
   });
 
   it("the persisted record is ciphertext in the slot, never plaintext picks", async () => {
-    stubFetch(() => {
+    let attempted: { client_measure_id: string; measure_date: string } | null = null;
+    stubFetch((url, init) => {
+      if (url.endsWith("/measures") && init.method === "POST") {
+        attempted = JSON.parse(String(init.body)) as { client_measure_id: string; measure_date: string };
+      }
       throw new Error("down");
     });
     const { kv } = await import("../src/kvstore");
@@ -261,8 +314,19 @@ describe("MeasuresView offline persistence (audit 2026-09-26 LOW: the offline ga
     expect(slotKey).toBeTruthy();
     const raw = await kv.getItem(slotKey!);
     expect(raw).not.toBeNull();
-    expect(raw!).not.toContain("phq2");
-    expect(raw!).not.toMatch(/clientMeasureId/);
+    expect(attempted).not.toBeNull();
+    expect(attempted!.client_measure_id).toMatch(/^m-\d{4}-\d{2}-\d{2}-[A-Za-z0-9]{1,8}$/);
+    expect(attempted!.measure_date).toBe(localDateISO());
+    const expectedPlaintext = JSON.stringify({
+      kind: "phq2", clientMeasureId: attempted!.client_measure_id,
+      picks: [1, 3], date: attempted!.measure_date,
+    });
+    const key = Buffer.alloc(32, 4);
+    const aad = Buffer.from('["pending-measure","user-1"]', "utf8");
+    let opened: string | null = null;
+    expect(() => { opened = independentlyOpenMeasureBlob(raw!, key, aad); }).not.toThrow();
+    expect(opened).toBe(expectedPlaintext);
+    checkIndependentMeasureOracle("phq2", key, aad, expectedPlaintext);
   });
 });
 
@@ -314,6 +378,138 @@ describe("MeasuresView zeroized-key race (audit 2026-09-27)", () => {
     // (it will retry after the next unlock, under the same id).
     const pending = await loadPendingMeasure(originalKey, USER);
     expect(pending).toMatchObject<Partial<PendingMeasure>>({ kind: "phq2", picks: [1, 3] });
+    // BEGIN measures retired operation regression
+    // The real native crypto result waits before delivery to the old view.
+    await act(async () => { root.unmount(); });
+    const escapes: boolean[] = [];
+    const observations: Array<Record<string, unknown>> = [];
+    for (const phase of ["save-encrypt", "restore-decrypt"] as const) {
+      resetTestState();
+      const ownerA = "measure-retired-owner-a", ownerB = "measure-replacement-owner-b";
+      const keyA = new Uint8Array(new ArrayBuffer(32)).fill(31);
+      const keyB = new Uint8Array(new ArrayBuffer(32)).fill(47);
+      const vaultA = new Uint8Array(keyA);
+      installSession(ownerA);
+      vault.unlock({ authKey: new Uint8Array(keyA), dataKey: vaultA }, ownerA);
+      const backend = memoryBackend(); setKvBackendForTests(backend);
+      const preservedB = "replacement account retained opaque record";
+      await backend.setItem(`mindpattern.pendingMeasure.${ownerB}`, preservedB);
+      const record: PendingMeasure = { kind: "phq2", clientMeasureId: "m-retired-restoration", picks: [1, 3], date: "2026-10-05" };
+      if (phase === "restore-decrypt") await savePendingMeasure(keyA, ownerA, record);
+      const native = globalThis.crypto;
+      let release!: () => void, entered = false, admitted = 0;
+      const gate = new Promise<void>(resolve => { release = resolve; });
+      const temporary: Uint8Array[] = [];
+      const nativePromises: Promise<unknown>[] = [];
+      const returnedPromises: Promise<unknown>[] = [];
+      const remember = <T,>(promise: Promise<T>, list: Promise<unknown>[]): Promise<T> => {
+        list.push(promise);
+        void promise.catch(() => undefined); // The stable drain retains and rethrows the original fault.
+        return promise;
+      };
+      const drainCrypto = async () => {
+        release();
+        let count = -1;
+        let failure: PromiseRejectedResult | undefined;
+        while (count !== nativePromises.length + returnedPromises.length) {
+          count = nativePromises.length + returnedPromises.length;
+          const results = await Promise.allSettled([...nativePromises, ...returnedPromises]);
+          failure ??= results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+          await settle(2, 1); // Flush the public consumers that may begin another native operation.
+        }
+        if (failure) throw failure.reason;
+      };
+      const posted: Array<{ owner: string; body: { client_measure_id: string; blob: string } }> = [];
+      const subtle = new Proxy(native.subtle, { get(target, property) {
+        if (property === "encrypt") return (...args: Parameters<SubtleCrypto["encrypt"]>) => {
+          const nativePromise = remember(target.encrypt(...args), nativePromises);
+          return remember((async () => {
+            const result = await nativePromise;
+            const aad = (args[0] as AesGcmParams).additionalData;
+            if (phase === "save-encrypt" && aad && new TextDecoder().decode(aad).startsWith(`["measure","${ownerA}",`)) {
+              const input = args[2];
+              temporary.push(input instanceof ArrayBuffer ? new Uint8Array(input) : new Uint8Array(input.buffer, input.byteOffset, input.byteLength));
+              admitted++; entered = true; await gate;
+            }
+            return result;
+          })(), returnedPromises);
+        };
+        if (property === "decrypt") return (...args: Parameters<SubtleCrypto["decrypt"]>) => {
+          const nativePromise = remember(target.decrypt(...args), nativePromises);
+          return remember((async () => {
+            const result = await nativePromise;
+            const aad = (args[0] as AesGcmParams).additionalData;
+            if (phase === "restore-decrypt" && aad && new TextDecoder().decode(aad) === `["pending-measure","${ownerA}"]`) {
+              temporary.push(new Uint8Array(result)); admitted++; entered = true; await gate;
+            }
+            return result;
+          })(), returnedPromises);
+        };
+        const value = Reflect.get(target, property, target);
+        if (typeof value !== "function") return value;
+        return (...args: unknown[]) => {
+          const result = value.apply(target, args);
+          return result && typeof result.then === "function" ? remember(result, nativePromises) : result;
+        };
+      } });
+      vi.stubGlobal("crypto", new Proxy(native, { get(target, property) {
+        if (property === "subtle") return subtle;
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      } }));
+      stubFetch((url, init) => {
+        if (new URL(url).pathname.endsWith("/measures") && init.method === "POST") {
+          posted.push({ owner: String((init.headers as Record<string, string>).Authorization), body: JSON.parse(String(init.body)) });
+          return jsonResponse({ id: "accepted" }, { status: 201 });
+        }
+        return jsonResponse([], { headers: { "X-Measures-Revision": "1" } });
+      });
+      const retiredSignal = sessionAbortSignal()!;
+      let retired: Awaited<ReturnType<typeof render>> | undefined;
+      try {
+        retired = await render(<MeasuresView onCrisis={() => undefined} />);
+        if (phase === "save-encrypt") {
+          await settle(20, 3); await press(retired, "PHQ-2");
+          await pressNth(retired, "Several days", 0); await pressNth(retired, "Nearly every day", 1);
+          await press(retired, "Save measure");
+        }
+        await vi.waitFor(() => expect(entered).toBe(true), { timeout: 2000 });
+        expect(admitted).toBe(1);
+        clearSession(); vault.lock();
+        await act(async () => { retired!.unmount(); });
+        setSession("replacement-measure-token", ownerB, "replacement-measure-user");
+        vault.unlock({ authKey: new Uint8Array(keyB), dataKey: new Uint8Array(keyB) }, ownerB);
+        expect(retiredSignal.aborted).toBe(true);
+        expect(vaultA.every(byte => byte === 0)).toBe(true);
+        await drainCrypto();
+        expect(temporary).toHaveLength(1);
+        expect(temporary[0]!.every(byte => byte === 0)).toBe(true);
+        const retainedA = await backend.getItem(`mindpattern.pendingMeasure.${ownerA}`) !== null;
+        const untouchedB = await backend.getItem(`mindpattern.pendingMeasure.${ownerB}`) === preservedB;
+        let ciphertextOwner: string | null = null;
+        if (posted.length > 0) {
+          expect(posted).toHaveLength(1);
+          expect(posted[0]!.owner).toBe("Bearer replacement-measure-token");
+          const expectedOwner = phase === "save-encrypt" ? ownerA : ownerB;
+          const expectedKey = phase === "save-encrypt" ? keyA : keyB;
+          const opened = independentlyOpenMeasureBlob(posted[0]!.body.blob, Buffer.from(expectedKey), Buffer.from(buildAad("measure", expectedOwner, posted[0]!.body.client_measure_id)));
+          expect(JSON.parse(opened)).toMatchObject({ measure: "phq2", score: 4 });
+          ciphertextOwner = expectedOwner;
+        }
+        observations.push({ phase, admitted, postCount: posted.length, ciphertextOwner, retainedA, untouchedB, temporaryErased: true });
+        escapes.push(posted.length > 0 || !retainedA || !untouchedB);
+      } finally {
+        try {
+          await drainCrypto();
+        } finally {
+          vi.stubGlobal("crypto", native);
+          if (retired) await act(async () => { retired!.unmount(); });
+        }
+      }
+    }
+    console.info("MEASURES_RETIRED_OPERATION_CUSTODY", JSON.stringify(observations));
+    expect(escapes.some(Boolean), "retired questionnaire work cannot publish or acknowledge through the replacement session").toBe(false);
+    // END measures retired operation regression
   });
 });
 

@@ -51,7 +51,7 @@ const AUTH = Buffer.from(crypto.hkdfSync("sha256", MASTER, Buffer.alloc(32), "mi
 const DATA = Buffer.from(crypto.hkdfSync("sha256", MASTER, Buffer.alloc(32), "mindpattern/data/v1", 32));
 let root: ReturnType<typeof ReactTestRenderer.create> | undefined;
 let boundary: ((path: string, method: string) => Promise<void>) | undefined;
-let nativeRouteEvents: { emit(event: { type: string; target: string }): unknown } | undefined;
+let nativeRouteEvents: { emit(event: { type: string; target: string }): void } | undefined;
 let recoverySealed: string | undefined;
 let consent: boolean, voice: boolean, recovery: boolean, serverAccountPresent: boolean, setupStatus: number, recoveryRemoveStatus: number, consentWriteStatus: number, recoveryReadStatus: number, deleteStatus: number;
 const releases: Array<() => void> = [];
@@ -144,7 +144,7 @@ it("a refused native kit creation still accepts the initial existing kit", async
   recovery = true; setupStatus = 500; const held = pause();
   boundary = async (path, method) => { if (method === "GET" && path.endsWith("/account/recovery")) await held.run(); };
   await mount(); await vi.waitFor(() => expect(held.entered()).toBe(true));
-  await press("Create recovery kit"); await confirm(); expect(text()).not.toContain("mindpattern-recovery:v2:");
+  await press("Create recovery kit"); await confirm(); expect(alert()?.[0]).toBe("Recovery kit"); expect(text()).not.toContain("mindpattern-recovery:v2:");
   held.release(); await flush(); expect(text()).toContain("Remove kit");
 });
 it("a late refused native status read cannot hide an acknowledged new kit", async () => {
@@ -188,7 +188,7 @@ it.each(["haptics", "theme", "daily", "measure", "health"] as const)("an initial
   held.release(); await flush();
   if (kind === "theme") {
     const selected = root!.root.findAllByType(TouchableOpacity).find(node => node.props.accessibilityLabel === "Theme: Light")!;
-    expect(selected.props.accessibilityState.selected).toBe(true); expect(root!.root.findAllByType(ScrollView)[0].props.style[1].backgroundColor).toBe("#f8f5ef");
+    expect(selected.props.accessibilityState.selected).toBe(true); expect(root!.root.findAllByType(ScrollView)[0]!.props.style[1].backgroundColor).toBe("#f8f5ef");
   } else expect(control(label).props.value).toBe(true);
 });
 it.each(["daily", "measure"] as const)("an initial Native %s read cannot undo a newer schedule choice", async kind => {
@@ -298,7 +298,7 @@ it.each(reminderActions.flatMap(kind=>[false,true].map(failure=>({kind,failure})
  await vi.waitFor(()=>expect(next.entered()).toBe(true));await flush();unchangedReminderChoice(kind);expect(vi.mocked(Alert.alert).mock.calls).toEqual([]);
  next.release();await act(async()=>{await Promise.all([firstResult,secondResult]);});await flush();if(kind==="daily"||kind==="measure")expect(control(kind==="daily"?"Daily reminder":"Check-in reminders").props.value).toBe(true);else unchangedReminderChoice(kind);
 });
-it.each(reminderActions)("an admitted Native $kind lookup cannot save into a replacement vault",async kind=>{
+it.each(reminderActions)("an admitted Native $kind lookup cannot save into a replacement vault (case #%#)",async kind=>{
  nativeNotifications();const key=kind==="daily"||kind==="time"?accountStorageKey.reminders(USER):accountStorageKey.measureReminders(USER);
  if(kind==="time"||kind==="interval")await storage.setItem(key,JSON.stringify(kind==="time"?{enabled:true,hour:20,minute:0}:{enabled:true,intervalWeeks:4}));await mount();const previous=await storage.getItem(key),held=pause(),read=secureStore.getItem.bind(secureStore);let first=true;
  vi.spyOn(secureStore,"getItem").mockImplementation(async slot=>{const value=await read(slot);if(first&&slot==="@mindpattern/user_id"){first=false;await held.run();}return value;});let result:Promise<unknown>|undefined;await act(async()=>{result=reminderChoice(kind,true);});await vi.waitFor(()=>expect(held.entered()).toBe(true));
@@ -417,7 +417,7 @@ it("two actual Native confirmation releases before commit keep the displayed kit
   });
   await vi.waitFor(() => expect(held.entered()).toBe(true)); await flush(); held.release(); await flush(); await flush();
   await vi.waitFor(() => expect(text()).toContain("mindpattern-recovery:v2:"));
-  const encoded = text().match(/mindpattern-recovery:v2:([A-Za-z0-9+/]{43}=)/)![1];
+  const encoded = text().match(/mindpattern-recovery:v2:([A-Za-z0-9+/]{43}=)/)![1]!;
   const key = Buffer.from(encoded, "base64"), kek = Buffer.from(crypto.hkdfSync("sha256", key, Buffer.alloc(32), "mindpattern/recovery-seal/v2", 32));
   expect(recoverySealed).toBeDefined();
   const sealed = Buffer.from(recoverySealed!, "base64"), decipher = crypto.createDecipheriv("aes-256-gcm", kek, sealed.subarray(0, 12));
@@ -731,7 +731,7 @@ it("the still-enabled confirmation cannot start a consent change while the Nativ
   await press("Export encrypted recording 1"); await vi.waitFor(() => expect(held.entered()).toBe(true));
   const confirmation = root!.root.findAllByType(TouchableOpacity).find(n => n.props.accessibilityLabel === "Confirm with password")!;
   expect(confirmation.props.disabled).toBe(false);
-  await act(async () => { const tap = nativeGrantedPress(confirmation.props); try { tap.configure(confirmation.props); tap.release(); } finally { tap.dispose(); } }); await flush();
+  await act(async () => { const tap = nativeGrantedPress(confirmation.props as Parameters<typeof nativeGrantedPress>[0]); try { tap.configure(confirmation.props as Parameters<typeof nativeGrantedPress>[0]); tap.release(); } finally { tap.dispose(); } }); await flush();
   expect(consent).toBe(false); expect(control("Allow third-party transcript translation").props.value).toBe(false);
   expect(root!.root.findAllByType(TextInput).find(n => n.props.accessibilityLabel === "Password confirmation")!.props.value).toBe(PASSWORD);
   expect(await storage.getItem(record.slot)).toBe(record.raw); expect(files.__hasFile(record.descriptor.uri)).toBe(true);
@@ -803,12 +803,67 @@ it.each([0, 15])("the Native reminder chips select exactly the durable minute %s
   const selected = () => labels.map(label => root!.root.findAllByType(TouchableOpacity).find(node => node.props.accessibilityLabel === label)!.props.accessibilityState.selected);
   expect(selected()).toEqual([false, false, minute === 0]);
   if (minute !== 0) expect(root!.root.findAllByType(TouchableOpacity).find(node => node.props.accessibilityLabel === "Reminder time: 20:15")!.props.accessibilityState.selected).toBe(true);
-  await press(labels[0]); await flush(); expect(selected()).toEqual([true, false, false]);
+  await press(labels[0]!); await flush(); expect(selected()).toEqual([true, false, false]);
 });
 
 it("a current Native recovery removal refusal keeps the actual kit and explains its failure", async () => {
   recovery = true; await mount(); recoveryRemoveStatus = 500; await press("Remove kit"); await confirm(); await flush();
   expect(recovery).toBe(true); expect(text()).toContain("Remove kit"); expect(alert()?.[0]).toBe("Recovery kit"); expect(alert()?.[1]).toBe("The kit could not be removed — try again.");
+
+  // The actual Response.json fixture has parsed the reply before this boundary.
+  // Four explicit Promise-job deliveries place the public key replacement after
+  // request's final ownership check and before its Settings await continuation.
+  recoveryRemoveStatus = 200;
+  const priorBoundary = boundary, next = Buffer.from(DATA);
+  let replacementQueued = false, replacementError: unknown;
+  let finishReplacement!: () => void;
+  const replacement = new Promise<void>(resolve => { finishReplacement = resolve; });
+  let confirmation: Promise<unknown> | undefined;
+  let touch: ReturnType<typeof nativeGrantedPress> | undefined;
+  try {
+    boundary = async (path, method) => {
+      if (!replacementQueued && path.endsWith("/account/recovery") && method === "DELETE") {
+        replacementQueued = true;
+        queueMicrotask(() => queueMicrotask(() => queueMicrotask(() => queueMicrotask(() => {
+          try {
+            vault.unlock({ masterKey: Buffer.from(MASTER), authKey: Buffer.from(AUTH), dataKey: next }, USER);
+            installLocalDataKey(USER, next);
+          } catch (error) { replacementError = error; }
+          finally { finishReplacement(); }
+        }))));
+      }
+    };
+    await press("Remove kit");
+    const field = root!.root.findAllByType(TextInput).find(node => node.props.accessibilityLabel === "Password confirmation");
+    expect(field).toBeDefined();
+    await act(async () => { field!.props.onChangeText(PASSWORD); });
+    const host = root!.root.findAllByType(TouchableOpacity).find(node => node.props.accessibilityLabel === "Confirm with password");
+    expect(host).toBeDefined();
+    await act(async () => {
+      touch = nativeGrantedPress({ ...host!.props, onPress: () => {
+        const pending = host!.props.onPress(); confirmation = Promise.resolve(pending);
+        void confirmation.catch(() => {}); return pending;
+      } });
+      touch.release();
+    });
+    if (!confirmation) throw new Error("Native confirmation did not supply its owned completion");
+    await act(async () => { await confirmation; if (replacementQueued) await replacement; });
+    if (replacementError !== undefined) throw replacementError;
+    await flush();
+    expect(vault.ownerUserId()).toBe(USER); expect(vault.get().dataKey).toBe(next);
+    expect(await api.recoveryStatus()).toMatchObject({ enabled: false });
+    // A retired generation's acknowledgement cannot replace this mounted view.
+    // This asserts visible acknowledgement custody, not continued server custody.
+    expect(text()).toContain("Remove kit");
+  } finally {
+    boundary = priorBoundary;
+    try { touch?.dispose(); }
+    finally {
+      if (replacementQueued) await replacement;
+      await confirmation?.catch(() => {});
+      await new Promise<void>(resolve => setImmediate(resolve));
+    }
+  }
 });
 
 it("a held Native recovery removal keeps other sensitive controls unavailable until its physical receipt", async () => {
@@ -840,7 +895,7 @@ it.each(["retry", "export"] as const)("a queued Native recording %s release befo
       // no callback from an already replaced React frame is retained.
       const host = root!.root.findAllByType(TouchableOpacity).find(node => node.props.accessibilityLabel === (kind === "retry" ? "Retry saved recordings" : "Export encrypted recording 1"))!;
       expect(host).toBeDefined(); expect(host.props.disabled).toBe(false);
-      const tap = nativeGrantedPress(host.props); try { tap.configure(host.props); tap.release(); } finally { tap.dispose(); }
+      const tap = nativeGrantedPress(host.props as Parameters<typeof nativeGrantedPress>[0]); try { tap.configure(host.props as Parameters<typeof nativeGrantedPress>[0]); tap.release(); } finally { tap.dispose(); }
     });
     await flush(); await new Promise<void>(resolve => setImmediate(resolve));
     expect(failures).toEqual([]); expect(control("Allow third-party transcript translation").props.disabled).toBe(false);
@@ -899,7 +954,7 @@ it("an already granted Native confirmation release before replacement-login comm
   await mount(); await act(async () => control("Allow third-party transcript translation").props.onValueChange(true));
   const field = root!.root.findAllByType(TextInput).find(node => node.props.accessibilityLabel === "Password confirmation")!;
   await act(async () => field.props.onChangeText(PASSWORD));
-  const host = root!.root.findAllByType(TouchableOpacity).find(node => node.props.accessibilityLabel === "Confirm with password")!, tap = nativeGrantedPress(host.props);
+  const host = root!.root.findAllByType(TouchableOpacity).find(node => node.props.accessibilityLabel === "Confirm with password")!, tap = nativeGrantedPress(host.props as Parameters<typeof nativeGrantedPress>[0]);
   await api.setSession("replacement same-account Native bearer", USER, "alice");
   try {
     act(() => {
@@ -908,7 +963,7 @@ it("an already granted Native confirmation release before replacement-login comm
       vault.unlock({ masterKey: Buffer.from(MASTER), authKey: Buffer.from(AUTH), dataKey: Buffer.from(DATA) }, USER); installLocalDataKey(USER, vault.get().dataKey);
       expect(field.props.value).toBe(PASSWORD);
       expect(host.props.disabled).toBe(false);
-      tap.configure(host.props); tap.release();
+      tap.configure(host.props as Parameters<typeof nativeGrantedPress>[0]); tap.release();
     });
   } finally { tap.dispose(); }
   await flush(); await vi.waitFor(() => expect(control("Allow third-party transcript translation").props.disabled).toBe(false), { timeout: 1500 });
@@ -954,11 +1009,11 @@ it("an already granted Native rejected-entry retry before replacement-login comm
   const scope = Buffer.from(`${canonicalOrigin(DEFAULT_BASE_URL)}\0${USER}`).toString("base64url"), rejected = `${ACCOUNT_STORAGE_PREFIX.queue}.rejected.${scope}`, queue = `${ACCOUNT_STORAGE_PREFIX.queue}.items.${scope}`;
   const raw = JSON.stringify([{ userId: USER, clientEntryId: id, blobB64: blob.blobB64, entryDate: "2026-10-07" }]); await storage.setItem(rejected, raw); await mount();
   await vi.waitFor(() => expect(text()).toContain("Try syncing them again"));
-  const host = root!.root.findAllByType(TouchableOpacity).find(node => node.props.accessibilityLabel === "Try syncing the recovered entries again")!, tap = nativeGrantedPress(host.props);
+  const host = root!.root.findAllByType(TouchableOpacity).find(node => node.props.accessibilityLabel === "Try syncing the recovered entries again")!, tap = nativeGrantedPress(host.props as Parameters<typeof nativeGrantedPress>[0]);
   await api.setSession("replacement rejected-queue Native bearer", USER, "alice");
   try { act(() => {
     vault.unlock({ masterKey: Buffer.from(MASTER), authKey: Buffer.from(AUTH), dataKey: Buffer.from(DATA) }, USER); installLocalDataKey(USER, vault.get().dataKey);
-    expect(host.props.disabled).toBe(false); tap.configure(host.props); tap.release();
+    expect(host.props.disabled).toBe(false); tap.configure(host.props as Parameters<typeof nativeGrantedPress>[0]); tap.release();
   }); } finally { tap.dispose(); }
   await flush(); await vi.waitFor(() => expect(control("Allow third-party transcript translation").props.disabled).toBe(false));
   expect(await storage.getItem(rejected)).toBe(raw); expect(await storage.getItem(queue)).toBeNull();
@@ -967,11 +1022,11 @@ it("an already granted Native rejected-entry retry before replacement-login comm
 it("an already granted Native rotation release before replacement-login commit cannot lock the replacement vault", async () => {
   await mount(); await press("Change password");
   await act(async () => { root!.root.findAllByType(TextInput).find(node => node.props.accessibilityLabel === "Password confirmation")!.props.onChangeText(PASSWORD); root!.root.findAllByType(TextInput).find(node => node.props.accessibilityLabel === "New password")!.props.onChangeText("New Native secret42!"); });
-  const oldField = root!.root.findAllByType(TextInput).find(node => node.props.accessibilityLabel === "Password confirmation")!, host = root!.root.findAllByType(TouchableOpacity).find(node => node.props.accessibilityLabel === "Rotate keys and sign in again")!, tap = nativeGrantedPress(host.props);
+  const oldField = root!.root.findAllByType(TextInput).find(node => node.props.accessibilityLabel === "Password confirmation")!, host = root!.root.findAllByType(TouchableOpacity).find(node => node.props.accessibilityLabel === "Rotate keys and sign in again")!, tap = nativeGrantedPress(host.props as Parameters<typeof nativeGrantedPress>[0]);
   await api.setSession("replacement rotation Native bearer", USER, "alice");
   try { act(() => {
     vault.unlock({ masterKey: Buffer.from(MASTER), authKey: Buffer.from(AUTH), dataKey: Buffer.from(DATA) }, USER); installLocalDataKey(USER, vault.get().dataKey);
-    expect(oldField.props.value).toBe(PASSWORD); expect(host.props.disabled).toBe(false); tap.configure(host.props); tap.release();
+    expect(oldField.props.value).toBe(PASSWORD); expect(host.props.disabled).toBe(false); tap.configure(host.props as Parameters<typeof nativeGrantedPress>[0]); tap.release();
   }); } finally { tap.dispose(); }
   await flush(); await vi.waitFor(() => expect(control("Allow third-party transcript translation").props.disabled).toBe(false), { timeout: 1500 });
   expect(vault.isUnlocked()).toBe(true); expect(vault.get().dataKey).toEqual(DATA); expect(await secureStore.getItem("@mindpattern/token")).toBe("replacement rotation Native bearer");
@@ -983,10 +1038,10 @@ it("an already granted Native retry release while a share sheet owns busy preser
   const scope = Buffer.from(`${canonicalOrigin(DEFAULT_BASE_URL)}\0${USER}`).toString("base64url"), rejected = `${ACCOUNT_STORAGE_PREFIX.queue}.rejected.${scope}`, queue = `${ACCOUNT_STORAGE_PREFIX.queue}.items.${scope}`;
   const raw = JSON.stringify([{ userId: USER, clientEntryId: id, blobB64: blob.blobB64, entryDate: "2026-10-07" }]); await storage.setItem(rejected, raw); await mount();
   await vi.waitFor(() => expect(text()).toContain("Try syncing them again"));
-  const host = root!.root.findAllByType(TouchableOpacity).find(node => node.props.accessibilityLabel === "Try syncing the recovered entries again")!, tap = nativeGrantedPress(host.props), held = pause();
+  const host = root!.root.findAllByType(TouchableOpacity).find(node => node.props.accessibilityLabel === "Try syncing the recovered entries again")!, tap = nativeGrantedPress(host.props as Parameters<typeof nativeGrantedPress>[0]), held = pause();
   sharing.shareAsync.mockImplementationOnce(async () => { await held.run(); });
   await press("Export encrypted recording 1"); await vi.waitFor(() => expect(held.entered()).toBe(true));
-  try { await act(async () => { expect(host.props.disabled).toBe(true); tap.configure(host.props); tap.release(); }); await flush(); await flush();
+  try { await act(async () => { expect(host.props.disabled).toBe(true); tap.configure(host.props as Parameters<typeof nativeGrantedPress>[0]); tap.release(); }); await flush(); await flush();
     expect(await storage.getItem(rejected)).toBe(raw); expect(await storage.getItem(queue)).toBeNull(); expect(control("Allow third-party transcript translation").props.disabled).toBe(true);
     expect(files.__hasFile(record.descriptor.uri)).toBe(true);
   } finally { tap.dispose(); held.release(); await flush(); }
@@ -1407,4 +1462,34 @@ it.each(["AppState", "vault"] as const)("an unmounted Native Settings %s subscri
     await vi.waitFor(() => expect(ready).toBe(true), { timeout: 250, interval: 5 });
     expect(await secureStore.getItem("@mindpattern/token")).toBe("replacement Native disposed Settings bearer");
   } finally { held.release(); if (timer) clearTimeout(timer); await replacement; await worker; }
+});
+
+it("a replacement Native navigation receiver still clears the retained Settings password on its own blur", async () => {
+  function ReboundSettings({ route }: { route: string }) {
+    const events = useEventEmitter(); nativeRouteEvents = events;
+    const navigation = React.useMemo(() => ({ ...events.create(route), navigate: () => events.emit({ type: "blur", target: route }) }), [events, route]);
+    return <SettingsScreen navigation={navigation}/>;
+  }
+  try {
+    await act(async () => { root = ReactTestRenderer.create(<ThemeProvider><ReboundSettings route="settings-receiver-before"/></ThemeProvider>); });
+    await flush();
+    const retained = root!.root.findByType(SettingsScreen), priorNavigation = retained.props.navigation;
+    await act(async () => { root!.update(<ThemeProvider><ReboundSettings route="settings-receiver-after"/></ThemeProvider>); });
+    await flush();
+    expect(root!.root.findByType(SettingsScreen)).toBe(retained);
+    expect(retained.props.navigation).not.toBe(priorNavigation);
+    await act(async () => control("Allow third-party transcript translation").props.onValueChange(true));
+    const field = root!.root.findAllByType(TextInput).find(node => node.props.accessibilityLabel === "Password confirmation")!;
+    await act(async () => field.props.onChangeText(PASSWORD));
+    expect(field.props.value).toBe(PASSWORD);
+    expect(text()).toContain("Confirm with password");
+    await act(async () => { nativeRouteEvents!.emit({ type: "blur", target: "settings-receiver-after" }); });
+    expect(text()).not.toContain("Confirm with password");
+    await act(async () => { nativeRouteEvents!.emit({ type: "focus", target: "settings-receiver-after" }); });
+    await act(async () => control("Allow third-party transcript translation").props.onValueChange(true));
+    expect(root!.root.findAllByType(TextInput).find(node => node.props.accessibilityLabel === "Password confirmation")!.props.value).toBe("");
+    expect(consent).toBe(false);
+  } finally {
+    if (root) { await act(async () => { root!.unmount(); root = undefined; }); }
+  }
 });

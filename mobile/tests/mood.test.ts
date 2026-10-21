@@ -86,5 +86,6 @@ describe("check-in localization (audit fix 21, 2026-09-21)", () => {
     // An unknown tag (another client's vocabulary) renders as its raw wire
     // value, never a raw catalog key.
     expect(activityTagLabel("unknown-tag")).toBe("unknown-tag");
+    for (const option of [...ENERGY_OPTIONS, ...SLEEP_OPTIONS]) expect(option.label).toMatch(/\S/);
   });
 });

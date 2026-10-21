@@ -365,7 +365,7 @@ export async function quarantinedQueueExists(userId?: string): Promise<boolean> 
 export async function rejectedEntries(userId?: string): Promise<QueuedEntry[]> {
   await migrateUnscopedLegacyData();
   const scope = await scopeFor(await resolveUserId(userId));
-  return rejectedFor(scope);
+  return serialized(() => rejectedFor(scope));
 }
 
 export async function rejectedEntryCount(userId?: string): Promise<number> {

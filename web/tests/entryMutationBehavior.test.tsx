@@ -142,7 +142,7 @@ it("removes only a deselected activity while preserving the other explicit activ
   const root = await mount(); await press(root, t("activityTag.work")); await press(root, t("activityTag.family")); await press(root, t("activityTag.work")); await press(root, t("entry.save")); await flush();
   const wire = vi.mocked(api.createEntry).mock.calls[0]!; expect((await decryptEntry(key, owner, wire[0], wire[1], wire[3])).tags).toEqual(["family"]);
 });
-it.each(["", "existing text", "existing text "])("appends the displayed writing starter with one separating space to%s", async initial => {
+it.each(["", "existing text", "existing text "])("appends the displayed writing starter with one separating space (case #%#)", async initial => {
   const root = await mount(); await typeArea(root, t("entry.question"), initial); const chip = promptChipsFor(new Date(), 3, "en")[0]!; await press(root, chip);
   const expected = `${initial}${initial && !initial.endsWith(" ") ? " " : ""}${chip} `; expect(root.root.findAllByType("textarea")[0]!.props.value).toBe(expected);
   await press(root, t("entry.save")); await flush(); const wire = vi.mocked(api.createEntry).mock.calls[0]!; expect((await decryptEntry(key, owner, wire[0], wire[1], wire[3])).text).toBe(expected);
@@ -154,6 +154,24 @@ it.each(["new", "already shown", "read failure", "write failure"] as const)("kee
   const support = vi.fn(), root = await mount(vi.fn(), support); await typeArea(root, t("entry.question"), "I want to kill myself"); await press(root, t("entry.save")); await flush();
   const wire = vi.mocked(api.createEntry).mock.calls[0]!; expect((await decryptEntry(key, owner, wire[0], wire[1], wire[3])).text).toBe("I want to kill myself");
   if (state === "already shown") expect(textOf(root)).not.toContain(t("entry.crisisPromptTitle")); else { expect(textOf(root)).toContain(t("entry.crisisPromptTitle")); expect(textOf(root)).toContain(t("entry.crisisPromptProceed")); await press(root, t("measures.getSupport")); expect(support).toHaveBeenCalledTimes(1); await press(root, t("common.notNow")); expect(textOf(root)).not.toContain(t("entry.crisisPromptTitle")); }
+  if (state === "new") {
+    await act(async () => { root.unmount(); });
+    const actualQuery = crisis.crisisDialogShownOn, actualStamp = crisis.recordCrisisDialogShown;
+    const readOwner = "retired-crisis-read-owner";
+    clearSession(); installSession(readOwner); vault.unlock({ authKey: key.slice(), dataKey: key.slice() }, readOwner);
+    const readRoot = await mount(); await typeArea(readRoot, t("entry.question"), "I want to kill myself");
+    const query = vi.spyOn(crisis, "crisisDialogShownOn").mockImplementation(async (...args) => { const result = await actualQuery(...args); clearSession(); return result; });
+    await press(readRoot, t("entry.save")); await flush(); query.mockRestore();
+    expect(await actualQuery(readOwner, "2026-10-05")).toBe(false);
+    expect(textOf(readRoot)).not.toContain(t("entry.crisisPromptTitle"));
+    await act(async () => { readRoot.unmount(); });
+    const stampOwner = "retired-crisis-write-owner";
+    installSession(stampOwner); vault.unlock({ authKey: key.slice(), dataKey: key.slice() }, stampOwner);
+    const stampRoot = await mount(); await typeArea(stampRoot, t("entry.question"), "I want to kill myself");
+    const stamp = vi.spyOn(crisis, "recordCrisisDialogShown").mockImplementation(async (...args) => { await actualStamp(...args); clearSession(); });
+    await press(stampRoot, t("entry.save")); await flush(); stamp.mockRestore();
+    expect(textOf(stampRoot)).not.toContain(t("entry.crisisPromptTitle"));
+  }
 });
 it("refuses a retired stale draft when an ordinary retry has already observed the cleared slot", async () => {
   await drafts.saveActiveDraft(key, owner, { text: "Old held writing", mood: null, energy: null, sleep: null, tags: [] }); const real = drafts.loadActiveDraft, hold = deferred<Awaited<ReturnType<typeof drafts.loadActiveDraft>>>(), started = deferred<void>();
@@ -306,6 +324,14 @@ it("retries actual draft restoration repeatedly before the third native read ret
 it("does not let an unmounted account's source overwrite another account's authentic parked draft during a later native lock", async () => {
   const root = await mount(); await typeArea(root, t("entry.question"), "Old account private navigation writing"); await act(async () => { root.unmount(); }); await flush(); const nextOwner = "parked-draft-replacement", nextKey = new Uint8Array(32).fill(93), parked = { text: "Replacement account preserved private writing", mood: -0.5, energy: 2, sleep: 3, tags: ["work"] };
   clearSession(); installSession(nextOwner); vault.unlock({ dataKey: nextKey.slice(), authKey: nextKey.slice() }, nextOwner); await drafts.saveActiveDraft(nextKey, nextOwner, parked); await drafts.preserveActiveDraft(); expect(await drafts.loadActiveDraft(nextKey, nextOwner)).toEqual(parked);
+  clearSession(); installSession(owner); vault.unlock({ authKey: key.slice(), dataKey: key.slice() }, owner);
+  const retained = await mount(); await typeArea(retained, t("entry.question"), "Old account shared-buffer writing");
+  const shared = vault.get(), sharedOwner = "shared-buffer-draft-replacement";
+  clearSession(); installSession(sharedOwner); vault.unlock(shared, sharedOwner);
+  const authentic = { ...parked, text: "Authentic shared-buffer replacement writing" };
+  await drafts.saveActiveDraft(shared.dataKey, sharedOwner, authentic);
+  await drafts.preserveActiveDraft();
+  expect(await drafts.loadActiveDraft(shared.dataKey, sharedOwner)).toEqual(authentic);
 });
 it("does not invent a translated preview when the actual native voice result has no English channel", async () => {
   vi.mocked(api.transcribeAudio).mockResolvedValue({ ...transcript, english_text: null }); const root = await mount(); await take(root); expect(textOf(root)).toContain(t("entry.voiceReviewTitle")); expect(textOf(root)).not.toContain(t("entry.voiceEnglishPreview")); await press(root, t("entry.save")); await flush(); const wire = vi.mocked(api.createEntry).mock.calls[0]!; expect((await decryptEntry(key, owner, wire[0], wire[1], wire[3])).english_text).toBeNull();
@@ -539,6 +565,138 @@ it.each(["discard", "save", "oversized retry"] as const)("clears the actual stop
     const consent = deferred<Awaited<ReturnType<typeof api.getVoiceConsent>>>(); vi.mocked(api.getVoiceConsent).mockReturnValueOnce(consent.promise);
     try { await press(root, t("entry.micRecord")); await flush(); expect(textOf(root)).not.toContain(t("entry.voiceRecordFailed")); }
     finally { await act(async () => { consent.resolve({ enabled: false, active_for_current_policy: false, voice_consent_at: null, voice_consent_disclosure: null, voice_consent_policy: null }); }); await flush(); }
+    // A stopped take can commit before transcribing's separate state update.
+    // Observe the real DOM and click its current enabled Record control only.
+    const previousSeals: Promise<void>[] = [], preservePrevious = drafts.preserveActiveDraft;
+    const previousSealObserver = vi.spyOn(drafts, "preserveActiveDraft").mockImplementation(() => {
+      const original = preservePrevious(); previousSeals.push(original); return original;
+    });
+    try { await act(async () => { root.unmount(); }); await Promise.all(previousSeals); }
+    finally { previousSealObserver.mockRestore(); }
+    {
+      const { createRequire } = await import("node:module");
+      const { JSDOM } = createRequire(import.meta.url)("jsdom") as {
+        JSDOM: new (html: string, options: { url: string }) => { window: Window & typeof globalThis & { close: () => void } };
+      };
+      const { webcrypto } = await import("node:crypto"), { Blob: NativeBlob } = await import("node:buffer");
+      const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "http://localhost:5173" });
+      if (globalThis.navigator?.locks) Object.defineProperty(dom.window.navigator, "locks", { configurable: true, value: globalThis.navigator.locks });
+      let domRoot: import("react-dom/client").Root | undefined, observer: MutationObserver | undefined;
+      let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+      const originals: Array<{ label: string; promise: Promise<unknown> }> = [];
+      const own = <T,>(label: string, promise: Promise<T>): Promise<T> => { originals.push({ label, promise }); void promise.catch(() => undefined); return promise; };
+      const acquisition = deferred<MediaStream>(), speech = deferred<Awaited<ReturnType<typeof api.transcribeAudio>>>();
+      const oversized = { ...transcript, original_text: "x".repeat(100_001) };
+      const makeTrack = (label: string) => ({ label, readyState: "live", stop() { this.readyState = "ended"; }, addEventListener() {}, removeEventListener() {} });
+      const firstTrack = makeTrack("first controlled microphone"), nextTrack = makeTrack("replacement controlled microphone");
+      const firstStream = { getTracks: () => [firstTrack] } as unknown as MediaStream;
+      const nextStream = { getTracks: () => [nextTrack] } as unknown as MediaStream;
+      let mediaRequests = 0, speechRequests = 0;
+      const instances: ControlledRecorder[] = [];
+      class ControlledRecorder {
+        static isTypeSupported(mime: string): boolean { return mime === "audio/webm"; }
+        mimeType = "audio/webm"; state = "inactive";
+        ondataavailable: ((event: { data: Blob }) => void) | null = null;
+        onstop: (() => void) | null = null; onerror: (() => void) | null = null;
+        constructor(_stream: MediaStream, _options: MediaRecorderOptions) { instances.push(this); }
+        start(): void { this.state = "recording"; }
+        stop(): void {
+          if (this.state === "inactive") return;
+          this.state = "inactive";
+          this.ondataavailable?.({ data: new Blob([audioBytes], { type: this.mimeType }) });
+          this.onstop?.();
+        }
+      }
+      const drain = async (): Promise<void> => {
+        let count = -1, failed = false; let failure: unknown;
+        while (count !== originals.length) {
+          count = originals.length;
+          const results = await Promise.allSettled(originals.map(row => row.promise));
+          for (const result of results) if (result.status === "rejected") { if (!failed) failure = result.reason; failed = true; }
+          await act(async () => { await Promise.resolve(); });
+        }
+        if (failed) throw failure;
+      };
+      try {
+        vi.stubGlobal("window", dom.window); vi.stubGlobal("document", dom.window.document);
+        vi.stubGlobal("navigator", dom.window.navigator); vi.stubGlobal("Blob", NativeBlob);
+        const nativeSubtle = webcrypto.subtle;
+        const subtle = new Proxy(nativeSubtle, { get(target, property) {
+          const value = Reflect.get(target, property, target);
+          if (typeof value !== "function") return value;
+          return (...args: unknown[]) => { const original = value.apply(target, args); if (original && typeof original.then === "function") own("native " + String(property), original); return original; };
+        } });
+        vi.stubGlobal("crypto", new Proxy(webcrypto, { get(target, property) { if (property === "subtle") return subtle; const value = Reflect.get(target, property, target); return typeof value === "function" ? value.bind(target) : value; } }));
+        resetTestState(); installSession("entry-275-controlled-DOM-owner");
+        vault.unlock({ authKey: key.slice(), dataKey: key.slice() }, "entry-275-controlled-DOM-owner");
+        const get = kv.getItem.bind(kv), set = kv.setItem.bind(kv), remove = kv.removeItem.bind(kv), capture = kv.captureWritePermit.bind(kv);
+        vi.spyOn(kv, "getItem").mockImplementation((...args) => own("actual KV getItem", get(...args)));
+        vi.spyOn(kv, "setItem").mockImplementation((...args) => own("actual KV setItem", set(...args)));
+        vi.spyOn(kv, "removeItem").mockImplementation((...args) => own("actual KV removeItem", remove(...args)));
+        vi.spyOn(kv, "captureWritePermit").mockImplementation((...args) => own("actual KV captureWritePermit", capture(...args)));
+        const preserve = drafts.preserveActiveDraft;
+        vi.spyOn(drafts, "preserveActiveDraft").mockImplementation(() => own("actual complete preserved draft", preserve()));
+        vi.stubGlobal("MediaRecorder", ControlledRecorder);
+        Object.defineProperty(dom.window.navigator, "mediaDevices", { configurable: true, value: { getUserMedia: () => {
+          mediaRequests++;
+          if (mediaRequests === 1) return own("first controlled getUserMedia", Promise.resolve(firstStream));
+          if (mediaRequests === 2) return own("replacement controlled getUserMedia", acquisition.promise);
+          return own("unexpected third controlled getUserMedia", Promise.reject(new Error("SetupError: unexpected third microphone acquisition")));
+        } } });
+        vi.mocked(api.meta).mockResolvedValue({ version: "1", api_version: "v1", unlock_days: 30, llm_available: false, llm_provider_name: null, llm_data_retention: null, sharing_available: true, sharing_disclosure_version: "v3", audio_available: true });
+        vi.mocked(api.getVoiceConsent).mockResolvedValue({ enabled: true, active_for_current_policy: true, voice_consent_at: null, voice_consent_disclosure: null, voice_consent_policy: null });
+        vi.mocked(api.transcribeAudio).mockImplementation(() => { speechRequests++; return own("controlled old transcription", speech.promise); });
+        const { createRoot } = await import("react-dom/client");
+        const container = document.createElement("div"); document.body.append(container); domRoot = createRoot(container);
+        const button = (label: string) => [...container.querySelectorAll("button")].find(node => node.textContent === label);
+        const until = async (label: string, condition: () => boolean): Promise<void> => {
+          const deadline = performance.now() + 8000; // The owning file freezes Date only.
+          while (!condition()) {
+            if (performance.now() > deadline) throw new Error("SetupError: timeout waiting for " + label);
+            await act(async () => { await new Promise<void>(resolve => setTimeout(resolve, 5)); });
+          }
+        };
+        let clicked = false, resolveObserved!: () => void;
+        const observed = new Promise<void>(resolve => { resolveObserved = resolve; });
+        const snapshots: Array<{ record: boolean; enabled: boolean; transcribing: boolean; clicked: boolean }> = [];
+        observer = new dom.window.MutationObserver(() => {
+          if (instances[0]?.state !== "inactive") return;
+          const record = button(t("entry.micRecord"));
+          const snapshot = { record: !!record, enabled: !!record && !record.disabled, transcribing: container.textContent!.includes(t("entry.voiceTranscribing")), clicked: false };
+          snapshots.push(snapshot);
+          if (!clicked && snapshot.enabled && !snapshot.transcribing) { clicked = true; snapshot.clicked = true; observer!.disconnect(); record!.click(); resolveObserved(); }
+        });
+        await act(async () => domRoot!.render(<EntryView onSaved={() => { throw new Error("SetupError: no save in this recording schedule"); }} onCrisis={() => { throw new Error("SetupError: no crisis action in this recording schedule"); }} />));
+        await until("initial enabled recording control", () => !!button(t("entry.micRecord")) && !button(t("entry.micRecord"))!.disabled);
+        await act(async () => button(t("entry.micRecord"))!.click());
+        await until("first controlled recording", () => mediaRequests === 1 && !!button(t("entry.micStop")) && instances[0]?.state === "recording");
+        observer.observe(container, { subtree: true, childList: true, attributes: true, characterData: true });
+        if (!button(t("entry.micStop")) || button(t("entry.micStop"))!.disabled) throw new Error("SetupError: enabled first Stop button absent");
+        // Keep the actual discrete click/commit/effect sequence outside act's
+        // all-work drain; native DOM scheduling warnings remain literal.
+        button(t("entry.micStop"))!.click();
+        await Promise.race([observed, new Promise<void>(resolve => { deadlineTimer = setTimeout(resolve, 1500); })]);
+        observer.disconnect(); if (deadlineTimer) clearTimeout(deadlineTimer);
+        if (!clicked) throw new Error("SetupError: replacement acquisition window was not observed in this finite DOM schedule");
+        await until("second acquisition and old transcription pending", () => mediaRequests === 2 && speechRequests === 1);
+        expect(firstTrack.readyState, "The completed original take released its controlled browser track").toBe("ended");
+        await act(async () => { speech.resolve(oversized); });
+        await until("old oversize refusal committed", () => container.textContent!.includes(t("entry.tooLongBody", { max: "100,000" })) && !container.textContent!.includes(t("entry.voiceTranscribing")));
+        await act(async () => { acquisition.resolve(nextStream); }); await drain();
+        await until("replacement media receipt completed", () => !!button(t("entry.micStop")) || (!!button(t("entry.micRecord")) && !button(t("entry.micRecord"))!.disabled));
+        const result = { clicked, snapshots, mediaRequests, speechRequests, firstTrack: firstTrack.readyState, replacementTrack: nextTrack.readyState, recordingControlVisible: !!button(t("entry.micStop")), originalOversizeMessageVisible: container.textContent!.includes(t("entry.tooLongBody", { max: "100,000" })) };
+        console.log("ENTRY275_PUBLIC_RESULT " + JSON.stringify(result));
+        expect({ track: nextTrack.readyState, recording: !!button(t("entry.micStop")) }, "An acknowledged oversize refusal retires the previous control's replacement microphone acquisition").toEqual({ track: "ended", recording: false });
+      } finally {
+        observer?.disconnect(); if (deadlineTimer) clearTimeout(deadlineTimer);
+        speech.resolve(oversized); acquisition.resolve(nextStream);
+        try { if (domRoot) await act(async () => domRoot!.unmount()); await drain(); }
+        finally {
+          try { firstTrack.stop(); nextTrack.stop(); dom.window.close(); }
+          finally { vi.restoreAllMocks(); vi.unstubAllGlobals(); resetTestState(); }
+        }
+      }
+    }
   }
 });
 

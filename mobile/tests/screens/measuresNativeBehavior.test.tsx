@@ -67,7 +67,7 @@ beforeEach(async () => {
   await api.setSession("native measures bearer", USER, "alice");
   await clearCrisisDialogStamp(USER);
   vault.unlock({ masterKey: Buffer.alloc(32, 3), authKey: Buffer.alloc(32, 4), dataKey: Buffer.from(KEY) }, USER); installLocalDataKey(USER, vault.get().dataKey);
-  serverRows = []; serverStatus = 201; sent = []; gets = 0; releases = []; stage = 0; touchActivity.mockClear(); navigation.navigate.mockClear(); navigation.goBack.mockClear(); Alert.alert.mockClear();
+  serverRows = []; serverStatus = 201; sent = []; gets = 0; releases = []; stage = 0; touchActivity.mockClear(); navigation.navigate.mockClear(); navigation.goBack.mockClear(); vi.mocked(Alert.alert).mockClear();
   vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
     const path = new URL(url).pathname;
     if (!path.endsWith("/measures")) throw new Error("Unexpected Native measures path " + path);
@@ -161,8 +161,8 @@ it.each([201, 409, 0])("Native item-9 support follows safely persisted answers f
   await mount(); await complete("phq9", 1); await press("Record this check-in");
   if (status === 409) { await vi.waitFor(() => expect(words()).toContain("Already recorded")); expect(Alert.alert).not.toHaveBeenCalled(); return; }
   await vi.waitFor(() => expect(Alert.alert).toHaveBeenCalled());
-  const call = Alert.alert.mock.calls.at(-1)!; expect(call[0]).toBe("Support is available"); expect(call[1]).toContain("does not monitor this response or alert anyone");
-  expect(call[2]?.map((value: {text: string; style?: string}) => ({text: value.text, style: value.style}))).toEqual([{text: "View support resources", style: undefined}, {text: "Make a safety plan", style: undefined}, {text: "Not now", style: "cancel"}]);
+  const call = vi.mocked(Alert.alert).mock.calls.at(-1)!; expect(call[0]).toBe("Support is available"); expect(call[1]).toContain("does not monitor this response or alert anyone");
+  expect(call[2]?.map((value) => ({text: value.text, style: value.style}))).toEqual([{text: "View support resources", style: undefined}, {text: "Make a safety plan", style: undefined}, {text: "Not now", style: "cancel"}]);
   await act(async () => call[2]![0]!.onPress!()); expect(navigation.navigate).toHaveBeenLastCalledWith("Crisis"); await act(async () => call[2]![1]!.onPress!()); expect(navigation.navigate).toHaveBeenLastCalledWith("SafetyPlan");
   if (status === 201) expect(await lastMeasureCompletedOn(USER)).toBe(sent[0]!.measure_date);
   else { await press("Record this check-in"); await flush(); expect(Alert.alert).toHaveBeenCalledTimes(1); }
@@ -170,7 +170,7 @@ it.each([201, 409, 0])("Native item-9 support follows safely persisted answers f
 });
 it("a Native server refusal keeps the questionnaire and reports the shipped failure dialog", async () => {
   await mount(); await complete(); serverStatus = 500; await press("Record this check-in"); await vi.waitFor(() => expect(Alert.alert).toHaveBeenCalled());
-  expect(Alert.alert.mock.calls.at(-1)?.slice(0,2)).toEqual(["Not recorded", "Could not record just now. Your picks are still on screen."]);
+  expect(vi.mocked(Alert.alert).mock.calls.at(-1)?.slice(0,2)).toEqual(["Not recorded", "Could not record just now. Your picks are still on screen."]);
   expect(button("Record this check-in").props.disabled).toBe(false); inspect();
 });
 it.each(["offline", "native-storage", "server"])("Native %s history failure displays its honest public state", async mode => {
@@ -242,11 +242,11 @@ it.each(["success","offline","native-cipher-refusal"])("Native %s submission ret
 });
 it("a mismatched Native credential receipt cannot read history or send the visible old-vault answers",async()=>{
   await api.setSession("mismatched Native bearer",OTHER,"bob");await mount(false);await vi.waitFor(()=>expect(words()).toContain("Could not load your measures."));expect(gets).toBe(0);
-  await complete();await press("Record this check-in");await vi.waitFor(()=>expect(Alert.alert).toHaveBeenCalled());expect(sent).toHaveLength(0);expect(Alert.alert.mock.calls.at(-1)?.slice(0,2)).toEqual(["Not recorded","Could not record just now. Your picks are still on screen."]);inspect();
+  await complete();await press("Record this check-in");await vi.waitFor(()=>expect(Alert.alert).toHaveBeenCalled());expect(sent).toHaveLength(0);expect(vi.mocked(Alert.alert).mock.calls.at(-1)?.slice(0,2)).toEqual(["Not recorded","Could not record just now. Your picks are still on screen."]);inspect();
 });
 it("a Native missing credential id reports damaged submit without starting history or a send",async()=>{
   await secureStore.removeItem("@mindpattern/user_id");await mount(false);await vi.waitFor(()=>expect(words()).toContain("Could not load your measures."));expect(gets).toBe(0);
-  await complete();await press("Record this check-in");await vi.waitFor(()=>expect(Alert.alert).toHaveBeenCalled());expect(Alert.alert.mock.calls.at(-1)?.slice(0,2)).toEqual(["Session damaged","Account id missing — please sign in again."]);expect(sent).toHaveLength(0);inspect();
+  await complete();await press("Record this check-in");await vi.waitFor(()=>expect(Alert.alert).toHaveBeenCalled());expect(vi.mocked(Alert.alert).mock.calls.at(-1)?.slice(0,2)).toEqual(["Session damaged","Account id missing — please sign in again."]);expect(sent).toHaveLength(0);inspect();
 });
 it("a Native legacy vault with no verified owner admits no load or submission",async()=>{
   vault.unlock({masterKey:Buffer.alloc(32,4),authKey:Buffer.alloc(32,5),dataKey:Buffer.from(KEY)});await mount(false);expect(words()).toContain("Your keys are locked");await complete();await press("Record this check-in");expect(gets).toBe(0);expect(sent).toHaveLength(0);expect(Alert.alert).not.toHaveBeenCalled();inspect();
@@ -256,9 +256,9 @@ it("a same-account Native scope refresh before the first lookup receipt declines
   await mount(false);await vi.waitFor(()=>expect(hold.entered()).toBe(true));await api.setSession("refreshed Native bearer",USER,"alice");hold.release();await flush();expect(gets).toBe(0);
 });
 it("a Native status replacement remains visible until its own expiration",async()=>{
-  await mount();await complete();vi.useFakeTimers();await press("Record this check-in");await vi.waitFor(()=>expect(words()).toContain("Recorded —"));await act(async()=>vi.advanceTimersByTimeAsync(1500));
-  await complete();serverStatus=409;await press("Record this check-in");await vi.waitFor(()=>expect(words()).toContain("Already recorded"));await act(async()=>vi.advanceTimersByTimeAsync(1101));expect(words()).toContain("Already recorded");
-  await act(async()=>vi.advanceTimersByTimeAsync(1500));expect(words()).not.toContain("Already recorded");inspect();vi.useRealTimers();
+  await mount();await complete();vi.useFakeTimers();await press("Record this check-in");await vi.waitFor(()=>expect(words()).toContain("Recorded —"));await act(async()=>{await vi.advanceTimersByTimeAsync(1500);});
+  await complete();serverStatus=409;await press("Record this check-in");await vi.waitFor(()=>expect(words()).toContain("Already recorded"));await act(async()=>{await vi.advanceTimersByTimeAsync(1101);});expect(words()).toContain("Already recorded");
+  await act(async()=>{await vi.advanceTimersByTimeAsync(1500);});expect(words()).not.toContain("Already recorded");inspect();vi.useRealTimers();
 });
 it("a Native view unmount cancels its finite status timer",async()=>{
   await mount();await complete();vi.useFakeTimers();await press("Record this check-in");await vi.waitFor(()=>expect(words()).toContain("Recorded —"));expect(vi.getTimerCount()).toBe(1);
@@ -355,11 +355,89 @@ it("a Native in-flight PHQ-9 save cannot reset a newly completed shorter instrum
 });
 it("a last-item Native tap after resetting an in-flight PHQ-9 remains selected when that older save completes",async()=>{
   await mount();await complete("phq9");const hold=gate(),create=api.createMeasure;vi.spyOn(api,"createMeasure").mockImplementationOnce(async(...args)=>{const result=await create(...args);hold.enter();await hold.promise;return result;});await press("Record this check-in");await vi.waitFor(()=>expect(hold.entered()).toBe(true));await press("PHQ-9 (depression, 9 items)");await press("Question 9: Not at all");hold.release();await vi.waitFor(()=>expect(button("Record this check-in").props.accessibilityState.busy).toBe(false));expect(button("Question 9: Not at all").props.accessibilityState.selected).toBe(true);expect(button("Question 1: Not at all").props.accessibilityState.selected).toBe(false);expect(button("Record this check-in").props.disabled).toBe(true);inspect();
+  // Public mounted-component batching: every gesture looks up the current
+  // enabled native control. No callback from an earlier render is retained.
+  await flush();
+  vi.restoreAllMocks();
+  const acknowledgeFollowing = gate();
+  const createFollowing = api.createMeasure;
+  let holdFollowing = false;
+  const publicPorts: Array<Promise<unknown>> = [];
+  const followingSpy = vi.spyOn(api, "createMeasure").mockImplementation((...args) => {
+    const pending = (async () => {
+      const result = await createFollowing(...args);
+      if (holdFollowing) {
+        acknowledgeFollowing.enter();
+        await acknowledgeFollowing.promise;
+      }
+      return result;
+    })();
+    publicPorts.push(pending);
+    void pending.catch(() => {});
+    return pending;
+  });
+  const currentEnabledGesture = (label: string): void => {
+    const current = button(label);
+    expect(current.props.disabled).not.toBe(true);
+    const gesture = nativeGrantedPress(current.props);
+    try { gesture.release(); } finally { gesture.dispose(); }
+  };
+  try {
+    await act(async () => currentEnabledGesture("PHQ-9 (depression, 9 items)"));
+    for (let index = 0; index < 9; index++) {
+      await act(async () => currentEnabledGesture(`Question ${index + 1}: Not at all`));
+    }
+    await act(async () => {
+      currentEnabledGesture("Record this check-in");
+      // All first-send ports delegate to the immediate fixture. This one
+      // host-task boundary drains their settled jobs, including finally.
+      await new Promise<void>(resolve => setTimeout(resolve, 0));
+      holdFollowing = true;
+      currentEnabledGesture("Record this check-in");
+      await vi.waitFor(() => expect(acknowledgeFollowing.entered()).toBe(true));
+    });
+    expect(button("Record this check-in").props.accessibilityState.busy).toBe(true);
+    await act(async () => currentEnabledGesture("Question 9: Not at all"));
+    expect(button("Question 9: Not at all").props.accessibilityState.selected).toBe(true);
+    await act(async () => acknowledgeFollowing.release());
+    await vi.waitFor(() => expect(button("Record this check-in").props.accessibilityState.busy).toBe(false));
+    expect(button("Question 9: Not at all").props.accessibilityState.selected,
+      "A newly selected answer must survive the older batched save acknowledgement").toBe(true);
+  } finally {
+    acknowledgeFollowing.release();
+    await Promise.allSettled(publicPorts);
+    await flush();
+    followingSpy.mockRestore();
+  }
+
 });
 it("an installed Native last-item responder delivered before the restore commit preserves its pick through the mount retry",async()=>{
-  await savePendingMeasure(KEY,USER,{kind:"phq9",clientMeasureId:"m-native-pending-partial-last",picks:[0,0,0,0,0,0,0,0,0],date:"2026-09-20"});const restore=gate(),send=gate(),read=storage.getItem.bind(storage),create=api.createMeasure,lookup=api.getUserId;let lookups=0,gesture:ReturnType<typeof nativeGrantedPress>|undefined,delivery:Promise<void>|undefined;
-  vi.spyOn(api,"getUserId").mockImplementation(async()=>{if(++lookups===3){delivery=Promise.resolve().then(()=>{expect(button("Question 1: Not at all").props.accessibilityState.selected).toBe(false);gesture!.configure(button("Question 9: Not at all").props);gesture!.release();});}return lookup();});vi.spyOn(storage,"getItem").mockImplementation(async name=>{const value=await read(name);if(name===accountStorageKey.pendingMeasure(USER)){restore.enter();await restore.promise;}return value;});vi.spyOn(api,"createMeasure").mockImplementationOnce(async(...args)=>{const result=await create(...args);send.enter();await send.promise;return result;});await mount();await vi.waitFor(()=>expect(restore.entered()).toBe(true));gesture=nativeGrantedPress(button("Question 9: Not at all").props);try{restore.release();await vi.waitFor(()=>expect(send.entered()).toBe(true));await delivery;send.release();await vi.waitFor(()=>expect(button("Record this check-in").props.accessibilityState.busy).toBe(false));expect(button("Question 9: Not at all").props.accessibilityState.selected).toBe(true);expect(button("Question 1: Not at all").props.accessibilityState.selected).toBe(false);expect(button("Record this check-in").props.disabled).toBe(true);inspect();}finally{gesture.dispose();}
+  await savePendingMeasure(KEY,USER,{kind:"phq9",clientMeasureId:"m-native-pending-partial-last",picks:[0,0,0,0,0,0,0,0,0],date:"2026-09-20"});
+  const restore=gate(),send=gate(),read=storage.getItem.bind(storage),create=api.createMeasure,lookup=api.getUserId;
+  let gesture:ReturnType<typeof nativeGrantedPress>|undefined,delivery:Promise<void>|undefined;
+  vi.spyOn(storage,"getItem").mockImplementation(async name=>{const value=await read(name);if(name===accountStorageKey.pendingMeasure(USER)){restore.enter();await restore.promise;}return value;});
+  vi.spyOn(api,"createMeasure").mockImplementationOnce(async(...args)=>{const result=await create(...args);send.enter();await send.promise;return result;});
+  try{
+    await mount();await vi.waitFor(()=>expect(restore.entered()).toBe(true));
+    gesture=nativeGrantedPress(button("Question 9: Not at all").props);
+    // The pending-read acknowledgment is still held. Its submit-owner lookup
+    // is the next genuine owner lookup, after this responder is admitted.
+    vi.spyOn(api,"getUserId").mockImplementationOnce(async()=>{
+      delivery=Promise.resolve().then(()=>{expect(button("Question 1: Not at all").props.accessibilityState.selected).toBe(false);gesture!.configure(button("Question 9: Not at all").props);gesture!.release();});
+      // Observe rejection immediately; keep the original rejected Promise and
+      // await it on the body and cleanup paths, preserving genuine failures.
+      void delivery.catch(()=>{});
+      return lookup();
+    });
+    restore.release();await vi.waitFor(()=>expect(send.entered()).toBe(true));await delivery;send.release();
+    await vi.waitFor(()=>expect(button("Record this check-in").props.accessibilityState.busy).toBe(false));
+    expect(button("Question 9: Not at all").props.accessibilityState.selected).toBe(true);expect(button("Question 1: Not at all").props.accessibilityState.selected).toBe(false);expect(button("Record this check-in").props.disabled).toBe(true);inspect();
+  }finally{
+    restore.release();send.release();
+    try{if(delivery)await delivery;}finally{try{await flush();}finally{gesture?.dispose();}}
+  }
 });
+
 it.each(["online","offline"])("Native %s item-nine support uses its separate stamp despite an earlier journal prompt",async mode=>{
   await recordCrisisDialogShown(USER,localDateISO(),"journal");await mount();await complete("phq9",1);if(mode==="offline"){const nativeFetch=globalThis.fetch;vi.stubGlobal("fetch",async(...args:Parameters<typeof fetch>)=>{if(args[1]?.method==="POST")throw new TypeError("Native offline");return nativeFetch(...args);});}
   await press("Record this check-in");await vi.waitFor(()=>expect(Alert.alert).toHaveBeenCalled());expect(await secureStore.getItem(accountStorageKey.crisisItem9(USER))).toBe(localDateISO());expect(await secureStore.getItem(accountStorageKey.crisisJournal(USER))).toBe(localDateISO());inspect();

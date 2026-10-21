@@ -70,7 +70,7 @@ it("erases the plaintext buffer passed to the encryption consumer", () => {
 
 it("validates declared password envelope costs and refuses unknown or malformed wire fields", () => {
   expect(keyEnvelope.defaultKdfParams()).toEqual({ algorithm: "pbkdf2-sha256", version: 1, iterations: 600000 });
-  const valid = { algorithm: "pbkdf2-sha256", version: 1, iterations: 100000 };
+  const valid = { algorithm: "pbkdf2-sha256", version: 1, iterations: 100000 } as const;
   for (const iterations of [100000, 100001, 600000, 10000000]) expect(keyEnvelope.validateKdfParams({ ...valid, iterations })).toEqual({ ...valid, iterations });
   const invalid: unknown[] = [null, false, 1, "params", [], {}, { ...valid, extra: true }, { ...valid, algorithm: "sha256" }, { ...valid, version: 2 }, { ...valid, version: "1" }, { ...valid, version: 1.5 }];
   for (const iterations of [undefined, "100000", 99999, 10000001, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) invalid.push({ ...valid, iterations });
@@ -108,6 +108,20 @@ it("reads both generations of recovery kits without giving the server's verifier
     expect(recovery.unsealDataKeyWithRecoveryScheme(kit, sealed, USER, scheme)).toEqual(data);
     expect(recovery.unsealDataKeyWithRecoveryScheme(kit, sealed, "other-user", scheme)).toBeNull();
   }
+});
+
+it("refuses malformed recovery kits before allocating decoded key bytes", () => {
+  const from = Buffer.from;
+  const decoded: Buffer[] = [];
+  vi.spyOn(Buffer, "from").mockImplementation(((value: unknown, encoding?: unknown) => {
+    const bytes = from(value as string, encoding as BufferEncoding);
+    if (encoding === "base64") decoded.push(bytes);
+    return bytes;
+  }) as typeof Buffer.from);
+  for (const input of ["A".repeat(65536), "@".repeat(43) + "=", "mindpattern-recovery:v2:" + "A".repeat(65536), "@" + ("A".repeat(43) + "="), ("A".repeat(43) + "=") + "!"]) {
+    expect(recovery.recoveryKeyFromB64(input)).toBeNull();
+  }
+  expect(decoded).toEqual([]);
 });
 
 it("clears explicitly removed nullable and empty structured fields in the authenticated wire payload", () => {
@@ -197,4 +211,13 @@ it.each([false, true])("erases ephemeral therapist wrapping secrets even when en
   else expect(wrapDataKeyForTherapist(KEY, publicB64, USER, "therapist").wrappedKeyB64).not.toBe("");
   expect(observed).toHaveLength(2); for (const value of observed) expect(value.every(byte => byte === 0)).toBe(true);
   expect(KEY).toEqual(Buffer.alloc(32, 7));
+});
+
+it("preserves authenticated empty-name additive field during entryedit", () => {
+  const stored = { v: 3, text: "old", sentiment: -1, created_at: "old-date", "": { retained: true } };
+  const original = journal.decryptEntry({ dataKey: KEY }, USER, ID, wireSeal(stored, wireAad("entry", USER, ID)));
+  const { blobB64 } = journal.encryptEntry({ dataKey: KEY }, USER, ID, "edited", "new-date", null, undefined, undefined, undefined, original);
+  const actual = JSON.parse(wireOpen(Buffer.from(blobB64, "base64"), KEY, wireAad("entry", USER, ID)).toString("utf8"));
+  expect(actual[""]).toEqual({ retained: true });
+  expect(actual).toEqual({ v: 1, text: "edited", sentiment: null, created_at: "new-date", "": { retained: true } });
 });

@@ -6,7 +6,7 @@ import {
   __resetLocalKeyLifecycleForTests, changeLocalSessionOwner, markAccountDeleted,
   freezeLocalKeyWrites, installLocalDataKey, waitLocalWriteCommits, localWriteScopeEpoch,
 } from "../src/localWriteGuard";
-import { beginNotificationUpdate } from "../src/notificationOwnership";
+import { assertNotificationOwner, beginNotificationUpdate, runNotificationCancellation, runOwnedNotification } from "../src/notificationOwnership";
 
 const live = new Set<string>();
 const events: string[] = [];
@@ -80,7 +80,7 @@ for (const kind of ["daily", "measure"] as const) {
     await disabled("a", false);
     await sync("a");
     gate.resolve();
-    await old;
+    expect(await old).toBe(false);
     expect(live.has(kind === "daily" ? dailyId : measureId)).toBe(false);
   });
 }
@@ -456,5 +456,43 @@ describe("migration and sibling restoration", () => {
     expect(requestPermission).not.toHaveBeenCalled();
     await expect(native.scheduleDailyReminder(9, 0, current)).resolves.toBe(true);
     expect(createTriggerNotification).toHaveBeenCalledTimes(1);
+
+    expect(() => assertNotificationOwner(stale, "daily"), "the exported stale reminder assertion preserves its public Error message")
+      .toThrow("The reminder preference changed");
+
+    const queued = deferred<void>();
+    const released = deferred<void>();
+    const blocker = runOwnedNotification(beginNotificationUpdate("a", "daily"), async () => {
+      queued.resolve();
+      await released.promise;
+      return 0;
+    });
+    const blockerOutcome = blocker.then(
+      value => ({ status: "fulfilled" as const, value }),
+      error => ({ status: "rejected" as const, message: error instanceof Error ? error.message : String(error) }),
+    );
+    let cancellationOutcome: Promise<unknown> | null = null;
+    try {
+      await Promise.race([
+        queued.promise,
+        blockerOutcome.then(() => { throw new Error("The public notification lane did not reach its admitted callback"); }),
+      ]);
+      const caller = vi.fn(async () => true);
+      const cancellation = runNotificationCancellation(["daily"], caller);
+      const outcome = cancellation.then(
+        value => ({ status: "fulfilled" as const, value }),
+        error => ({ status: "rejected" as const, message: error instanceof Error ? error.message : String(error) }),
+      );
+      cancellationOutcome = outcome;
+      beginNotificationUpdate("a", "daily");
+      released.resolve();
+      expect(await blockerOutcome).toEqual({ status: "fulfilled", value: 0 });
+      expect(await outcome, "a retired exported cancellation preserves its Error message and refuses before invoking the public callback")
+        .toEqual({ status: "rejected", message: "The notification cancellation belongs to a retired session" });
+      expect(caller).not.toHaveBeenCalled();
+    } finally {
+      released.resolve();
+      await Promise.allSettled(cancellationOutcome ? [blockerOutcome, cancellationOutcome] : [blockerOutcome]);
+    }
   });
 });

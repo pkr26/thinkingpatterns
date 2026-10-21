@@ -1,4 +1,4 @@
-import React from "react";
+import "react";
 import {Text,View,TouchableOpacity} from "react-native";
 import {readFileSync} from "node:fs";
 import {dirname,resolve} from "node:path";

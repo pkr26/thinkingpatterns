@@ -1,4 +1,4 @@
-import { runTestControl } from "./helpers/testControl";
+import { drainPortalDraftWritesForTests, runTestControl } from "./helpers/testControl";
 /**
  * View behavior with mocked api/crypto layers (the crypto itself is
  * pinned by tests/crypto.test.ts against the real WebCrypto): login and
@@ -2220,6 +2220,14 @@ describe("PatientView note history decrypt failure (2026-09-26 audit round, L)",
 });
 
 describe("PatientView idempotent note creation (2026-09-26 audit round, L)", () => {
+  const saveNoteToCompletion = async (root: Awaited<ReturnType<typeof render>>) => {
+    const button = root.root.findAllByType("button").find(node => rtr.textOfNode(node) === "Save note");
+    if (!button || button.props.disabled) throw new Error("The current Save note control is not enabled");
+    // Button forwards saveNote's original Promise; await both encrypted writes,
+    // the public API response, and the handler's final busy-state reset.
+    await act(async () => { await button.props.onClick(); });
+  };
+
   it("a failed save retries with the SAME client_note_id; success produces exactly one note; the next note mints a fresh id", async () => {
     const noteRow = (id: string, clientNoteId: string) => ({
       id, client_note_id: clientNoteId, pattern_pid: null, blob: "b",
@@ -2232,35 +2240,37 @@ describe("PatientView idempotent note creation (2026-09-26 audit round, L)", () 
       .mockResolvedValueOnce(noteRow("n1", "captured-at-send"))
       .mockResolvedValueOnce(noteRow("n2", "captured-at-send-2"));
     const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
-    await flush();
+    try {
+      await flush();
 
-    await typeTextarea(root, "Note about this patient…", "Session note text.");
-    await press(root, "Save note");
-    await flush();
-    expect(textOf(root)).toContain("request timed out");
-    // The draft survives a failed save; the user presses Save again.
-    await press(root, "Save note");
-    await flush();
-    expect(textOf(root)).toContain("Session note text.");
+      await typeTextarea(root, "Note about this patient…", "Session note text.");
+      await saveNoteToCompletion(root);
+      expect(textOf(root)).toContain("request timed out");
+      // The draft survives a failed save; the user presses Save again.
+      await saveNoteToCompletion(root);
+      expect(textOf(root)).toContain("Session note text.");
 
-    const calls = mockedApi.createNote.mock.calls as unknown as [string, { client_note_id: string }][];
-    expect(calls.length).toBeGreaterThanOrEqual(2);
-    expect(calls[0]![1].client_note_id).toBe(calls[1]![1].client_note_id);
-    // Exactly one note rendered in the interactive notes card — the retry
-    // rewrote nothing. (The print-only summary mirrors the note too; scope
-    // the count to the interactive card's .note paragraphs.)
-    const onScreenNotes = root.root.findAllByType("p").filter(
-      (n) => String(n.props.className ?? "").split(" ").includes("note")
-        && rtr.textOfNode(n).includes("Session note text."),
-    );
-    expect(onScreenNotes.length).toBe(1);
+      const calls = mockedApi.createNote.mock.calls as unknown as [string, { client_note_id: string }][];
+      expect(calls.length).toBeGreaterThanOrEqual(2);
+      expect(calls[0]![1].client_note_id).toBe(calls[1]![1].client_note_id);
+      // Exactly one note rendered in the interactive notes card — the retry
+      // rewrote nothing. (The print-only summary mirrors the note too; scope
+      // the count to the interactive card's .note paragraphs.)
+      const onScreenNotes = root.root.findAllByType("p").filter(
+        (n) => String(n.props.className ?? "").split(" ").includes("note")
+          && rtr.textOfNode(n).includes("Session note text."),
+      );
+      expect(onScreenNotes.length).toBe(1);
 
-    // A NEW note after a successful save mints a fresh id.
-    await typeTextarea(root, "Note about this patient…", "Second session note.");
-    await press(root, "Save note");
-    await flush();
-    const third = (mockedApi.createNote.mock.calls as unknown as [string, { client_note_id: string }][])[2]!;
-    expect(third![1].client_note_id).not.toBe(calls[0]![1].client_note_id);
+      // A NEW note after a successful save mints a fresh id.
+      await typeTextarea(root, "Note about this patient…", "Second session note.");
+      await saveNoteToCompletion(root);
+      const third = (mockedApi.createNote.mock.calls as unknown as [string, { client_note_id: string }][])[2]!;
+      expect(third![1].client_note_id).not.toBe(calls[0]![1].client_note_id);
+    } finally {
+      try { await act(async () => { root.unmount(); }); }
+      finally { await drainPortalDraftWritesForTests(); }
+    }
   });
 
   it("a 409 conflict burns the id — the next attempt mints a fresh one", async () => {
@@ -2271,19 +2281,22 @@ describe("PatientView idempotent note creation (2026-09-26 audit round, L)", () 
         created_at: "2026-09-16T00:00:00Z", updated_at: "2026-09-16T00:00:00Z",
       });
     const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
-    await flush();
-    await typeTextarea(root, "Note about this patient…", "Conflict then retry.");
-    await press(root, "Save note");
-    await flush();
-    await vi.waitFor(() => expect(textOf(root)).toContain("note id already used for another patient"));
-    // The conflicted id is burned: the retry mints a fresh one and lands.
-    await press(root, "Save note");
-    await flush();
-    await vi.waitFor(() => expect(mockedApi.createNote).toHaveBeenCalledTimes(2));
-    await vi.waitFor(() => expect(buttonByLabel(root, "Save note")).toBeDefined());
-    const calls = mockedApi.createNote.mock.calls as unknown as [string, { client_note_id: string }][];
-    expect(calls[1]![1].client_note_id).not.toBe(calls[0]![1].client_note_id);
-    expect(textOf(root)).toContain("Conflict then retry.");
+    try {
+      await flush();
+      await typeTextarea(root, "Note about this patient…", "Conflict then retry.");
+      await saveNoteToCompletion(root);
+      await vi.waitFor(() => expect(textOf(root)).toContain("note id already used for another patient"));
+      // The conflicted id is burned: the retry mints a fresh one and lands.
+      await saveNoteToCompletion(root);
+      await vi.waitFor(() => expect(mockedApi.createNote).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() => expect(buttonByLabel(root, "Save note")).toBeDefined());
+      const calls = mockedApi.createNote.mock.calls as unknown as [string, { client_note_id: string }][];
+      expect(calls[1]![1].client_note_id).not.toBe(calls[0]![1].client_note_id);
+      expect(textOf(root)).toContain("Conflict then retry.");
+    } finally {
+      try { await act(async () => { root.unmount(); }); }
+      finally { await drainPortalDraftWritesForTests(); }
+    }
   });
 
   it("M-2 (2026-09-28): a 409 version_conflict burns the id too — the retry mints a FRESH client_note_id and succeeds", async () => {
@@ -2307,22 +2320,25 @@ describe("PatientView idempotent note creation (2026-09-26 audit round, L)", () 
         created_at: "2026-09-16T00:00:00Z", updated_at: "2026-09-16T00:00:00Z",
       });
     const root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
-    await flush();
-    await typeTextarea(root, "Note about this patient…", "Version conflict then retry.");
-    await press(root, "Save note");
-    await flush();
-    await vi.waitFor(() => expect(textOf(root)).toContain("a different note with this client_note_id already exists"));
-    // The version-conflicted id is burned: the second press mints a FRESH
-    // client_note_id (different bytes underneath it) and the draft is
-    // savable again — not wedged on the dead id forever.
-    await press(root, "Save note");
-    await flush();
-    await vi.waitFor(() => expect(mockedApi.createNote).toHaveBeenCalledTimes(2));
-    const calls = mockedApi.createNote.mock.calls as unknown as [string, { client_note_id: string; blob: string }][];
-    expect(calls.length).toBe(2);
-    expect(calls[1]![1].client_note_id).not.toBe(calls[0]![1].client_note_id);
-    expect(calls[1]![1].blob).toBe("SEALEDNOTE-2==");
-    expect(textOf(root)).toContain("Version conflict then retry.");
+    try {
+      await flush();
+      await typeTextarea(root, "Note about this patient…", "Version conflict then retry.");
+      await saveNoteToCompletion(root);
+      await vi.waitFor(() => expect(textOf(root)).toContain("a different note with this client_note_id already exists"));
+      // The version-conflicted id is burned: the second press mints a FRESH
+      // client_note_id (different bytes underneath it) and the draft is
+      // savable again — not wedged on the dead id forever.
+      await saveNoteToCompletion(root);
+      await vi.waitFor(() => expect(mockedApi.createNote).toHaveBeenCalledTimes(2));
+      const calls = mockedApi.createNote.mock.calls as unknown as [string, { client_note_id: string; blob: string }][];
+      expect(calls.length).toBe(2);
+      expect(calls[1]![1].client_note_id).not.toBe(calls[0]![1].client_note_id);
+      expect(calls[1]![1].blob).toBe("SEALEDNOTE-2==");
+      expect(textOf(root)).toContain("Version conflict then retry.");
+    } finally {
+      try { await act(async () => { root.unmount(); }); }
+      finally { await drainPortalDraftWritesForTests(); }
+    }
   });
 });
 

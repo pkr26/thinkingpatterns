@@ -84,12 +84,17 @@ export async function saveActiveDraft(dataKey: Bytes, userId: string, draft: Ent
   const keyCopy=new Uint8Array(dataKey);
   const payload = new TextEncoder().encode(JSON.stringify(draft));
   try {
-    const permit=await kv.captureWritePermit(userId,keyCopy);
-    if(draftIsEmpty(draft)){await clearActiveDraft(userId,permit);return;}
-    await chained(userId, async () => {
+    const permitPromise = kv.captureWritePermit(userId,keyCopy);
+    // Enqueue before awaiting the captured permit so a clear cannot overtake.
+    const queued = chained(userId, async () => {
+      const permit=await permitPromise;
+      if(draftIsEmpty(draft)){await kv.removeItem(key(userId),permit);return;}
       const blob = await encrypt(keyCopy, payload, buildAad("draft", userId));
       await kv.setItem(key(userId), toBase64(blob),permit);
     });
+    void queued.catch(() => undefined);
+    await permitPromise;
+    await queued;
   } finally {
     zeroize(payload,keyCopy);
   }

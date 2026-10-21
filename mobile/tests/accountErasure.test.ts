@@ -85,6 +85,26 @@ it("never retires an account for a malformed stored cleanup job", async () => {
     expect(await retryPendingAccountErasures()).toBe(1);
     expect(await api.getUserId()).toBe(user); expect(await storage.getItem(slot)).toBe("journal-owner-data");
   }
+
+  // A matching key does not authenticate an empty or NUL-framed owner.
+  // Retrying corrupt checkpoints must leave this live account able to save.
+  await storage.removeItem(marker);
+  const planKey = Buffer.alloc(32, 9);
+  const plan = { ...emptySafetyPlan(), warningSigns: "My current safety plan" };
+  try {
+    await expect(saveSafetyPlan(planKey, user, plan)).resolves.toBeUndefined();
+    for (const invalidOwner of ["", "\0origin-erasure"]) {
+      const invalidMarker = accountStorageKey.erasure(origin, invalidOwner);
+      const invalidJob = JSON.stringify({ userId: invalidOwner, origin, username: null });
+      await secureStore.setItem(invalidMarker, invalidJob);
+      expect(await retryPendingAccountErasures()).toBe(1);
+      expect(await secureStore.getItem(invalidMarker)).toBe(invalidJob);
+      expect(await api.getUserId()).toBe(user);
+      await expect(saveSafetyPlan(planKey, user, plan)).resolves.toBeUndefined();
+      expect(await storage.getItem(slot)).toBe("journal-owner-data");
+      await storage.removeItem(invalidMarker);
+    }
+  } finally { planKey.fill(0); }
 });
 
 it("never applies a valid cleanup body stored under another account's checkpoint key", async () => {

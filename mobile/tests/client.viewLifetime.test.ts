@@ -73,7 +73,7 @@ it.each([
 });
 
 it("retired view refuses processing admission before any Native delivery", async () => {
-  await expect(api.openProcessingSession(KEY, undefined, () => false)).rejects.toMatchObject({ status: 0, code: "stale_operation" });
+  await expect(api.openProcessingSession(KEY, undefined, () => false)).rejects.toMatchObject({ status: 0, code: "stale_operation", message: "The operation is no longer active; no request was sent." });
   expect(deliveries).toEqual([]);
 });
 
@@ -274,7 +274,7 @@ const readRequests = [
 it.each(readRequests.flatMap(([label, request]) => [
   [label, request, "@mindpattern/token", "@mindpattern/user_id"],
   [label, request, "@mindpattern/user_id", "@mindpattern/username"],
-] as const))("an obsolete %s %s completion leaves the serial Native provider available to the current read", async (_label, request, pausedSlot, followingSlot) => {
+] as const))("an obsolete %s %s completion leaves the serial Native provider available to the current read (case #%#)", async (_label, request, pausedSlot, followingSlot) => {
   const completedRead = hold(), obsoleteRead = hold(), get = storage.getItem.bind(storage);
   let first = true, oldCurrent = true, obsoleteWindow = false;
   let lane: Promise<unknown> = Promise.resolve();
@@ -316,7 +316,7 @@ it.each(readRequests.flatMap(([label, request]) => [
   [label, request, "bearer", "@mindpattern/token"],
   [label, request, "owner", "@mindpattern/user_id"],
   [label, request, "username", "@mindpattern/username"],
-] as const))("retired %s read refuses dispatch after Native %s delivery", async (_label, request, stage, slot) => {
+] as const))("retired %s read refuses dispatch after Native %s delivery (case #%#)", async (_label, request, stage, slot) => {
   const held = hold(), get = storage.getItem.bind(storage);
   let current = stage !== "admission", first = true;
   vi.stubGlobal("fetch", async (url: unknown) => {
@@ -342,7 +342,7 @@ it.each(readRequests.flatMap(([label, request]) => [
 
 it.each(readRequests.flatMap(([label, request]) => [
   [label, request, "headers"], [label, request, "body"],
-] as const))("a retired %s read cannot adopt Native %s delivery", async (_label, request, stage) => {
+] as const))("a retired %s read cannot adopt Native %s delivery (case #%#)", async (_label, request, stage) => {
   const held = hold(); let current = true;
   vi.stubGlobal("fetch", async (url: unknown) => {
     deliveries.push(new URL(String(url)).pathname);
@@ -369,7 +369,7 @@ it.each(settingsRequests.flatMap(([label, request]) => [
   [label, request, "bearer", "@mindpattern/token"],
   [label, request, "owner", "@mindpattern/user_id"],
   [label, request, "username", "@mindpattern/username"],
-] as const))("retired Settings %s refuses sensitive dispatch after Native %s delivery", async (_label, request, stage, slot) => {
+] as const))("retired Settings %s refuses sensitive dispatch after Native %s delivery (case #%#)", async (_label, request, stage, slot) => {
   const held = hold(), get = storage.getItem.bind(storage); let current = stage !== "admission", first = true;
   vi.stubGlobal("fetch", async (url: unknown) => {
     deliveries.push(new URL(String(url)).pathname);

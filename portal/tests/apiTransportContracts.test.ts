@@ -49,15 +49,43 @@ it("drops fetch-failure deadlines and links even when the host rejects before re
 });
 
 it("rejects body consumption immediately when a late response arrives after its deadline",async()=>{
-  vi.useFakeTimers();let releaseFetch!:(response:Response)=>void;let releaseBody!:(body:unknown)=>void;
-  const body=new Promise<unknown>(resolve=>{releaseBody=resolve;});
-  vi.stubGlobal("fetch",vi.fn(async()=>await new Promise<Response>(resolve=>{releaseFetch=resolve;})));
-  const request=api.me();const result=observe(request);await settle();
-  try{
-    vi.advanceTimersByTime(15_000);await settle();
-    releaseFetch({status:200,ok:true,headers:new Headers(),url:"",json:async()=>await body} as Response);
-    await settle();expect(result.settled).toBe(true);expect(result.error).toMatchObject({status:0,message:"request timed out while reading response"});
-  }finally{releaseBody({});await request.catch(()=>{});}
+  vi.useFakeTimers();
+  const nativeAdd = AbortSignal.prototype.addEventListener;
+  const signals: AbortSignal[] = [];
+  const observer = vi.spyOn(AbortSignal.prototype, "addEventListener").mockImplementation(function (this: AbortSignal, ...args: Parameters<AbortSignal["addEventListener"]>) {
+    const result = nativeAdd.apply(this, args);
+    if (args[0] === "abort") signals.push(this);
+    return result;
+  });
+  try {
+    for (const nativeBody of [false, true]) {
+      let releaseFetch!: (response: Response) => void;
+      let releaseBody!: (body: unknown) => void;
+      let source: ReadableStreamDefaultController<Uint8Array> | undefined;
+      const cancelled = vi.fn();
+      const body = new Promise<unknown>(resolve => { releaseBody = resolve; });
+      signals.length = 0;
+      vi.stubGlobal("fetch", vi.fn(async () => await new Promise<Response>(resolve => { releaseFetch = resolve; })));
+      const request = api.me(); const result = observe(request); await settle();
+      try {
+        expect(signals).toHaveLength(1);
+        const sessionSignal = signals[0]!;
+        expect(getEventListeners(sessionSignal, "abort")).toHaveLength(1);
+        vi.advanceTimersByTime(15_000); await settle();
+        expect(getEventListeners(sessionSignal, "abort"), "expired header-pending request releases its original session cancellation link").toHaveLength(0);
+        releaseFetch(nativeBody
+          ? new Response(new ReadableStream<Uint8Array>({ start(target) { source = target; }, cancel: cancelled }))
+          : {status:200,ok:true,headers:new Headers(),url:"",json:async()=>await body} as Response);
+        await settle(); expect(result.settled).toBe(true);
+        expect(result.error).toMatchObject({status:0,message:"request timed out while reading response"});
+        if (nativeBody) expect(cancelled, "a native body arriving after the deadline releases its original reader").toHaveBeenCalledOnce();
+      } finally {
+        releaseFetch(json({})); releaseBody({});
+        try { source?.close(); } catch { /* original source already cancelled */ }
+        await request.catch(() => {}); await settle();
+      }
+    }
+  } finally { observer.mockRestore(); }
 });
 
 it("cleans a retired request's deadline immediately even while its host fetch is still pending",async()=>{
@@ -209,6 +237,38 @@ it("propagates a native source read failure while releasing the request deadline
   vi.useFakeTimers(); const failure = new Error("source disconnected");
   vi.stubGlobal("fetch", vi.fn(async () => new Response(new ReadableStream({ start(target) { target.error(failure); } }))));
   await expect(api.me()).rejects.toBe(failure); expect(vi.getTimerCount()).toBe(0);
+
+  vi.useRealTimers();
+  const { setImmediate: nativeCheckpoint } = await import("node:timers/promises");
+  const terminalFault = new Error("public native body terminal fault");
+  let nativeSource!: ReadableStreamDefaultController<Uint8Array>;
+  const nativeBody = new ReadableStream<Uint8Array>({ start(source) { nativeSource = source; } });
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(nativeBody)));
+  const request = api.me();
+  const observed = observe(request);
+  let releaseRetirement!: () => void;
+  const retirement = new Promise<void>(resolve => { releaseRetirement = resolve; });
+  const retireSession = (): void => { try { clearSession(); } finally { releaseRetirement(); } };
+  let retirementQueued = false;
+  try {
+    await nativeCheckpoint();
+    expect(observed.settled).toBe(false);
+    nativeSource.error(terminalFault);
+    queueMicrotask(retireSession);
+    retirementQueued = true;
+    await expect(request).rejects.toBe(terminalFault);
+    await retirement;
+    expect(hasSession()).toBe(false);
+    setSession("after-native-body-terminal", base);
+    vi.stubGlobal("fetch", vi.fn(async () => json({ currentOwnerResult: true })));
+    await expect(api.me()).resolves.toEqual({ currentOwnerResult: true });
+  } finally {
+    if (!retirementQueued) retireSession();
+    await retirement;
+    clearSession();
+    try { nativeSource.close(); } catch { /* already errored or cancelled */ }
+    await request.catch(() => undefined);
+  }
 });
 
 it("keeps a hung native JSON body unsettled until its fifteen-second deadline, then fails promptly", async () => {
@@ -221,7 +281,7 @@ it("keeps a hung native JSON body unsettled until its fifteen-second deadline, t
     expect(result).toMatchObject({settled:true,error:{name:"ApiError",status:0,message:"request timed out while reading response"}});
   } finally {try{source.close();}catch{/* source already cancelled */} await settle();}
 });
-it.each([undefined, "", "   ", " enrollment-token "])("sends an optional enrollment token only when meaningful: %s", async token => {
+it.each([undefined, "", "   ", " enrollment-token "])("sends an optional enrollment token only when meaningful (case #%#)", async token => {
   vi.stubGlobal("fetch", vi.fn(async () => json({ token: "issued" })));
   await auth.registerTherapist(base, { username: "drportal", salt: "salt", verifier: "proof", display_name: "Dr. Portal", wrap_pub_key: "public", wrap_key_blob: "sealed", age_attestation: "minimum_age_confirmed_v1" }, token);
   const headers = new Headers(vi.mocked(fetch).mock.calls[0]![1]!.headers);

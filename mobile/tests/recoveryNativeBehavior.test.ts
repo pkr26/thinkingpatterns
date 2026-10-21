@@ -2,7 +2,7 @@
  * server independently authenticates the kit, processing key and new wrap. */
 import crypto from "node:crypto";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { api, ApiError } from "../src/api/client";
+import { api } from "../src/api/client";
 import { recoverAccountWithKey } from "../src/recoveryFlow";
 import * as kdf from "../src/crypto/kdf";
 import * as recoveryCrypto from "../src/crypto/recovery";
@@ -76,10 +76,10 @@ it.each(["v1", "v2"] as const)("a Native %s kit installs the recovered key and a
   expect(await api.getCachedSalt("alice")).toBe(cachedBody!.new_salt);
   expect(await api.getCachedKeyEnvelope("alice")).toMatchObject({ scheme: "v2", saltB64: cachedBody!.new_salt, wrappedB64: cachedBody!.wrapped_data_key });
 });
-it.each([undefined, null, "", 0, false, {}, []])("native canonical username %j falls back to the trimmed requested account", async value => {
+it.each([undefined, null, "", 0, false, {}, []])("native canonical username %j falls back to the trimmed requested account (case #%#)", async value => {
   canonical = value; const result = await recoverAccountWithKey(" alice ", kit(), PASSWORD, "v2"); expect(result.username).toBe("alice"); expect(await api.getUsername()).toBe("alice"); expect(resets).toBe(1);
 });
-it.each([null, undefined, "", 0, false, {}, []])("native processing token %j cannot reset or publish success", async value => {
+it.each([null, undefined, "", 0, false, {}, []])("native processing token %j cannot reset or publish success (case #%#)", async value => {
   processing = value; await expect(recoverAccountWithKey("alice", kit(), PASSWORD, "v2")).rejects.toThrow("Invalid processing-session response"); expect(resets).toBe(0); expect(await api.isLoggedIn()).toBe(false);
 });
 it("a Native authentication refusal does not install recovery credentials", async () => {
@@ -99,7 +99,7 @@ it("the active Native UI attempt can complete with an explicit current callback"
   const result = await recoverAccountWithKey("alice", kit(), PASSWORD, "v2", { stillCurrent: () => true }); expect(result.dataKey).toEqual(DATA); expect(resets).toBe(1);
 });
 it("a retired Native UI attempt cannot start recovery", async () => {
-  await expect(recoverAccountWithKey("alice", kit(), PASSWORD, "v2", { stillCurrent: () => false })).rejects.toMatchObject({ code: "stale_operation" }); expect(resets).toBe(0); expect(await api.isLoggedIn()).toBe(false);
+  await expect(recoverAccountWithKey("alice", kit(), PASSWORD, "v2", { stillCurrent: () => false })).rejects.toMatchObject({ code: "stale_operation", message: "Recovery stopped because the account or server changed. Confirm any completed password reset before retrying." }); expect(resets).toBe(0); expect(await api.isLoggedIn()).toBe(false);
 });
 it("a retired UI rejects promptly while the next Native recovery provider is unavailable", async () => {
   const held = gate(), fetch = globalThis.fetch;

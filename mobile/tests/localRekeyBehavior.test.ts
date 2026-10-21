@@ -4,9 +4,9 @@ import storage from "./helpers/storageMock";
 import * as files from "./helpers/expoFsMock";
 import { runTestControl } from "./helpers/testControl";
 import { secureStore, setSecureStoreBackend } from "../src/secureStore";
-import { api, DEFAULT_BASE_URL } from "../src/api/client";
-import { accountStorageKey } from "../src/accountStorage";
-import { advanceLocalWriteScope, __resetLocalKeyLifecycleForTests } from "../src/localWriteGuard";
+import { api, canonicalOrigin, DEFAULT_BASE_URL } from "../src/api/client";
+import { accountStorageKey, ACCOUNT_STORAGE_PREFIX } from "../src/accountStorage";
+import { advanceLocalWriteScope, localWriteScopeEpoch, localKeyGeneration, __resetLocalKeyLifecycleForTests } from "../src/localWriteGuard";
 import { clearLocalRekey, localRekeyRequest, markLocalRekeyPhase, pendingLocalRekey, pendingLocalRekeyOldSalt, prepareLocalRekey, resumeLocalRekey, storeLocalRekeyRequest, storeLocalRekeyTokens, type AtomicRekeyBody } from "../src/localRekey";
 import { emptySafetyPlan, loadSafetyPlan, saveSafetyPlan } from "../src/safetyPlan";
 import { enqueueAudio, flushAudioQueue } from "../src/audioQueue";
@@ -124,12 +124,29 @@ it("explicitly removes every checkpoint chunk while preserving the authored orig
 });
 it("keeps queued checkpoint writers serialized when a predecessor settles while its successor is still reading",async()=>{
   await prepared();const body=await requestBody(),read=secureStore.getItem;let reads=0,release!:()=>void,ready!:()=>void;const started=new Promise<void>(resolve=>{ready=resolve;});
-  vi.spyOn(secureStore,"getItem").mockImplementation(async key=>{const value=await read(key);if(key===slot&&++reads===2){ready();await new Promise<void>(resolve=>{release=resolve;});}return value;});
-  const first=storeLocalRekeyTokens(USER,NEXT,{old:"first",next:"first-next"});
-  const second=storeLocalRekeyTokens(USER,NEXT,{old:"second",next:"second-next"});
-  await Promise.race([started,second]);const third=storeLocalRekeyRequest(USER,NEXT,body);
-  for(let i=0;i<80;i++)await Promise.resolve();release();await Promise.all([first,second,third]);vi.restoreAllMocks();
-  expect(await localRekeyRequest(USER,NEXT)).toEqual({operationId:body.operation_id,tokens:{old:"second",next:"second-next"},body});
+  const scope=`${localWriteScopeEpoch()}\0${localKeyGeneration(USER)}\0${USER}`;
+  const descriptor=Object.getOwnPropertyDescriptor(Map.prototype,"set")!,nativeSet=Map.prototype.set,nativeHas=Map.prototype.has;
+  let journalTail:{receiver:Map<unknown,unknown>;original:Promise<unknown>}|undefined;
+  const owned:Promise<unknown>[]=[];
+  try{
+    Object.defineProperty(Map.prototype,"set",{...descriptor,value:function(this:Map<unknown,unknown>,key:unknown,value:unknown){
+      const result=nativeSet.call(this,key,value);
+      if(key===scope&&value instanceof Promise)journalTail={receiver:this,original:value};
+      return result;
+    }});
+    vi.spyOn(secureStore,"getItem").mockImplementation(async key=>{const value=await read(key);if(key===slot&&++reads===2){ready();await new Promise<void>(resolve=>{release=resolve;});}return value;});
+    const first=storeLocalRekeyTokens(USER,NEXT,{old:"first",next:"first-next"});owned.push(first);
+    const second=storeLocalRekeyTokens(USER,NEXT,{old:"second",next:"second-next"});owned.push(second);
+    await Promise.race([started,second]);const third=storeLocalRekeyRequest(USER,NEXT,body);owned.push(third);
+    expect(journalTail).toBeDefined();expect(nativeHas.call(journalTail!.receiver,scope)).toBe(true);
+    for(let i=0;i<80;i++)await Promise.resolve();release();await Promise.all([first,second,third]);vi.restoreAllMocks();
+    await journalTail!.original;
+    expect(nativeHas.call(journalTail!.receiver,scope),"A settled journal writer releases its actual native Map owner slot").toBe(false);
+    expect(await localRekeyRequest(USER,NEXT)).toEqual({operationId:body.operation_id,tokens:{old:"second",next:"second-next"},body});
+  }finally{
+    try{release?.();await Promise.allSettled(owned);if(journalTail)await Promise.allSettled([journalTail.original]);}
+    finally{Object.defineProperty(Map.prototype,"set",descriptor);vi.restoreAllMocks();}
+  }
 });
 it("lets a replacement owner's checkpoint complete while an old native read remains held",async()=>{
   await prepared();const read=secureStore.getItem;let release!:()=>void,ready!:()=>void;const started=new Promise<void>(resolve=>{ready=resolve;});
@@ -225,7 +242,7 @@ it("settles an interrupted real queued request without classifying the frozen ge
 it("settles an interrupted recording before rereading unavailable native descriptors",async()=>{
   await recorded();const descriptor=(await storage.getAllKeys()).find(key=>key.startsWith("@mindpattern/audioqueue.v1:"))!;
   expect(descriptor).toBeTypeOf("string");const read=storage.getItem;let ready!:()=>void,releaseFetch!:()=>void,releaseRead!:()=>void;const reached=new Promise<void>(resolve=>{ready=resolve;}),fetchGate=new Promise<void>(resolve=>{releaseFetch=resolve;}),readGate=new Promise<void>(resolve=>{releaseRead=resolve;});let obsolete=false;
-  vi.spyOn(storage,"getItem").mockImplementation(async key=>{if(obsolete&&key===descriptor)await readGate;return read(key);});
+  vi.spyOn(storage,"getItem").mockImplementation(async key=>{if(obsolete&&(key===descriptor||key===`${ACCOUNT_STORAGE_PREFIX.audioErase}${Buffer.from(`${canonicalOrigin(origin)}\0${USER}`).toString("base64url")}`))await readGate;return read(key);});
   vi.stubGlobal("fetch",vi.fn(async()=>{ready();await fetchGate;return new Response("{}",{status:200,headers:{"Content-Type":"application/json"}});}));
   const flush=flushAudioQueue(),result=flush.then(value=>({value}),error=>({error:(error as Error).message}));await Promise.race([reached,result]);
   try{await prepareLocalRekey(USER,OLD,NEXT);obsolete=true;releaseFetch();expect(await Promise.race([result,new Promise(resolve=>setTimeout(()=>resolve({blocked:true}),100))])).toEqual({value:0});}

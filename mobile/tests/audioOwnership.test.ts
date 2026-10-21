@@ -30,7 +30,7 @@ it("account erasure wins an export suspended before native file creation and sha
   Sharing.isAvailableAsync.mockImplementationOnce(async () => { started.resolve(); return release.promise; });
   const exporting = exportSavedAudio(USER, "saved").catch(e => e);
   await started.promise;
-  expect(await eraseDeletedAccountLocals(USER, "alice", { preserveSession: true })).toEqual([]);
+  expect(await eraseDeletedAccountLocals(USER, "alice")).toEqual([]);
   const writesAfterErasure = fs.writeAsStringAsync.mock.calls.length;
   release.resolve(true);
   expect(await exporting).toBeInstanceOf(Error);
@@ -60,7 +60,7 @@ it("erasure drains an already submitted export file write before removing the sc
   });
   const exporting = exportSavedAudio(USER, "saved").catch(e => e); await started.promise;
   let erased = false;
-  const erasure = eraseDeletedAccountLocals(USER, "alice", { preserveSession: true }).then(result => { erased = true; return result; });
+  const erasure = eraseDeletedAccountLocals(USER, "alice").then(result => { erased = true; return result; });
   await new Promise<void>(r => setImmediate(r)); expect(erased).toBe(false);
   release.resolve(); expect(await exporting).toBeInstanceOf(Error); expect(await erasure).toEqual([]);
   const uri = fs.writeAsStringAsync.mock.calls.at(-1)![0];
@@ -75,7 +75,7 @@ it("erasure drains a legacy recording migration already writing a native file", 
   });
   const flushing = flushAudioQueue().catch(e => e); await started.promise;
   let erased = false;
-  const erasure = eraseDeletedAccountLocals(USER, "alice", { preserveSession: true }).then(result => { erased = true; return result; });
+  const erasure = eraseDeletedAccountLocals(USER, "alice").then(result => { erased = true; return result; });
   await new Promise<void>(r => setImmediate(r)); const finishedBeforeNativeWrite = erased;
   release.resolve(); await flushing; expect(await erasure).toEqual([]);
   expect(finishedBeforeNativeWrite).toBe(false);

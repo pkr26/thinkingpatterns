@@ -45,13 +45,13 @@ describe("linked synchronous native capability probes", () => {
     expect(requireNative.mock.calls.some(([name]) => name === "@notifee/react-native")).toBe(true);
   });
 
-  it.each([17, 17.99, "17", "17.99"])("reports the system requirement for iOS %s", async (version) => {
+  it.each([17, 17.99, "17", "17.99"])("reports the system requirement for iOS %s (case #%#)", async (version) => {
     const { healthkit, Platform } = await linked();
     Platform.OS = "ios"; Platform.Version = version;
     expect(healthkit.healthKitCapability()).toEqual({ available: false, reason: "settings.reasonHealthIOS18" });
   });
 
-  it.each([18, 18.5, "18", "18.5", "unknown"])("accepts linked capable modules at iOS version %s", async (version) => {
+  it.each([18, 18.5, "18", "18.5", "unknown"])("accepts linked capable modules at iOS version %s (case #%#)", async (version) => {
     const { healthkit, Platform } = await linked();
     Platform.OS = "ios"; Platform.Version = version;
     expect(healthkit.healthKitCapability()).toEqual({ available: true });
@@ -64,7 +64,7 @@ describe("linked synchronous native capability probes", () => {
   });
 
   it.each([{}, { default: {} }, { requestAuthorization: () => true }, { saveStateOfMind: () => true }])(
-    "distinguishes linked modules lacking the State of Mind API", async (module) => {
+    "distinguishes linked modules lacking the State of Mind API (case #%#)", async (module) => {
       const { healthkit, Platform } = await linked(module);
       Platform.OS = "ios"; Platform.Version = 18;
       expect(healthkit.healthKitCapability()).toEqual({ available: false, reason: "settings.reasonHealthOldModule" });
@@ -90,7 +90,7 @@ describe("linked synchronous native capability probes", () => {
   });
 
   it.each([3, "linked", true, { default: 3 }, { default: "linked" }, { default: true }])(
-    "declines malformed linked HealthKit exports without rejecting", async (module) => {
+    "declines malformed linked HealthKit exports without rejecting (case #%#)", async (module) => {
       const { healthkit } = await linked(module);
       expect(healthkit.healthKitCapability()).toEqual({ available: false, reason: "settings.reasonHealthOldModule" });
       expect(await healthkit.ensureStateOfMindWriteAccess()).toBe(false);
@@ -293,7 +293,7 @@ describe("linked native scheduling surface", () => {
     expect(api.createTriggerNotification.mock.calls[0]?.[1]).toMatchObject({ type: 0, repeatFrequency: 1 });
   });
 
-  it.each([null, {}, { default: {} }, { default: 3 }])("declines invalid scheduling modules for daily, measure and cancellation actions", async (module) => {
+  it.each([null, {}, { default: {} }, { default: 3 }])("declines invalid scheduling modules for daily, measure and cancellation actions (case #%#)", async (module) => {
     const { native, ownership } = await scheduled(module);
     expect(await native.scheduleDailyReminder(9, 15, ownership.beginNotificationUpdate("owner", "daily"))).toBe(false);
     expect(await native.scheduleMeasureReminder(new Date(), ownership.beginNotificationUpdate("owner", "measure"))).toBe(false);
@@ -375,7 +375,7 @@ describe("linked native scheduling surface", () => {
 
     it(`${kind} stops after a newer same-account preference supersedes permission`, async () => {
       const api = schedulerApi();
-      const { native, ownership } = await scheduled(api);
+      const { native, ownership, requireNative } = await scheduled(api);
       let entered!: () => void; let release!: () => void;
       const reached = new Promise<void>(resolve => { entered = resolve; });
       const wait = new Promise<void>(resolve => { release = resolve; });
@@ -387,6 +387,47 @@ describe("linked native scheduling surface", () => {
       expect(await pending).toBe(false);
       expect(api.cancelNotification).not.toHaveBeenCalled();
       expect(api.createTriggerNotification).not.toHaveBeenCalled();
+      const stale = ownership.beginNotificationUpdate("owner", kind);
+      ownership.beginNotificationUpdate("owner", kind);
+      const nativeProbeCount = requireNative.mock.calls.filter(([name]) => name === "@notifee/react-native").length;
+      const refused = kind === "daily" ? native.scheduleDailyReminder(9, 15, stale) : native.scheduleMeasureReminder(new Date(), stale);
+      expect(await refused).toBe(false);
+      expect(requireNative.mock.calls.filter(([name]) => name === "@notifee/react-native"), "a superseded reminder intent must refuse before probing the native module").toHaveLength(nativeProbeCount);
+
+      // A queued cancellation also owns the prefix before its first native load.
+      // Restore the loader before creating an independent cold module context.
+      requireNative.mockRestore();
+      vi.resetModules();
+      const queued = await scheduled(schedulerApi());
+      let reachedLane!: () => void;
+      let releaseLane!: () => void;
+      const laneEntered = new Promise<void>(resolve => { reachedLane = resolve; });
+      const laneGate = new Promise<void>(resolve => { releaseLane = resolve; });
+      const blocker = queued.ownership.runOwnedNotification(
+        queued.ownership.beginNotificationUpdate("owner", kind),
+        async () => { reachedLane(); await laneGate; return true; },
+      );
+      let cancellation: Promise<boolean> | undefined;
+      try {
+        await Promise.race([
+          laneEntered,
+          blocker.then(() => { throw new Error("The public notification lane did not reach its held callback"); }),
+        ]);
+        const older = queued.ownership.beginNotificationUpdate("owner", kind);
+        cancellation = kind === "daily"
+          ? queued.native.cancelDailyReminder("owner", older)
+          : queued.native.cancelMeasureReminder("owner", older);
+        queued.ownership.beginNotificationUpdate("owner", kind);
+        expect(queued.requireNative.mock.calls.filter(([name]) => name === "@notifee/react-native")).toHaveLength(0);
+        releaseLane();
+        expect(await blocker).toBe(true);
+        expect(await cancellation).toBe(false);
+        expect(queued.requireNative.mock.calls.filter(([name]) => name === "@notifee/react-native"), "a queued cancellation whose intent retired must refuse before native module admission").toHaveLength(0);
+      } finally {
+        releaseLane();
+        await Promise.allSettled(cancellation ? [blocker, cancellation] : [blocker]);
+        queued.requireNative.mockRestore();
+      }
     });
   }
 
@@ -428,7 +469,9 @@ describe("linked native scheduling surface", () => {
     await reminders.setReminderEnabled("owner", true);
     expect(await native.cancelMeasureReminder("owner")).toBe(true);
     expect(api.createTriggerNotification).toHaveBeenCalledOnce();
-    expect(api.createTriggerNotification.mock.calls[0][0]).toMatchObject({ id: "mindpattern-daily-reminder" });
+    const notificationCall = api.createTriggerNotification.mock.calls[0];
+    if (!notificationCall) throw new Error("Expected the restored daily reminder call");
+    expect(notificationCall[0]).toMatchObject({ id: "mindpattern-daily-reminder" });
   });
 
   it("fallback cancellation cannot restore a sibling after a newer same-kind cancellation intent", async () => {
@@ -493,7 +536,7 @@ describe("linked native scheduling surface", () => {
   });
 
   it("migration restores daily output and stays pending when native permission is denied", async () => {
-    const api = schedulerApi(); const { native, storage } = await scheduled(api);
+    const api = schedulerApi(); const { native, storage, requireNative } = await scheduled(api);
     const reminders = await import("../src/reminders");
     await reminders.setReminderEnabled("owner", true);
     api.requestPermission.mockResolvedValueOnce({ authorizationStatus: 0 });
@@ -503,8 +546,49 @@ describe("linked native scheduling surface", () => {
     await native.migrateOrphanedReminderNotifications("owner");
     expect(api.cancelAllNotifications).toHaveBeenCalledTimes(2);
     expect(api.createTriggerNotification).toHaveBeenCalledOnce();
-    expect(api.createTriggerNotification.mock.calls[0][0]).toMatchObject({ id: "mindpattern-daily-reminder" });
+    const notificationCall = api.createTriggerNotification.mock.calls[0];
+    if (!notificationCall) throw new Error("Expected the restored daily reminder call");
+    expect(notificationCall[0]).toMatchObject({ id: "mindpattern-daily-reminder" });
     expect(await storage.getItem("@mindpattern/reminder.migration.v2.done")).toBe("1");
+
+    // Observe the same completed original marker read before its await resumes.
+    // The real retirement must stop this cold path before Notifee can load.
+    requireNative.mockRestore();
+    vi.resetModules();
+    const cold = await scheduled(schedulerApi());
+    const owner = cold.ownership.beginNotificationUpdate("owner", "daily");
+    const nativeRead = cold.storage.getItem.bind(cold.storage);
+    const observers: Promise<unknown>[] = [];
+    let originalRead: Promise<string | null> | undefined;
+    let ownerWasCurrentAtRead = false;
+    const read = vi.spyOn(cold.storage, "getItem").mockImplementation(key => {
+      const original = nativeRead(key);
+      if (key === "@mindpattern/reminder.migration.v2.done" && originalRead === undefined) {
+        originalRead = original;
+        observers.push(original.then(value => {
+          expect(value).toBeNull();
+          cold.ownership.assertNotificationOwner(owner);
+          ownerWasCurrentAtRead = true;
+          cold.lifecycle.changeLocalSessionOwner("replacement");
+        }));
+      }
+      return original;
+    });
+    let migration: Promise<void> | undefined;
+    try {
+      expect(cold.requireNative.mock.calls.filter(([name]) => name === "@notifee/react-native")).toHaveLength(0);
+      migration = cold.native.migrateOrphanedReminderNotifications("owner", owner);
+      await migration;
+      await Promise.all(observers);
+      expect(originalRead).toBeDefined();
+      expect(ownerWasCurrentAtRead).toBe(true);
+      expect(cold.requireNative.mock.calls.filter(([name]) => name === "@notifee/react-native"), "migration retired after its native marker read must refuse before native module admission").toHaveLength(0);
+      expect(await nativeRead("@mindpattern/reminder.migration.v2.done")).toBeNull();
+    } finally {
+      await Promise.allSettled(migration ? [migration, ...observers] : observers);
+      read.mockRestore();
+      cold.requireNative.mockRestore();
+    }
   });
 
   it.each(["daily-preference", "measure-preference", "measure-baseline"] as const)("migration remains pending when an empty %s read is superseded", async boundary => {
@@ -585,7 +669,9 @@ describe("linked native scheduling surface", () => {
     const migration = native.migrateOrphanedReminderNotifications("owner"); release();
     expect(await pending).toBe(false); await migration;
     expect(api.createTriggerNotification).toHaveBeenCalledOnce();
-    expect(api.createTriggerNotification.mock.calls[0][0]).toMatchObject({ id: "mindpattern-daily-reminder" });
+    const notificationCall = api.createTriggerNotification.mock.calls[0];
+    if (!notificationCall) throw new Error("Expected the restored daily reminder call");
+    expect(notificationCall[0]).toMatchObject({ id: "mindpattern-daily-reminder" });
   });
 
   it.each(["owned-cancel", "admin-cancel", "origin-cancel", "migration"] as const)("does not dispatch old native work after a session changes during async loading (%s)", async operation => {
@@ -639,7 +725,7 @@ describe("real notification subscription feeds the navigation queue", () => {
     stop?.();
   });
 
-  it.each([null, {}, { notification: {} }, { notification: { id: 1 } }])("ignores an empty or unrecognized initial notification", async (initial) => {
+  it.each([null, {}, { notification: {} }, { notification: { id: 1 } }])("ignores an empty or unrecognized initial notification (case #%#)", async (initial) => {
     const events = eventApi();
     const { native, route } = await linked(healthApi(), events.module);
     const stop = await native.startNotificationPressRouting();
@@ -671,7 +757,7 @@ describe("real notification subscription feeds the navigation queue", () => {
     stop?.();
   });
 
-  it.each([null, 3, "linked", { default: 3 }, { default: "linked" }])("declines malformed notification event exports", async (module) => {
+  it.each([null, 3, "linked", { default: 3 }, { default: "linked" }])("declines malformed notification event exports (case #%#)", async (module) => {
     const { native } = await linked(healthApi(), module);
     expect(await native.startNotificationPressRouting()).toBeNull();
   });

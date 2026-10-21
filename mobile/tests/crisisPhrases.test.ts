@@ -53,7 +53,7 @@ describe("shared fixtures", () => {
     expect(detectCrisisLanguage(text)).toBe(true);
   });
 
-  it.each(shared.fixtures.dialog_silent)("dialog tier stays silent on %j", (text) => {
+  it.each(shared.fixtures.dialog_silent)("dialog tier stays silent on %j (case #%#)", (text) => {
     expect(detectCrisisLanguage(text)).toBe(false);
   });
 

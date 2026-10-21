@@ -155,11 +155,43 @@ export function PatientsView(props: {
    *  so the SAS itself proves nothing against a malicious server; this
    *  locally verified digest is the load-bearing substitution check. */
   const [sasLocalFingerprint, setSasLocalFingerprint] = useState<string | null>(null);
+  // A SAS belongs to one live account/code/patient tuple. Retire its UI
+  // immediately when that tuple changes, and fence every late continuation.
+  const sasGeneration = useRef(0);
+  const invalidateSas = useCallback(() => {
+    sasGeneration.current += 1;
+    setSasResult(null);
+    setSasLocalFingerprint(null);
+    setSasError("");
+    setSasBusy(false);
+  }, []);
+  useEffect(() => {
+    invalidateSas();
+    return () => { sasGeneration.current += 1; };
+  }, [props.session, invalidateSas]);
   /** Audit B-4 (2026-09-21): the accountability view of this therapist's
    *  own portal actions, fetched on demand from the server's access log. */
   const [auditRows, setAuditRows] = useState<AccessLogRow[] | null>(null);
   const [auditBusy, setAuditBusy] = useState(false);
   const [auditError, setAuditError] = useState("");
+
+  // Account-security continuations belong to the view and session that
+  // started them. In particular, salt/KDF work may finish after sign-out.
+  const securityGeneration = useRef(0);
+  const securitySession = useRef(props.session);
+  securitySession.current = props.session;
+  useEffect(() => {
+    securityGeneration.current += 1;
+    return () => { securityGeneration.current += 1; };
+  }, [props.session]);
+  const securityCurrent = (): (() => boolean) => {
+    const generation = securityGeneration.current;
+    const owner = props.session;
+    return () => owner !== undefined && securitySession.current === owner && securityGeneration.current === generation;
+  };
+  const requireSecurityCurrent = (current: () => boolean): void => {
+    if (!current()) throw new Error("This account security action ended with its session.");
+  };
 
   // --- Account security (NEW-3 / F.4, 2026-09-22) -----------------------------
   // Collapsed by default like the access-history panel above: nothing is
@@ -239,17 +271,28 @@ export function PatientsView(props: {
   // Verify every accessible current/revision blob under UUID binding before a
   // security change. Custody preserves ciphertext byte-for-byte; no valid
   // revision is skipped and no migration overwrites a concurrent clinical edit.
-  const verifyNotesCustody = async (ring: NotesKeyring): Promise<void> => {
+  const verifyNotesCustody = async (ring: NotesKeyring, current: () => boolean): Promise<void> => {
     const owner = props.session!.userId;
-    for (const patient of await api.patients()) {
+    requireSecurityCurrent(current);
+    const patients = await api.patients();
+    requireSecurityCurrent(current);
+    for (const patient of patients) {
       let offset = 0; let revision: string | undefined;
       for (let page = 0; page < 500; page += 1) {
+        requireSecurityCurrent(current);
         const result = await api.notes(patient.user_id, { offset, expectedRevision: revision });
+        requireSecurityCurrent(current);
+        if (revision === undefined && result.revision !== undefined && offset !== 0)
+          throw new Error("server changed the note pagination protocol during custody verification — nothing was changed.");
         revision = result.revision;
         for (const note of result.notes) {
           await decryptNoteAny(ring.active, ring.historical[0]!, owner, patient.user_id, note.client_note_id, note.blob, ring.historical);
-          for (const row of await api.noteRevisions(note.id)) {
+          requireSecurityCurrent(current);
+          const revisions = await api.noteRevisions(note.id);
+          requireSecurityCurrent(current);
+          for (const row of revisions) {
             await decryptNoteAny(ring.active, ring.historical[0]!, owner, patient.user_id, note.client_note_id, row.blob, ring.historical);
+            requireSecurityCurrent(current);
           }
         }
         if (result.nextOffset === null) break;
@@ -271,6 +314,7 @@ export function PatientsView(props: {
       setSecError(policy);
       return;
     }
+    const current = securityCurrent();
     setSecBusy(true);
     setSecError("");
     setSecNotice("");
@@ -281,8 +325,11 @@ export function PatientsView(props: {
       const base = normalizeBaseUrl(currentOrigin());
       if (!base) throw new Error("this portal must be served from its configured secure origin");
       const username = props.session.username;
+      requireSecurityCurrent(current);
       const { salt } = await auth.saltFor(base, username);
+      requireSecurityCurrent(current);
       currentKeys = await deriveFor(pwCurrent, salt);
+      requireSecurityCurrent(current);
       // P-1: the verifier string is derived here, at the send, from the
       // raw bytes — which are wiped the moment the string exists.
       const verifierB64 = toBase64(currentKeys.authKey);
@@ -293,25 +340,34 @@ export function PatientsView(props: {
       const newSaltB64 = toBase64(newSaltBytes);
       try {
         newKeys = await deriveFor(pwNew, newSaltB64);
+        requireSecurityCurrent(current);
       } finally {
         newSaltBytes.fill(0);
       }
       const newVerifierB64 = toBase64(newKeys.authKey);
       newKeys.authKey.fill(0);
+      requireSecurityCurrent(current);
       const me = await api.me();
+      requireSecurityCurrent(current);
       pkcs8 = await openSealedPrivateKey(currentKeys.wrapKek, me.wrap_key_blob, username);
+      requireSecurityCurrent(current);
       if (!pkcs8) throw new Error("The current password did not unlock your sharing identity — nothing was changed.");
       const identityKey = await noteKeyV2FromPrivateKey(pkcs8);
       let ring: NotesKeyring | null = null;
       try {
+        requireSecurityCurrent(current);
         ring = me.notes_keyring_blob
           ? await openNotesKeyring(currentKeys.wrapKek, props.session.userId, me.notes_keyring_blob)
           : createNotesKeyring(currentKeys.noteKey, identityKey);
+        requireSecurityCurrent(current);
         includeNotesCustodyKey(ring,currentKeys.noteKey);
         includeNotesCustodyKey(ring,identityKey);
-        await verifyNotesCustody(ring);
+        await verifyNotesCustody(ring, current);
+        requireSecurityCurrent(current);
         const notesBlob = await sealNotesKeyring(newKeys.wrapKek, props.session.userId, ring);
+        requireSecurityCurrent(current);
         const resealedBlob = await sealPrivateKeyForUpload(newKeys.wrapKek, pkcs8, username);
+        requireSecurityCurrent(current);
         const version = me.custody_version ?? 0;
         const payload = { operation_id: crypto.randomUUID(), expected_custody_version: version, custody_version: version + 1,
           verifier: verifierB64, new_salt: newSaltB64, new_verifier: newVerifierB64,
@@ -319,7 +375,7 @@ export function PatientsView(props: {
         // Identical operation IDs/payloads make lost-response retries safe;
         // backend commits credential/privatewrap/custody/epoch together.
         for (let attempt = 0; ; attempt += 1) {
-          try { await api.changePasswordAtomic(payload); break; }
+          try { requireSecurityCurrent(current); await api.changePasswordAtomic(payload); requireSecurityCurrent(current); break; }
           catch (err) { if (attempt >= 3 || !(err instanceof ApiError) || (err.status !== 0 && err.status < 500)) throw err; }
         }
       } finally { identityKey.fill(0); wipeNotesKeyring(ring); }
@@ -330,21 +386,24 @@ export function PatientsView(props: {
       if (props.onSessionsEnded) props.onSessionsEnded();
       else props.onSignOut();
     } catch (err) {
-      setSecError(displayError(err, "could not change the password"));
+      if (current()) setSecError(displayError(err, "could not change the password"));
     } finally {
       wipeKeySet(currentKeys, newKeys);
       pkcs8?.fill(0);
       // Password strings cannot be overwritten in JavaScript; dropping
       // them from the live form promptly is the available hygiene.
-      setPwCurrent("");
-      setPwNew("");
-      setPwConfirm("");
-      setSecBusy(false);
+      if (current()) {
+        setPwCurrent("");
+        setPwNew("");
+        setPwConfirm("");
+        setSecBusy(false);
+      }
     }
   };
 
   const recoverSharingKey = async () => {
     if (secBusy || !props.session || !interruptedSaltB64) return;
+    const current = securityCurrent();
     setSecBusy(true);
     setSecError("");
     setSecNotice("");
@@ -355,53 +414,70 @@ export function PatientsView(props: {
       const base = normalizeBaseUrl(currentOrigin());
       if (!base) throw new Error("this portal must be served from its configured secure origin");
       const username = props.session.username;
+      requireSecurityCurrent(current);
       const { salt } = await auth.saltFor(base, username);
+      requireSecurityCurrent(current);
       currentKeys = await deriveFor(recCurrent, salt);
+      requireSecurityCurrent(current);
       const verifierB64 = toBase64(currentKeys.authKey);
       currentKeys.authKey.fill(0);
       intendedKeys = await deriveFor(recIntended, interruptedSaltB64);
+      requireSecurityCurrent(current);
       const me = await api.me();
+      requireSecurityCurrent(current);
       pkcs8 = await openSealedPrivateKey(intendedKeys.wrapKek, me.wrap_key_blob, username);
+      requireSecurityCurrent(current);
       if (!pkcs8) {
         throw new Error("the second password did not unlock the stored sharing key — nothing was changed; check the password you were changing to");
       }
       const identityKey = await noteKeyV2FromPrivateKey(pkcs8);
       let ring: NotesKeyring | null = null;
       try {
+        requireSecurityCurrent(current);
         if (me.notes_keyring_blob) {
           // Legacy two-step clients could leave custody under either KEK.
           // This local authentication fallback never changes the credential.
           try { ring = await openNotesKeyring(currentKeys.wrapKek, props.session.userId, me.notes_keyring_blob); }
-          catch { ring = await openNotesKeyring(intendedKeys.wrapKek, props.session.userId, me.notes_keyring_blob); }
+          catch { requireSecurityCurrent(current); ring = await openNotesKeyring(intendedKeys.wrapKek, props.session.userId, me.notes_keyring_blob); }
+          requireSecurityCurrent(current);
         } else ring = createNotesKeyring(currentKeys.noteKey, identityKey);
         includeNotesCustodyKey(ring, currentKeys.noteKey);
         includeNotesCustodyKey(ring, intendedKeys.noteKey);
         includeNotesCustodyKey(ring, identityKey);
-        await verifyNotesCustody(ring);
+        await verifyNotesCustody(ring, current);
+        requireSecurityCurrent(current);
         const version = me.custody_version ?? 0;
         const blob = await sealNotesKeyring(currentKeys.wrapKek, props.session.userId, ring);
+        requireSecurityCurrent(current);
         await api.installNotesCustody({ verifier: verifierB64, operation_id: crypto.randomUUID(), expected_custody_version: version, custody_version: version + 1, notes_keyring_blob: blob });
+        requireSecurityCurrent(current);
         const confirmed = await api.me();
+        requireSecurityCurrent(current);
         if (confirmed.notes_keyring_blob !== blob || confirmed.custody_version !== version + 1) throw new Error("Notes custody was not confirmed — sharing identity was not changed.");
         const resealedBlob = await sealPrivateKeyForUpload(currentKeys.wrapKek, pkcs8, username);
+        requireSecurityCurrent(current);
         await api.rotateWrapKey(verifierB64, me.wrap_pub_key, resealedBlob, version + 1);
+        requireSecurityCurrent(current);
       } finally { identityKey.fill(0); wipeNotesKeyring(ring); }
       setInterruptedSaltB64(null);
       if (props.session) sessionStore.removePrefix(interruptedSaltKey(props.session.userId));
       setSecNotice("Sharing key recovered — it is sealed under your current sign-in password again. Your sign-in password never changed; you can retry the password change.");
     } catch (err) {
-      setSecError(displayError(err, "could not recover the sharing key"));
+      if (current()) setSecError(displayError(err, "could not recover the sharing key"));
     } finally {
       wipeKeySet(currentKeys, intendedKeys);
       pkcs8?.fill(0);
-      setRecCurrent("");
-      setRecIntended("");
-      setSecBusy(false);
+      if (current()) {
+        setRecCurrent("");
+        setRecIntended("");
+        setSecBusy(false);
+      }
     }
   };
 
   const rotateSharingKey = async () => {
     if (secBusy || !props.session || !compConfirmed) return;
+    const current = securityCurrent();
     setSecBusy(true);
     setSecError("");
     setSecNotice("");
@@ -410,42 +486,59 @@ export function PatientsView(props: {
       const base = normalizeBaseUrl(currentOrigin());
       if (!base) throw new Error("this portal must be served from its configured secure origin");
       const username = props.session.username;
+      requireSecurityCurrent(current);
       const { salt } = await auth.saltFor(base, username);
+      requireSecurityCurrent(current);
       currentKeys = await deriveFor(compCurrent, salt);
+      requireSecurityCurrent(current);
       const verifierB64 = toBase64(currentKeys.authKey);
       currentKeys.authKey.fill(0);
+      requireSecurityCurrent(current);
       const me = await api.me();
+      requireSecurityCurrent(current);
       const privateBytes = await openSealedPrivateKey(currentKeys.wrapKek, me.wrap_key_blob, username);
       if (!privateBytes) throw new Error("The current password did not unlock your sharing identity — nothing was changed.");
-      const identityKey = await noteKeyV2FromPrivateKey(privateBytes);
+      let identityKey: Bytes | null = null;
       let ring: NotesKeyring | null = null;
       let version = me.custody_version ?? 0;
       try {
+        requireSecurityCurrent(current);
+        identityKey = await noteKeyV2FromPrivateKey(privateBytes);
+        requireSecurityCurrent(current);
         ring = me.notes_keyring_blob ? await openNotesKeyring(currentKeys.wrapKek, props.session.userId, me.notes_keyring_blob) : createNotesKeyring(currentKeys.noteKey, identityKey);
+        requireSecurityCurrent(current);
         includeNotesCustodyKey(ring,currentKeys.noteKey);
         includeNotesCustodyKey(ring,identityKey);
-        await verifyNotesCustody(ring);
+        await verifyNotesCustody(ring, current);
+        requireSecurityCurrent(current);
         {
           // Re-seal the keyring even when already installed: legacy clients
           // may have written under the current identity/password since then.
           const blob = await sealNotesKeyring(currentKeys.wrapKek, props.session.userId, ring);
+          requireSecurityCurrent(current);
           await api.installNotesCustody({ verifier: verifierB64, operation_id: crypto.randomUUID(), expected_custody_version: version, custody_version: version + 1, notes_keyring_blob: blob });
+          requireSecurityCurrent(current);
           const confirmed = await api.me();
+          requireSecurityCurrent(current);
           if (confirmed.notes_keyring_blob !== blob || confirmed.custody_version !== version + 1) throw new Error("Notes custody was not confirmed — sharing identity was not changed.");
           version += 1;
         }
         const pair = await generateTherapistKeyPair(currentKeys.wrapKek, username);
+        requireSecurityCurrent(current);
         await api.rotateWrapKey(verifierB64, pair.publicKeySpkiB64, pair.wrapKeyBlobB64, version);
+        requireSecurityCurrent(current);
         setSecNotice("Sharing identity rotated. Existing patient grants were revoked. Sign in again. Each patient must verify the new pairing fingerprint and share again; historical notes remain readable through independent encrypted custody.");
         if (props.onSessionsEnded) props.onSessionsEnded(); else props.onSignOut();
-      } finally { privateBytes.fill(0); identityKey.fill(0); wipeNotesKeyring(ring); }
+      } finally { privateBytes.fill(0); identityKey?.fill(0); wipeNotesKeyring(ring); }
     } catch (err) {
-      setSecError(displayError(err, "could not rotate the sharing key"));
+      if (current()) setSecError(displayError(err, "could not rotate the sharing key"));
     } finally {
       wipeKeySet(currentKeys);
-      setCompCurrent("");
-      setCompConfirmed(false);
-      setSecBusy(false);
+      if (current()) {
+        setCompCurrent("");
+        setCompConfirmed(false);
+        setSecBusy(false);
+      }
     }
   };
 
@@ -455,45 +548,56 @@ export function PatientsView(props: {
 
   /** Derive the login verifier from the just-typed password (never from
    *  anything cached — the whole point is proving password knowledge). */
-  const totpVerifierFor = async (): Promise<string> => {
+  const totpVerifierFor = async (current: () => boolean): Promise<string> => {
     if (!props.session) throw new Error("not signed in");
     const base = normalizeBaseUrl(currentOrigin());
     if (!base) throw new Error("this portal must be served from its configured secure origin");
+    requireSecurityCurrent(current);
     const { salt } = await auth.saltFor(base, props.session.username);
+    requireSecurityCurrent(current);
     const keys = await deriveFor(totpPw, salt);
-    const verifierB64 = toBase64(keys.authKey);
-    wipeKeySet(keys);
-    return verifierB64;
+    try {
+      requireSecurityCurrent(current);
+      return toBase64(keys.authKey);
+    } finally { wipeKeySet(keys); }
   };
 
   const totpStart = async () => {
     if (secBusy || !props.session || !totpPw) return;
+    const current = securityCurrent();
     setSecBusy(true);
     setSecError("");
     setSecNotice("");
     try {
-      const verifier = await totpVerifierFor();
+      const verifier = await totpVerifierFor(current);
+      requireSecurityCurrent(current);
       const setup = await api.totpSetup(verifier);
+      requireSecurityCurrent(current);
       setTotpPending({ secretBase32: setup.secret_base32, otpauthUri: setup.otpauth_uri });
       // Every freshly minted secret starts masked (see totpSecretVisible).
       setTotpSecretVisible(false);
     } catch (err) {
-      setSecError(displayError(err, "could not start two-factor setup"));
+      if (current()) setSecError(displayError(err, "could not start two-factor setup"));
     } finally {
-      setTotpPw("");
-      setTotpCode("");
-      setSecBusy(false);
+      if (current()) {
+        setTotpPw("");
+        setTotpCode("");
+        setSecBusy(false);
+      }
     }
   };
 
   const totpEnableConfirm = async () => {
     if (secBusy || !props.session || !totpPending || !totpPw || !/^\d{6}$/.test(totpCode)) return;
+    const current = securityCurrent();
     setSecBusy(true);
     setSecError("");
     setSecNotice("");
     try {
-      const verifier = await totpVerifierFor();
+      const verifier = await totpVerifierFor(current);
+      requireSecurityCurrent(current);
       const { backup_codes: backupCodes } = await api.totpEnable(verifier, totpCode);
+      requireSecurityCurrent(current);
       setTotpStatus(true);
       setTotpPending(null);
       setTotpBackupCodes(backupCodes?.length ? backupCodes : null);
@@ -503,33 +607,41 @@ export function PatientsView(props: {
           + "and losing every code AND the authenticator still needs an operator to clear.",
       );
     } catch (err) {
-      setSecError(displayError(err, "could not enable two-factor"));
+      if (current()) setSecError(displayError(err, "could not enable two-factor"));
     } finally {
-      setTotpPw("");
-      setTotpCode("");
-      setSecBusy(false);
+      if (current()) {
+        setTotpPw("");
+        setTotpCode("");
+        setSecBusy(false);
+      }
     }
   };
 
   const totpDisableConfirm = async () => {
     if (secBusy || !props.session || !totpPw || !/^\d{6}$/.test(totpCode)) return;
+    const current = securityCurrent();
     setSecBusy(true);
     setSecError("");
     setSecNotice("");
     try {
-      const verifier = await totpVerifierFor();
+      const verifier = await totpVerifierFor(current);
+      requireSecurityCurrent(current);
       await api.totpDisable(verifier, totpCode);
+      requireSecurityCurrent(current);
       setTotpStatus(false);
       setTotpBackupCodes(null);
       setSecNotice("Two-factor authentication is off. Sign-in is password-only again (the recovery-code set was destroyed with it).");
     } catch (err) {
-      setSecError(displayError(err, "could not disable two-factor"));
+      if (current()) setSecError(displayError(err, "could not disable two-factor"));
     } finally {
-      setTotpPw("");
-      setTotpCode("");
-      setSecBusy(false);
+      if (current()) {
+        setTotpPw("");
+        setTotpCode("");
+        setSecBusy(false);
+      }
     }
   };
+
 
   // Ask the server for the honest state the first time the panel opens
   // (the collapsed panel derives and sends nothing).
@@ -644,9 +756,7 @@ export function PatientsView(props: {
     setPairingCode(null);
     // A new code is a NEW pairing session: its SAS differs by construction
     // (the code is an HMAC input), so any displayed comparison retires.
-    setSasResult(null);
-    setSasLocalFingerprint(null);
-    setSasError("");
+    invalidateSas();
     try {
       const { code } = await api.newPairingCode();
       setPairingCode(code);
@@ -664,12 +774,14 @@ export function PatientsView(props: {
    *  else's — indistinguishable, exactly like lookup/grant). */
   const showSas = async () => {
     if (sasBusy || !pairingCode || !sasPatientId.trim()) return;
+    const operation = ++sasGeneration.current;
     setSasBusy(true);
     setSasError("");
     setSasResult(null);
     setSasLocalFingerprint(null);
     try {
       const result = await api.pairingSas(sasPatientId.trim(), pairingCode);
+      if (operation !== sasGeneration.current) return;
       setSasResult({ sas: result.sas, wrap_key_fingerprint: result.wrap_key_fingerprint });
       // independent audit 2026-09-27: compute OUR OWN fingerprint of OUR OWN
       // wrap public key at the same time, in the server's short format, so
@@ -678,19 +790,21 @@ export function PatientsView(props: {
       // substitution check that actually binds the pairing to this key.
       if (props.session) {
         try {
-          setSasLocalFingerprint(await serverWrapKeyFingerprint(props.session.publicKeyB64));
+          const localFingerprint = await serverWrapKeyFingerprint(props.session.publicKeyB64);
+          if (operation === sasGeneration.current) setSasLocalFingerprint(localFingerprint);
         } catch {
-          setSasLocalFingerprint(null);
+          if (operation === sasGeneration.current) setSasLocalFingerprint(null);
         }
       }
     } catch (err) {
+      if (operation !== sasGeneration.current) return;
       if (err instanceof ApiError && err.status === 404) {
         setSasError("pairing code not found or expired — generate a new code and try again");
       } else {
         setSasError(displayError(err, "could not load the verification code"));
       }
     } finally {
-      setSasBusy(false);
+      if (operation === sasGeneration.current) setSasBusy(false);
     }
   };
 
@@ -853,7 +967,11 @@ export function PatientsView(props: {
             <Field
               label="Patient's account id (shown in their app)"
               value={sasPatientId}
-              onChange={(value) => setSasPatientId(value.trim())}
+              onChange={(value) => {
+                const next = value.trim();
+                if (next !== sasPatientId) invalidateSas();
+                setSasPatientId(next);
+              }}
               placeholder="32 characters"
               autoComplete="off"
             />

@@ -19,7 +19,7 @@ it.each([{ name: "phq9", max: 27 }, { name: "gad7", max: 21 }, { name: "phq2", m
 it.each(["phq9", "gad7", "phq2"])("preserves explicit absence of item nine for supported %s readings", async name => {
   await expect(measure({ v: 1, measure: name, score: 0 })).resolves.toEqual({ measure: name, score: 0, item9: null, completedAt: null, measureDate: "2026-09-30" });
 });
-it.each([{ v: 1, measure: "phq9", score: 3 }, { v: 1, measure: "phq9", score: -1 }])("releases host-held measure plaintext after a supported or rejected reading", async payload => {
+it.each([{ v: 1, measure: "phq9", score: 3 }, { v: 1, measure: "phq9", score: -1 }])("releases host-held measure plaintext after a supported or rejected reading %#", async payload => {
   const rawDecrypt = crypto.subtle.decrypt.bind(crypto.subtle);
   const held: Uint8Array[] = [];
   vi.spyOn(crypto.subtle, "decrypt").mockImplementation(async (...args) => {

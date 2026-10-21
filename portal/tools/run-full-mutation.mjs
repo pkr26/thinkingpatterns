@@ -26,6 +26,7 @@ const timeoutMS = Number(option('--timeout-ms', '2000'));
 const workerBudgetFile = option('--worker-budget-file', '');
 const replayReportPath = option('--replay-report', '');
 const testGlob = option('--test-glob', '');
+const suppliedRunnerModules = option('--runner-node-modules', '');
 const testControlsOnly = args.includes('--test-controls-only');
 const onlyFiles = option('--only-files', '').split(',').filter(Boolean).map(file => file.replace(/^src\//, ''));
 const replayRanges = new Map();
@@ -85,10 +86,18 @@ async function digestTree(path, prefix = '') {
   }
   return files;
 }
-await checked('npm', ['ci', '--no-audit', '--no-fund'], 'install');
-// Stryker's native runner 10 is exercised against its supported Vitest 4
-// APIs. The production project's lockfile and Vitest 5 remain untouched.
-await checked('npm', ['install', '--no-save', '--package-lock=false', '--no-audit', '--no-fund', 'vitest@4.1.10', '@vitest/coverage-v8@4.1.10'], 'install-native-runner');
+if (suppliedRunnerModules) {
+  const modules = resolve(suppliedRunnerModules);
+  for (const [name, expected] of [['vitest', '4.1.10'], ['@vitest/coverage-v8', '4.1.10'], ['@stryker-mutator/core', '10.0.0'], ['@stryker-mutator/vitest-runner', '10.0.0']]) {
+    const installed = JSON.parse(await readFile(join(modules, name, 'package.json'), 'utf8'));
+    if (installed.version !== expected) throw new Error(`Runner ${name} must be ${expected}, found ${installed.version}`);
+  }
+  await symlink(modules, join(workspace, 'node_modules'));
+} else {
+  await checked('npm', ['ci', '--no-audit', '--no-fund'], 'install');
+  // The isolated native runner uses Vitest 4; normal project dependencies stay unchanged.
+  await checked('npm', ['install', '--no-save', '--package-lock=false', '--no-audit', '--no-fund', 'vitest@4.1.10', '@vitest/coverage-v8@4.1.10'], 'install-native-runner');
+}
 const sourceBefore = await digestTree(join(workspace, 'src'));
 const inputs = { source: sourceBefore, tests: await digestTree(join(workspace, 'tests')), packageLock: createHash('sha256').update(await readFile(join(portalRoot, 'package-lock.json'))).digest('hex') };
 const originalConfig = JSON.parse(await readFile(join(workspace, 'stryker.config.json'), 'utf8'));

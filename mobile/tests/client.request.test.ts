@@ -59,19 +59,33 @@ describe("stored base URL policy", () => {
   // 2026-09-26 audit LOW: the default is __DEV__-selected — a release
   // build must never silently default to the device-local dev server.
   it("selects the default by build: release builds get the loud HTTPS placeholder", async () => {
-    vi.stubGlobal("__DEV__", false);
-    vi.resetModules();
-    const release = await import("../src/api/client");
-    // The single release-config point: a PLACEHOLDER origin, never a real
-    // deployment — operators must replace it at release-config time, and
-    // a build left on it fails loudly (no such host) rather than quietly
-    // shipping a dev default.
-    expect(release.PRODUCTION_BASE_URL).toBe("https://api.mindpattern.example");
-    expect(release.DEFAULT_BASE_URL).toBe(release.PRODUCTION_BASE_URL);
-    expect(release.DEFAULT_BASE_URL).not.toContain("localhost");
-    // …and the placeholder is still a valid product-grammar URL, so the
-    // release default survives parseServerUrl without special-casing.
-    expect(release.parseServerUrl(release.DEFAULT_BASE_URL)).not.toBeNull();
+    const originalDevDescriptor = Object.getOwnPropertyDescriptor(globalThis, "__DEV__");
+    try {
+      vi.stubGlobal("__DEV__", false);
+      vi.resetModules();
+      const release = await import("../src/api/client");
+      // The single release-config point: a PLACEHOLDER origin, never a real
+      // deployment — operators must replace it at release-config time, and
+      // a build left on it fails loudly (no such host) rather than quietly
+      // shipping a dev default.
+      expect(release.PRODUCTION_BASE_URL).toBe("https://api.mindpattern.example");
+      expect(release.DEFAULT_BASE_URL).toBe(release.PRODUCTION_BASE_URL);
+      expect(release.DEFAULT_BASE_URL).not.toContain("localhost");
+      // …and the placeholder is still a valid product-grammar URL, so the
+      // release default survives parseServerUrl without special-casing.
+      expect(release.parseServerUrl(release.DEFAULT_BASE_URL)).not.toBeNull();
+      expect(Reflect.deleteProperty(globalThis, "__DEV__")).toBe(true);
+      expect("__DEV__" in globalThis).toBe(false);
+      vi.resetModules();
+      await expect(import("../src/api/client")).resolves.toMatchObject({
+        PRODUCTION_BASE_URL: release.PRODUCTION_BASE_URL,
+        DEFAULT_BASE_URL: release.PRODUCTION_BASE_URL,
+      });
+    } finally {
+      if (originalDevDescriptor) Object.defineProperty(globalThis, "__DEV__", originalDevDescriptor);
+      else Reflect.deleteProperty(globalThis, "__DEV__");
+      vi.resetModules();
+    }
   });
 
   it("persists valid https URLs and clears the insecure flag", async () => {
@@ -321,7 +335,7 @@ describe("401 session-death hook", () => {
     const calls: string[] = [];
     // The handler observes the vault state at invocation time; here we just
     // record the call order relative to the thrown ApiError.
-    setUnauthorizedHandler(() => calls.push("locked"));
+    (setUnauthorizedHandler as (handler: () => void) => void)(() => calls.push("locked"));
     vi.mocked(fetch).mockImplementation(async () => jsonResponse({ detail: "invalid token" }, 401));
 
     // Insights fetch and question fetch — the audit's inconsistent pair.
@@ -907,8 +921,8 @@ describe("listEntries hostile-server cap", () => {
     });
     const pageSpy = vi.spyOn(api, "listEntriesPage").mockImplementation(async (options = {}) => {
       const offset = options.offset ?? 0;
-      if (offset === 100) return { entries: [overflow] as never, nextOffset: null };
-      return { entries: [{ client_entry_id: `e-${offset}` }] as never, nextOffset: offset + 1 };
+      if (offset === 100) return { entries: [overflow] as never, nextOffset: null } as Omit<Awaited<ReturnType<typeof api.listEntriesPage>>, "revision"> as Awaited<ReturnType<typeof api.listEntriesPage>>;
+      return { entries: [{ client_entry_id: `e-${offset}` }] as never, nextOffset: offset + 1 } as Omit<Awaited<ReturnType<typeof api.listEntriesPage>>, "revision"> as Awaited<ReturnType<typeof api.listEntriesPage>>;
     });
     try {
       await expect(api.listEntries()).rejects.toMatchObject({

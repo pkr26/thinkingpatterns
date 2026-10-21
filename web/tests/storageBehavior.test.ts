@@ -66,6 +66,31 @@ describe("persisted optional account metadata consumed by patient views", () => 
     expect(await readMutedPids(key, owner)).toEqual(new Set());
     expect(await adoptLegacyPlaintextMutes(key, owner)).toEqual(new Set());
     expect(records.get(`mindpattern.patternMutes.v1.${owner}`)).toBe("invalid ciphertext");
+    await writeMutedPids(key, owner, ["captured-before-migration"]);
+    const encryptedSlot = `mindpattern.patternMutes.v1.${owner}`, legacySlot = `mindpattern.mutedPids.v1.${owner}`;
+    window.localStorage.setItem(legacySlot, "[]");
+    const get = kv.getItem.bind(kv);
+    let entered = false, first = true, release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(kv, "getItem").mockImplementation(async slot => {
+      const value = await get(slot);
+      if (slot === encryptedSlot && first) { first = false; entered = true; await held; }
+      return value;
+    });
+    const adoption = adoptLegacyPlaintextMutes(key, owner);
+    void adoption.catch(() => undefined);
+    let laterWrite: Promise<void> | undefined;
+    try {
+      await vi.waitFor(() => expect(entered).toBe(true));
+      laterWrite = writeMutedPids(key, owner, ["written-after-migration-read"]);
+      release();
+      await Promise.all([adoption, laterWrite]);
+      expect(await readMutedPids(key, owner)).toEqual(new Set(["written-after-migration-read"]));
+      expect(window.localStorage.getItem(legacySlot)).toBeNull();
+    } finally {
+      release();
+      await Promise.allSettled(laterWrite ? [adoption, laterWrite] : [adoption]);
+    }
   });
   it("persists all standard questionnaire pick values and stable retry ids, isolates accounts and clears acknowledgement", async () => {
     for (const [kind, count] of [["phq9", 9], ["gad7", 7], ["phq2", 2]] as const) {

@@ -147,7 +147,7 @@ import {
   resetEntryVersionMirrors,
 } from "../src/entryVersions";
 import { api, ApiError } from "../src/api/client";
-import { decryptEntry, deriveKeysAsync, encryptEntry } from "../src/crypto/journalCrypto";
+import { decryptEntry, encryptEntry } from "../src/crypto/journalCrypto";
 import { rotatePassword } from "../src/rotation";
 import { vault } from "../src/vault";
 import { enableBiometricUnlock, hasBiometricUnlock } from "../src/biometricUnlock";

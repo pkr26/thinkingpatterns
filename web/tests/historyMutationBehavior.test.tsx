@@ -368,10 +368,15 @@ it("disables the accepted permanent deletion and independent edit controls until
 
 it("services queued browser navigation at the native idle opportunity following a full decrypted batch", async () => {
   let queuedNavigation = false;
-  vi.stubGlobal("requestIdleCallback", (callback: () => void) => setTimeout(() => { if (queuedNavigation) clearSession(); callback(); }, 0));
+  const lastPlaintext = deferred<void>();
+  let navigationServiced = false;
+  vi.stubGlobal("requestIdleCallback", (callback: () => void) => setTimeout(() => { if (queuedNavigation) clearSession(); navigationServiced = queuedNavigation; callback(); }, 0));
   const rows = await Promise.all(Array.from({ length: 25 }, (_, index) => row(`idle-batch-${index}`, `Idle batch writing ${index}`))), broken = Array.from({ length: 80 }, (_, index) => ({ ...rows[0]!, id: `idle-broken-server-${index}`, client_entry_id: `idle-broken-${index}`, blob: "!" })), real = crypto.subtle.decrypt.bind(crypto.subtle);
-  vi.spyOn(crypto.subtle, "decrypt").mockImplementation(async (...args) => { const plaintext = await real(...args); try { if (JSON.parse(new TextDecoder().decode(plaintext)).text === "Idle batch writing 24") queuedNavigation = true; } catch { /* authenticated non-entry metadata */ } return plaintext; });
-  vi.mocked(client.listEntriesWalk).mockResolvedValue([...rows, ...broken]); const root = await render(<HistoryView />); await flush(); expect(textOf(root)).not.toContain("Idle batch writing"); expect(await versions.entryV2Bindings(owner, reference)).toEqual(new Set()); expect(await (await import("../src/kvstore")).kv.getItem(`mindpattern.entryV2Bound.${owner}`)).toBeNull();
+  vi.spyOn(crypto.subtle, "decrypt").mockImplementation(async (...args) => { const plaintext = await real(...args); try { if (JSON.parse(new TextDecoder().decode(plaintext)).text === "Idle batch writing 24") queuedNavigation = true; if (queuedNavigation) lastPlaintext.resolve(); } catch { /* authenticated non-entry metadata */ } return plaintext; });
+  vi.mocked(client.listEntriesWalk).mockResolvedValue([...rows, ...broken]); const root = await render(<HistoryView />); await flush();
+  // The absence checks must follow a genuinely completed native batch.
+  await lastPlaintext.promise; await flush();
+  expect(navigationServiced).toBe(true); expect(textOf(root)).not.toContain("Idle batch writing"); expect(await versions.entryV2Bindings(owner, reference)).toEqual(new Set()); expect(await (await import("../src/kvstore")).kv.getItem(`mindpattern.entryV2Bound.${owner}`)).toBeNull();
 });
 
 it.each(["valid rows", "malformed prefix"] as const)("finishes a real history walk with %s while the browser has no idle time by using its native deadline", async shape => {

@@ -1,13 +1,13 @@
-import { createDecipheriv, createHash, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, pbkdf2Sync } from "node:crypto";
+import { createDecipheriv, createHash, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, pbkdf2Sync, webcrypto } from "node:crypto";
 import { act, StrictMode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ShareView } from "../src/views/Share";
-import { api, auth, ApiError, clearSession, type ListedConsent, type PairingLookup } from "../src/api/client";
+import { api, auth, ApiError, clearSession, sessionAbortSignal, type ListedConsent, type PairingLookup } from "../src/api/client";
 import * as reauth from "../src/reauth";
 import * as sharing from "../src/crypto/sharing";
 import { vault } from "../src/vault";
 import { __setLocaleForTests, t } from "../src/strings";
-import { installSession, resetTestState } from "./helpers/api";
+import { installSession, resetTestState, jsonResponse, stubFetch } from "./helpers/api";
 import { isDisabled, press, pressSwitch, render, setCheckbox, textOf, typeInto } from "./helpers/rtr";
 import { publicSurface } from "./helpers/publicSurface";
 
@@ -22,6 +22,104 @@ type Root = Awaited<ReturnType<typeof render>>;
 const surface = (root: Root) => publicSurface(root.toJSON()).replaceAll(fingerprint, "DERIVED_THERAPIST_FINGERPRINT");
 const flush = async () => { for (let i = 0; i < 8; i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 2)); }); };
 function deferred<T>() { let resolve!: (value: T) => void, reject!: (error: unknown) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
+
+// Keep deliberately held public helpers owned until their failure-safe release.
+// The observer returns each original Promise; the gate remains an explicit seam.
+function heldShareProducers() {
+  const pending: Promise<unknown>[] = [];
+  const own = <T,>(promise: Promise<T>): Promise<T> => {
+    pending.push(promise); void promise.catch(() => undefined); return promise;
+  };
+  const drain = async () => {
+    for (;;) {
+      const count = pending.length, states = await Promise.allSettled(pending);
+      if (count !== pending.length) continue;
+      const failed = states.find((state): state is PromiseRejectedResult => state.status === "rejected");
+      if (failed) throw failed.reason;
+      return;
+    }
+  };
+  return { own, drain };
+}
+
+// Retire the pairing through its enabled public input while the authenticated
+// API response is pending. Observe real SHA-256 work, not helper call counts.
+async function retiredPairingDoesNotStartNativeDigest(): Promise<void> {
+  const pending: { promise: Promise<unknown>; settled: boolean; failed: boolean; reason: unknown }[] = [];
+  const own = <T,>(promise: Promise<T>): Promise<T> => {
+    const item = { promise, settled: false, failed: false, reason: undefined as unknown };
+    pending.push(item);
+    void promise.then(() => { item.settled = true; }, reason => {
+      item.settled = true; item.failed = true; item.reason = reason;
+    });
+    return promise;
+  };
+  const drain = async () => {
+    for (;;) {
+      const count = pending.length;
+      await act(async () => { await Promise.allSettled(pending.map(item => item.promise)); });
+      if (count === pending.length && pending.every(item => item.settled)) break;
+    }
+    const fault = pending.find(item => item.failed);
+    if (fault) throw new Error("Owned pairing API/transport/native crypto producer failed", { cause: fault.reason });
+  };
+  function setup(value: unknown, message: string): asserts value {
+    if (!value) throw new Error("SetupError: " + message);
+  }
+  const gate = deferred<void>();
+  let root: Root | undefined, retired = false, oldLookupAdmitted = false;
+  const nativeJobs: { retired: boolean; bytes: Uint8Array }[] = [];
+  const signal = sessionAbortSignal(), originalKeys = vault.get();
+  const originalDigest = webcrypto.subtle.digest.bind(webcrypto.subtle);
+  vi.mocked(api.pairingLookup).mockRestore();
+  const originalLookup = api.pairingLookup;
+  try {
+    setup(crypto.subtle === webcrypto.subtle, "the installed crypto provider is the original Node WebCrypto");
+    vi.spyOn(webcrypto.subtle, "digest").mockImplementation((algorithm, data) => {
+      const promise = originalDigest(algorithm, data);
+      const bytes = ArrayBuffer.isView(data)
+        ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+        : new Uint8Array(data);
+      if (algorithm === "SHA-256" && Buffer.from(bytes).equals(spki)) nativeJobs.push({ retired, bytes: bytes.slice() });
+      return own(promise);
+    });
+    stubFetch((url, init) => own((async () => {
+      const request = new URL(url), headers = new Headers(init.headers);
+      setup(request.pathname === "/api/v1/consents/pairing/lookup" && init.method === "POST", "only the declared authenticated pairing route is exercised");
+      setup(headers.get("Authorization") === "Bearer token-123", "the original API forwards the live account bearer");
+      const body = JSON.parse(String(init.body)) as { code?: string };
+      setup(body.code === "CURRENT-NATIVE" || body.code === "OLD-NATIVE", "the actual public pairing code reaches the API");
+      if (body.code === "OLD-NATIVE") { oldLookupAdmitted = true; await gate.promise; }
+      return jsonResponse(found);
+    })()));
+    vi.spyOn(api, "pairingLookup").mockImplementation((...args) => own(originalLookup(...args)));
+    root = await render(<ShareView />);
+    await typeInto(root, t("share.webPairingCode"), "CURRENT-NATIVE");
+    await press(root, t("share.webLookUp")); await drain();
+    expect(textOf(root)).toContain(fingerprint);
+    expect(nativeJobs.filter(job => !job.retired).map(job => [...job.bytes])).toEqual([[...spki]]);
+
+    await typeInto(root, t("share.webPairingCode"), "OLD-NATIVE");
+    await press(root, t("share.webLookUp")); await vi.waitFor(() => { expect(oldLookupAdmitted).toBe(true); }, { timeout: 8000, interval: 10 });
+    await typeInto(root, t("share.webPairingCode"), "REPLACED-NATIVE");
+    setup(sessionAbortSignal() === signal && !!signal && !signal.aborted && vault.ownerUserId() === owner && vault.get().dataKey === originalKeys.dataKey, "code replacement retires only the pairing; API account and key remain live");
+    retired = true;
+    await act(async () => { gate.resolve(); }); await drain();
+    expect(nativeJobs.filter(job => job.retired), "A retired pairing response must not start native SHA-256 work for its old public SPKI").toEqual([]);
+    expect(textOf(root)).not.toContain(found.display_name);
+  } finally {
+    gate.resolve();
+    try { await drain(); }
+    finally {
+      try { if (root) await act(async () => root!.unmount()); }
+      finally {
+        try { await drain(); }
+        finally { vi.restoreAllMocks(); vi.unstubAllGlobals(); }
+      }
+    }
+  }
+}
+
 async function lookup(root: Root) { await typeInto(root, t("share.webPairingCode"), "  PAIR1234  "); await press(root, t("share.webLookUp")); await flush(); }
 async function requestGrant(root: Root) { await lookup(root); await setCheckbox(root, t("share.webFingerprintConfirm"), true); await setCheckbox(root, t("share.webDisclosureConfirm"), true); await press(root, t("share.webConfirmShare")); }
 async function confirm(root: Root) { await typeInto(root, t("settings.reauthPasswordField"), "fresh patient password"); await press(root, t("settings.reauthConfirm")); await flush(); }
@@ -85,17 +183,42 @@ it("works after React StrictMode performs its effect cleanup and remount", async
   const root = await render(<StrictMode><ShareView /></StrictMode>); await lookup(root); expect(textOf(root)).toContain(found.display_name); expect(textOf(root)).toContain(fingerprint);
 });
 it.each(["code", "session", "keys"] as const)("does not send a password proof after a real key wrap completes for a retired operation: %s", async retired => {
-  const gate = deferred<void>(), started = deferred<void>(), real = sharing.wrapDataKeyForTherapist;
-  vi.spyOn(sharing, "wrapDataKeyForTherapist").mockImplementation(async (...args) => { const result = await real(...args); started.resolve(); await gate.promise; return result; });
-  const grant = vi.spyOn(api, "grantConsent").mockResolvedValue(consent()); const root = await render(<ShareView />); await requestGrant(root); await confirm(root); await started.promise;
-  if (retired === "code") await typeInto(root, t("share.webPairingCode"), "REPLACED"); else if (retired === "session") clearSession(); else vault.unlock({ authKey: new Uint8Array(new ArrayBuffer(32)).fill(51), dataKey: new Uint8Array(new ArrayBuffer(32)).fill(53) }, owner);
-  await act(async () => { gate.resolve(); }); await flush(); expect(reauth.freshStepUp).not.toHaveBeenCalled(); expect(grant).not.toHaveBeenCalled();
+  const gate = deferred<void>(), real = sharing.wrapDataKeyForTherapist;
+  let retiredWrapAdmitted = false;
+  const producers = heldShareProducers();
+  const held = vi.spyOn(sharing, "wrapDataKeyForTherapist").mockImplementation((...args) => producers.own((async () => {
+    const result = await producers.own(real(...args)); retiredWrapAdmitted = true; await gate.promise; return result;
+  })()));
+  let root: Root | undefined;
+  try {
+    const grant = vi.spyOn(api, "grantConsent").mockResolvedValue(consent()); root = await render(<ShareView />); await requestGrant(root); await confirm(root); await vi.waitFor(() => { expect(retiredWrapAdmitted).toBe(true); }, { timeout: 8000, interval: 10 });
+    if (retired === "code") await typeInto(root, t("share.webPairingCode"), "REPLACED"); else if (retired === "session") clearSession(); else vault.unlock({ authKey: new Uint8Array(new ArrayBuffer(32)).fill(51), dataKey: new Uint8Array(new ArrayBuffer(32)).fill(53) }, owner);
+    await act(async () => { gate.resolve(); }); await flush(); expect(reauth.freshStepUp).not.toHaveBeenCalled(); expect(grant).not.toHaveBeenCalled();
+  } finally {
+    clearSession(); vault.lock();
+    try {
+      try { await act(async () => { root?.unmount(); }); }
+      finally {
+        gate.resolve();
+        await act(async () => { await producers.drain(); }); await flush();
+      }
+    } finally { held.mockRestore(); }
+  }
 });
 it.each([false, true])("does not replace refreshed grants with a superseded initial load or late load error: failedOldLoad=%s", async failure => {
   const pending = deferred<ListedConsent[]>(); vi.mocked(api.listConsents).mockReturnValueOnce(pending.promise).mockResolvedValue([]); vi.spyOn(api, "grantConsent").mockResolvedValue(consent());
-  const root = await render(<ShareView />); await requestGrant(root); await confirm(root); expect(api.listConsents).toHaveBeenCalledTimes(2);
-  await act(async () => { if (failure) pending.reject(new Error("superseded initial load failed")); else pending.resolve([consent("d".repeat(32), { display_name: "Dr. Superseded" })]); }); await flush();
-  expect(textOf(root)).not.toContain("Dr. Superseded"); expect(textOf(root)).not.toContain("superseded initial load failed");
+  let mounted: Root | undefined;
+  try {
+    const root = await render(<ShareView />); mounted = root; await requestGrant(root); await confirm(root); expect(api.listConsents).toHaveBeenCalledTimes(2);
+    await act(async () => { if (failure) pending.reject(new Error("superseded initial load failed")); else pending.resolve([consent("d".repeat(32), { display_name: "Dr. Superseded" })]); }); await flush();
+    expect(textOf(root)).not.toContain("Dr. Superseded"); expect(textOf(root)).not.toContain("superseded initial load failed");
+  } finally {
+    try { await act(async () => { mounted?.unmount(); }); }
+    finally {
+      await act(async () => { pending.resolve([]); await Promise.allSettled([pending.promise]); });
+      await flush();
+    }
+  }
 });
 it.each(["locked", "no-account", "wrong-password", "offline"] as const)("retains the action and clears its password after fresh authentication refuses it: %s", async reason => {
   vi.mocked(reauth.freshStepUp).mockResolvedValue({ ok: false, reason }); const grant = vi.spyOn(api, "grantConsent").mockResolvedValue(consent()); const root = await render(<ShareView />); await requestGrant(root); await confirm(root);
@@ -122,10 +245,19 @@ it.each([false, true])("changes voice sharing only after its fresh proof and rel
   expect(textOf(root)).toContain(t("share.voiceOn"));
 });
 it.each(["code", "session", "unmount"] as const)("does not grant after a stale asynchronous proof completion: %s", async retired => {
-  const pending = deferred<reauth.FreshStepUpResult>(); vi.mocked(reauth.freshStepUp).mockReturnValue(pending.promise); const grant = vi.spyOn(api, "grantConsent").mockResolvedValue(consent()); const root = await render(<ShareView />); await requestGrant(root); await confirm(root);
-  expect(reauth.freshStepUp).toHaveBeenCalledTimes(1);
-  if (retired === "code") await typeInto(root, t("share.webPairingCode"), "REPLACED"); else if (retired === "session") clearSession(); else await act(async () => { root.unmount(); });
-  await act(async () => { pending.resolve({ ok: true, proof: "stale-proof" }); }); await flush(); expect(grant).not.toHaveBeenCalled();
+  const pending = deferred<reauth.FreshStepUpResult>(); vi.mocked(reauth.freshStepUp).mockReturnValue(pending.promise); const grant = vi.spyOn(api, "grantConsent").mockResolvedValue(consent()); let mounted: Root | undefined;
+  try {
+    const root = await render(<ShareView />); mounted = root; await requestGrant(root); await confirm(root);
+    expect(reauth.freshStepUp).toHaveBeenCalledTimes(1);
+    if (retired === "code") await typeInto(root, t("share.webPairingCode"), "REPLACED"); else if (retired === "session") clearSession(); else await act(async () => { root.unmount(); });
+    await act(async () => { pending.resolve({ ok: true, proof: "stale-proof" }); }); await flush(); expect(grant).not.toHaveBeenCalled();
+  } finally {
+    try { await act(async () => { mounted?.unmount(); }); }
+    finally {
+      await act(async () => { pending.resolve({ ok: true, proof: "stale-proof" }); await Promise.allSettled([pending.promise]); });
+      await flush();
+    }
+  }
 });
 it.each([new ApiError(503, "service unavailable"), new Error("revoke unavailable")])("retains the grant and shows a failed revocation without claiming success: %#", async failure => {
   vi.mocked(api.listConsents).mockResolvedValue([consent()]); vi.spyOn(api, "revokeConsent").mockRejectedValue(failure); const root = await render(<ShareView />); await flush(); await press(root, t("share.webRevoke")); await press(root, t("share.webRevoke")); await confirm(root);
@@ -136,14 +268,45 @@ it.each(["load", "lookup"] as const)("uses honest fallback copy for an empty pub
   const root = await render(<ShareView />); await flush(); if (stage === "lookup") await lookup(root); expect(textOf(root)).toContain(t(stage === "load" ? "share.webLoadFailed" : "share.webLookupFailed"));
 });
 it("displays the active progress and danger states while fresh revocation authentication is pending", async () => {
-  const step = deferred<reauth.FreshStepUpResult>(); vi.mocked(reauth.freshStepUp).mockReturnValue(step.promise); vi.mocked(api.listConsents).mockResolvedValue([consent()]); const revoke = vi.spyOn(api, "revokeConsent").mockResolvedValue(null), root = await render(<ShareView />); await flush(); await press(root, t("share.webRevoke")); await press(root, t("share.webRevoke")); await confirm(root); expect(surface(root)).toMatchSnapshot(); expect(isDisabled(root, t("settings.working"))).toBe(true); expect(revoke).not.toHaveBeenCalled();
-  await act(async () => { step.resolve({ ok: true, proof: "fresh-action-proof" }); }); await flush(); expect(revoke).toHaveBeenCalledTimes(1);
+  const step = deferred<reauth.FreshStepUpResult>(); vi.mocked(reauth.freshStepUp).mockReturnValue(step.promise); vi.mocked(api.listConsents).mockResolvedValue([consent()]); const revoke = vi.spyOn(api, "revokeConsent").mockResolvedValue(null); let mounted: Root | undefined;
+  try {
+    const root = await render(<ShareView />); mounted = root; await flush(); await press(root, t("share.webRevoke")); await press(root, t("share.webRevoke")); await confirm(root); expect(surface(root)).toMatchSnapshot(); expect(isDisabled(root, t("settings.working"))).toBe(true); expect(revoke).not.toHaveBeenCalled();
+    await act(async () => { step.resolve({ ok: true, proof: "fresh-action-proof" }); }); await flush(); expect(revoke).toHaveBeenCalledTimes(1);
+  } finally {
+    try { await act(async () => { mounted?.unmount(); }); }
+    finally {
+      await act(async () => { step.resolve({ ok: true, proof: "fresh-action-proof" }); await Promise.allSettled([step.promise]); });
+      await flush();
+    }
+  }
 });
 it("displays pairing progress and clears prior success before the next lookup completes", async () => {
-  vi.spyOn(api, "grantConsent").mockResolvedValue(consent()); const root = await render(<ShareView />); await requestGrant(root); await confirm(root); const next = deferred<PairingLookup>(); vi.mocked(api.pairingLookup).mockReturnValue(next.promise); await typeInto(root, t("share.webPairingCode"), "NEXT-CODE"); await press(root, t("share.webLookUp")); expect(textOf(root)).not.toContain(t("share.webGrantedStatus", { name: found.display_name })); expect(surface(root)).toMatchSnapshot(); await act(async () => { next.resolve(found); }); await flush(); expect(textOf(root)).toContain(found.display_name);
+  vi.spyOn(api, "grantConsent").mockResolvedValue(consent()); const next = deferred<PairingLookup>(); let mounted: Root | undefined;
+  try {
+    const root = await render(<ShareView />); mounted = root; await requestGrant(root); await confirm(root);  vi.mocked(api.pairingLookup).mockReturnValue(next.promise); await typeInto(root, t("share.webPairingCode"), "NEXT-CODE"); await press(root, t("share.webLookUp")); expect(textOf(root)).not.toContain(t("share.webGrantedStatus", { name: found.display_name })); expect(surface(root)).toMatchSnapshot(); await act(async () => { next.resolve(found); }); await flush(); expect(textOf(root)).toContain(found.display_name);
+  } finally {
+    try { await act(async () => { mounted?.unmount(); }); }
+    finally {
+      await act(async () => { next.resolve(found); await Promise.allSettled([next.promise]); });
+      await flush();
+    }
+  }
 });
 it.each(["success", "error"] as const)("ignores a retired pairing response before key verification: %s", async outcome => {
-  const pending = deferred<PairingLookup>(); vi.mocked(api.pairingLookup).mockReturnValue(pending.promise); const root = await render(<ShareView />); await lookup(root); await typeInto(root, t("share.webPairingCode"), "CHANGED-CODE"); await act(async () => { if (outcome === "error") pending.reject(new Error("retired pairing error")); else pending.resolve(found); }); await flush(); expect(textOf(root)).not.toContain(found.display_name); expect(textOf(root)).not.toContain("retired pairing error");
+  const pending = deferred<PairingLookup>(); vi.mocked(api.pairingLookup).mockReturnValue(pending.promise); let mounted: Root | undefined;
+  try {
+    const root = await render(<ShareView />); mounted = root; await lookup(root); await typeInto(root, t("share.webPairingCode"), "CHANGED-CODE"); await act(async () => { if (outcome === "error") pending.reject(new Error("retired pairing error")); else pending.resolve(found); }); await flush(); expect(textOf(root)).not.toContain(found.display_name); expect(textOf(root)).not.toContain("retired pairing error");
+    if (outcome === "success") {
+      await act(async () => root.unmount()); mounted = undefined;
+      await retiredPairingDoesNotStartNativeDigest();
+    }
+  } finally {
+    try { await act(async () => { mounted?.unmount(); }); }
+    finally {
+      await act(async () => { pending.resolve(found); await Promise.allSettled([pending.promise]); });
+      await flush();
+    }
+  }
 });
 it.each(["en", "es"] as const)("names the fallback therapist identity in the voice authentication prompt: %s", async locale => {
   __setLocaleForTests(locale); vi.mocked(api.listConsents).mockResolvedValue([consent(undefined, { display_name: "", username: "fallback-clinician" })]); const root = await render(<ShareView />); await flush(); await pressSwitch(root); expect(textOf(root)).toContain(t("share.reauthShareVoiceTitle", { name: "fallback-clinician" })); expect(surface(root)).toMatchSnapshot();
@@ -152,10 +315,28 @@ it("retires an existing authentication prompt when its pairing code is replaced"
   const grant = vi.spyOn(api, "grantConsent").mockResolvedValue(consent()), root = await render(<ShareView />); await requestGrant(root); await typeInto(root, t("settings.reauthPasswordField"), "typed secret"); await typeInto(root, t("share.webPairingCode"), "REPLACEMENT"); expect(root.root.findAllByType("input").some(node => node.props.type === "password")).toBe(false); expect(grant).not.toHaveBeenCalled(); expect(reauth.freshStepUp).not.toHaveBeenCalled();
 });
 it("refuses a retired voice failure reload after account ownership changes", async () => {
-  const reload = deferred<ListedConsent[]>(); vi.mocked(api.listConsents).mockResolvedValueOnce([consent()]).mockReturnValueOnce(reload.promise); vi.spyOn(api, "setShareVoice").mockRejectedValue(new Error("voice scope service failed")); const root = await render(<ShareView />); await flush(); await pressSwitch(root); await confirm(root); clearSession(); vault.lock(); await act(async () => { reload.resolve([consent(undefined, { display_name: "Dr. Retired Account", share_voice: true })]); }); await flush(); expect(textOf(root)).not.toContain("Dr. Retired Account");
+  const reload = deferred<ListedConsent[]>(); vi.mocked(api.listConsents).mockResolvedValueOnce([consent()]).mockReturnValueOnce(reload.promise); vi.spyOn(api, "setShareVoice").mockRejectedValue(new Error("voice scope service failed")); let mounted: Root | undefined;
+  try {
+    const root = await render(<ShareView />); mounted = root; await flush(); await pressSwitch(root); await confirm(root); clearSession(); vault.lock(); await act(async () => { reload.resolve([consent(undefined, { display_name: "Dr. Retired Account", share_voice: true })]); }); await flush(); expect(textOf(root)).not.toContain("Dr. Retired Account");
+  } finally {
+    try { await act(async () => { mounted?.unmount(); }); }
+    finally {
+      await act(async () => { reload.resolve([]); await Promise.allSettled([reload.promise]); });
+      await flush();
+    }
+  }
 });
 it("rejects a superseded initial StrictMode load even when its effect is remounted", async () => {
-  const first = deferred<ListedConsent[]>(), second = deferred<ListedConsent[]>(); vi.mocked(api.listConsents).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise); const root = await render(<StrictMode><ShareView /></StrictMode>); expect(api.listConsents).toHaveBeenCalledTimes(2); await act(async () => { second.resolve([consent(undefined, { display_name: "Dr. Fresh Remount" })]); }); await flush(); await act(async () => { first.resolve([consent(undefined, { display_name: "Dr. Retired Mount" })]); }); await flush(); expect(textOf(root)).toContain("Dr. Fresh Remount"); expect(textOf(root)).not.toContain("Dr. Retired Mount");
+  const first = deferred<ListedConsent[]>(), second = deferred<ListedConsent[]>(); vi.mocked(api.listConsents).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise); let mounted: Root | undefined;
+  try {
+    const root = await render(<StrictMode><ShareView /></StrictMode>); mounted = root; expect(api.listConsents).toHaveBeenCalledTimes(2); await act(async () => { second.resolve([consent(undefined, { display_name: "Dr. Fresh Remount" })]); }); await flush(); await act(async () => { first.resolve([consent(undefined, { display_name: "Dr. Retired Mount" })]); }); await flush(); expect(textOf(root)).toContain("Dr. Fresh Remount"); expect(textOf(root)).not.toContain("Dr. Retired Mount");
+  } finally {
+    try { await act(async () => { mounted?.unmount(); }); }
+    finally {
+      await act(async () => { first.resolve([]); second.resolve([]); await Promise.allSettled([first.promise, second.promise]); });
+      await flush();
+    }
+  }
 });
 it("shows honest non-expiry copy for a typed non-404 pairing failure", async () => {
   vi.mocked(api.pairingLookup).mockRejectedValue(new ApiError(503, "server-controlled detail")); const root = await render(<ShareView />); await lookup(root); expect(textOf(root)).toContain(t("errors.serverError")); expect(textOf(root)).not.toContain(t("share.webCodeExpired"));
@@ -164,13 +345,47 @@ it("hides a malformed comparison fingerprint independently of a usable server SA
   vi.mocked(api.pairingLookup).mockResolvedValue({ ...found, wrap_key_fingerprint: ["wrong fingerprint type"] } as unknown as PairingLookup); const root = await render(<ShareView />); await lookup(root); expect(textOf(root)).toContain(found.sas!); expect(textOf(root)).not.toContain("wrong fingerprint type"); expect(surface(root)).toMatchSnapshot();
 });
 it("clears prior verification details on same-code lookup retry and on code replacement", async () => {
-  const root = await render(<ShareView />); await lookup(root); const next = deferred<PairingLookup>(); vi.mocked(api.pairingLookup).mockReturnValue(next.promise); await press(root, t("share.webLookUp")); expect(textOf(root)).not.toContain(found.display_name); await act(async () => { next.resolve(found); }); await flush(); expect(textOf(root)).toContain(found.display_name); await typeInto(root, t("share.webPairingCode"), "DIFFERENT-CODE"); expect(textOf(root)).not.toContain(found.display_name); expect(root.root.findAllByType("input").some(n => n.props.type === "checkbox")).toBe(false);
+  const next = deferred<PairingLookup>(); let mounted: Root | undefined;
+  try {
+    const root = await render(<ShareView />); mounted = root; await lookup(root);  vi.mocked(api.pairingLookup).mockReturnValue(next.promise); await press(root, t("share.webLookUp")); expect(textOf(root)).not.toContain(found.display_name); await act(async () => { next.resolve(found); }); await flush(); expect(textOf(root)).toContain(found.display_name); await typeInto(root, t("share.webPairingCode"), "DIFFERENT-CODE"); expect(textOf(root)).not.toContain(found.display_name); expect(root.root.findAllByType("input").some(n => n.props.type === "checkbox")).toBe(false);
+  } finally {
+    try { await act(async () => { mounted?.unmount(); }); }
+    finally {
+      await act(async () => { next.resolve(found); await Promise.allSettled([next.promise]); });
+      await flush();
+    }
+  }
 });
 it("ignores a retired key-fingerprint completion after the real fingerprint was calculated", async () => {
-  const gate = deferred<void>(), actual = sharing.keyFingerprint; vi.spyOn(sharing, "keyFingerprint").mockImplementation(async pub => { const value = await actual(pub); await gate.promise; return value; }); const root = await render(<ShareView />); await lookup(root); await typeInto(root, t("share.webPairingCode"), "REPLACED-CODE"); await act(async () => { gate.resolve(); }); await flush(); expect(textOf(root)).not.toContain(found.display_name); expect(textOf(root)).not.toContain(fingerprint);
+  const gate = deferred<void>(), actual = sharing.keyFingerprint, producers = heldShareProducers();
+  const held = vi.spyOn(sharing, "keyFingerprint").mockImplementation(pub => producers.own((async () => {
+    const value = await producers.own(actual(pub)); await gate.promise; return value;
+  })()));
+  let root: Root | undefined;
+  try {
+    root = await render(<ShareView />); await lookup(root); await typeInto(root, t("share.webPairingCode"), "REPLACED-CODE"); await act(async () => { gate.resolve(); }); await flush(); expect(textOf(root)).not.toContain(found.display_name); expect(textOf(root)).not.toContain(fingerprint);
+  } finally {
+    clearSession(); vault.lock();
+    try {
+      try { await act(async () => { root?.unmount(); }); }
+      finally {
+        gate.resolve();
+        await act(async () => { await producers.drain(); }); await flush();
+      }
+    } finally { held.mockRestore(); }
+  }
 });
 it.each(["success", "error"] as const)("does not publish a grant response after the pairing operation retires: %s", async outcome => {
-  const pending = deferred<ListedConsent>(); vi.spyOn(api, "grantConsent").mockReturnValue(pending.promise); const root = await render(<ShareView />); await requestGrant(root); await confirm(root); await typeInto(root, t("share.webPairingCode"), "REPLACEMENT-CODE"); await act(async () => { outcome === "success" ? pending.resolve(consent()) : pending.reject(new Error("retired grant error")); }); await flush(); expect(api.listConsents).toHaveBeenCalledTimes(1); expect(textOf(root)).not.toContain(t("share.webGrantedStatus", { name: found.display_name })); expect(textOf(root)).not.toContain(t("share.webGrantFailed")); expect(root.root.findAllByType("input").find(n => n.props.type === "text")!.props.value).toBe("REPLACEMENT-CODE");
+  const pending = deferred<ListedConsent>(); vi.spyOn(api, "grantConsent").mockReturnValue(pending.promise); let mounted: Root | undefined;
+  try {
+    const root = await render(<ShareView />); mounted = root; await requestGrant(root); await confirm(root); await typeInto(root, t("share.webPairingCode"), "REPLACEMENT-CODE"); await act(async () => { outcome === "success" ? pending.resolve(consent()) : pending.reject(new Error("retired grant error")); }); await flush(); expect(api.listConsents).toHaveBeenCalledTimes(1); expect(textOf(root)).not.toContain(t("share.webGrantedStatus", { name: found.display_name })); expect(textOf(root)).not.toContain(t("share.webGrantFailed")); expect(root.root.findAllByType("input").find(n => n.props.type === "text")!.props.value).toBe("REPLACEMENT-CODE");
+  } finally {
+    try { await act(async () => { mounted?.unmount(); }); }
+    finally {
+      await act(async () => { pending.resolve(consent()); await Promise.allSettled([pending.promise]); });
+      await flush();
+    }
+  }
 });
 it("clears revocation arming before a concurrent relationship reappears in the refreshed listing", async () => {
   vi.mocked(api.listConsents).mockResolvedValue([consent()]); vi.spyOn(api, "revokeConsent").mockResolvedValue(null); const root = await render(<ShareView />); await flush(); await press(root, t("share.webRevoke")); await press(root, t("share.webRevoke")); await confirm(root); vi.mocked(reauth.freshStepUp).mockClear(); await press(root, t("share.webRevoke")); expect(root.root.findAllByType("input").some(n => n.props.type === "password")).toBe(false); expect(reauth.freshStepUp).not.toHaveBeenCalled(); await press(root, t("common.cancel")); expect(surface(root)).toMatchSnapshot();
@@ -187,22 +402,49 @@ it.each(["grant", "revoke", "voice"] as const)("refuses a visible sensitive cont
   expect(root.root.findAllByType("input").some(node => node.props.type === "password")).toBe(false); expect(reauth.freshStepUp).not.toHaveBeenCalled();
 });
 it("keeps the next action's password when an older grant settles after pairing changes", async () => {
-  const old = deferred<ListedConsent>(); vi.spyOn(api, "grantConsent").mockReturnValue(old.promise); const root = await render(<ShareView />); await requestGrant(root); await confirm(root);
-  await typeInto(root, t("share.webPairingCode"), "NEW-CODE"); await press(root, t("share.webLookUp")); await flush(); await setCheckbox(root, t("share.webFingerprintConfirm"), true); await setCheckbox(root, t("share.webDisclosureConfirm"), true); await press(root, t("share.webConfirmShare")); await typeInto(root, t("settings.reauthPasswordField"), "new action password");
-  await act(async () => { old.resolve(consent()); }); await flush();
-  expect(root.root.findAllByType("input").find(node => node.props.type === "password")!.props.value).toBe("new action password");
+  const old = deferred<ListedConsent>(); vi.spyOn(api, "grantConsent").mockReturnValue(old.promise); let mounted: Root | undefined;
+  try {
+    const root = await render(<ShareView />); mounted = root; await requestGrant(root); await confirm(root);
+    await typeInto(root, t("share.webPairingCode"), "NEW-CODE"); await press(root, t("share.webLookUp")); await flush(); await setCheckbox(root, t("share.webFingerprintConfirm"), true); await setCheckbox(root, t("share.webDisclosureConfirm"), true); await press(root, t("share.webConfirmShare")); await typeInto(root, t("settings.reauthPasswordField"), "new action password");
+    await act(async () => { old.resolve(consent()); }); await flush();
+    expect(root.root.findAllByType("input").find(node => node.props.type === "password")!.props.value).toBe("new action password");
+  } finally {
+    try { await act(async () => { mounted?.unmount(); }); }
+    finally {
+      await act(async () => { old.resolve(consent()); await Promise.allSettled([old.promise]); });
+      await flush();
+    }
+  }
 });
 it("does not claim a new pairing fingerprint was copied when an older clipboard operation settles", async () => {
-  const copied = deferred<void>(); vi.stubGlobal("navigator", { clipboard: { writeText: vi.fn().mockReturnValue(copied.promise) } }); const root = await render(<ShareView />); await lookup(root); await press(root, t("share.copyFingerprint"));
-  await typeInto(root, t("share.webPairingCode"), "NEW-CODE"); await press(root, t("share.webLookUp")); await flush(); await act(async () => { copied.resolve(); }); await flush();
-  expect(textOf(root)).toContain(t("share.copyFingerprint")); expect(textOf(root)).not.toContain(t("share.copiedFingerprint"));
+  const copied = deferred<void>(); vi.stubGlobal("navigator", { clipboard: { writeText: vi.fn().mockReturnValue(copied.promise) } }); let mounted: Root | undefined;
+  try {
+    const root = await render(<ShareView />); mounted = root; await lookup(root); await press(root, t("share.copyFingerprint"));
+    await typeInto(root, t("share.webPairingCode"), "NEW-CODE"); await press(root, t("share.webLookUp")); await flush(); await act(async () => { copied.resolve(); }); await flush();
+    expect(textOf(root)).toContain(t("share.copyFingerprint")); expect(textOf(root)).not.toContain(t("share.copiedFingerprint"));
+  } finally {
+    try { await act(async () => { mounted?.unmount(); }); }
+    finally {
+      await act(async () => { copied.resolve(); await Promise.allSettled([copied.promise]); });
+      await flush();
+    }
+  }
 });
 it.each(["lookup", "grant"] as const)("preserves a newer lookup's busy state when an old operation settles: %s", async action => {
-  const oldLookup = deferred<PairingLookup>(), oldGrant = deferred<ListedConsent>(); const root = await render(<ShareView />);
-  if (action === "lookup") { vi.mocked(api.pairingLookup).mockReturnValueOnce(oldLookup.promise); await lookup(root); }
-  else { vi.spyOn(api, "grantConsent").mockReturnValue(oldGrant.promise); await requestGrant(root); await confirm(root); }
-  const current = deferred<PairingLookup>(); vi.mocked(api.pairingLookup).mockReturnValueOnce(current.promise); await typeInto(root, t("share.webPairingCode"), "NEW-CODE"); await press(root, t("share.webLookUp")); expect(isDisabled(root, t("settings.working"))).toBe(true);
-  await act(async () => { if (action === "lookup") oldLookup.resolve(found); else oldGrant.resolve(consent()); }); await flush(); expect(isDisabled(root, t("settings.working"))).toBe(true); await act(async () => { current.resolve(found); }); await flush();
+  const oldLookup = deferred<PairingLookup>(), oldGrant = deferred<ListedConsent>(), current = deferred<PairingLookup>(); let mounted: Root | undefined;
+  try {
+    const root = await render(<ShareView />); mounted = root;
+    if (action === "lookup") { vi.mocked(api.pairingLookup).mockReturnValueOnce(oldLookup.promise); await lookup(root); }
+    else { vi.spyOn(api, "grantConsent").mockReturnValue(oldGrant.promise); await requestGrant(root); await confirm(root); }
+    vi.mocked(api.pairingLookup).mockReturnValueOnce(current.promise); await typeInto(root, t("share.webPairingCode"), "NEW-CODE"); await press(root, t("share.webLookUp")); expect(isDisabled(root, t("settings.working"))).toBe(true);
+    await act(async () => { if (action === "lookup") oldLookup.resolve(found); else oldGrant.resolve(consent()); }); await flush(); expect(isDisabled(root, t("settings.working"))).toBe(true); await act(async () => { current.resolve(found); }); await flush();
+  } finally {
+    try { await act(async () => { mounted?.unmount(); }); }
+    finally {
+      await act(async () => { oldLookup.resolve(found); oldGrant.resolve(consent()); current.resolve(found); await Promise.allSettled([oldLookup.promise, oldGrant.promise, current.promise]); });
+      await flush();
+    }
+  }
 });
 it("refuses the enabled confirmation after its vault locks without a native unhandled event failure", async () => {
   const failures: unknown[] = [], observe = (reason: unknown) => { failures.push(reason); }; process.on("unhandledRejection", observe);
@@ -218,6 +460,23 @@ it("never describes a voice-scope change as a revoked therapist relationship", a
 });
 it("retires a computed grant wrap when the vault changes owners while retaining the data-key reference", async () => {
   const password = "fresh patient password", salt = new Uint8Array(16).fill(29), master = pbkdf2Sync(password, salt, 100_000, 32, "sha256"), authKey = new Uint8Array(hkdfSync("sha256", master, new Uint8Array(32), Buffer.from("mindpattern/auth/v1"), 32)); vault.unlock({ authKey, dataKey: new Uint8Array(32).fill(49) }, owner);
-  vi.spyOn(auth, "saltFor").mockResolvedValue({ salt: Buffer.from(salt).toString("base64") }); vi.spyOn(api, "keyEnvelope").mockResolvedValue({ key_scheme: "v2", salt: Buffer.from(salt).toString("base64"), kdf_params: { algorithm: "pbkdf2-sha256", version: 1, iterations: 100_000 }, wrapped_data_key: null }); vi.mocked(reauth.freshStepUp).mockImplementation(actualFreshStepUp); const stepUp = vi.spyOn(api, "stepUp").mockResolvedValue({ proof: "actual-password-proof", action: "sharing_grant", expires_in: 120 }), grant = vi.spyOn(api, "grantConsent").mockResolvedValue(consent()), gate = deferred<void>(), began = deferred<void>(), real = sharing.wrapDataKeyForTherapist;
-  vi.spyOn(sharing, "wrapDataKeyForTherapist").mockImplementation(async (...args) => { const result = await real(...args); began.resolve(); await gate.promise; return result; }); const root = await render(<ShareView />); await requestGrant(root); await confirm(root); await began.promise; const keys = vault.get(); vault.unlock({ authKey: keys.authKey.slice(), dataKey: keys.dataKey }, "another-key-owner"); await act(async () => { gate.resolve(); }); await flush(); expect(stepUp).not.toHaveBeenCalled(); expect(grant).not.toHaveBeenCalled();
+  vi.spyOn(auth, "saltFor").mockResolvedValue({ salt: Buffer.from(salt).toString("base64") }); vi.spyOn(api, "keyEnvelope").mockResolvedValue({ key_scheme: "v2", salt: Buffer.from(salt).toString("base64"), kdf_params: { algorithm: "pbkdf2-sha256", version: 1, iterations: 100_000 }, wrapped_data_key: null }); vi.mocked(reauth.freshStepUp).mockImplementation(actualFreshStepUp); const stepUp = vi.spyOn(api, "stepUp").mockResolvedValue({ proof: "actual-password-proof", action: "sharing_grant", expires_in: 120 }), grant = vi.spyOn(api, "grantConsent").mockResolvedValue(consent()), gate = deferred<void>(), real = sharing.wrapDataKeyForTherapist;
+  let ownerWrapAdmitted = false;
+  const producers = heldShareProducers();
+  const held = vi.spyOn(sharing, "wrapDataKeyForTherapist").mockImplementation((...args) => producers.own((async () => {
+    const result = await producers.own(real(...args)); ownerWrapAdmitted = true; await gate.promise; return result;
+  })()));
+  let root: Root | undefined;
+  try {
+    root = await render(<ShareView />); await requestGrant(root); await confirm(root); await vi.waitFor(() => { expect(ownerWrapAdmitted).toBe(true); }, { timeout: 8000, interval: 10 }); const keys = vault.get(); vault.unlock({ authKey: keys.authKey.slice(), dataKey: keys.dataKey }, "another-key-owner"); await act(async () => { gate.resolve(); }); await flush(); expect(stepUp).not.toHaveBeenCalled(); expect(grant).not.toHaveBeenCalled();
+  } finally {
+    clearSession(); vault.lock();
+    try {
+      try { await act(async () => { root?.unmount(); }); }
+      finally {
+        gate.resolve();
+        await act(async () => { await producers.drain(); }); await flush();
+      }
+    } finally { held.mockRestore(); }
+  }
 });

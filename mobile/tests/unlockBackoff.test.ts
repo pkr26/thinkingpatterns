@@ -69,7 +69,10 @@ describe("the durable per-account counter", () => {
     // counter in AsyncStorage, and no device key there either.
     const raw = await storage.getItem("mindpattern.unlockFail.alice");
     expect(raw).not.toBeNull();
-    expect(raw).not.toContain(String(MAX_TRACKED_UNLOCK_FAILURES));
+    const envelope = JSON.parse(raw!) as { v: number; c: string };
+    expect(envelope).toEqual({ v: 1, c: expect.any(String) });
+    expect(Buffer.from(envelope.c, "base64").length).toBeGreaterThan(Buffer.byteLength(String(MAX_TRACKED_UNLOCK_FAILURES)));
+    expect(await secureStore.getItem("mindpattern.unlockFail.alice")).toBe(String(MAX_TRACKED_UNLOCK_FAILURES));
     expect(await storage.getItem("@mindpattern/device_k")).toBeNull();
 
     await clearUnlockFailures("alice", USER);

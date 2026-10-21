@@ -272,8 +272,35 @@ describe("envelope behavior", () => {
   });
 
   it("rejects wrong key sizes and too-short blobs", async () => {
-    await expect(encrypt(new Uint8Array(31), new TextEncoder().encode("x"))).rejects.toThrow(/32 bytes/);
-    await expect(decrypt(new Uint8Array(32), new Uint8Array(10))).rejects.toThrow(TamperError);
+    const native = crypto.subtle, originalImport = native.importKey, originalDecrypt = native.decrypt;
+    let aesImports = 0, decryptCalls = 0;
+    const importSpy = vi.spyOn(native, "importKey").mockImplementation(((...args: unknown[]) => {
+      if (args[2] === "AES-GCM") aesImports += 1;
+      return Reflect.apply(originalImport, native, args);
+    }) as SubtleCrypto["importKey"]);
+    const decryptSpy = vi.spyOn(native, "decrypt").mockImplementation((...args) => {
+      decryptCalls += 1;
+      return Reflect.apply(originalDecrypt, native, args);
+    });
+    const key = new Uint8Array(32).fill(23), aad = new TextEncoder().encode("native-minimum-framing");
+    try {
+      // The valid minimum-size message proves the same installed provider
+      // can import and authenticate, rather than silently bypassing crypto.
+      const valid = await encrypt(key, new Uint8Array(), aad);
+      expect(valid).toHaveLength(28);
+      aesImports = 0; decryptCalls = 0;
+      await expect(decrypt(key, valid, aad)).resolves.toEqual(new Uint8Array());
+      expect(aesImports).toBe(1); expect(decryptCalls).toBe(1);
+      aesImports = 0; decryptCalls = 0;
+      await expect(encrypt(new Uint8Array(31), new TextEncoder().encode("x"))).rejects.toThrow(/32 bytes/);
+      await expect(decrypt(new Uint8Array(32), new Uint8Array(10))).rejects.toThrow(TamperError);
+      expect(aesImports).toBe(0);
+      expect(decryptCalls).toBe(0);
+      for (const length of [0, 1, 11, 12, 16, 27]) {
+        await expect(decrypt(key, new Uint8Array(length), aad)).rejects.toThrow(TamperError);
+        expect(aesImports).toBe(0); expect(decryptCalls).toBe(0);
+      }
+    } finally { key.fill(0); decryptSpy.mockRestore(); importSpy.mockRestore(); }
   });
 });
 
@@ -284,7 +311,22 @@ describe("therapist key custody", () => {
     // Audit fix P-1 (2026-09-20): generation and upload-sealing are one call;
     // the returned object carries public material and the sealed blob only —
     // no base64 string of the raw private key ever exists.
-    const pair = await generateTherapistKeyPair(keys.wrapKek, "drportal");
+    const native = crypto.subtle, originalExport = native.exportKey;
+    const exported: Array<{ format: string; bytes: Uint8Array }> = [];
+    const exportSpy = vi.spyOn(native, "exportKey").mockImplementation(((...args: unknown[]) => {
+      const original = Reflect.apply(originalExport, native, args) as Promise<ArrayBuffer | JsonWebKey>;
+      void original.then(value => { if (value instanceof ArrayBuffer) exported.push({ format: String(args[0]), bytes: new Uint8Array(value) }); }, () => undefined);
+      return original;
+    }) as SubtleCrypto["exportKey"]);
+    let pair: Awaited<ReturnType<typeof generateTherapistKeyPair>>;
+    try {
+      pair = await generateTherapistKeyPair(keys.wrapKek, "drportal");
+      expect(exported.map(row => row.format)).toEqual(["spki", "pkcs8"]);
+      for (const row of exported) expect(row.bytes.every(value => value === 0)).toBe(true);
+    } finally {
+      exportSpy.mockRestore();
+      for (const row of exported) row.bytes.fill(0);
+    }
     expect(pair.publicKeySpkiB64).toHaveLength(124);
     expect(Object.keys(pair).sort()).toEqual(["publicKeySpkiB64", "wrapKeyBlobB64"]);
     // What the server sees is opaque; what the right password yields is a

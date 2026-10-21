@@ -173,13 +173,23 @@ describe("entryDraft custody (module)", () => {
     const gate = new Promise<void>((resolve) => {
       releaseSeal = resolve;
     });
+    let reportSealEntered: () => void = () => undefined;
+    const sealEntered = new Promise<void>((resolve) => { reportSealEntered = resolve; });
+    const awaitSealEntered = async (): Promise<void> => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([sealEntered, new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error("SetupError: native held seal never entered its storage write")), 5000);
+        })]);
+      } finally { if (timer !== undefined) clearTimeout(timer); }
+    };
     const inner = memoryBackend();
     setKvBackendForTests({
       async getItem(k) {
         return inner.getItem(k);
       },
       async setItem(k, v) {
-        if (k === `mindpattern.draft.active.${USER}`) await gate;
+        if (k === `mindpattern.draft.active.${USER}`) { reportSealEntered(); await gate; }
         return inner.setItem(k, v);
       },
       async removeItem(k) {
@@ -192,11 +202,13 @@ describe("entryDraft custody (module)", () => {
     // The lock seals the half-written entry; the write is IN FLIGHT.
     registerDraftSource(() => DRAFT);
     const sealing = preserveActiveDraft();
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    let clearing: Promise<void> | undefined;
+    try {
+      await awaitSealEntered();
     // The save completes while the seal is still pending: its clear must
     // queue BEHIND the seal (the old bare removeItem committed now, and the
     // seal's setItem then resurrected the slot).
-    const clearing = clearActiveDraft(USER);
+    clearing = clearActiveDraft(USER);
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(await kv.getItem(`mindpattern.draft.active.${USER}`)).toBe("earlier-sealed-blob"); // the clear is still queued
     releaseSeal();
@@ -204,6 +216,14 @@ describe("entryDraft custody (module)", () => {
     // The seal landed, then the clear removed it: the slot is genuinely
     // empty — the saved entry cannot come back as a draft.
     expect(await loadActiveDraft(DATA_KEY, USER)).toBeNull();
+    } finally {
+      releaseSeal();
+      const settled = await Promise.allSettled([sealing, ...(clearing ? [clearing] : [])]);
+      const rejected = settled.find((result) => result.status === "rejected");
+      if (rejected?.status === "rejected") {
+        throw new Error("SetupError: owned draft fixture producer failed during drain", { cause: rejected.reason });
+      }
+    }
   });
 
   it("a discard racing an in-flight seal gets the same combined clear (both slots)", async () => {
@@ -214,13 +234,23 @@ describe("entryDraft custody (module)", () => {
     const gate = new Promise<void>((resolve) => {
       releaseSeal = resolve;
     });
+    let reportSealEntered: () => void = () => undefined;
+    const sealEntered = new Promise<void>((resolve) => { reportSealEntered = resolve; });
+    const awaitSealEntered = async (): Promise<void> => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([sealEntered, new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error("SetupError: native held seal never entered its storage write")), 5000);
+        })]);
+      } finally { if (timer !== undefined) clearTimeout(timer); }
+    };
     const inner = memoryBackend();
     setKvBackendForTests({
       async getItem(k) {
         return inner.getItem(k);
       },
       async setItem(k, v) {
-        if (k === `mindpattern.draft.active.${USER}`) await gate;
+        if (k === `mindpattern.draft.active.${USER}`) { reportSealEntered(); await gate; }
         return inner.setItem(k, v);
       },
       async removeItem(k) {
@@ -229,11 +259,21 @@ describe("entryDraft custody (module)", () => {
     });
     registerDraftSource(() => DRAFT);
     const sealing = preserveActiveDraft();
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    const clearing = clearActiveDraft(USER);
+    let clearing: Promise<void> | undefined;
+    try {
+      await awaitSealEntered();
+    clearing = clearActiveDraft(USER);
     releaseSeal();
     await Promise.all([sealing, clearing]);
     expect(await loadActiveDraft(DATA_KEY, USER)).toBeNull();
+    } finally {
+      releaseSeal();
+      const settled = await Promise.allSettled([sealing, ...(clearing ? [clearing] : [])]);
+      const rejected = settled.find((result) => result.status === "rejected");
+      if (rejected?.status === "rejected") {
+        throw new Error("SetupError: owned draft fixture producer failed during drain", { cause: rejected.reason });
+      }
+    }
   });
 });
 
@@ -293,6 +333,18 @@ describe("EntryView draft contract", () => {
     expect(root.root.findAllByType("textarea")[0]!.props.value).toBe("");
     expect(await loadActiveDraft(DATA_KEY, USER)).toBeNull();
     expect(textOf(root)).not.toContain("Unsent draft restored");
+    const discarded = textOf(root);
+    const permit = vi.spyOn(kv, "captureWritePermit");
+    try {
+    await act(async () => { vault.unlock({ authKey: DATA_KEY.slice(), dataKey: DATA_KEY.slice() }); });
+    await typeArea(root, "How was today?", "unverified local writing to discard");
+    await press(root, "Discard draft"); await settle(20, 2);
+    expect(root.root.findAllByType("textarea")[0]!.props.value).toBe("");
+    expect(textOf(root)).toBe(discarded);
+    expect(permit).not.toHaveBeenCalled();
+    } finally {
+      permit.mockRestore();
+    }
   });
 
   it("a lock racing the save press is the honest locked message, never an unhandled throw (audit LOW)", async () => {
@@ -303,6 +355,18 @@ describe("EntryView draft contract", () => {
     await press(root, "Save entry");
     await settle(20, 2);
     expect(textOf(root)).toContain("session locked");
+    expect(mock.mock.calls.some(([url]) => String(url).endsWith("/entries"))).toBe(false);
+    await act(async () => { root.unmount(); });
+    installSession(USER); unlockVault();
+    const retained = await render(<EntryView onSaved={() => undefined} />);
+    await settle(40, 3);
+    clearSession();
+    await typeArea(retained, "How was today?", "retained vault after session retirement");
+    await settle(120, 3);
+    expect(await loadActiveDraft(DATA_KEY, USER)).toBeNull();
+    await press(retained, "Save entry");
+    await settle(20, 2);
+    expect(textOf(retained)).toContain("session locked");
     expect(mock.mock.calls.some(([url]) => String(url).endsWith("/entries"))).toBe(false);
   });
 });

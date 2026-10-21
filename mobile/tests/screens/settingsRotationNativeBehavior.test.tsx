@@ -1,8 +1,7 @@
-import React from "react";
 import crypto from "node:crypto";
 import ReactTestRenderer, { act } from "react-test-renderer";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { Alert, TextInput, TouchableOpacity } from "react-native";
+import { Alert, Text, TextInput, TouchableOpacity } from "react-native";
 import { SettingsScreen } from "../../src/screens/SettingsScreen";
 import { UnlockScreen } from "../../src/screens/UnlockScreen";
 import { AppNavigator } from "../../src/navigation";
@@ -91,7 +90,7 @@ beforeEach(async () => {
   runTestControl(setSecureStoreBackend, null); runTestControl(__resetLocalKeyLifecycleForTests); vault.lock();
   scheme = "v1"; serverSalt = Buffer.from(SALT); verifier = auth.toString("base64"); envelopeData = derivedData;
   passwordStatus = rekeyStatus = envelopeStatus = upgradeStatus = 200; upgradeCode = ""; wrapped = undefined; newParams = undefined;
-  passwordBody = rekeyBody = upgradeBody = undefined; processingKeys = []; paths = []; boundary = undefined; Alert.alert.mockClear();
+  passwordBody = rekeyBody = upgradeBody = undefined; processingKeys = []; paths = []; boundary = undefined; vi.mocked(Alert.alert).mockClear();
   responseBoundary = undefined; distinctLogins = false; loginNumber = 0;
   recoveryStatus = 200;
   sharing.shareAsync.mockReset().mockResolvedValue(); sharing.isAvailableAsync.mockResolvedValue(true);
@@ -149,9 +148,15 @@ it("a granted Native rotation release while Share owns busy keeps the password a
   const id = "native-root-busy-rotation", plain = Buffer.from("recoverable Native recording during Share");
   await enqueueAudio({ userId: USER, clientEntryId: id, ...encryptAudio({ dataKey: DATA }, USER, id, plain), mime: "audio/m4a", durationSeconds: 4, parentPending: true }, captureLocalWritePermit(USER, vault.get().dataKey));
   const slot = `${ACCOUNT_STORAGE_PREFIX.audioQueue}${canonicalOrigin(await getBaseUrl())}:${USER}:${id}`;
+  const queuedDescriptor = JSON.parse((await storage.getItem(slot))!);
+  // A retained recording is a dated fixture, independent of today's clock.
+  await storage.setItem(slot, JSON.stringify({ ...queuedDescriptor, queuedAt: new Date(2026, 9, 7, 12).getTime() }));
   const raw = (await storage.getItem(slot))!, descriptor = JSON.parse(raw);
   await mount(); await vi.waitFor(() => expect(button("Export encrypted recording 1")).toBeDefined());
   await press("Change password");
+  const disclosed = root!.root.findAllByType(Text).map(node => node.props.children);
+  expect(disclosed).toContain("This changes the password that locks your encryption key. Your journal is not re-encrypted — it stays exactly as it is, and sharing with your therapist keeps working unchanged. Every device signs out afterwards.");
+  expect(disclosed).not.toContain("This rotates your sign-in credential AND re-encrypts your journal under a new encryption key — the recovery step if your password or key was ever exposed. Every device signs out afterwards; active sharing grants are re-wrapped automatically.");
   await act(async () => { field("Password confirmation").props.onChangeText(OLD); field("New password").props.onChangeText(NEW); });
   const target = button("Change password and sign in again"), gesture = nativeGrantedPress(target.props), receipt = hold();
   sharing.shareAsync.mockImplementationOnce(async () => { await receipt.run(); });
@@ -160,7 +165,7 @@ it("a granted Native rotation release while Share owns busy keeps the password a
     await act(async () => { expect(target.props.disabled).toBe(true); gesture.configure(target.props); gesture.release(); });
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 1500)); });
     expect(passwordBody).toBeUndefined();
-    expect(Alert.alert.mock.calls).toEqual([]);
+    expect(vi.mocked(Alert.alert).mock.calls).toEqual([]);
     expect(await secureStore.getItem("@mindpattern/token")).toBe("current Native bearer");
     expect(await storage.getItem(slot)).toBe(raw);
     expect(decryptAudio({ dataKey: DATA }, USER, id, await files.readAsStringAsync(descriptor.uri))).toEqual(plain);
@@ -169,14 +174,17 @@ it("a granted Native rotation release while Share owns busy keeps the password a
 });
 afterEach(async () => {
   for (const release of releases.splice(0)) release();
-  assertPublicSurface({ view: root ? publicSurface(root) : null, alerts: Alert.alert.mock.calls.map(([title, message, choices]: any[]) => ({ title, message, choices: choices?.map((choice: any) => ({ text: choice.text, style: choice.style })) })) }, 1);
+  try {
+  assertPublicSurface({ view: root ? publicSurface(root) : null, alerts: vi.mocked(Alert.alert).mock.calls.map(([title, message, choices]: any[]) => ({ title, message, choices: choices?.map((choice: any) => ({ text: choice.text, style: choice.style })) })) }, 1);
+  } finally {
   if (root) { await act(async () => root!.unmount()); root = undefined; }
   vi.restoreAllMocks(); vault.lock(); await api.clearSession(); vi.unstubAllGlobals();
+  }
 });
 
 it.each(["v1", "v2"] as const)("completes actual Native Settings %s rotation with the matching public recovery disclosure", async target => {
-  if (target === "v2") v2(); await mount(); await rotation(); await vi.waitFor(() => expect(Alert.alert.mock.calls[0]?.[0]).toBe("Password changed"), { timeout: 4000 });
-  expect(Alert.alert.mock.calls).toHaveLength(1); expect(Alert.alert.mock.calls[0][1].includes("recovery kit")).toBe(target === "v1");
+  if (target === "v2") v2(); await mount(); await rotation(); await vi.waitFor(() => expect(vi.mocked(Alert.alert).mock.calls[0]?.[0]).toBe("Password changed"), { timeout: 4000 });
+  expect(vi.mocked(Alert.alert).mock.calls).toHaveLength(1); expect(vi.mocked(Alert.alert).mock.calls[0]![1]!.includes("recovery kit")).toBe(target === "v1");
   expect(await secureStore.getItem("@mindpattern/token")).toBe("rotated Native bearer");
   const transaction = target === "v1" ? rekeyBody : passwordBody, fresh = crypto.pbkdf2Sync(NEW, Buffer.from(transaction.new_salt, "base64"), 600000, 32, "sha256");
   expect(transaction.new_verifier).toBe(Buffer.from(crypto.hkdfSync("sha256", fresh, Buffer.alloc(32), "mindpattern/auth/v1", 32)).toString("base64"));
@@ -185,8 +193,8 @@ it.each(["v1", "v2"] as const)("completes actual Native Settings %s rotation wit
 });
 
 it.each(["v1", "v2"] as const)("single-shot Native Settings %s rotation acknowledgement cannot sign out a newer login", async target => {
-  if (target === "v2") v2(); await mount(); await rotation(); await vi.waitFor(() => expect(Alert.alert.mock.calls[0]?.[0]).toBe("Password changed"), { timeout: 4000 });
-  const choice = Alert.alert.mock.calls[0][2]![0]; expect(choice.text).toBe("OK");
+  if (target === "v2") v2(); await mount(); await rotation(); await vi.waitFor(() => expect(vi.mocked(Alert.alert).mock.calls[0]?.[0]).toBe("Password changed"), { timeout: 4000 });
+  const choice = vi.mocked(Alert.alert).mock.calls[0]![2]![0]!; expect(choice.text).toBe("OK");
   await api.setSession("replacement Native bearer", OTHER, "bob"); vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 8), dataKey: Buffer.alloc(32, 9) }, OTHER);
   await act(async () => choice.onPress!());
   expect(await secureStore.getItem("@mindpattern/token")).toBe("replacement Native bearer"); expect(vault.ownerUserId()).toBe(OTHER); expect(vault.get().dataKey).toEqual(Buffer.alloc(32, 9));
@@ -197,38 +205,46 @@ it.each(["v1", "v2"] as const)("reports actual Native Settings %s transaction re
   if (target === "v1") {
     await vi.waitFor(() => expect(button("Finish interrupted password change")).toBeDefined(), { timeout: 4000 });
     expect(root!.root.findAllByType(UnlockScreen)).toHaveLength(1); expect(root!.root.findAllByType(SettingsScreen)).toHaveLength(0);
-    expect(await pendingLocalRekey(USER)).toBe(true); expect(vault.canReauthenticate()).toBe(false); expect(Alert.alert.mock.calls).toEqual([]);
+    expect(await pendingLocalRekey(USER)).toBe(true); expect(vault.canReauthenticate()).toBe(false); expect(vi.mocked(Alert.alert).mock.calls).toEqual([]);
   } else {
-    await vi.waitFor(() => expect(Alert.alert.mock.calls).toHaveLength(1), { timeout: 4000 });
-    expect(Alert.alert.mock.calls[0][0]).toBe("Could not change password"); expect(Alert.alert.mock.calls[0][1]).not.toContain("Untrusted");
+    await vi.waitFor(() => expect(vi.mocked(Alert.alert).mock.calls).toHaveLength(1), { timeout: 4000 });
+    expect(vi.mocked(Alert.alert).mock.calls[0]![0]).toBe("Could not change password"); expect(vi.mocked(Alert.alert).mock.calls[0]![1]).not.toContain("Untrusted");
   }
   expect(await secureStore.getItem("@mindpattern/token")).toBe("current Native bearer");
 });
 
 it.each(["tiny", "alllowercasepassword"])("rejects the Native Settings password policy before key shipment: %s", async next => {
-  await mount(); await rotation(OLD, next); expect(Alert.alert.mock.calls).toHaveLength(1); expect(processingKeys).toEqual([]); expect(passwordBody).toBeUndefined(); expect(rekeyBody).toBeUndefined();
+  await mount(); await rotation(OLD, next); expect(vi.mocked(Alert.alert).mock.calls).toHaveLength(1); expect(processingKeys).toEqual([]); expect(passwordBody).toBeUndefined(); expect(rekeyBody).toBeUndefined();
 });
 
 it("upgrades through actual Native proof, possession and envelope providers without changing the data key", async () => {
-  await mount(); const key = vault.get().dataKey; await upgrade(); await vi.waitFor(() => expect(Alert.alert.mock.calls[0]?.[0]).toBe("Key protection upgraded"), { timeout: 4000 });
+  await mount();
+  const show = nativeGrantedPress(button("Change password").props);
+  try { await act(async () => { show.release(); }); } finally { show.dispose(); }
+  const disclosed = root!.root.findAllByType(Text).map(node => node.props.children);
+  expect(disclosed).toContain("This rotates your sign-in credential AND re-encrypts your journal under a new encryption key — the recovery step if your password or key was ever exposed. Every device signs out afterwards; active sharing grants are re-wrapped automatically.");
+  expect(disclosed).not.toContain("This changes the password that locks your encryption key. Your journal is not re-encrypted — it stays exactly as it is, and sharing with your therapist keeps working unchanged. Every device signs out afterwards.");
+  const close = nativeGrantedPress(button("Close change password").props);
+  try { await act(async () => { close.release(); }); } finally { close.dispose(); }
+  const key = vault.get().dataKey; await upgrade(); await vi.waitFor(() => expect(vi.mocked(Alert.alert).mock.calls[0]?.[0]).toBe("Key protection upgraded"), { timeout: 4000 });
   expect(vault.get().dataKey).toBe(key); expect(processingKeys).toEqual([derivedData.toString("base64")]); expect(upgradeBody).toBeDefined(); expect((await cachedEnvelope("alice"))?.scheme).toBe("v2"); expect(button("Upgrade now")).toBeUndefined();
 });
 
 it("reports a Native server upgrade completed after the initial v1 card as already protected", async () => {
-  await mount(); scheme = "v2"; await upgrade(); await vi.waitFor(() => expect(Alert.alert.mock.calls).toHaveLength(1), { timeout: 4000 });
-  expect(upgradeBody).toBeUndefined(); expect(processingKeys).toEqual([]); expect(Alert.alert.mock.calls[0][0]).toBe("Already upgraded");
+  await mount(); scheme = "v2"; await upgrade(); await vi.waitFor(() => expect(vi.mocked(Alert.alert).mock.calls).toHaveLength(1), { timeout: 4000 });
+  expect(upgradeBody).toBeUndefined(); expect(processingKeys).toEqual([]); expect(vi.mocked(Alert.alert).mock.calls[0]![0]).toBe("Already upgraded");
 });
 
-it.each([[403, "envelope_key_mismatch"], [403, "verification_failed"], [503, ""]] as const)("keeps actual Native upgrade refusal honest: %s %s", async (status, code) => {
-  upgradeStatus = status; upgradeCode = code; await mount(); await upgrade(); await vi.waitFor(() => expect(Alert.alert.mock.calls).toHaveLength(1), { timeout: 4000 });
-  expect(Alert.alert.mock.calls[0][0]).not.toBe("Key protection upgraded"); expect(Alert.alert.mock.calls[0][1]).not.toContain("Untrusted"); expect(vault.get().dataKey).toEqual(derivedData); expect((await cachedEnvelope("alice"))?.scheme).not.toBe("v2");
-  if (code === "envelope_key_mismatch") expect(Alert.alert.mock.calls[0][0]).toBe("Could not upgrade key protection");
+it.each([[403, "envelope_key_mismatch"], [403, "verification_failed"], [503, ""]] as const)("keeps actual Native upgrade refusal honest (case #%#)", async (status, code) => {
+  upgradeStatus = status; upgradeCode = code; await mount(); await upgrade(); await vi.waitFor(() => expect(vi.mocked(Alert.alert).mock.calls).toHaveLength(1), { timeout: 4000 });
+  expect(vi.mocked(Alert.alert).mock.calls[0]![0]).not.toBe("Key protection upgraded"); expect(vi.mocked(Alert.alert).mock.calls[0]![1]).not.toContain("Untrusted"); expect(vault.get().dataKey).toEqual(derivedData); expect((await cachedEnvelope("alice"))?.scheme).not.toBe("v2");
+  if (code === "envelope_key_mismatch") expect(vi.mocked(Alert.alert).mock.calls[0]![0]).toBe("Could not upgrade key protection");
 });
 
 it("keeps a late Native upgrade receipt quiet after the Settings route retires", async () => {
   const held = hold(); boundary = async path => { if (path.endsWith("/account/key-envelope/upgrade")) await held.run(); }; await mount(); await upgrade(false); await vi.waitFor(() => expect(held.entered()).toBe(true), { timeout: 4000 });
   await act(async () => vault.lock()); expect(root!.root.findAllByType(SettingsScreen)).toHaveLength(0); held.release();
-  for (let i = 0; i < 128; i++) await act(async () => { await Promise.resolve(); }); expect(Alert.alert.mock.calls).toEqual([]); expect(vault.canReauthenticate()).toBe(false);
+  for (let i = 0; i < 128; i++) await act(async () => { await Promise.resolve(); }); expect(vi.mocked(Alert.alert).mock.calls).toEqual([]); expect(vault.canReauthenticate()).toBe(false);
 });
 
 it("keeps a late Native upgrade disclosure quiet after a navigation blur retires its confirmation", async () => {
@@ -236,7 +252,7 @@ it("keeps a late Native upgrade disclosure quiet after a navigation blur retires
   await vi.waitFor(() => expect(held.entered()).toBe(true), { timeout: 4000 });
   await act(async () => { for (const callback of nativeNavigation.listeners.get("blur") ?? []) callback(); }); held.release();
   for (let i = 0; i < 128; i++) await act(async () => { await Promise.resolve(); });
-  expect(root!.root.findAllByType(SettingsScreen)).toHaveLength(1); expect(vault.get().dataKey).toEqual(derivedData); expect(Alert.alert.mock.calls).toEqual([]);
+  expect(root!.root.findAllByType(SettingsScreen)).toHaveLength(1); expect(vault.get().dataKey).toEqual(derivedData); expect(vi.mocked(Alert.alert).mock.calls).toEqual([]);
 });
 
 it.each(["v1", "v2"] as const)("keeps a late actual Native Settings %s rotation result from changing a replacement account", async target => {
@@ -244,7 +260,7 @@ it.each(["v1", "v2"] as const)("keeps a late actual Native Settings %s rotation 
   await mount(); await rotation(); await vi.waitFor(() => expect(held.entered()).toBe(true), { timeout: 4000 });
   await api.setSession("replacement Native bearer", OTHER, "bob"); await act(async () => vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 8), dataKey: Buffer.alloc(32, 9) }, OTHER)); held.release();
   for (let i = 0; i < 128; i++) await act(async () => { await Promise.resolve(); });
-  expect(await secureStore.getItem("@mindpattern/token")).toBe("replacement Native bearer"); expect(vault.ownerUserId()).toBe(OTHER); expect(vault.get().dataKey).toEqual(Buffer.alloc(32, 9)); expect(Alert.alert.mock.calls).toEqual([]);
+  expect(await secureStore.getItem("@mindpattern/token")).toBe("replacement Native bearer"); expect(vault.ownerUserId()).toBe(OTHER); expect(vault.get().dataKey).toEqual(Buffer.alloc(32, 9)); expect(vi.mocked(Alert.alert).mock.calls).toEqual([]);
 });
 
 it("two installed Native rotation releases before commit keep one v2 password transaction and its public result", async () => {
@@ -259,8 +275,8 @@ it("two installed Native rotation releases before commit keep one v2 password tr
   });
   await vi.waitFor(() => expect(held.entered()).toBe(true), { timeout: 4000 });
   for (let i = 0; i < 128; i++) await act(async () => { await Promise.resolve(); }); held.release();
-  await vi.waitFor(() => expect(Alert.alert.mock.calls.some(call => call[0] === "Password changed")).toBe(true), { timeout: 4000 });
-  expect(Alert.alert.mock.calls).toHaveLength(1); expect(Alert.alert.mock.calls[0][0]).toBe("Password changed"); expect(vault.get().dataKey).toEqual(DATA);
+  await vi.waitFor(() => expect(vi.mocked(Alert.alert).mock.calls.some(call => call[0] === "Password changed")).toBe(true), { timeout: 4000 });
+  expect(vi.mocked(Alert.alert).mock.calls).toHaveLength(1); expect(vi.mocked(Alert.alert).mock.calls[0]![0]).toBe("Password changed"); expect(vault.get().dataKey).toEqual(DATA);
   const fresh = crypto.pbkdf2Sync(NEW, serverSalt, 600000, 32, "sha256"); expect(verifier).toBe(Buffer.from(crypto.hkdfSync("sha256", fresh, Buffer.alloc(32), "mindpattern/auth/v1", 32)).toString("base64"));
   expect(await secureStore.getItem("@mindpattern/token")).toBe("rotated Native bearer");
 });

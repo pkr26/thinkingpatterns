@@ -23,8 +23,11 @@ const selectedTests = process.env.MOBILE_MUTATION_TEST_FILES_JSON
   : process.env.MOBILE_MUTATION_TEST_FILES?.split(",").filter(Boolean);
 const selectedNamePattern = process.env.MOBILE_MUTATION_TEST_NAME_PATTERN || undefined;
 const selectedSetup = process.env.MOBILE_MUTATION_SETUP_FILES_JSON ? JSON.parse(process.env.MOBILE_MUTATION_SETUP_FILES_JSON) : undefined;
+const workerCachePrefix = join(isolated, ".campaign-cache");
 if (selectedTests) {
-  writeFileSync(join(isolated, "vitest.shard.config.ts"), `import base from "./vitest.mutation.config";\nexport default { ...base, test: { ...base.test, testTimeout: 120000, hookTimeout: 120000, update: "none", include: ${JSON.stringify(selectedTests)}${selectedNamePattern ? `, testNamePattern: ${JSON.stringify(selectedNamePattern)}` : ""}${selectedSetup ? `, setupFiles: ${JSON.stringify(selectedSetup)}` : ""} } };\n`);
+  // Each Stryker worker has private runtime state. Keep persistent runner
+  // metadata private too: node_modules is shared with other disposable lanes.
+  writeFileSync(join(isolated, "vitest.shard.config.ts"), `import base from "./vitest.mutation.config";\nexport default { ...base, cacheDir: ${JSON.stringify(workerCachePrefix)} + "-" + (process.env.STRYKER_MUTATOR_WORKER ?? "baseline"), test: { ...base.test, cache: false, testTimeout: 120000, hookTimeout: 120000, update: "none", include: ${JSON.stringify(selectedTests)}${selectedNamePattern ? `, testNamePattern: ${JSON.stringify(selectedNamePattern)}` : ""}${selectedSetup ? `, setupFiles: ${JSON.stringify(selectedSetup)}` : ""} } };\n`);
   const configPath = join(isolated, "stryker.config.json");
   const config = JSON.parse(readFileSync(configPath, "utf8"));
   config.vitest.configFile = "./vitest.shard.config.ts";
@@ -44,7 +47,7 @@ const productionFiles = [join(isolated, "App.tsx"), join(isolated, "index.js"), 
 const manifest = hashFiles(isolated, productionFiles);
 const configFiles = ["package.json", "package-lock.json", "stryker.config.json", "vitest.config.ts", "vitest.mutation.config.ts", ...(selectedTests ? ["vitest.shard.config.ts"] : [])].map(file => join(isolated, file));
 const dependencyFiles = ["@stryker-mutator/core", "@stryker-mutator/vitest-runner", "@stryker-mutator/instrumenter", "vitest"].map(name => join(isolated, "node_modules", name, "package.json"));
-writeFileSync(join(output, "execution.json"), JSON.stringify({ isolated, argv: process.argv.slice(2), selectedTests, selectedNamePattern, sourceHashes: manifest, testHashes: hashFiles(isolated, walk(join(isolated, "tests"))), sharedHashes: hashFiles(scratch, walk(join(scratch, "shared"))), configHashes: hashFiles(isolated, configFiles), dependencyHashes: hashFiles(isolated, dependencyFiles), nodeVersion: process.version, startedAt: new Date().toISOString() }, null, 2) + "\n");
+writeFileSync(join(output, "execution.json"), JSON.stringify({ isolated, argv: process.argv.slice(2), selectedTests, selectedNamePattern, ...(selectedTests ? { supportIsolation: { resultsCache: false, workerCachePrefix } } : {}), sourceHashes: manifest, testHashes: hashFiles(isolated, walk(join(isolated, "tests"))), sharedHashes: hashFiles(scratch, walk(join(scratch, "shared"))), configHashes: hashFiles(isolated, configFiles), dependencyHashes: hashFiles(isolated, dependencyFiles), nodeVersion: process.version, startedAt: new Date().toISOString() }, null, 2) + "\n");
 console.log(`Mutation working copy: ${isolated}`);
 const result = spawnSync(process.execPath, [join(isolated, "node_modules", "@stryker-mutator", "core", "bin", "stryker.js"), "run", ...process.argv.slice(2), "--inPlace"], { cwd: isolated, stdio: "inherit", env: { ...process.env, MOBILE_UPDATE_PUBLIC_SURFACES: "", MOBILE_MUTATION_EVENT_FILE: join(output, "mutants.jsonl") } });
 for (const file of ["mutation.json", "mutation.html"]) {

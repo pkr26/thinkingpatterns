@@ -7,12 +7,11 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import { inventory, mutantKey } from './audit-frontend-mutation.mjs';
+import { timedOut, runnerFault, incompleteRun as emptyRun, runtimeKill } from './mutation-observation.mjs';
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-const timedOut = mutant => mutant.status === 'Killed' && /^(?:Test|Hook) timed out in \d+ms\./m.test(mutant.statusReason ?? '');
-const emptyRun = mutant => ['Killed','Survived'].includes(mutant.status) && mutant.testsCompleted === 0;
 const validStatuses = new Set(['Killed','Survived','NoCoverage','Timeout','CompileError','RuntimeError','Ignored']);
-const rank = mutant => emptyRun(mutant) && !timedOut(mutant) ? 0 : mutant.status === 'Killed' && !timedOut(mutant) ? 6
+const rank = mutant => emptyRun(mutant) && !timedOut(mutant) || runnerFault(mutant) ? 0 : runtimeKill(mutant) ? 6
   : mutant.status === 'Survived' ? 5
   : timedOut(mutant) || mutant.status === 'Timeout' ? 4
   : mutant.status === 'NoCoverage' ? 3
@@ -62,6 +61,7 @@ export function mergeReports(sources, inputs, { skipStale = false } = {}) {
         const observation = { input: namespace, path: input.path, sha256: input.sha256, file, rawId: mutant.id, rawStatus: mutant.status,
           ...(timedOut(mutant) ? { testTimeoutFailure: true } : {}), evidence: input.evidence ?? [] };
         if (emptyRun(mutant)) observation.zeroTestsCompleted = true;
+        if (runnerFault(mutant)) observation.runnerFault = true;
         const rejection = rejections.get(key);
         if (rejection) {
           observation.rejection = rejection;

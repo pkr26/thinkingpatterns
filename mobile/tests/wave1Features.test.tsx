@@ -85,8 +85,14 @@ describe("prompt chips", () => {
     const a = promptChipsFor(earlyMorning);
     const b = promptChipsFor(lateEvening);
     expect(a).toEqual(b);
+    expect(a).toEqual([
+      "If today had a title…",
+      "My body feels…",
+      "The weather matched my mood when…",
+    ]);
     expect(a).toHaveLength(3);
     expect(PROMPT_CHIPS).toContain(a[0]);
+    expect(promptChipsFor(new Date(Number.NaN))).toEqual([]);
   });
 
   it("E-3 (2026-09-21): the chips localize — es serves the Spanish pool, position-parity", async () => {

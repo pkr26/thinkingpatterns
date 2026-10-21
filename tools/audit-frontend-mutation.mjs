@@ -6,17 +6,12 @@ import { createRequire } from 'node:module';
 import { relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
+import { timedOut as testTimedOut, runnerFault, incompleteRun as zeroTestObservation, runtimeKill } from './mutation-observation.mjs';
 
 const statuses = new Set(['Killed', 'Survived', 'NoCoverage', 'Timeout', 'CompileError', 'RuntimeError', 'Ignored']);
 const unresolvedStatuses = new Set(['Survived', 'NoCoverage', 'Timeout', 'RuntimeError', 'Ignored']);
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const slash = (path) => path.split(sep).join('/');
-// Vitest reports its own timeout as a failed test, which Stryker labels Killed.
-// Preserve that raw label while preventing a watchdog failure earning a kill.
-const testTimedOut = (mutant) => mutant.status === 'Killed' && /^(?:Test|Hook) timed out in \d+ms\./m.test(mutant.statusReason ?? '');
-// A mutated setup import can fail before Vitest executes any test, while the
-// runner still returns Killed or Survived. Such observations need a replay.
-const zeroTestObservation = (mutant) => ['Killed', 'Survived'].includes(mutant.status) && mutant.testsCompleted === 0;
 
 export function mutantKey(file, mutant) {
   const { start, end } = mutant.location;
@@ -85,6 +80,8 @@ export function auditReport(sources, enumeration, report, reviews = []) {
   let resourceExhaustion = 0;
   let testTimeoutFailures = 0;
   let zeroTestObservations = 0;
+  let runnerFaultFailures = 0;
+  let runtimeKills = 0;
   for (const [name, file] of Object.entries(report.files)) {
     if (!sources.has(name)) throw new Error(`Out-of-scope file: ${name}`);
     if (file.source !== sources.get(name)) throw new Error(`Stale report source: ${name}`);
@@ -101,11 +98,15 @@ export function auditReport(sources, enumeration, report, reviews = []) {
       counts[mutant.status]++;
       const stalledTest = testTimedOut(mutant);
       const emptyRun = zeroTestObservation(mutant);
+      const fault = runnerFault(mutant);
       if (stalledTest) testTimeoutFailures++;
       if (emptyRun) zeroTestObservations++;
+      if (fault) runnerFaultFailures++;
+      if (runtimeKill(mutant)) runtimeKills++;
       total++;
       const review = reviewMap.get(key);
       if (review) {
+        if (fault) throw new Error(`Runner fault requires a trustworthy replay before residual closure: ${name} ${mutant.id}`);
         if (review.disposition === 'Equivalent') {
           if (!['Survived', 'NoCoverage'].includes(mutant.status)) throw new Error(`Equivalent review requires a survivor: ${name} ${mutant.id}`);
           if (emptyRun) throw new Error(`Equivalent review requires a valid test observation: ${name} ${mutant.id}`);
@@ -117,9 +118,9 @@ export function auditReport(sources, enumeration, report, reviews = []) {
         }
         reviewMap.delete(key);
       }
-      if (unresolvedStatuses.has(mutant.status) || stalledTest || emptyRun) {
+      if (unresolvedStatuses.has(mutant.status) || stalledTest || emptyRun || fault) {
         rows.push({ file: name, id: mutant.id, key, location: mutant.location, mutatorName: mutant.mutatorName,
-          replacement: mutant.replacement, status: mutant.status, ...(stalledTest ? { testTimedOut: true } : {}), ...(emptyRun ? { zeroTestsCompleted: true } : {}), disposition: review ? review.disposition : 'Unresolved', ...(review ? { review } : {}) });
+          replacement: mutant.replacement, status: mutant.status, ...(stalledTest ? { testTimedOut: true } : {}), ...(emptyRun ? { zeroTestsCompleted: true } : {}), ...(fault ? { runnerFault: true } : {}), disposition: review ? review.disposition : 'Unresolved', ...(review ? { review } : {}) });
       }
     }
   }
@@ -131,8 +132,8 @@ export function auditReport(sources, enumeration, report, reviews = []) {
   }));
   const unresolved = rows.filter((row) => row.disposition === 'Unresolved').length;
   return { scope: 'Runtime frontend JS/TS/TSX, including entrypoints and public scripts; excludes tests, build tooling, dependencies, and native platform source',
-    note: 'Validates operator inventory, target bytes, report statuses and review linkage. Runtime oracle validity and equivalent reasoning require separate review. Timeouts receive no runtime-kill credit.',
-    total, counts, runtimeKills: counts.Killed - rows.filter(row => row.status === 'Killed' && (row.testTimedOut || row.zeroTestsCompleted)).length,
+    note: 'Validates operator inventory, target bytes, report statuses and review linkage. Runtime oracle validity and equivalent reasoning require separate review. Timeouts, runner faults and absent/nonpositive testsCompleted receive no runtime-kill credit. zeroTestObservations includes missing or invalid completion counts.',
+    total, counts, runtimeKills, runnerFaultFailures,
     testTimeoutFailures, zeroTestObservations, equivalent, nonTerminating, resourceExhaustion, unresolved, complete: unresolved === 0, targets, residuals: rows };
 }
 
@@ -156,7 +157,7 @@ async function main() {
   const reviews = options['--reviews'] ? await readJson(options['--reviews']) : [];
   const audit = auditReport(sources, enumeration, report, reviews);
   if (options['--output']) await writeFile(options['--output'], `${JSON.stringify(audit, null, 2)}\n`);
-  console.log(JSON.stringify({ total: audit.total, counts: audit.counts, runtimeKills: audit.runtimeKills, testTimeoutFailures: audit.testTimeoutFailures, zeroTestObservations: audit.zeroTestObservations, equivalent: audit.equivalent, nonTerminating: audit.nonTerminating, resourceExhaustion: audit.resourceExhaustion, unresolved: audit.unresolved,
+  console.log(JSON.stringify({ total: audit.total, counts: audit.counts, runtimeKills: audit.runtimeKills, runnerFaultFailures: audit.runnerFaultFailures, testTimeoutFailures: audit.testTimeoutFailures, zeroTestObservations: audit.zeroTestObservations, equivalent: audit.equivalent, nonTerminating: audit.nonTerminating, resourceExhaustion: audit.resourceExhaustion, unresolved: audit.unresolved,
     targets: audit.targets.length, complete: audit.complete }));
   if (!audit.complete) process.exitCode = 1;
 }

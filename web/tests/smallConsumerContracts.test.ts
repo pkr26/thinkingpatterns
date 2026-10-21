@@ -9,7 +9,7 @@ afterEach(() => __setLocaleForTests("en"));
 
 describe("local calendar and safe visible errors", () => {
   it.each([[9, 0, 1, "0009-01-01"], [99, 1, 9, "0099-02-09"], [2026, 9, 5, "2026-10-05"], [2024, 1, 29, "2024-02-29"], [2026, 11, 31, "2026-12-31"]] as const)
-    ("formats local calendar fields including padded years, months and days", (year, month, day, expected) => {
+    ("formats local calendar fields including padded years, months and days (case #%#)", (year, month, day, expected) => {
       const morning = new Date(2000, month, day, 0, 1); morning.setFullYear(year);
       const evening = new Date(2000, month, day, 23, 59); evening.setFullYear(year);
       expect(localDateISO(morning)).toBe(expected); expect(localDateISO(evening)).toBe(expected);

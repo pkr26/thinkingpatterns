@@ -392,7 +392,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       assertSensitiveOwnership(operation);
       vault.lock();
       let failures: string[] = [];
-      if (userId) failures = await eraseDeletedAccountLocals(userId, username, { origin, preserveSession: true }).catch(() => ["device cleanup"]);
+      if (userId) failures = await eraseDeletedAccountLocals(userId, username, { origin }).catch(() => ["device cleanup"]);
       // Erasure retires the credential tuple immediately and advances the
       // local scope. Publish the matching logged-out UI even when a later
       // native cleanup task failed and left a retry checkpoint.
@@ -885,7 +885,8 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         // Load language and recovery status even when no theme preference was saved.
         if (!cancelled) {
           const choice = await readLanguageChoice();
-          if (!cancelled && !acknowledgedPreferences.current.language) setLanguageState(choice);
+          if (cancelled) return;
+          if (!acknowledgedPreferences.current.language) setLanguageState(choice);
           try {
             const status = await api.recoveryStatus();
             if (!cancelled && !acknowledgedPreferences.current.recovery) {
@@ -1475,7 +1476,7 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
       {showRotate && (
         <View style={[styles.reauthCard, { backgroundColor: t.colors.cardDeep, borderRadius: t.radius.lg }]}>
           <Text style={[styles.reauthTitle, { color: t.colors.text }]}>
-            {tr(keyScheme === "v2" ? "settings.changePasswordTitleV2" : "settings.changePasswordTitle")}
+            {tr("settings.changePasswordTitle")}
           </Text>
           {/* 2026-09-26: v2 accounts get the honest O(1) copy — no rekey,
               grants keep working; v1 accounts keep the rekey disclosure. */}

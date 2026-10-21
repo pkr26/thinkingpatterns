@@ -8,7 +8,7 @@
  * Real WebCrypto, no mocks — the guard is the shipping decrypt path.
  */
 import { describe, expect, it } from "vitest";
-import { decryptEntry, encrypt, toBase64 } from "../src/crypto";
+import { decryptEntry, encrypt, toBase64, ENTRY_PAYLOAD_VERSIONS } from "../src/crypto";
 import { buildAad } from "../src/aad";
 
 const DATA_KEY = new Uint8Array(32).fill(7);
@@ -25,6 +25,8 @@ async function sealedEntry(payload: Record<string, unknown>, contentVersion = 1)
 
 describe("decryptEntry payload-version guard (M-8b, audit 2026-09-29)", () => {
   it("v1, v2 and v3 payloads decrypt through the guard", async () => {
+    // Public compatibility metadata must advertise every supported payload generation.
+    expect(ENTRY_PAYLOAD_VERSIONS).toEqual([1, 2, 3]);
     const v1 = await sealedEntry({ v: 1, text: "plain day", sentiment: 0.2, created_at: "2026-09-29T00:00:00Z" });
     const v2 = await sealedEntry({ v: 2, text: "structured day", sentiment: null, created_at: "2026-09-29T00:00:00Z", energy: 3 });
     const v3 = await sealedEntry({

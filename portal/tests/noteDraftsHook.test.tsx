@@ -24,9 +24,48 @@ beforeEach(() => {
 });
 afterEach(() => vi.useRealTimers());
 
-it("keeps an already-started replacement write authoritative when an earlier write completes",async()=>{
- const releases:Array<()=>void>=[];runTestControl(setKvBackendForTests, {getItem:async id=>stored.get(id)??null,setItem:(id,value)=>new Promise<void>(resolve=>{releases.push(()=>{stored.set(id,value);resolve();});}),removeItem:async()=>{}});
- const first=savePortalDraft("therapist-1","patient-1",key,{...empty(),text:{general:"first acknowledged snapshot"}});await vi.waitFor(()=>expect(releases).toHaveLength(1));const second=savePortalDraft("therapist-1","patient-1",key,{...empty(),text:{general:"replacement snapshot"}});releases[0]!();await first;await vi.waitFor(()=>expect(releases).toHaveLength(2));const reading=loadPortalDraft("therapist-1","patient-1",[key]);try{await flush(12);}finally{releases[1]!();await second;}await expect(reading).resolves.toMatchObject({text:{general:"replacement snapshot"}});
+it("keeps an already-started replacement write authoritative when an earlier write completes", async () => {
+  const releases: Array<() => void> = [];
+  const operations: Promise<unknown>[] = [];
+  let finishing = false;
+  const own = <T,>(operation: Promise<T>): Promise<T> => {
+    operations.push(operation);
+    void operation.catch(() => undefined);
+    return operation;
+  };
+  try {
+    runTestControl(setKvBackendForTests, {
+      getItem: async id => stored.get(id) ?? null,
+      setItem: (id, value) => new Promise<void>(resolve => {
+        let released = false;
+        const release = () => {
+          if (released) return;
+          released = true;
+          stored.set(id, value);
+          resolve();
+        };
+        releases.push(release);
+        if (finishing) release();
+      }),
+      removeItem: async () => {},
+    });
+    const first = own(savePortalDraft("therapist-1", "patient-1", key, { ...empty(), text: { general: "first acknowledged snapshot" } }));
+    await vi.waitFor(() => expect(releases).toHaveLength(1));
+    const second = own(savePortalDraft("therapist-1", "patient-1", key, { ...empty(), text: { general: "replacement snapshot" } }));
+    releases[0]!();
+    await first;
+    await vi.waitFor(() => expect(releases).toHaveLength(2));
+    const reading = own(loadPortalDraft("therapist-1", "patient-1", [key]));
+    await flush(12);
+    releases[1]!();
+    await second;
+    await expect(reading).resolves.toMatchObject({ text: { general: "replacement snapshot" } });
+  } finally {
+    finishing = true;
+    for (const release of releases) release();
+    // Every operation is awaited on success; drain without masking an earlier assertion.
+    await Promise.allSettled(operations);
+  }
 });
 
 it.each(["restoring", "restored"])("retires host-held raw draft custody when leaving a %s view while preserving the caller's borrowed key",async stage=>{
@@ -38,18 +77,45 @@ it.each(["restoring", "restored"])("retires host-held raw draft custody when lea
 
 it("merges writing made while a saved draft is restoring without losing pending requests", async () => {
   const encrypted = await encoded(saved);
-  let resolveRead!: (value: string | null) => void;
+  let resolveRead: ((value: string | null) => void) | undefined;
   runTestControl(setKvBackendForTests, { getItem: () => new Promise(resolve => { resolveRead = resolve; }), setItem: async (id, value) => { stored.set(id, value); }, removeItem: async () => {} });
-  const root = await render(<Harness />);
-  expect(current.restored).toBe(false);
-  expect(textOf(root)).toContain("Loading encrypted local draft…");
-  await expect(current.persist()).rejects.toThrow("Existing local drafts have not been restored");
-  const local: DraftState = { text: { general: "Typing now" }, editing: { id: "new-note", text: "Typing an edit" }, pending: { general: { client_note_id: "new-request", blob: "new-sealed", text: "New pending text", pattern_pid: null } } };
-  await act(async () => { current.setState(local); resolveRead(encrypted); });
-  await flush();
-  expect(current.restored).toBe(true);
-  expect(current.state).toEqual({ ...local, text: { ...saved.text, ...local.text } });
-  expect(textOf(root)).toContain("Restored encrypted local draft.");
+  const native = crypto.subtle, importKey = native.importKey.bind(native), decrypt = native.decrypt.bind(native);
+  const nativeOperations = new Set<Promise<unknown>>();
+  const observe = <T,>(operation: Promise<T>): Promise<T> => {
+    nativeOperations.add(operation);
+    void operation.then(() => nativeOperations.delete(operation), () => nativeOperations.delete(operation));
+    return operation;
+  };
+  const importSpy = vi.spyOn(native, "importKey").mockImplementation(((...args: Parameters<SubtleCrypto["importKey"]>) => observe(importKey(...args))) as SubtleCrypto["importKey"]);
+  const decryptSpy = vi.spyOn(native, "decrypt").mockImplementation((...args) => observe(decrypt(...args)));
+  let root: Awaited<ReturnType<typeof render>> | undefined;
+  try {
+    root = await render(<Harness />);
+    expect(current.restored).toBe(false);
+    expect(textOf(root)).toContain("Loading encrypted local draft…");
+    await expect(current.persist()).rejects.toThrow("Existing local drafts have not been restored");
+    const local: DraftState = { text: { general: "Typing now" }, editing: { id: "new-note", text: "Typing an edit" }, pending: { general: { client_note_id: "new-request", blob: "new-sealed", text: "New pending text", pattern_pid: null } } };
+    await act(async () => { current.setState(local); resolveRead!(encrypted); });
+    // The native decrypt is asynchronous; wait for the hook's public restored
+    // publication rather than assuming three microtask-only acts complete it.
+    await vi.waitFor(() => expect(current.restored).toBe(true));
+    expect(current.restored).toBe(true);
+    expect(current.state).toEqual({ ...local, text: { ...saved.text, ...local.text } });
+    expect(textOf(root)).toContain("Restored encrypted local draft.");
+  } finally {
+    try {
+      await act(async () => { resolveRead?.(encrypted); });
+      while (nativeOperations.size > 0) {
+        await act(async () => { await Promise.allSettled([...nativeOperations]); });
+      }
+    } finally {
+      try { if (root) await act(async () => { root!.unmount(); }); }
+      finally {
+        try { await drainPortalDraftWritesForTests(); }
+        finally { decryptSpy.mockRestore(); importSpy.mockRestore(); }
+      }
+    }
+  }
 });
 
 it("restores the unchanged draft, supports functional edits, and persists an explicit snapshot", async () => {
@@ -57,6 +123,7 @@ it("restores the unchanged draft, supports functional edits, and persists an exp
   const root = await render(<Harness />);
   await vi.waitFor(() => expect(current.state).toEqual(saved));
   expect(current.state).toEqual(saved);
+  vi.useFakeTimers();
   await act(async () => { current.setState(previous => ({ ...previous, text: { ...previous.text, general: "Changed writing" } })); });
   expect(current.state.text.general).toBe("Changed writing");
   await act(async () => { await current.persist(); });
@@ -65,6 +132,56 @@ it("restores the unchanged draft, supports functional edits, and persists an exp
   const explicit = { ...current.state, text: { general: "Explicit save" } };
   await act(async () => { await current.persist(explicit); });
   await expect(loadPortalDraft("therapist-1", "patient-1", [key])).resolves.toEqual(explicit);
+
+  // Finish the already-scheduled debounce under the controlled clock before
+  // another acknowledged writer updates the same encrypted storage slot.
+  await act(async () => { await vi.advanceTimersByTimeAsync(250); await drainPortalDraftWritesForTests(); });
+  const newer: DraftState = {
+    text: { general: "Newer acknowledged writing", pattern: "Newer pattern writing" },
+    editing: { id: "newer-note", text: "Newer acknowledged edit" },
+    pending: { general: { client_note_id: "newer-request", blob: "newer-sealed-request", text: "Newer pending writing", pattern_pid: null } },
+  };
+  const native = crypto.subtle, originalEncrypt = native.encrypt, originalDecrypt = native.decrypt;
+  const originals: Promise<ArrayBuffer>[] = [], nativeCensus: Array<Record<string, unknown>> = [];
+  let refresh = true;
+  const observe = (method: "encrypt" | "decrypt", args: Parameters<SubtleCrypto["encrypt"]>, original: Promise<ArrayBuffer>) => {
+    originals.push(original);
+    if (refresh) {
+      const parameters = args[0] as AesGcmParams;
+      nativeCensus.push({ method, aad: new TextDecoder().decode(parameters.additionalData), algorithm: args[1].algorithm.name,
+        length: (args[1].algorithm as AesKeyAlgorithm).length, type: args[1].type, extractable: args[1].extractable, usages: [...args[1].usages],
+        ivBytes: parameters.iv.byteLength, plaintext: method === "encrypt" ? new TextDecoder().decode(args[2]) : null });
+    }
+    return original;
+  };
+  const encryptObserver = vi.spyOn(native, "encrypt").mockImplementation((...args) => observe("encrypt", args, originalEncrypt.apply(native, args)));
+  const decryptObserver = vi.spyOn(native, "decrypt").mockImplementation((...args) => observe("decrypt", args, originalDecrypt.apply(native, args)));
+  try {
+    await savePortalDraft("therapist-1", "patient-1", key, newer);
+    const encrypted = stored.get("portal.draft.therapist-1.patient-1");
+    // No setState occurs during this explicit, same-context restore.
+    await act(async () => { await current.restore(); });
+    await Promise.all(originals);
+    const nativeKey = { aad: '["portal-draft","therapist-1","patient-1"]', algorithm: "AES-GCM", length: 256,
+      type: "secret", extractable: false, usages: ["encrypt", "decrypt"], ivBytes: 12 };
+    expect(nativeCensus).toEqual([{ method: "encrypt", ...nativeKey, plaintext: JSON.stringify({ v: 1, state: newer }) }, { method: "decrypt", ...nativeKey, plaintext: null }]);
+    expect(encrypted).not.toContain(newer.text.general);
+    expect(current.state, "an unchanged public restore must replace all documented fields with the newer acknowledged encrypted snapshot").toEqual(newer);
+    expect(textOf(root)).toContain(newer.text.general);
+    expect([...key]).toEqual(Array(32).fill(7));
+  } finally {
+    refresh = false;
+    const cleanupFaults: unknown[] = [];
+    try { await act(async () => root.unmount()); } catch (error) { cleanupFaults.push(error); }
+    try { await drainPortalDraftWritesForTests(); } catch (error) { cleanupFaults.push(error); }
+    for (;;) {
+      const snapshot = [...originals], settled = await Promise.allSettled(snapshot);
+      for (const result of settled) if (result.status === "rejected") cleanupFaults.push(result.reason);
+      if (snapshot.length === originals.length) break;
+    }
+    encryptObserver.mockRestore(); decryptObserver.mockRestore();
+    if (cleanupFaults.length) throw cleanupFaults[0];
+  }
 });
 
 it("publishes a functional draft update immediately for a caller's same-action durable save", async () => {
@@ -122,7 +239,45 @@ it("preserves an acknowledged earlier draft if its replacement view leaves befor
 });
 
 it("restores acknowledged writing without reporting a failed autosave while the clinician only reads it",async()=>{
- stored.set("portal.draft.therapist-1.patient-1",await encoded(saved));runTestControl(setKvBackendForTests, {getItem:async id=>stored.get(id)??null,setItem:async()=>{throw new Error("new writes denied");},removeItem:async()=>{}});vi.useFakeTimers();const root=await render(<Harness/>);await flush();expect(current.restored).toBe(true);expect(textOf(root)).toContain("Restored encrypted local draft.");await act(async()=>{vi.advanceTimersByTime(250);});await flush();expect(textOf(root)).toContain("Restored encrypted local draft.");expect(textOf(root)).not.toContain("Writing was not saved");
+ vi.useRealTimers();
+ stored.set("portal.draft.therapist-1.patient-1",await encoded(saved));
+ runTestControl(setKvBackendForTests, {getItem:async id=>stored.get(id)??null,setItem:async()=>{throw new Error("new writes denied");},removeItem:async()=>{}});
+ const native=crypto.subtle,importKey=native.importKey.bind(native),decrypt=native.decrypt.bind(native),encrypt=native.encrypt.bind(native);
+ const nativeOperations=new Set<Promise<unknown>>();
+ const observe=<T,>(operation:Promise<T>):Promise<T>=>{
+   nativeOperations.add(operation);
+   void operation.then(()=>nativeOperations.delete(operation),()=>nativeOperations.delete(operation));
+   return operation;
+ };
+ const importSpy=vi.spyOn(native,"importKey").mockImplementation(((...args:Parameters<SubtleCrypto["importKey"]>)=>observe(importKey(...args))) as SubtleCrypto["importKey"]);
+ const decryptSpy=vi.spyOn(native,"decrypt").mockImplementation((...args)=>observe(decrypt(...args)));
+ const encryptSpy=vi.spyOn(native,"encrypt").mockImplementation((...args)=>observe(encrypt(...args)));
+ let root:Awaited<ReturnType<typeof render>>|undefined;
+ try{
+   vi.useFakeTimers({shouldAdvanceTime:false});
+   root=await render(<Harness/>);
+   await vi.waitFor(()=>expect(current.restored).toBe(true),{timeout:10000,interval:0});
+   await flush();
+   expect(current.restored).toBe(true);
+   expect(textOf(root)).toContain("Restored encrypted local draft.");
+   await act(async()=>{vi.advanceTimersByTime(250);});
+   await flush();
+   expect(textOf(root)).toContain("Restored encrypted local draft.");
+   expect(textOf(root)).not.toContain("Writing was not saved");
+ }finally{
+   vi.useRealTimers();
+   try{
+     while(nativeOperations.size>0){await act(async()=>{await Promise.allSettled([...nativeOperations]);});}
+   }finally{
+     try{if(root)await act(async()=>root!.unmount());}
+     finally{
+       try{
+         await drainPortalDraftWritesForTests();
+         while(nativeOperations.size>0){await act(async()=>{await Promise.allSettled([...nativeOperations]);});}
+       }finally{encryptSpy.mockRestore();decryptSpy.mockRestore();importSpy.mockRestore();}
+     }
+   }
+ }
 });
 
 it("retains visible writing and reports a failed durable save so it can be retried", async () => {

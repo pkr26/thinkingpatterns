@@ -311,7 +311,7 @@ describe("erasure cleanup ownership", () => {
     await api.setSession("deleted-token", USER, "deleted");
     const origin = await getBaseUrl(), started = deferred(), owner = deferred<string | null>();
     vi.spyOn(api, "getUserId").mockImplementation(async () => { started.resolve(); return owner.promise; });
-    const erase = eraseDeletedAccountLocals(USER, null, { origin, preserveSession: true }); await started.promise;
+    const erase = eraseDeletedAccountLocals(USER, null, { origin }); await started.promise;
     await setBaseUrl("https://replacement.synthetic.invalid");
     const replacementSlot = `@mindpattern/safety_plan_${OTHER}`;
     await storage.setItem(replacementSlot, "replacement-origin-record"); owner.resolve(USER);
@@ -323,7 +323,7 @@ describe("erasure cleanup ownership", () => {
     vi.spyOn(nativeFeatures, "cancelDailyReminder").mockResolvedValue(true);
     vi.spyOn(nativeFeatures, "cancelMeasureReminder").mockResolvedValue(true);
     await api.setSession("deleted-token", USER, "deleted"); const origin = await getBaseUrl();
-    expect(await eraseDeletedAccountLocals(USER, null, { origin, preserveSession: true })).toEqual([]);
+    expect(await eraseDeletedAccountLocals(USER, null, { origin })).toEqual([]);
     expect(await api.getUserId()).toBeNull(); expect(await secureStore.getItem("@mindpattern/token")).toBeNull();
     expect((await storage.getAllKeys()).some(k => k.startsWith("@mindpattern/erasure.v1."))).toBe(false);
   });

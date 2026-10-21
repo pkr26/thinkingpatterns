@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import storage from "./helpers/storageMock";
 import { api } from "../src/api/client";
 import { eraseDeletedAccountLocals } from "../src/accountErasure";
-import { accountStorageKey } from "../src/accountStorage";
+import { accountStorageKey, accountStorageKeysForOwner } from "../src/accountStorage";
 import { __resetLocalKeyLifecycleForTests } from "../src/localRekey";
 import { setSecureStoreBackend } from "../src/secureStore";
 import * as audio from "../src/audioQueue";
@@ -62,6 +62,167 @@ it.each(faultCases)("retains a durable checkpoint and reports %s when that consu
   expect(failures).toContain(label);
   expect((await storage.getAllKeys()).filter(key => key.startsWith("@mindpattern/erasure.v1."))).toHaveLength(1);
   if (label !== "deleted-account session") expect(await api.isLoggedIn()).toBe(false);
+
+
+  if (label === "entries") {
+    vi.restoreAllMocks();
+    const retiringOwner = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+    await api.setSession("retiring-token", retiringOwner, "retiring");
+    const { canonicalOrigin, getBaseUrl } = await import("../src/api/client");
+    const { enqueue, flushQueue } = await import("../src/offlineQueue");
+    const origin = canonicalOrigin(await getBaseUrl());
+    await enqueue({ userId: retiringOwner, clientEntryId: "99999999-9999-4999-8999-999999999999", blobB64: Buffer.alloc(48, 7).toString("base64"), entryDate: "2026-10-03" });
+    const checkpoint = accountStorageKey.erasure(origin, retiringOwner);
+    let requestEntered!: () => void, reply!: () => void;
+    let checkpointEntered!: () => void, releaseCheckpoint!: () => void;
+    const requested = new Promise<void>(done => { requestEntered = done; });
+    const response = new Promise<void>(done => { reply = done; });
+    const checkpointStarted = new Promise<void>(done => { checkpointEntered = done; });
+    const checkpointHeld = new Promise<void>(done => { releaseCheckpoint = done; });
+    const network = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      requestEntered(); await response;
+      return new Response(null, { status: 204 });
+    });
+    const set = storage.setItem;
+    const checkpointWrite = vi.spyOn(storage, "setItem").mockImplementation(async (key, value) => {
+      if (key === checkpoint) { checkpointEntered(); await checkpointHeld; }
+      return set(key, value);
+    });
+    const flushing = flushQueue(retiringOwner).then(value => ({ status: "fulfilled" as const, value }), error => ({ status: "rejected" as const, error }));
+    let erasing: Promise<string[]> | null = null;
+    try {
+      await Promise.race([requested, flushing.then(() => { throw new Error("The queued upload never reached its public fetch request"); })]);
+      erasing = eraseDeletedAccountLocals(retiringOwner, null, { origin });
+      await Promise.race([checkpointStarted, erasing.then(() => { throw new Error("Erasure skipped its native checkpoint write"); })]);
+      reply();
+      expect(await flushing).toEqual({ status: "fulfilled", value: 0 });
+      expect(network).toHaveBeenCalledTimes(1);
+    } finally {
+      reply(); releaseCheckpoint();
+      await Promise.allSettled(erasing ? [flushing, erasing] : [flushing]);
+      checkpointWrite.mockRestore(); network.mockRestore();
+    }
+    expect(await erasing).toEqual([]);
+  }
+
+  if (label === "recordings") {
+    vi.restoreAllMocks();
+    const retiringOwner = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+    await api.setSession("retiring-token", retiringOwner, "retiring");
+    const { canonicalOrigin, getBaseUrl } = await import("../src/api/client");
+    const { flushAudioQueue } = await import("../src/audioQueue");
+    const origin = canonicalOrigin(await getBaseUrl());
+    const checkpoint = accountStorageKey.erasure(origin, retiringOwner);
+    let baseEntered!: () => void, releaseBase!: () => void;
+    let checkpointEntered!: () => void, releaseCheckpoint!: () => void;
+    const baseStarted = new Promise<void>(done => { baseEntered = done; });
+    const baseHeld = new Promise<void>(done => { releaseBase = done; });
+    const checkpointStarted = new Promise<void>(done => { checkpointEntered = done; });
+    const checkpointHeld = new Promise<void>(done => { releaseCheckpoint = done; });
+    const read = storage.getItem, set = storage.setItem;
+    let holdBase = true;
+    const baseRead = vi.spyOn(storage, "getItem").mockImplementation(async key => {
+      const value = await read(key);
+      if (key === "@mindpattern/base_url" && holdBase) { holdBase = false; baseEntered(); await baseHeld; }
+      return value;
+    });
+    const checkpointWrite = vi.spyOn(storage, "setItem").mockImplementation(async (key, value) => {
+      if (key === checkpoint) { checkpointEntered(); await checkpointHeld; }
+      return set(key, value);
+    });
+    const flushing = flushAudioQueue().then(value => ({ status: "fulfilled" as const, value }), error => ({ status: "rejected" as const, error }));
+    let erasing: Promise<string[]> | null = null;
+    try {
+      await Promise.race([baseStarted, flushing.then(() => { throw new Error("The audio flush never reached its native server-preference read"); })]);
+      erasing = eraseDeletedAccountLocals(retiringOwner, null, { origin });
+      await Promise.race([checkpointStarted, erasing.then(() => { throw new Error("Erasure skipped its native checkpoint write"); })]);
+      releaseBase();
+      expect(await flushing).toEqual({ status: "fulfilled", value: 0 });
+    } finally {
+      releaseBase(); releaseCheckpoint();
+      await Promise.allSettled(erasing ? [flushing, erasing] : [flushing]);
+      checkpointWrite.mockRestore(); baseRead.mockRestore();
+    }
+    expect(await erasing).toEqual([]);
+  }
+
+  if (label === "recordings") {
+    vi.restoreAllMocks();
+    const retiringOwner = "13131313131313131313131313131313";
+    const replacementOwner = "14141414141414141414141414141414";
+    await api.setSession("inventory-retiring-token", retiringOwner, "inventory-retiring");
+    const { canonicalOrigin, getBaseUrl } = await import("../src/api/client");
+    const origin = canonicalOrigin(await getBaseUrl());
+    const checkpoint = accountStorageKey.erasure(origin, retiringOwner);
+    const guardSlots = [accountStorageKey.entryVersions(retiringOwner), accountStorageKey.entryV2Bound(retiringOwner), accountStorageKey.stateSequence(retiringOwner)];
+    vi.spyOn(audio, "clearAudioQueue").mockRejectedValue(new Error("native/storage operation failed"));
+    const remove = storage.multiRemove, inventory = storage.getAllKeys;
+    let guardsAcknowledged = false, scheduled = false;
+    let inventoryKeys: string[] | null = null;
+    let replacing: Promise<{ status: "fulfilled" } | { status: "rejected"; error: unknown }> | null = null;
+    const guardRemoval = vi.spyOn(storage, "multiRemove").mockImplementation(async keys => {
+      const result = await remove(keys);
+      if (keys.length === guardSlots.length && guardSlots.every(key => keys.includes(key))) guardsAcknowledged = true;
+      return result;
+    });
+    const inventoryRead = vi.spyOn(storage, "getAllKeys").mockImplementation(async () => {
+      const keys = await inventory();
+      if (guardsAcknowledged && !scheduled) {
+        scheduled = true; inventoryKeys = [...keys];
+        queueMicrotask(() => queueMicrotask(() => {
+          replacing = api.setSession("inventory-replacement-token", replacementOwner, "inventory-replacement")
+            .then(() => ({ status: "fulfilled" as const }), error => ({ status: "rejected" as const, error }));
+        }));
+      }
+      return keys;
+    });
+    try {
+      const failures = await eraseDeletedAccountLocals(retiringOwner, null, { origin });
+      expect(scheduled).toBe(true);
+      expect(accountStorageKeysForOwner(inventoryKeys ?? [], retiringOwner).filter(key => key !== checkpoint)).toEqual([]);
+      expect(failures).toEqual(["recordings"]);
+      await Promise.resolve();
+      expect(replacing).not.toBeNull();
+      expect(await replacing).toEqual({ status: "fulfilled" });
+      expect(await api.getUserId()).toBe(replacementOwner);
+    } finally {
+      await Promise.resolve(); await Promise.resolve();
+      if (replacing) await replacing;
+      inventoryRead.mockRestore(); guardRemoval.mockRestore();
+    }
+  }
+
+  if (label === "mood log") {
+    vi.restoreAllMocks();
+    const retiringOwner = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+    const replacementOwner = "ffffffffffffffffffffffffffffffff";
+    await api.setSession("retiring-token", retiringOwner, "retiring");
+    const slot = accountStorageKey.moodLog(retiringOwner);
+    await storage.setItem(slot, "[]");
+    const remove = storage.removeItem;
+    let entered!: () => void, release!: () => void;
+    const started = new Promise<void>(done => { entered = done; });
+    const held = new Promise<void>(done => { release = done; });
+    const removal = vi.spyOn(storage, "removeItem").mockImplementation(async key => {
+      if (key === slot) { entered(); await held; }
+      return remove(key);
+    });
+    const erasing = eraseDeletedAccountLocals(retiringOwner, null);
+    let replacing: Promise<void> | null = null;
+    try {
+      await Promise.race([started, erasing.then(() => { throw new Error("Cleanup skipped the native mood-log removal"); })]);
+      replacing = api.setSession("replacement-token", replacementOwner, "replacement");
+      release();
+      const failures = await erasing;
+      await replacing;
+      expect(failures).toContain("mood log");
+      expect(await api.getUserId()).toBe(replacementOwner);
+    } finally {
+      release();
+      await Promise.allSettled(replacing ? [erasing, replacing] : [erasing]);
+      removal.mockRestore();
+    }
+  }
 });
 
 it.each(["daily", "check-in"])("reports an unverified %s notification cancellation", async kind => {
@@ -131,6 +292,40 @@ it("reports scope retirement while a rotation checkpoint is being removed", asyn
 it("reports a registry inventory failure after attempting feature cleanup", async () => {
   vi.spyOn(storage, "getAllKeys").mockRejectedValue(new Error("inventory unavailable"));
   expect(await eraseDeletedAccountLocals(USER, null)).toContain("account storage inventory");
+
+
+  vi.restoreAllMocks();
+  const retiringOwner = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+  const replacementOwner = "ffffffffffffffffffffffffffffffff";
+  await api.setSession("retiring-token", retiringOwner, "retiring");
+  const guardKeys = [accountStorageKey.entryVersions(retiringOwner), accountStorageKey.entryV2Bound(retiringOwner), accountStorageKey.stateSequence(retiringOwner)];
+  const remove = storage.multiRemove;
+  const inventoryReads = vi.spyOn(storage, "getAllKeys");
+  let entered!: () => void, release!: () => void;
+  const started = new Promise<void>(done => { entered = done; });
+  const held = new Promise<void>(done => { release = done; });
+  const removal = vi.spyOn(storage, "multiRemove").mockImplementation(async keys => {
+    if (guardKeys.every(key => keys.includes(key))) { entered(); await held; }
+    return remove(keys);
+  });
+  const erasing = eraseDeletedAccountLocals(retiringOwner, null);
+  let replacing: Promise<void> | null = null;
+  try {
+    await Promise.race([started, erasing.then(() => { throw new Error("Cleanup skipped the native persisted-guard deletion"); })]);
+    const readsAtAdmission = inventoryReads.mock.calls.length;
+    replacing = api.setSession("replacement-token", replacementOwner, "replacement");
+    release();
+    const failures = await erasing;
+    await replacing;
+    expect(failures).toEqual(["persisted guards", "account storage inventory"]);
+    expect(inventoryReads.mock.calls).toHaveLength(readsAtAdmission);
+    expect(await api.getUserId()).toBe(replacementOwner);
+  } finally {
+    release();
+    await Promise.allSettled(replacing ? [erasing, replacing] : [erasing]);
+    removal.mockRestore();
+    inventoryReads.mockRestore();
+  }
 });
 
 it("fences metadata writes immediately while deleted-account origin lookup is pending", async () => {
@@ -184,6 +379,37 @@ it("reports a failed final cleanup checkpoint removal after all feature retireme
   expect(await eraseDeletedAccountLocals(USER, null)).toEqual(["cleanup checkpoint"]);
   expect(await api.isLoggedIn()).toBe(false);
   expect((await storage.getAllKeys()).filter(key => key.startsWith("@mindpattern/erasure.v1."))).toHaveLength(1);
+
+  // A real replacement login retires the old scope while its last native
+  // deletion receipt is pending. Its credential publication drains that work.
+  vi.restoreAllMocks();
+  const retiringOwner = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+  const replacementOwner = "ffffffffffffffffffffffffffffffff";
+  await api.setSession("retiring-token", retiringOwner, "retiring");
+  const { canonicalOrigin, getBaseUrl } = await import("../src/api/client");
+  const checkpoint = accountStorageKey.erasure(canonicalOrigin(await getBaseUrl()), retiringOwner);
+  let entered!: () => void, release!: () => void;
+  const started = new Promise<void>(done => { entered = done; });
+  const held = new Promise<void>(done => { release = done; });
+  const removal = vi.spyOn(storage, "removeItem").mockImplementation(async key => {
+    if (key === checkpoint) { entered(); await held; }
+    return original(key);
+  });
+  const erasing = eraseDeletedAccountLocals(retiringOwner, null);
+  let replacing: Promise<void> | null = null;
+  try {
+    await Promise.race([started, erasing.then(() => { throw new Error("Cleanup skipped its final native checkpoint removal"); })]);
+    replacing = api.setSession("replacement-token", replacementOwner, "replacement");
+    release();
+    const failures = await erasing;
+    await replacing;
+    expect(failures).toEqual(["cleanup checkpoint"]);
+    expect(await api.getUserId()).toBe(replacementOwner);
+  } finally {
+    release();
+    await Promise.allSettled(replacing ? [erasing, replacing] : [erasing]);
+    removal.mockRestore();
+  }
 });
 
 it("retires a registered password-rotation slot through the final account inventory sweep", async () => {
@@ -200,4 +426,37 @@ it("reports scope retirement after inventory lookup without removing the checkpo
   vi.spyOn(storage, "getAllKeys").mockImplementationOnce(async () => { const keys = await original(); advanceLocalWriteScope(); return keys; });
   expect(await eraseDeletedAccountLocals(USER, null)).toContain("account storage inventory");
   expect((await original()).filter(key => key.startsWith("@mindpattern/erasure.v1."))).toHaveLength(1);
+
+  vi.restoreAllMocks();
+  const retiringOwner = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+  const replacementOwner = "ffffffffffffffffffffffffffffffff";
+  await api.setSession("retiring-token", retiringOwner, "retiring");
+  // This registered slot has no feature-specific deletion helper; the final
+  // native inventory sweep owns its removal.
+  const slot = accountStorageKey.pendingRotationSalt(retiringOwner);
+  await storage.setItem(slot, "previous-rotation-salt");
+  const remove = storage.multiRemove;
+  let entered!: () => void, release!: () => void;
+  const started = new Promise<void>(done => { entered = done; });
+  const held = new Promise<void>(done => { release = done; });
+  const removal = vi.spyOn(storage, "multiRemove").mockImplementation(async keys => {
+    if (keys.includes(slot)) { entered(); await held; }
+    return remove(keys);
+  });
+  const erasing = eraseDeletedAccountLocals(retiringOwner, null);
+  let replacing: Promise<void> | null = null;
+  try {
+    await Promise.race([started, erasing.then(() => { throw new Error("Cleanup skipped the registered native inventory slot"); })]);
+    replacing = api.setSession("replacement-token", replacementOwner, "replacement");
+    release();
+    const failures = await erasing;
+    await replacing;
+    expect(failures).toEqual(["account storage inventory"]);
+    expect(await api.getUserId()).toBe(replacementOwner);
+  } finally {
+    release();
+    await Promise.allSettled(replacing ? [erasing, replacing] : [erasing]);
+    removal.mockRestore();
+  }
+
 });

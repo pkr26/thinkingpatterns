@@ -1,8 +1,14 @@
 import { expect, it } from "vitest";
 import { maxScoreForMeasure, measureComplete, measureScore, measureSafetyItemValue, measurePayload, safetyItemEndorsed, type MeasureId } from "../src/measures";
 
+import { PHQ9_ITEMS, PHQ9_OPTIONS } from "../src/phq9";
+
 const instruments: Array<[MeasureId, number, number]> = [["phq9", 9, 27], ["gad7", 7, 21], ["phq2", 2, 6]];
 it.each(instruments)("accepts only a complete set of standard picks for %s", (id, count) => {
+  if (id === "phq9") {
+    expect(PHQ9_ITEMS).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(PHQ9_OPTIONS).toEqual([{ value: 0 }, { value: 1 }, { value: 2 }, { value: 3 }]);
+  }
   for (const pick of [0, 1, 2, 3]) expect(measureComplete(id, Array(count).fill(pick))).toBe(true);
   expect(measureComplete(id, Array(count - 1).fill(0))).toBe(false);
   expect(measureComplete(id, Array(count + 1).fill(0))).toBe(false);

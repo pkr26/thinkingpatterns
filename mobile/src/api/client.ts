@@ -2087,6 +2087,7 @@ export const api = {
         const seen = new Set<string>();
         let offset = 0;
         let revision: EntriesRevision | null = null;
+        let revisionMode: "unknown" | "snapshot" | "legacy" = "unknown";
         for (let page = 0; page < MAX_LIST_PAGES; page += 1) {
           const result = await api.listEntriesPage({
             since,
@@ -2094,10 +2095,20 @@ export const api = {
             limit: 500,
             offset,
             pageBytes: ENTRY_PAGE_BYTES,
-            ...(revision !== null ? { expectedRevision: revision } : {}),
+            ...(revisionMode === "snapshot" && revision !== null
+              ? { expectedRevision: revision }
+              : {}),
           });
-          if (revision === null && result.revision !== null)
-            revision = result.revision;
+          const receivedRevision = result.revision ?? null;
+          if (revisionMode === "unknown") {
+            revisionMode = receivedRevision === null ? "legacy" : "snapshot";
+            revision = receivedRevision;
+          } else if (
+            (revisionMode === "snapshot" && receivedRevision !== revision) ||
+            (revisionMode === "legacy" && receivedRevision !== null)
+          ) {
+            throw entriesRevisionConflict();
+          }
           for (const entry of result.entries) {
             if (seen.has(entry.client_entry_id)) continue;
             if (seen.size >= maxRows) {

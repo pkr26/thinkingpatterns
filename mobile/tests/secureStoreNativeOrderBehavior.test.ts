@@ -120,10 +120,26 @@ it.each([false, true])("the native encryption input is erased after slot write r
     cipher.update = ((input: Buffer) => { if (Buffer.isBuffer(input) && input.toString("utf8") === secret) held.push(input); return update(input); }) as typeof cipher.update;
     return cipher;
   });
-  if (refused) vi.spyOn(storage, "setItem").mockRejectedValueOnce(new Error("Native credential write refused"));
-  if (refused) await expect(secureStore.setItem(SLOT, secret)).rejects.toThrow("Native credential write refused");
-  else await secureStore.setItem(SLOT, secret);
-  expect(held.length).toBeGreaterThan(0); expect(held.every(buffer => buffer.every(byte => byte === 0))).toBe(true);
+  const nativeSet = Map.prototype.set, slots: Array<{ receiver: Map<unknown, unknown>; tail: Promise<unknown> }> = [];
+  const observer = vi.spyOn(Map.prototype, "set").mockImplementation(function (this: Map<unknown, unknown>, slot: unknown, value: unknown) {
+    const result = nativeSet.call(this, slot, value);
+    if (slot === SLOT && value instanceof Promise) slots.push({ receiver: this, tail: value });
+    return result;
+  });
+  let operation: Promise<void> | undefined;
+  try {
+    if (refused) vi.spyOn(storage, "setItem").mockRejectedValueOnce(new Error("Native credential write refused"));
+    operation = secureStore.setItem(SLOT, secret);
+    if (refused) await expect(operation).rejects.toThrow("Native credential write refused");
+    else await operation;
+    expect(held.length).toBeGreaterThan(0); expect(held.every(buffer => buffer.every(byte => byte === 0))).toBe(true);
+    expect(slots).toHaveLength(1);
+    await slots[0]!.tail;
+    expect(slots[0]!.receiver.has(SLOT), "a completed native credential write releases its serialization slot").toBe(false);
+  } finally {
+    try { await Promise.allSettled([...(operation ? [operation] : []), ...slots.map(row => row.tail)]); }
+    finally { observer.mockRestore(); }
+  }
 });
 
 it.each(["versioned", "legacy"])("the returned %s Native credential leaves no retained decrypted conversion bytes", async format => {

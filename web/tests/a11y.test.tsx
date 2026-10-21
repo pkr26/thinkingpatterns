@@ -44,8 +44,6 @@ import { setKvBackendForTests, type KvBackend } from "../src/kvstore";
 
 let container: HTMLDivElement | null = null;
 let root: Root | null = null;
-const IS_REACT_ACT_ENVIRONMENT = true;
-void IS_REACT_ACT_ENVIRONMENT;
 
 declare global {
   // eslint-disable-next-line no-var

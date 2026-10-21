@@ -53,3 +53,22 @@ includes React Native's `ReactCommon` headers for its 0.87 ErrorUtils
 forwarder. The root Gradle configuration explicitly enables BuildConfig
 for Expo LogBox, which declares a custom field. These changes are exercised
 by native compilation and do not replace the application's privacy gates.
+
+The iOS backport in `expo-modules-autolinking@57.0.13` preserves earlier
+React Native post-install xcconfig edits when adding Expo macro flags. It
+backports [Expo commit 1ae6855](https://github.com/expo/expo/commit/1ae6855e399930d57322c84cc73f76c36a8a3e62)
+by reading an existing xcconfig from disk instead of reconstructing it from
+stale CocoaPods settings. Package versions, module checking and warning
+policies stay unchanged. The existing exact-hash installer and verifier cover
+the additional source artifact.
+
+With the iOS Gemfile dependencies installed, run
+`npm run verify:dependency-patches:ios`. Its real Xcodeproj regression checks
+that C, C++, Swift and header-search edits survive, repeated calls are
+idempotent, an existing macro preserves every byte, and a missing file uses
+the existing settings. The regression requires Ruby/CocoaPods, but no Xcode
+SDK, simulator, native compilation or test application.
+
+Expo 57.0.26 also receives the exact React Native 0.87 factory backport from https://github.com/expo/expo/commit/2ca97ce502a01b188c76dd1a4258d8dbd19fbb0e. It removes obsolete bridge configuration calls and keeps bundle configuration, runtime delegation, and root-view customization. The existing exact-source loader verifies this file on install and refuses unknown source bytes. React Native and Expo versions, podspecs, module warning flags, and package locks stay unchanged. A real app-host SDK build remains required; loader checks do not establish native compilation or runtime behavior.
+
+For the locked react-native-health 1.19.0 / React Native 0.87.1 pair, preserve React Native's injected `callableJSModules` when dispatching HealthKit events. Remove the obsolete manual bridge assignment and its unreferenced private singleton helper; retain listener gating and public event name/body dispatch. This is an adaptation to the primary RN 0.87 interfaces, not a claimed upstream HealthKit fix. The generic loader refuses unknown source and leaves all package versions unchanged. The old source failed the real SDK compile on `setBridge:`. Positive app-host event-wiring and native mutation qualification remain separate required runtime checks.

@@ -31,7 +31,7 @@ import { scrubVoiceScratchForOwner } from "./audio/voiceScratch";
 const PREFIX = ACCOUNT_STORAGE_PREFIX.erasure;
 interface Erasure { userId: string; username: string | null; origin: string }
 const keyFor = (job: Erasure) => accountStorageKey.erasure(job.origin, job.userId);
-export async function eraseDeletedAccountLocals(userId: string, username: string | null, options: { origin?: string; preserveSession?: boolean } = {}): Promise<string[]> {
+export async function eraseDeletedAccountLocals(userId: string, username: string | null, options: { origin?: string } = {}): Promise<string[]> {
   const epoch = localWriteScopeEpoch();
   markAccountDeleted(userId);
   const origin = options.origin ?? await getBaseUrl();
@@ -40,10 +40,10 @@ export async function eraseDeletedAccountLocals(userId: string, username: string
   abortInFlightFlush(); abortInFlightAudioFlush();
   let checkpointFailed = false;
   try { await commitLocalErasureWrite(userId, epoch, () => secureStore.setItem(keyFor(job), JSON.stringify(job))); } catch { checkpointFailed = true; }
-  const failures = await cleanup(job, { epoch, preserveSession: options.preserveSession });
+  const failures = await cleanup(job, { epoch });
   return checkpointFailed ? ["cleanup checkpoint", ...failures] : failures;
 }
-async function cleanup(job: Erasure, options: { epoch?: number; preserveSession?: boolean } = {}): Promise<string[]> {
+async function cleanup(job: Erasure, options: { epoch?: number } = {}): Promise<string[]> {
   let epoch = options.epoch ?? localWriteScopeEpoch();
   if (canonicalOrigin(await getBaseUrl()) !== job.origin || epoch !== localWriteScopeEpoch()) return ["server scope changed"];
   const { userId, username } = job;
@@ -115,7 +115,7 @@ export async function retryPendingAccountErasures(): Promise<number> {
     try {
       const raw = await secureStore.getItem(key); if (!raw) continue;
       const job = JSON.parse(raw) as Erasure;
-      if (typeof job.userId !== "string" || typeof job.origin !== "string" || !(typeof job.username === "string" || job.username === null)) continue;
+      if (typeof job.userId !== "string" || job.userId.length === 0 || job.userId.includes("\0") || typeof job.origin !== "string" || !(typeof job.username === "string" || job.username === null)) continue;
       if (keyFor(job) !== key) continue;
       await cleanup(job);
     } catch { /* Keep the job so a later start can retry all remaining work. */ }

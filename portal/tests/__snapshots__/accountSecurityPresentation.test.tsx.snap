@@ -478,7 +478,7 @@ exports[`presents readable access history including account-wide lifecycle rows 
       "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
 `;
 
-exports[`presents the exact pairing fingerprint outcome for  > pairing fingerprint absent 1`] = `
+exports[`presents the exact pairing fingerprint outcome (case #4) > pairing fingerprint absent 1`] = `
 "<main className="portal-main">
   <header className="portal-head">
     <h1>
@@ -539,7 +539,7 @@ exports[`presents the exact pairing fingerprint outcome for  > pairing fingerpri
       "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
 `;
 
-exports[`presents the exact pairing fingerprint outcome for 0123456789ABCDEF > pairing fingerprint 0123456789ABCDEF 1`] = `
+exports[`presents the exact pairing fingerprint outcome (case #3) > pairing fingerprint 0123456789ABCDEF 1`] = `
 "<main className="portal-main">
   <header className="portal-head">
     <h1>
@@ -600,7 +600,7 @@ exports[`presents the exact pairing fingerprint outcome for 0123456789ABCDEF > p
       "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
 `;
 
-exports[`presents the exact pairing fingerprint outcome for 0123456789abcdef > pairing fingerprint 0123456789abcdef 1`] = `
+exports[`presents the exact pairing fingerprint outcome (case #0) > pairing fingerprint 0123456789abcdef 1`] = `
 "<main className="portal-main">
   <header className="portal-head">
     <h1>
@@ -663,7 +663,7 @@ exports[`presents the exact pairing fingerprint outcome for 0123456789abcdef > p
       "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
 `;
 
-exports[`presents the exact pairing fingerprint outcome for 0123456789abcdefsuffix > pairing fingerprint 0123456789abcdefsuffix 1`] = `
+exports[`presents the exact pairing fingerprint outcome (case #2) > pairing fingerprint 0123456789abcdefsuffix 1`] = `
 "<main className="portal-main">
   <header className="portal-head">
     <h1>
@@ -724,7 +724,7 @@ exports[`presents the exact pairing fingerprint outcome for 0123456789abcdefsuff
       "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
 `;
 
-exports[`presents the exact pairing fingerprint outcome for fedcba9876543210 > pairing fingerprint fedcba9876543210 1`] = `
+exports[`presents the exact pairing fingerprint outcome (case #5) > pairing fingerprint fedcba9876543210 1`] = `
 "<main className="portal-main">
   <header className="portal-head">
     <h1>
@@ -789,7 +789,7 @@ exports[`presents the exact pairing fingerprint outcome for fedcba9876543210 > p
       "This portal does not currently provide a complete clinician-account export or self-service account deletion. Contact your organization's privacy administrator to request an export or deletion. Patient charts can be printed individually from each patient view, but that is not a complete account export.""
 `;
 
-exports[`presents the exact pairing fingerprint outcome for prefix0123456789abcdef > pairing fingerprint prefix0123456789abcdef 1`] = `
+exports[`presents the exact pairing fingerprint outcome (case #1) > pairing fingerprint prefix0123456789abcdef 1`] = `
 "<main className="portal-main">
   <header className="portal-head">
     <h1>

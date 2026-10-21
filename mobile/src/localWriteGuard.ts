@@ -12,8 +12,8 @@ const frozen = new Set<string>();
 const deleted = new Set<string>();
 const generations = new Map<string, number>();
 const installedKeys = new Map<string, { originEpoch: number; keyId: string }>();
-const commits = new Map<string, Set<Promise<unknown>>>();
-const ORIGIN_ERASURE_LANE = "\0origin-erasure";
+const commits = new Map<string | symbol, Set<Promise<unknown>>>();
+const ORIGIN_ERASURE_LANE = Symbol("origin-erasure");
 let scopeEpoch = 0;
 let originEpoch = 0;
 // No account owns writes until a verified login or cold-start credential
@@ -117,7 +117,7 @@ export function commitOriginErasureWrite<T>(epoch: number, write: () => Promise<
   if (epoch !== scopeEpoch) throw new Error("The account/server changed during origin erasure");
   return trackCommit(ORIGIN_ERASURE_LANE, write);
 }
-function trackCommit<T>(userId: string, write: () => Promise<T>): Promise<T> {
+function trackCommit<T>(userId: string | symbol, write: () => Promise<T>): Promise<T> {
   const pending = Promise.resolve(write());
   let owned = commits.get(userId);
   if (!owned) { owned = new Set(); commits.set(userId, owned); }

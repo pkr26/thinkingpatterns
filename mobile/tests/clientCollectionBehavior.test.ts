@@ -33,6 +33,7 @@ const collections=[
   ["entries","X-Entries-Revision",()=>api.listEntries("2026-10-01")],
   ["measures","X-Measures-Revision",()=>api.listMeasures()],
   ["consents","X-Consents-Revision",()=>api.listConsents()],
+  ["entry window","X-Entries-Revision",()=>api.listEntriesWindow("2026-10-01","2026-11-01")],
 ] as const;
 it.each(collections)("deduplicates real %s pages while pinning the same snapshot",async(resource,header,invoke)=>{
   const first=entry("first"),second=entry("second");let calls=0;
@@ -68,7 +69,7 @@ it.each(collections)("walks stable headerless %s pages without inventing a snaps
 });
 it.each(collections)("reports the final repeated %s protocol conflict with its public retry copy",async(resource,header,invoke)=>{
   let calls=0;const fetch=serve(()=>++calls%2===1?answer([entry("legacy")],200,{"X-Next-Offset":"1"}):answer([entry("snapshot")],200,{[header]:"7"}));
-  await expect(invoke()).rejects.toMatchObject({status:409,message:`${resource} changed while paging; retry the request`,code:"collection_changed"});
+  await expect(invoke()).rejects.toMatchObject({status:409,message:`${resource === "entry window" ? "entries" : resource} changed while paging; retry the request`,code:"collection_changed"});
   expect(fetch).toHaveBeenCalledTimes(4);
 });
 it("stops a complete measures walk at its first terminal page",async()=>{

@@ -10,7 +10,7 @@ const files = new Map<string, string>();
 export const EncodingType = { Base64: "base64", UTF8: "utf8" } as const;
 
 export const documentDirectory = "/tmp/mindpattern-test-documents/";
-export const makeDirectoryAsync = vi.fn(async () => {});
+export const makeDirectoryAsync = vi.fn<(uri: string, options?: { intermediates?: boolean }) => Promise<void>>(async () => {});
 
 export const cacheDirectory = "/tmp/mindpattern-test-cache/";
 

@@ -11,7 +11,7 @@ it("hands an export ticket to the native download manager through a temporary sa
   expect(forms).toEqual([{ method: "POST", action: "/api/v1/account/export-download", target: "_self", enctype: "application/x-www-form-urlencoded", acceptCharset: "UTF-8", hidden: true, appendChild: expect.any(Function), submit, remove }]);
   expect(children).toEqual([{ type: "hidden", name: "ticket", value: ticket }]); expect(submit).toHaveBeenCalledOnce(); expect(remove).toHaveBeenCalledOnce();
 });
-it.each(["", "a".repeat(42), "a".repeat(44), "a".repeat(42) + "+", "a".repeat(42) + "=", " " + "a".repeat(43), "a".repeat(43) + " "])("refuses malformed download tickets before handing any capability to the DOM: %s", ticket => {
+it.each(["", "a".repeat(42), "a".repeat(44), "a".repeat(42) + "+", "a".repeat(42) + "=", " " + "a".repeat(43), "a".repeat(43) + " "])("refuses malformed download tickets before handing any capability to the DOM (case #%#)", ticket => {
   const createElement = vi.fn(); vi.stubGlobal("document", { createElement }); expect(requestAccountDownload(ticket)).toBe(false); expect(createElement).not.toHaveBeenCalled();
 });
 it.each(["create", "append", "submit"])("reports native export failure and removes any allocated form after %s failure", failure => {

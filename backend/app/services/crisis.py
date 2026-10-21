@@ -662,7 +662,7 @@ def _normalize_pre_punct(text: str) -> str:
     # into U+03C2 (final sigma, "s"-like) — only the raw codepoints can
     # still tell the two confusable families apart.
     out = out.translate(_HOMOGLYPHS)
-    out = unicodedata.normalize("NFKC", out)
+    out = unicodedata.normalize("NFKC", out).lower()
     out = _fold_latin_marks(out)
     # Curly apostrophe to ASCII before punctuation folding (the patterns'
     # ['\u2019]? classes accept both, but only ASCII ' survives the fold).
@@ -903,8 +903,8 @@ SUPPRESS_CONCAT_RE = _compile_tier(tuple(_concat_pattern(p) for p in SUPPRESS_PA
 # Benign compounds are masked on the PRE-punctuation-fold text, matched as
 # whole words joined by whitespace/hyphens only: punctuation between the
 # words ("suicide, silence") is not the compound, so real ideation next to
-# a masked word cannot be silenced. Longest-first so "suicide squad" can
-# never eat only half of a longer entry. Non-ASCII compounds (CJK, 2026-09
+# a masked word cannot be silenced. Every mask finds spans in the same
+# input before their union is replaced. Non-ASCII compounds (CJK, 2026-09
 # -20 audit L-23) are masked as plain substrings: \b never fires next to
 # CJK in either engine, so the anchored form would never match at all.
 def _benign_mask(compound: str) -> re.Pattern[str]:
@@ -918,14 +918,24 @@ def _benign_mask(compound: str) -> re.Pattern[str]:
 
 
 _BENIGN_MASK_RES: tuple[re.Pattern[str], ...] = tuple(
-    _benign_mask(compound) for compound in sorted(BENIGN_COMPOUNDS, key=len, reverse=True)
+    _benign_mask(compound) for compound in BENIGN_COMPOUNDS
 )
 
 
-def _mask_benign(text: str) -> str:
-    for mask in _BENIGN_MASK_RES:
-        text = mask.sub(" ", text)
-    return text
+def _mask_benign(
+    text: str, masks: tuple[re.Pattern[str], ...] = _BENIGN_MASK_RES
+) -> str:
+    coverage: bytearray | None = None
+    for mask in masks:
+        for match in mask.finditer(text):
+            if coverage is None:
+                coverage = bytearray(len(text))
+            start, end = match.span()
+            coverage[start:end] = b"\x01" * (end - start)
+    if coverage is None:
+        return text
+    covered = coverage
+    return "".join(" " if covered[index] else char for index, char in enumerate(text))
 
 
 # --- 2026-09-20 audit H-7: letter-doubling ---------------------------------
@@ -973,7 +983,7 @@ SUPPRESS_FOLDED_CONCAT_RE = _compile_tier(
 # — including when the doubling is what hid it ("suiciide squaad").
 _BENIGN_MASK_FOLDED_RES: tuple[re.Pattern[str], ...] = tuple(
     _benign_mask(folded)
-    for folded in sorted((_dedup_fold(c) for c in BENIGN_COMPOUNDS), key=len, reverse=True)
+    for folded in (_dedup_fold(c) for c in BENIGN_COMPOUNDS)
 )
 
 
@@ -983,10 +993,9 @@ def _folded_variants(text: str) -> tuple[str, ...]:
     channel is untouched, so every pre-existing verdict keeps its exact
     form. The historical re-run of _normalize_pre_punct on the folded form
     is preserved (idempotent, but exact behavior is pinned by tests)."""
-    pre = _mask_benign(_normalize_pre_punct(text))
-    folded = _dedup_fold(pre)
-    for mask in _BENIGN_MASK_FOLDED_RES:
-        folded = mask.sub(" ", folded)
+    folded = _mask_benign(
+        _dedup_fold(_normalize_pre_punct(text)), _BENIGN_MASK_FOLDED_RES
+    )
     out: list[str] = []
     for tokens in _variant_token_sets(_normalize_pre_punct(folded)):
         out.extend((_primary_join(tokens), _orphan_glue(tokens), _concat_join(tokens)))

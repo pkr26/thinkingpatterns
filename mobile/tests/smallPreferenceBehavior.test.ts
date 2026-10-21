@@ -16,7 +16,7 @@ const owner = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 beforeEach(() => { vi.restoreAllMocks(); storage.__reset(); (Keychain as unknown as { __reset(): void }).__reset(); runTestControl(setSecureStoreBackend, null); Platform.OS = "ios"; });
 afterEach(() => { vi.restoreAllMocks(); Platform.OS = "ios"; });
 
-it.each(["en", "es", "device", "", "de", "garbage"])("reads the interoperable encrypted language preference %s", async value => {
+it.each(["en", "es", "device", "", "de", "garbage"])("reads the interoperable encrypted language preference (case #%#)", async value => {
   await secureStore.setItem("@mindpattern/language_pref", value);
   expect(await readLanguageChoice()).toBe(value === "en" || value === "es" || value === "device" ? value : "device");
 });
@@ -28,7 +28,7 @@ it("the device preference follows native Spanish detection immediately and after
 });
 it("an unavailable native haptic preference restores the optional Android pulse after a previous disable", async () => {
   await setHapticsEnabled(false); vi.spyOn(storage, "getItem").mockRejectedValue(new Error("Native preferences unavailable"));
-  expect(await loadHapticsSetting()).toBe(true); expect(hapticsEnabled()).toBe(true); Platform.OS = "android"; Vibration.vibrate.mockClear(); lightHaptic(); expect(Vibration.vibrate).toHaveBeenCalledWith(10);
+  expect(await loadHapticsSetting()).toBe(true); expect(hapticsEnabled()).toBe(true); (Platform as { OS: "ios" | "android" }).OS = "android"; Vibration.vibrate.mockClear(); lightHaptic(); expect(Vibration.vibrate).toHaveBeenCalledWith(10);
 });
 it("resumes a legacy onboarding position after migrating it into the account's native preference", async () => {
   await storage.setItem("@mindpattern/onboarding_panel", "2"); expect(await loadOnboardingPanel(5, owner)).toBe(2);
@@ -37,7 +37,7 @@ it("resumes a legacy onboarding position after migrating it into the account's n
 it("an unreadable native onboarding position shows the first panel", async () => {
   vi.spyOn(storage, "getItem").mockRejectedValue(new Error("Native resume preference unavailable")); expect(await loadOnboardingPanel(5, owner)).toBe(0);
 });
-it.each(["-1", "0", "nonnumeric", "Infinity", "NaN"])("restored encrypted unlock failures %s cannot manufacture a negative or invalid count", async raw => {
+it.each(["-1", "-0", "0", "nonnumeric", "Infinity", "NaN"])("restored encrypted unlock failures %s cannot manufacture a negative or invalid count", async raw => {
   await secureStore.setItem("mindpattern.unlockFail.alice", raw); expect(await unlockFailureCount("alice")).toBe(0);
 });
 it("verifies the existing authenticated unlock-proof format through its actual encrypted native record", async () => {

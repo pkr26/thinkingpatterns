@@ -181,4 +181,42 @@ it("uses singular fresh-scan grammar and breaks equal triage counts by the lates
  provider.decryptInsights.mockResolvedValue({state_seq:7,stats:{patterns:[{kind:"topic",label:"work",occurrences:4,confidence:0.7,detail:{first_seen:"2026-09-30"}}]}});
  const root=await caseload();await press(root,"Scan caseload for triage");await press(root,"Start the triage scan");await flush(16);expect(textOf(root)).toContain("1 pattern (scanned just now)");expect(textOf(root)).not.toContain("1 patterns (scanned just now)");
  await act(async()=>root.root.findByType("select").props.onChange({target:{value:"triage"}}));expect(root.root.findAllByType("strong").filter(node=>node.props.className==="patient-name").map(node=>node.children.join(""))).toEqual(["Alpha","Middle","Zulu"]);
+ // Public component batching can admit both currently rendered Retry actions
+ // before their queued loading-state commit. This is not a physical double-
+ // click claim. Every gesture below looks up the current host control anew.
+ await act(async()=>root.unmount());
+ type Roster=Awaited<ReturnType<typeof api.patients>>;
+ const firstRoster:Roster=[row("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","Earlier A","2026-09-01"),row("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","Earlier B","2026-09-02")];
+ const nextRoster:Roster=[row("cccccccccccccccccccccccccccccccc","New older","2026-09-01"),row("dddddddddddddddddddddddddddddddd","New newer","2026-09-03"),row("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","New middle","2026-09-02")];
+ const rosterPorts:Promise<Roster>[]=[];
+ let releaseFirst:((value:Roster)=>void)|undefined,releaseSecond:((value:Roster)=>void)|undefined;
+ let orderingRoot:Awaited<ReturnType<typeof render>>|undefined;
+ vi.mocked(api.patients).mockReset().mockRejectedValueOnce(new Error("network unavailable"))
+  .mockImplementationOnce(()=>{const port=new Promise<Roster>(resolve=>{releaseFirst=resolve;});rosterPorts.push(port);return port;})
+  .mockImplementationOnce(()=>{const port=new Promise<Roster>(resolve=>{releaseSecond=resolve;});rosterPorts.push(port);return port;});
+ provider.decryptInsights.mockResolvedValue({state_seq:7,stats:{patterns:[]}});
+ try{
+  orderingRoot=await render(<PatientsView displayName="Dr. Portal" session={session} onOpen={()=>{}} onSignOut={()=>{}}/>);
+  await vi.waitFor(()=>expect(orderingRoot!.root.findAllByType("button").some(button=>button.props.children==="Retry loading patients")).toBe(true));
+  await act(()=>{
+   for(let retry=0;retry<2;retry+=1){
+    const button=orderingRoot!.root.findAllByType("button").find(node=>node.props.children==="Retry loading patients");
+    if(!button||button.props.disabled===true)throw new Error("SetupError: current public Retry is unavailable inside the batch");
+    button.props.onClick();
+   }
+  });
+  if(rosterPorts.length!==2||!releaseFirst||!releaseSecond)throw new Error("SetupError: the two current Retry actions did not admit both public roster producers");
+  await act(async()=>{releaseFirst!(firstRoster);await rosterPorts[0];});
+  await vi.waitFor(()=>expect(textOf(orderingRoot!)).toContain("Earlier A"));
+  await press(orderingRoot,"Scan caseload for triage");await press(orderingRoot,"Start the triage scan");
+  await vi.waitFor(()=>expect(textOf(orderingRoot!)).toContain("0 patterns (scanned just now)"));
+  await act(async()=>{releaseSecond!(nextRoster);await rosterPorts[1];});
+  await vi.waitFor(()=>expect(textOf(orderingRoot!)).toContain("New newer"));
+  await act(async()=>orderingRoot!.root.findByType("select").props.onChange({target:{value:"triage"}}));
+  expect(orderingRoot.root.findAllByType("strong").filter(node=>node.props.className==="patient-name").map(node=>node.children.join("")),"A replacement roster without scan rows remains ordered by newest grant").toEqual(["New newer","New middle","New older"]);
+ }finally{
+  releaseFirst?.(firstRoster);releaseSecond?.(nextRoster);
+  await act(async()=>{await Promise.allSettled(rosterPorts);});
+  if(orderingRoot)await act(async()=>orderingRoot!.unmount());
+ }
 });

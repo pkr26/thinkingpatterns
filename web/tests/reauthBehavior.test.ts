@@ -7,7 +7,7 @@ import { vault } from "../src/vault";
 import { installSession, resetTestState } from "./helpers/api";
 
 const owner = "reauth-behavior-owner", password = "fresh typed password café", salt = new Uint8Array(16).fill(24);
-const expectedMaster = pbkdf2Sync(password, salt, 100_000, 32, "sha256");
+const expectedMaster = pbkdf2Sync(password, salt, 600_000, 32, "sha256");
 const expectedAuth = new Uint8Array(hkdfSync("sha256", expectedMaster, new Uint8Array(32), Buffer.from("mindpattern/auth/v1"), 32));
 const baseEnvelope = { key_scheme: "v2" as const, kdf_params: { algorithm: "pbkdf2-sha256" as const, version: 1, iterations: 100_000 }, salt: Buffer.from(salt).toString("base64"), wrapped_data_key: null };
 const realTimeout = globalThis.setTimeout;
@@ -46,6 +46,7 @@ it.each([null, { algorithm: "pbkdf2-sha256", version: 1, iterations: 99_999 }, {
   expect(await freshStepUp(password, "account_delete")).toEqual({ ok: false, reason: "offline" }); expect(api.stepUp).not.toHaveBeenCalled();
 });
 it.each(["offline", "locked", "owner", "owner reusing keys", "account", "auth key", "data key"])("rejects a response from an obsolete verification when %s changes during retrieval", async change => {
+  const derivation = vi.spyOn(crypto.subtle, "deriveBits");
   let respond!: (value: { salt: string }) => void;
   vi.mocked(auth.saltFor).mockImplementation(() => new Promise(resolve => { respond = resolve; }));
   const operation = verifyPasswordForVault(password);
@@ -61,6 +62,7 @@ it.each(["offline", "locked", "owner", "owner reusing keys", "account", "auth ke
   if (change === "offline") { respond({ salt: "not base64" }); await expect(operation).resolves.toEqual({ ok: false, reason: "offline" }); }
   else { respond({ salt: Buffer.from(salt).toString("base64") }); await expect(operation).resolves.toEqual({ ok: false, reason: "locked" }); }
   expect(api.stepUp).not.toHaveBeenCalled();
+  expect(derivation).not.toHaveBeenCalled();
 });
 it("rechecks the account and key references after real password derivation, clearing all obsolete outputs", async () => {
   const realDerive = crypto.subtle.deriveBits.bind(crypto.subtle), held: Uint8Array[] = [];

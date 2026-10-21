@@ -26,10 +26,12 @@ import {setLocale,t as tr} from "../../src/strings";
 import {peekDraft,stashDraft,takeStashedDraft} from "../../src/store";
 const USER="a".repeat(32),OTHER="b".repeat(32),KEY=Buffer.alloc(32,61),NEXT=Buffer.alloc(32,62),DATE="2026-09-11",QUESTION="Which native moment changed the course of your day?";
 const session={touchActivity:()=>{},unlockDays:30};
+// Same process event sink with its general EventEmitter call signature.
+const nativeEvents: NodeJS.EventEmitter = process;
 vi.mock("../../src/store",async original=>({...await original<typeof import("../../src/store")>(),useSession:()=>session}));
 let root:ReturnType<typeof ReactTestRenderer.create>|undefined;
 let surfaceStage=0;
-async function act<T>(operation:()=>T|Promise<T>){await reactAct(operation);if(root)assertPublicSurface(publicSurface(root),++surfaceStage);}
+async function act<T>(operation:()=>T|Promise<T>){await reactAct(async()=>{await operation();});if(root)assertPublicSurface(publicSurface(root),++surfaceStage);}
 let destination:string;
 let nativeQuestionKey:Buffer,nativeQuestionText:string;
 let summary:unknown,questionStatus:number,recomputeFailure:string|undefined,insightsStatus:number,storedPid:unknown;
@@ -74,7 +76,12 @@ it("a Native rejected feedback token is consumed and recovery uses a fresh singl
  questionStatus=404;recomputeFailure="feedback_blob_invalid";await recordPatternMute(KEY,USER,"topic:invalid-feedback",true);await storage.setItem(accountStorageKey.keyShipmentConsent(USER),"1");await mount();await press("Show today's question");await flush();expect(words()).toContain(QUESTION);expect(deliveredKeys).toEqual([KEY,KEY]);expect(processing.size).toBe(0);expect(await storage.getItem(accountStorageKey.feedback(USER))).toBeNull();
 });
 it("finite Native progress counts cannot overflow the baseline day counter or caption",async()=>{
+ const restoreSnapshotDate = pinEntrySnapshotCalendar();
+ try {
+
  summary={phase:"baseline",active_days:1e308,days_remaining:1e308};await mount();expect(words()).not.toContain("Infinity");expect(words()).toContain("30 days");
+
+ } finally { restoreSnapshotDate(); }
 });
 it("a Native question bridge places the shown question in this account's editor",async()=>{
  await mount();await press("Write about this question");expect(peekDraft(USER)).toBe(QUESTION);expect(destination).toBe("Entry");
@@ -89,6 +96,34 @@ it("a held Native processing-origin read cannot ship a retired key into replacem
 });
 it("replacement Native vault keys clear the previous question and its confirmation disclosure",async()=>{
  await mount();await press("This question resonated with me");expect(words()).toContain("Noted — questions like this");await act(async()=>{vault.unlock({masterKey:Buffer.alloc(32),authKey:Buffer.alloc(32),dataKey:Buffer.from(NEXT)},USER);installLocalDataKey(USER,vault.get().dataKey);});await flush();expect(words()).not.toContain(QUESTION);expect(words()).not.toContain("Noted — questions like this");expect(root!.root.findAllByType(TouchableOpacity).some(n=>n.props.accessibilityLabel==="This question resonated with me")).toBe(false);expect(root!.root.findAllByType(TouchableOpacity).find(n=>n.props.accessibilityLabel==="Show today's question")!.props.disabled).toBe(false);
+
+ // A still-mounted public Question view must retire its busy presentation
+ // when a restricted owner is adopted, even though both projected keys are null.
+ await reactAct(async()=>vault.lock());
+ const lockedShow=root!.root.findAllByType(TouchableOpacity).find(node=>node.props.accessibilityLabel===tr("question.showToday"));
+ expect(lockedShow).toBeDefined();
+ const gesture=nativeGrantedPress(lockedShow!.props);
+ try {
+  await reactAct(async()=>{gesture.release();});
+  const pendingShow=root!.root.findAllByType(TouchableOpacity).find(node=>node.props.accessibilityLabel===tr("question.showToday"));
+  expect(pendingShow).toBeDefined();
+  await reactAct(async()=>vault.unlock({masterKey:Buffer.alloc(32),authKey:Buffer.alloc(32),dataKey:Buffer.from(NEXT)},OTHER,{writeSuspended:true}));
+  expect(vault.ownerUserId()).toBe(OTHER);
+  expect(vault.canReauthenticate()).toBe(true);
+  expect(vault.isUnlocked()).toBe(false);
+  const resetShow=root!.root.findAllByType(TouchableOpacity).find(node=>node.props.accessibilityLabel===tr("question.showToday"));
+  expect(resetShow).toBeDefined();
+  expect(resetShow!.props.disabled).toBe(false);
+  expect(words()).not.toContain(QUESTION);
+ } finally {
+  gesture.dispose();
+  // Restore the old body's ordinary owned state before its unchanged
+  // afterEach public-surface oracle, including on the intended failure.
+  await reactAct(async()=>{
+   vault.unlock({masterKey:Buffer.alloc(32),authKey:Buffer.alloc(32),dataKey:Buffer.from(NEXT)},USER);
+   installLocalDataKey(USER,vault.get().dataKey);
+  });
+ }
 });
 it("a Native auth-key adoption keeps the still-owned question visible",async()=>{
  await mount();await act(async()=>vault.adoptAuthKey(Buffer.alloc(32,65)));await flush();expect(words()).toContain(QUESTION);expect(root!.root.findAllByType(TouchableOpacity).some(n=>n.props.accessibilityLabel==="This question resonated with me")).toBe(true);
@@ -97,10 +132,20 @@ it("a finite Native feedback-write refusal leaves an honest retry and the old re
  await recordPatternMute(KEY,USER,"an earlier Native event",true);const slot=accountStorageKey.feedback(USER),before=await storage.getItem(slot);await mount();const write=storage.setItem.bind(storage);let refuse=true;vi.spyOn(storage,"setItem").mockImplementation(async(k,v)=>{if(k===slot&&refuse)throw new Error("Native feedback store is full");return write(k,v);});await press("This question resonated with me");expect(await storage.getItem(slot)).toBe(before);expect(words()).toContain("could not be saved just now");expect(root!.root.findAllByType(TouchableOpacity).some(n=>n.props.accessibilityLabel==="This question resonated with me")).toBe(true);refuse=false;await press("This question does not land for me");const current=await storage.getItem(slot);expect(JSON.parse(decrypt(KEY,Buffer.from(current!,"base64"),buildAad("feedback-local",USER)).toString("utf8"))).toMatchObject([{pid:"an earlier Native event",mute:true},{pid:"topic:native-question",resonated:false}]);expect(words()).toContain("Noted — this one");
 });
 it.each(["active_days","days_remaining"] as const)("an overflowed Native %s count cannot appear in baseline progress",async field=>{
+ const restoreSnapshotDate = ["finite Native progress counts cannot overflow the baseline day counter or caption", "an overflowed Native active_days count cannot appear in baseline progress", "an overflowed Native days_remaining count cannot appear in baseline progress", "a Native malformed remaining count null cannot manufacture a day counter", "a Native malformed remaining count \"26\" cannot manufacture a day counter", "a Native malformed remaining count {} cannot manufacture a day counter", "a Native malformed remaining count undefined cannot manufacture a day counter", "a Native account-key transition clears the previous baseline writing prompt"].includes(expect.getState().currentTestName ?? "") ? pinEntrySnapshotCalendar() : () => {};
+ try {
+
  summary={phase:"baseline",active_days:4,days_remaining:26,[field]:Number.POSITIVE_INFINITY};await mount();expect(words()).not.toContain("Infinity");expect(words()).not.toContain("Day ");expect(words()).toContain("30 days");
+
+ } finally { restoreSnapshotDate(); }
 });
 it.each([null,"26",{},[]])("a Native malformed remaining count %j cannot manufacture a day counter",async value=>{
+ const restoreSnapshotDate = ["finite Native progress counts cannot overflow the baseline day counter or caption", "an overflowed Native active_days count cannot appear in baseline progress", "an overflowed Native days_remaining count cannot appear in baseline progress", "a Native malformed remaining count null cannot manufacture a day counter", "a Native malformed remaining count \"26\" cannot manufacture a day counter", "a Native malformed remaining count {} cannot manufacture a day counter", "a Native malformed remaining count undefined cannot manufacture a day counter", "a Native account-key transition clears the previous baseline writing prompt"].includes(expect.getState().currentTestName ?? "") ? pinEntrySnapshotCalendar() : () => {};
+ try {
+
  summary={phase:"baseline",active_days:4,days_remaining:value};await mount();expect(words()).not.toContain("Day 4 of");expect(words()).toContain("30 days");
+
+ } finally { restoreSnapshotDate(); }
 });
 
 it.each([401,500])("a genuine Native question HTTP %s refusal cannot fall through to a key shipment",async code=>{
@@ -161,7 +206,12 @@ it("a Native account-key transition clears a visible failed question request",as
  questionStatus=500;await mount();expect(root!.root.findAllByType(Text).some(n=>n.props.accessibilityRole==="alert")).toBe(true);await act(async()=>{vault.unlock({masterKey:Buffer.alloc(32),authKey:Buffer.alloc(32),dataKey:Buffer.from(NEXT)},USER);installLocalDataKey(USER,vault.get().dataKey);});expect(root!.root.findAllByType(Text).some(n=>n.props.accessibilityRole==="alert")).toBe(false);expect(root!.root.findAllByType(TouchableOpacity).some(n=>n.props.accessibilityLabel==="Show today's question")).toBe(true);
 });
 it("a Native account-key transition clears the previous baseline writing prompt",async()=>{
+ const restoreSnapshotDate = pinEntrySnapshotCalendar();
+ try {
+
  summary={phase:"baseline",active_days:3,days_remaining:27};await mount();expect(root!.root.findAllByType(TouchableOpacity).some(n=>n.props.accessibilityLabel===tr("question.refresh"))).toBe(true);await act(async()=>{vault.unlock({masterKey:Buffer.alloc(32),authKey:Buffer.alloc(32),dataKey:Buffer.from(NEXT)},USER);installLocalDataKey(USER,vault.get().dataKey);});expect(root!.root.findAllByType(TouchableOpacity).some(n=>n.props.accessibilityLabel==="Show today's question")).toBe(true);expect(words()).not.toContain("Day 3 of");
+
+ } finally { restoreSnapshotDate(); }
 });
 it.each(["load","processing"] as const)("a retired Native %s finishes the unchanged question view's busy state after credential renewal",async stage=>{
  await mount();if(stage==="processing"){questionStatus=404;await storage.setItem(accountStorageKey.keyShipmentConsent(USER),"1");}const held=hold(),get=secureStore.getItem.bind(secureStore);let ordinal=0;vi.spyOn(secureStore,"getItem").mockImplementation(async slot=>{const value=await get(slot);if(slot==="@mindpattern/user_id"&&++ordinal===(stage==="processing"?5:1)){await held.run();}return value;});await press(tr("question.refresh"));await vi.waitFor(()=>expect(held.entered()).toBe(true));expect(root!.root.findAllByType(TouchableOpacity).find(n=>n.props.accessibilityLabel===tr("question.refresh"))!.props.disabled).toBe(true);await api.setSession("the renewed Native question credential",USER,"alice");held.release();await flush();expect(root!.root.findAllByType(TouchableOpacity).find(n=>n.props.accessibilityLabel===tr("question.refresh"))!.props.disabled).toBe(false);await press(tr("question.refresh"));expect(words()).toContain(QUESTION);expect(deliveredKeys).toEqual(stage==="processing"?[KEY]:[]);
@@ -225,6 +275,34 @@ it.each([
 });
 it("the retired question does not quarantine feedback or ship a retry key after a late Native refusal",async()=>{
  questionStatus=404;recomputeFailure="feedback_blob_invalid";await recordPatternMute(KEY,USER,"the refused but retired Native receipt",true);const slot=accountStorageKey.feedback(USER),before=await storage.getItem(slot);await mount();await press("Show today's question");const held=hold();recomputeBoundary=held.run;await alertButton("Continue");await vi.waitFor(()=>expect(held.entered()).toBe(true));await act(async()=>root!.unmount());root=undefined;held.release();await flush();expect(deliveredKeys).toEqual([KEY]);expect(await storage.getItem(slot)).toBe(before);
+ // Acknowledged feedback quarantine is a real native boundary: retirement
+ // must stop the retry before handing its immutable key string to the
+ // exported processing interface, even though that interface also guards
+ // the wire request independently.
+ const removal=hold(),remove=storage.removeItem.bind(storage),open=api.openProcessingSession.bind(api);
+ let firstRemoval=true,retired=false,retiredProcessingHandoffs=0;
+ let replacement:Promise<{error:unknown}>|undefined;
+ recomputeBoundary=undefined;questionStatus=404;recomputeFailure="feedback_blob_invalid";
+ processing.clear();deliveredKeys=[];consumedFeedback=[];
+ await api.setSession("Native question retry custody bearer",USER,"alice");
+ vault.unlock({masterKey:Buffer.alloc(32),authKey:Buffer.alloc(32),dataKey:Buffer.from(KEY)},USER);installLocalDataKey(USER,vault.get().dataKey);
+ await recordPatternMute(KEY,USER,"the Native retry custody receipt",true);await storage.setItem(accountStorageKey.keyShipmentConsent(USER),"1");
+ vi.spyOn(api,"openProcessingSession").mockImplementation((...args)=>{if(retired)retiredProcessingHandoffs++;return open(...args);});
+ vi.spyOn(storage,"removeItem").mockImplementation(async name=>{await remove(name);if(firstRemoval&&name===slot){firstRemoval=false;await removal.run();}});
+ try {
+  await reactAct(async()=>{root=ReactTestRenderer.create(<ThemeProvider><QuestionScreen navigation={{navigate:(route:string)=>{destination=route;}}}/></ThemeProvider>);});
+  await reactAct(async()=>{await new Promise(resolve=>setTimeout(resolve,0));});
+  const show=root!.root.findAllByType(TouchableOpacity).find(node=>node.props.accessibilityLabel==="Show today's question")!;
+  const gesture=nativeGrantedPress(show.props);
+  try {await reactAct(async()=>{gesture.release();});}finally{gesture.dispose();}
+  await vi.waitFor(()=>expect(removal.entered()).toBe(true));
+  await reactAct(async()=>{replacement=api.setSession("Native replacement retry custody bearer",OTHER,"bob").then(()=>({error:null}),error=>({error}));vault.unlock({masterKey:Buffer.alloc(32),authKey:Buffer.alloc(32),dataKey:Buffer.from(NEXT)},OTHER);installLocalDataKey(OTHER,vault.get().dataKey);retired=true;removal.release();expect((await replacement).error).toBeNull();await new Promise(resolve=>setTimeout(resolve,0));});
+  expect(retiredProcessingHandoffs,"A retired question must not hand its key to the processing interface").toBe(0);
+  expect(deliveredKeys).toEqual([KEY]);expect(await api.getUserId()).toBe(OTHER);
+ } finally {
+  removal.release();await replacement;await reactAct(async()=>{await new Promise(resolve=>setTimeout(resolve,0));if(root){root.unmount();root=undefined;}});
+ }
+
 });
 it("the first Native question frame admits an explicit load without an invented busy state",async()=>{
  let initialDisabled:unknown;function Parent(){React.useLayoutEffect(()=>{initialDisabled=root!.root.findAllByType(TouchableOpacity).find(n=>n.props.accessibilityLabel==="Show today's question")!.props.disabled;},[]);return <QuestionScreen navigation={{navigate:()=>{}}}/>;}await act(async()=>{root=ReactTestRenderer.create(<ThemeProvider><Parent/></ThemeProvider>);});await flush();expect(initialDisabled).toBe(false);expect(words()).toContain(QUESTION);
@@ -264,7 +342,7 @@ it("a queued Native answer from the old displayed question cannot append into ke
  try{await act(async()=>{vault.unlock({masterKey:Buffer.alloc(32),authKey:Buffer.alloc(32),dataKey:Buffer.from(NEXT)},USER);installLocalDataKey(USER,vault.get().dataKey);gesture.release();});await flush();expect(words()).not.toContain(QUESTION);expect(await storage.getItem(accountStorageKey.feedback(USER))).toBeNull();expect(words()).not.toContain("Noted —");}finally{gesture.dispose();}
 });
 it("a question load delivering after the Native vault locks retires quietly without accessing locked keys",async()=>{
- await mount();const held=hold(),get=secureStore.getItem.bind(secureStore),hostEmit=process.emit.bind(process),unhandled:unknown[]=[];vi.spyOn(process,"emit").mockImplementation((event,...args)=>{if(event==="unhandledRejection"){unhandled.push(args[0]);return true;}return hostEmit(event,...args);});let first=true;vi.spyOn(secureStore,"getItem").mockImplementation(async slot=>{const value=await get(slot);if(first&&slot==="@mindpattern/user_id"){first=false;await held.run();}return value;});await press(tr("question.refresh"));await vi.waitFor(()=>expect(held.entered()).toBe(true));await act(async()=>vault.lock());held.release();await flush();await new Promise(resolve=>setTimeout(resolve,0));expect(unhandled.length).toBe(0);expect(words()).not.toContain(QUESTION);expect(deliveredKeys).toEqual([]);expect(vi.mocked(Alert.alert).mock.calls).toEqual([]);
+ await mount();const held=hold(),get=secureStore.getItem.bind(secureStore),hostEmit=nativeEvents.emit.bind(nativeEvents),unhandled:unknown[]=[];vi.spyOn(nativeEvents,"emit").mockImplementation((event,...args)=>{if(event==="unhandledRejection"){unhandled.push(args[0]);return true;}return hostEmit(event,...args);});let first=true;vi.spyOn(secureStore,"getItem").mockImplementation(async slot=>{const value=await get(slot);if(first&&slot==="@mindpattern/user_id"){first=false;await held.run();}return value;});await press(tr("question.refresh"));await vi.waitFor(()=>expect(held.entered()).toBe(true));await act(async()=>vault.lock());held.release();await flush();await new Promise(resolve=>setTimeout(resolve,0));expect(unhandled.length).toBe(0);expect(words()).not.toContain(QUESTION);expect(deliveredKeys).toEqual([]);expect(vi.mocked(Alert.alert).mock.calls).toEqual([]);
 });
 it.each([["stored-question account",2],["consent account",4]] as const)("a retired Native %s delivery leaves the replacement question's credential lane available",async(_label,occurrence)=>{
  questionStatus=404;await mount();const held=hold(),blocked=hold(),secureGet=secureStore.getItem.bind(secureStore),get=storage.getItem.bind(storage);let ordinal=0,retired=false,replacement=false,lane:Promise<unknown>=Promise.resolve();
@@ -312,8 +390,8 @@ it("an old first-frame Native load cannot clear the replacement key's busy indic
  try{await act(async()=>{root=ReactTestRenderer.create(<ThemeProvider><Parent/></ThemeProvider>);});await vi.waitFor(()=>expect(old.entered()&&fresh.entered()).toBe(true));await api.setSession("Native first-frame replacement credential",USER,"alice");old.release();await flush();expect(root!.root.findAllByType(TouchableOpacity).find(node=>node.props.accessibilityLabel==="Show today's question")!.props.disabled).toBe(true);fresh.release();await flush();expect(root!.root.findAllByType(TouchableOpacity).find(node=>node.props.accessibilityLabel==="Show today's question")!.props.disabled).toBe(false);}finally{old.release();fresh.release();await flush();}
 });
 it("a granted Native Show release after a same-frame vault lock never exposes a locked-key runtime error",async()=>{
- await mount();const button=root!.root.findAllByType(TouchableOpacity).find(node=>node.props.accessibilityLabel===tr("question.refresh"))!,gesture=nativeGrantedPress(button.props),hostEmit=process.emit.bind(process),unhandled:unknown[]=[];
- vi.spyOn(process,"emit").mockImplementation((event,...args)=>{if(event==="unhandledRejection"){unhandled.push(args[0]);return true;}return hostEmit(event,...args);});try{await act(async()=>{vault.lock();gesture.release();});await flush();await new Promise(resolve=>setTimeout(resolve,0));expect(unhandled.length).toBe(0);expect(deliveredKeys).toEqual([]);expect(words()).not.toContain(QUESTION);}finally{gesture.dispose();}
+ await mount();const button=root!.root.findAllByType(TouchableOpacity).find(node=>node.props.accessibilityLabel===tr("question.refresh"))!,gesture=nativeGrantedPress(button.props),hostEmit=nativeEvents.emit.bind(nativeEvents),unhandled:unknown[]=[];
+ vi.spyOn(nativeEvents,"emit").mockImplementation((event,...args)=>{if(event==="unhandledRejection"){unhandled.push(args[0]);return true;}return hostEmit(event,...args);});try{await act(async()=>{vault.lock();gesture.release();});await flush();await new Promise(resolve=>setTimeout(resolve,0));expect(unhandled.length).toBe(0);expect(deliveredKeys).toEqual([]);expect(words()).not.toContain(QUESTION);}finally{gesture.dispose();}
 });
 it.each(Array.from({length:32},(_,i)=>i+1))("a Native question body retired after %i handoffs never publishes its old decrypted question into replacement keys",async hops=>{
  await mount();const held=hold(),nativeFetch=globalThis.fetch;let first=true,replaced=false;vi.stubGlobal("fetch",async(...args:Parameters<typeof fetch>)=>{const response=await nativeFetch(...args);if(first&&new URL(String(args[0])).pathname.endsWith("/questions/today")){first=false;const read=response.json.bind(response);response.json=async()=>{const value=await read();await held.run();let remaining=hops;const step=()=>{if(--remaining>0)queueMicrotask(step);else{replaced=true;reactAct(()=>{vault.unlock({masterKey:Buffer.alloc(32),authKey:Buffer.alloc(32),dataKey:Buffer.from(NEXT)},USER);installLocalDataKey(USER,vault.get().dataKey);});}};queueMicrotask(step);return value;};}return response;});await press(tr("question.refresh"));await vi.waitFor(()=>expect(held.entered()).toBe(true));held.release();await flush();expect(replaced).toBe(true);expect(words()).not.toContain(QUESTION);expect(deliveredKeys).toEqual([]);
@@ -386,3 +464,18 @@ it.each(Array.from({length:32},(_,i)=>i+1))("a Native summary body retired after
 it.each(Array.from({length:32},(_,i)=>i+1))("a Native stored question body retired after %i handoffs leaves its cipher context for the new view",async hops=>{
  await mount();const held=hold(),nativeFetch=globalThis.fetch;let first=true,retired=false;vi.stubGlobal("fetch",async(...args:Parameters<typeof fetch>)=>{const response=await nativeFetch(...args);if(first&&new URL(String(args[0])).pathname.endsWith("/questions/today")){first=false;const read=response.json.bind(response);response.json=async()=>{const value=await read();await held.run();let remaining=hops;const step=()=>{if(--remaining>0)queueMicrotask(step);else{retired=true;reactAct(()=>{root!.unmount();root=undefined;});const contexts:Array<WeakRef<object>>=[],borrow=<T extends object>(create:()=>T):T=>{if(contexts.filter(ref=>ref.deref()!==undefined).length>=8)throw new Error("The Native cipher pool is full until collection");const context=create();contexts.push(new WeakRef(context));return context;},decipher=engine.createDecipheriv.bind(engine),hash=engine.createHash.bind(engine);vi.spyOn(engine,"createDecipheriv").mockImplementation((...args)=>borrow(()=>decipher(...args)));vi.spyOn(engine,"createHash").mockImplementation((...args)=>borrow(()=>hash(...args)));}};queueMicrotask(step);return value;};}return response;});await press(tr("question.refresh"));await vi.waitFor(()=>expect(held.entered()).toBe(true));held.release();await new Promise(resolve=>setTimeout(resolve,0));expect(retired).toBe(true);nativeQuestionText="The Native cipher-handoff replacement question has capacity";try{await mount();expect(words()).toContain(nativeQuestionText);}finally{held.release();await flush();}
 });
+
+function pinEntrySnapshotCalendar() {
+  const NativeDate = globalThis.Date;
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "Date");
+  if (!descriptor) throw new Error("SetupError: Native snapshot Date descriptor is unavailable");
+  // The approved chips use the local calendar day, independently of timezone.
+  // Date.now and every real timer/Promise remain native for finite deadlines.
+  const localNoon = new NativeDate(2026, 9, 7, 12).getTime();
+  Object.defineProperty(globalThis, "Date", { ...descriptor, value: new Proxy(NativeDate, {
+    construct(target, argumentsList, newTarget) {
+      return Reflect.construct(target, argumentsList.length ? argumentsList : [localNoon], newTarget);
+    },
+  }) });
+  return () => Object.defineProperty(globalThis, "Date", descriptor);
+}

@@ -90,7 +90,7 @@ describe("encrypted draft public storage contract", () => {
   });
 
   it.each(["{", '{"text":"writing","mood":1e400,"energy":null,"sleep":null,"tags":[]}'])
-    ("retains authenticated malformed JSON or an overflowing numeric check-in", async (raw) => {
+    ("retains authenticated malformed JSON or an overflowing numeric check-in (case #%#)", async (raw) => {
       const ciphertext = toBase64(await encrypt(dataKey, new TextEncoder().encode(raw), buildAad("draft", owner)));
       await kv.setItem(slot, ciphertext);
       await expect(loadActiveDraft(dataKey, owner)).rejects.toBeInstanceOf(StorageReadError);

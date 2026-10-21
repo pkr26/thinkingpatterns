@@ -26,7 +26,7 @@ it("erasure drains an admitted biometric key write so its raw data key cannot re
   });
   const enabling = enableBiometricUnlock(USER, Buffer.alloc(32, 7)); await started.promise;
   let erased = false;
-  const erasure = eraseDeletedAccountLocals(USER, "alice", { preserveSession: true }).then(result => { erased = true; return result; });
+  const erasure = eraseDeletedAccountLocals(USER, "alice").then(result => { erased = true; return result; });
   await new Promise<void>(r => setImmediate(r));
   const waited = !erased; release.resolve(); await enabling; expect(await erasure).toEqual([]);
   expect(waited).toBe(true);
