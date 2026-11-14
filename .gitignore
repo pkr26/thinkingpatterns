@@ -18,6 +18,7 @@ mobile/android/.gradle/
 mobile/android/app/build/
 mobile/.verify-build/
 mobile/.decrypt-build/
+mobile/.history-task-cache/
 coverage/
 *.tsbuildinfo
 *.log
@@ -27,6 +28,7 @@ coverage/
 !reports/independent-commit-audit-2026-10-03/mobile/*.log
 
 # Local state
+.vscode/
 .DS_Store
 *.db
 *.sqlite3

@@ -48,3 +48,32 @@ it("the actual Native light calendar shows a heavier mood dot without changing t
  expect(root!.root.findAllByType(View).some(node=>flat(node.props.style).backgroundColor==="#a0483f"&&flat(node.props.style).width===4&&flat(node.props.style).height===4)).toBe(true);
  } finally {vi.useRealTimers();}
 });
+
+
+it("journaled Native calendar days without a usable mood retain a neutral dot", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(2026, 9, 7, 12));
+  const journaledDays = new Set(Array.from({ length: 7 }, (_, index) => `2026-10-0${index + 1}`));
+  try {
+    await mount(<MoodCalendar
+      dayMoods={{ "2026-10-02": 0, "2026-10-03": NaN, "2026-10-04": Infinity, "2026-10-05": -Infinity, "2026-10-06": 0.6, "2026-10-07": -0.6 }}
+      journaledDays={journaledDays}
+      selectedDay={null}
+      onSelectDay={() => {}}
+    />);
+    const flat = (value: any): any => Array.isArray(value) ? Object.assign({}, ...value.map(flat)) : value ?? {};
+    // Missing, neutral and unusable measurements cannot imply a heavier or
+    // lighter mood. Positive and negative controls keep those signals distinct.
+    const expectedColors = ["#6f675c", "#6f675c", "#6f675c", "#6f675c", "#6f675c", "#35704f", "#a0483f"];
+    for (const [index, expectedColor] of expectedColors.entries()) {
+      const label = `October ${index + 1}, 2026, journaled`;
+      const day = root!.root.findAllByType(TouchableOpacity).filter(node => node.props.accessibilityLabel === label);
+      expect(day, label).toHaveLength(1);
+      const dots = day[0]!.findAllByType(View).filter(node => flat(node.props.style).width === 4 && flat(node.props.style).height === 4);
+      expect(dots, label).toHaveLength(1);
+      expect(flat(dots[0]!.props.style).backgroundColor, label).toBe(expectedColor);
+    }
+  } finally {
+    vi.useRealTimers();
+  }
+});

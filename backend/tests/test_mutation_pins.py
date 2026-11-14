@@ -432,7 +432,9 @@ EXPECTED_ROUTES = {
     (entries_api, "/entries", "GET"): ({"entries"}, "entries-read"),
     (entries_api, "/entries/{client_entry_id}", "DELETE"): ({"entries"}, "entries-delete"),
     (insights_api, "/processing/sessions", "POST"): ({"insights"}, "processing-sessions"),
+    (insights_api, "/processing/rekey", "POST"): ({"insights"}, "processing-rekey"),
     (insights_api, "/insights/recompute", "POST"): ({"insights"}, "insights-recompute"),
+    (insights_api, "/insights/local-recompute", "POST"): ({"insights"}, "local-recompute"),
     (insights_api, "/insights", "GET"): ({"insights"}, "insights-read"),
     (insights_api, "/questions/today", "GET"): ({"insights"}, "questions-read"),
     # Dedicated export bucket since 2026-09-07 (was "account-read"): one

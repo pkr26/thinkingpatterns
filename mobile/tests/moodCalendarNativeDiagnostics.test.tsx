@@ -1,4 +1,3 @@
-import React from "react";
 import ReactTestRenderer, { act } from "react-test-renderer";
 import { expect, it } from "vitest";
 import { Text } from "react-native";

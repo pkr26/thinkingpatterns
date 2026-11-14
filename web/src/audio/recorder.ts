@@ -211,6 +211,7 @@ export function useRecorder(i18n: {
     }
     recorderRef.current = recorder;
     recorder.ondataavailable = (event: BlobEvent): void => {
+      if (!alive.current || operation !== acquisition.current) return;
       if (event.data && event.data.size > 0) chunksRef.current.push(event.data);
     };
     // L-6 (audit 2026-09-29): a failed recorder surfaces honestly and

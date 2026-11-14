@@ -9,9 +9,9 @@
  * of 16 or more characters need no class rule. Registration confirms the
  * password and explains the recovery-key requirement for a forgotten one.
  */
-import { localWriteScopeEpoch } from "../localWriteGuard";
+import { localWriteScopeEpoch, subscribeLocalWriteScope } from "../localWriteGuard";
 import { resumeLocalRekey, pendingLocalRekey } from "../localRekey";
-import React, { useRef, useState } from "react";
+import React, { useRef, useState, useSyncExternalStore } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -109,33 +109,96 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
   // birth, no attestation record — the gate is the checkbox, once, here).
   const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [registrationUncertain, setRegistrationUncertain] = useState(false);
   const mounted = useRef(true), attempt = useRef(0), submitting = useRef(false);
-  React.useEffect(() => { mounted.current = true; return () => { mounted.current = false; attempt.current++; }; }, []);
+  const viewLifetime = useRef(0), renderedLifetime = viewLifetime.current;
+  const [, setViewLifetimeVersion] = useState(0);
+  const ownsRenderedView = () => mounted.current && renderedLifetime === viewLifetime.current;
+  const submitOwner = useRef<number | null>(null), retiredSubmission = useRef(false);
+  const registrationOwner = useRef<number | null>(null), retiredRegistration = useRef(false);
+  const pinRequest = useRef(0), savingServer = useRef(false);
+  const [serverSaving, setServerSaving] = useState(false);
+  React.useEffect(() => {
+    mounted.current = true;
+    if (renderedLifetime !== viewLifetime.current) setViewLifetimeVersion(viewLifetime.current);
+    if (retiredRegistration.current) { retiredRegistration.current = false; setRegistrationUncertain(true); }
+    if (retiredSubmission.current) {
+      retiredSubmission.current = false; submitOwner.current = null; submitting.current = false;
+      setBusy(false); setPassword(""); setConfirm("");
+    } else setBusy(submitting.current);
+    setServerSaving(savingServer.current);
+    return () => {
+      if (submitting.current) retiredSubmission.current = true;
+      if (registrationOwner.current !== null) retiredRegistration.current = true;
+      mounted.current = false; viewLifetime.current++; attempt.current++; pinRequest.current++;
+    };
+  }, []);
   // M-3 (2026-09-20): the first origin this device ever authenticated
   // against is pinned; a DIFFERENT selected server renders a prominent
   // warning BEFORE the password is typed — the login credential is the
   // derived auth key with no reset path, so typing it at a phished
   // "support server" must be a visibly deliberate act.
   const [serverChanged, setServerChanged] = useState(false);
+  type PinStatus = "checking" | "verified" | "unverified";
+  const [pinStatus, setPinStatusState] = useState<PinStatus>("checking");
+  const pinStatusRef = useRef<PinStatus>("checking");
+  const pinScope = useRef(localWriteScopeEpoch());
+  const setPinStatus = (next: PinStatus) => { pinStatusRef.current = next; setPinStatusState(next); };
   const [serverUrl, setServerUrl] = useState("");
   const [editingServer, setEditingServer] = useState(false);
   const [serverDraft, setServerDraft] = useState("");
 
-  React.useEffect(() => {
-    const initialScope = localWriteScopeEpoch();
-    void api.originPinChanged().then((changed) => {
-      if (initialScope === localWriteScopeEpoch()) setServerChanged(changed);
-    }).catch(() => {
-      if (initialScope === localWriteScopeEpoch()) setServerChanged(false);
+  const refreshPin = () => {
+    if (savingServer.current) return;
+    const scope = localWriteScopeEpoch();
+    pinScope.current = scope;
+    const request = ++pinRequest.current;
+    const currentPin = () => {
+      if (!mounted.current || request !== pinRequest.current) return false;
+      if (scope !== localWriteScopeEpoch()) { setPassword(""); setConfirm(""); setServerUrl(""); setServerChanged(false); setPinStatus("unverified"); return false; }
+      return true;
+    };
+    setPinStatus("checking");
+    const address = getBaseUrl().then((url) => {
+      if (currentPin()) setServerUrl(url);
+      return url;
     });
-    void getBaseUrl().then((url) => {
-      if (initialScope === localWriteScopeEpoch()) setServerUrl(url ?? "");
-    }).catch(() => {});
-  }, []);
+    void Promise.all([api.originPinChanged(), address]).then(([changed]) => {
+      if (currentPin()) { setServerChanged(changed); setPinStatus("verified"); }
+    }).catch(() => { if (currentPin()) setPinStatus("unverified"); });
+  };
+  const retireForNewScope = () => {
+    if (savingServer.current) return;
+    if (submitting.current) {
+      if (registrationOwner.current !== null) {
+        registrationOwner.current = null; setRegistrationUncertain(true);
+      }
+      // A newer scope owns the form now. Retire this attempt immediately;
+      // its eventual completion cannot release any newer attempt's fence.
+      attempt.current++; submitOwner.current = null; submitting.current = false; setBusy(false);
+    }
+    setPassword(""); setConfirm(""); setServerUrl(""); setServerChanged(false);
+    refreshPin();
+  };
+  React.useEffect(() => { refreshPin(); }, []);
+  const observedScope = useSyncExternalStore(subscribeLocalWriteScope, localWriteScopeEpoch, localWriteScopeEpoch);
+  React.useEffect(() => {
+    if (observedScope !== pinScope.current) retireForNewScope();
+  }, [observedScope]);
+
+  // Verification and any deliberate unverified continuation belong to one
+  // account/server scope. A later transition retires the form's secrets before
+  // an old event callback can submit or append to them.
+  const ensurePinScope = () => {
+    if (pinScope.current === localWriteScopeEpoch()) return true;
+    retireForNewScope();
+    return false;
+  };
 
   const submit = async () => {
+    if (!ownsRenderedView() || !ensurePinScope()) return;
     const name = username.trim();
-    if (!name || !password || busy || submitting.current) return;
+    if (!name || !password || busy || submitting.current || savingServer.current || pinStatusRef.current === "checking") return;
     if (mode === "register") {
       // The age gate precedes every other check: no policy alerts, no
       // network, nothing — until the 18+ declaration is made.
@@ -155,6 +218,7 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
     }
     submitting.current = true;
     const id = ++attempt.current;
+    submitOwner.current = id;
     let epoch = localWriteScopeEpoch();
     const ownsAttempt = () => mounted.current && attempt.current === id;
     const current = () => ownsAttempt() && epoch === localWriteScopeEpoch();
@@ -166,7 +230,11 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
     };
     const adoptSession = async (token: string, userId: string, name: string) => {
       assertCurrent(); const pending = api.setSession(token,userId,name,{ stillCurrent: ownsAttempt });
-      epoch = localWriteScopeEpoch(); await pending; assertCurrent();
+      // setSession synchronously publishes the new local owner before its
+      // Promise settles. Bind that owned transition before awaiting so a
+      // retained edit does not mistake it for an external origin switch.
+      epoch = localWriteScopeEpoch(); pinScope.current = epoch;
+      await pending; assertCurrent();
     };
     setBusy(true);
     let derived: Keys | null = null;
@@ -204,14 +272,17 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
         // directly derives the storage key.
         const envelope = await wait(() => buildRegistrationEnvelope(password, salt, name), value => zeroize(value.dataKey));
         sessionDataKey = envelope.dataKey;
-        const body = await wait(() => api.register(
-          name,
-          salt.toString("base64"),
-          derived!.authKey.toString("base64"),
-          MINIMUM_AGE_ATTESTATION,
-          envelope.kdfParams,
-          envelope.wrappedB64,
-        ));
+        const body = await wait(() => {
+          registrationOwner.current = id;
+          return api.register(
+            name,
+            salt.toString("base64"),
+            derived!.authKey.toString("base64"),
+            MINIMUM_AGE_ATTESTATION,
+            envelope.kdfParams,
+            envelope.wrappedB64,
+          );
+        });
         accountCreated = true;
         await adoptSession(body.token, body.user_id, name);
         credentialsVerified = true;
@@ -322,6 +393,7 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
       // src/onboarding.ts); a plain login never does.
       if (mode === "register") queueOnboarding();
       markLoggedIn();
+      if (registrationOwner.current === id) registrationOwner.current = null;
     } catch (err) {
       if (sessionDataKey) zeroize(sessionDataKey);
       if (derived) zeroize(derived.masterKey, derived.authKey, derived.dataKey);
@@ -346,8 +418,20 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
         mode === "register" && accountCreated ? tr("login.registerPartialBody") : signInFailureCopy(err),
       );
     } finally {
-      if (attempt.current === id) submitting.current = false;
-      if (ownsAttempt()) setBusy(false);
+      if (registrationOwner.current === id) {
+        registrationOwner.current = null;
+        if (mounted.current && !current()) setRegistrationUncertain(true);
+      }
+      if (submitOwner.current === id) {
+        submitOwner.current = null; submitting.current = false;
+        if (mounted.current) {
+          setBusy(false);
+          if (pinScope.current !== localWriteScopeEpoch()) {
+            setPassword(""); setConfirm(""); setServerUrl(""); setServerChanged(false);
+            refreshPin();
+          }
+        }
+      }
     }
   };
 
@@ -369,6 +453,10 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
       <Text style={[styles.subtitle, { color: t.colors.muted, fontSize: 14 }]}>
         {tr("login.subtitle")}
       </Text>
+      {registrationUncertain && <>
+        <Text accessibilityRole="alert">{tr("login.registrationUncertain")}</Text>
+        {mode === "register" && <GhostButton label={tr("login.registrationTrySignIn")} onPress={() => { if (!ownsRenderedView()) return; setMode("login"); setConfirm(""); setAgeConfirmed(false); }} />}
+      </>}
       {erasureIncomplete ? (
         <Text accessibilityRole="alert" style={{ color: t.colors.danger }}>
           {tr("login.erasureIncomplete")}
@@ -379,37 +467,105 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
           {tr("login.serverLabel", { server: serverUrl })}
         </Text>
       )}
-      <GhostButton label={tr("login.changeServer")} disabled={busy} onPress={() => { setServerDraft(serverUrl); setEditingServer(!editingServer); }} />
+      <GhostButton label={tr("login.changeServer")} disabled={busy || serverSaving} onPress={() => { if (!ownsRenderedView()) return; setServerDraft(serverUrl); setEditingServer(!editingServer); }} />
       {editingServer && <>
-        <TextInput value={serverDraft} onChangeText={setServerDraft} autoCorrect={false} spellCheck={false} autoCapitalize="none" accessibilityLabel={tr("login.serverA11y")} style={inputTheme(t)} />
-        <GhostButton label={tr("login.saveServer")} disabled={busy} onPress={() => {
+        <TextInput value={serverDraft} editable={serverSaving ? false : undefined} onChangeText={(value) => { if (ownsRenderedView() && !savingServer.current) setServerDraft(value); }} autoCorrect={false} spellCheck={false} autoCapitalize="none" accessibilityLabel={tr("login.serverA11y")} style={inputTheme(t)} />
+        <GhostButton label={tr("login.saveServer")} disabled={busy || serverSaving} onPress={() => {
+          if (!ownsRenderedView()) return;
           void (async () => {
+            if (savingServer.current || submitting.current) return;
+            const parsed = parseServerUrl(serverDraft);
+            if (!parsed) { Alert.alert(tr("settings.invalidUrlTitle"), tr("settings.invalidUrlBody")); return; }
+            savingServer.current = true; setServerSaving(true);
+            let released = false;
+            const releaseSave = () => {
+              if (released) return;
+              released = true; savingServer.current = false;
+              if (mounted.current) setServerSaving(false);
+            };
             try {
-              const parsed = parseServerUrl(serverDraft);
-              if (!parsed) throw new Error(tr("settings.invalidUrlBody"));
+            const request = ++pinRequest.current;
+            // The write may commit before a later storage operation fails.
+            setPassword(""); setConfirm(""); setServerUrl(""); setServerChanged(false); setPinStatus("checking");
+            try {
               const error = await setBaseUrl(parsed.url);
-              if (error) throw new Error(error);
-              setServerUrl(await getBaseUrl()); setServerChanged(await api.originPinChanged()); setEditingServer(false);
-              setPassword(""); setConfirm("");
-            } catch { Alert.alert(tr("settings.invalidUrlTitle"), tr("settings.invalidUrlBody")); }
+              if (error) {
+                // A returned validation error is pre-write; thrown failures
+                // may happen after persistence and use the separate message.
+                releaseSave();
+                if (mounted.current && request === pinRequest.current) {
+                  Alert.alert(tr("settings.invalidUrlTitle"), tr("settings.invalidUrlBody"));
+                  refreshPin();
+                }
+                return;
+              }
+            } catch {
+              if (mounted.current && request === pinRequest.current) {
+                setPinStatus("unverified");
+                Alert.alert(tr("settings.couldNotSaveServerTitle"), tr("login.serverSaveUnverified"));
+              }
+              return;
+            }
+            // The write is finished. A hung verification must not keep the
+            // save fence held; the user can retry or explicitly continue unverified.
+            releaseSave();
+            const savedScope = localWriteScopeEpoch();
+            pinScope.current = savedScope;
+            const currentPin = () => {
+              if (!mounted.current || request !== pinRequest.current) return false;
+              if (savedScope !== localWriteScopeEpoch()) { setPassword(""); setConfirm(""); setServerUrl(""); setServerChanged(false); setPinStatus("unverified"); return false; }
+              return true;
+            };
+            if (!currentPin()) return;
+            try {
+              const actualUrl = await getBaseUrl();
+              if (!currentPin()) return;
+              setServerUrl(actualUrl); setEditingServer(false);
+              if (actualUrl !== parsed.url) { setPinStatus("unverified"); return; }
+              const changed = await api.originPinChanged();
+              if (currentPin()) { setServerChanged(changed); setPinStatus("verified"); }
+            } catch {
+              if (currentPin()) { setEditingServer(false); setPinStatus("unverified"); }
+            }
+            } finally {
+              releaseSave();
+            }
           })();
         }} />
       </>}
-      {serverChanged && (
+      {pinStatus === "checking" && <Text accessibilityRole="alert">{tr("login.serverChecking")}</Text>}
+      {pinStatus === "unverified" && <Text accessibilityRole="alert">{tr("login.serverUnverified")}</Text>}
+      {pinStatus !== "verified" && <GhostButton label={tr("login.serverRetry")} disabled={serverSaving} onPress={() => { if (ownsRenderedView()) refreshPin(); }} />}
+      {pinStatus === "checking" && !serverSaving && <GhostButton label={tr("login.serverContinueUnverified")} onPress={() => {
+        if (!ownsRenderedView() || !ensurePinScope()) return;
+        ++pinRequest.current; setPinStatus("unverified");
+      }} />}
+      {pinStatus !== "checking" && serverChanged && (
         // Audit fix 20 (2026-09-21): t.colors.error, not a hardcoded hex —
         // the literal measured 2.89:1 on the dark bg (WCAG AA failure on a
         // security warning); the theme's error color measures 6.8:1.
         <Text style={{ color: t.colors.error, fontSize: 13 }} accessibilityLabel={tr("login.serverChangedA11y")}>
-          {tr("login.serverChangedWarning")}
-          {"\n"}
+          {tr(pinStatus === "verified" ? "login.serverChangedWarning" : "login.serverPreviouslyChanged")}
+          {pinStatus === "verified" && <>{"\n"}
           <Text
             onPress={() => {
-              void api.confirmCurrentOrigin().then(() => setServerChanged(false)).catch(() => {});
+              if (!ownsRenderedView() || !ensurePinScope()) return;
+              const request = ++pinRequest.current;
+              const scope = localWriteScopeEpoch();
+              const currentPin = () => {
+              if (!mounted.current || request !== pinRequest.current) return false;
+              if (scope !== localWriteScopeEpoch()) { setPassword(""); setConfirm(""); setServerUrl(""); setServerChanged(false); setPinStatus("unverified"); return false; }
+              return true;
+            };
+              setPinStatus("checking");
+              void api.confirmCurrentOrigin().then(() => {
+                if (currentPin()) { setServerChanged(false); setPinStatus("verified"); }
+              }).catch(() => { if (currentPin()) setPinStatus("unverified"); });
             }}
             style={{ fontWeight: "600", textDecorationLine: "underline" }}
           >
             {tr("login.trustThisServer")}
-          </Text>
+          </Text></>}
         </Text>
       )}
       <TextInput
@@ -418,7 +574,7 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
         placeholderTextColor={t.colors.placeholder}
         autoCapitalize="none"
         value={username}
-        onChangeText={setUsername}
+        onChangeText={(value) => { if (ownsRenderedView()) setUsername(value); }}
         accessibilityLabel={tr("login.usernameA11y")}
         textContentType="username"
         autoComplete="username"
@@ -429,7 +585,8 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
         placeholderTextColor={t.colors.placeholder}
         secureTextEntry
         value={password}
-        onChangeText={setPassword}
+        editable={serverSaving || pinStatus === "checking" ? false : undefined}
+        onChangeText={(value) => { if (ownsRenderedView() && !savingServer.current && pinStatusRef.current !== "checking" && ensurePinScope()) setPassword(value); }}
         onSubmitEditing={submit}
         accessibilityLabel={tr("common.passwordA11y")}
         textContentType={mode === "register" ? "newPassword" : "password"}
@@ -442,7 +599,8 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
           placeholderTextColor={t.colors.placeholder}
           secureTextEntry
           value={confirm}
-          onChangeText={setConfirm}
+          editable={serverSaving || pinStatus === "checking" ? false : undefined}
+          onChangeText={(value) => { if (ownsRenderedView() && !savingServer.current && pinStatusRef.current !== "checking" && ensurePinScope()) setConfirm(value); }}
           onSubmitEditing={submit}
           accessibilityLabel={tr("login.confirmA11y")}
           textContentType="newPassword"
@@ -479,7 +637,7 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
           </Text>
           <Switch
             value={ageConfirmed}
-            onValueChange={(on) => setAgeConfirmed(on)}
+            onValueChange={(on) => { if (ownsRenderedView()) setAgeConfirmed(on); }}
             accessibilityLabel={tr("login.ageConfirmA11y")}
             accessibilityState={{ checked: ageConfirmed }}
           />
@@ -488,12 +646,13 @@ export function LoginScreen({ navigation }: { navigation: any }): React.JSX.Elem
       <PrimaryButton
         label={mode === "login" ? tr("login.signIn") : tr("login.createAccount")}
         onPress={submit}
-        disabled={mode === "register" && !ageConfirmed}
+        disabled={serverSaving || pinStatus === "checking" || (mode === "register" && !ageConfirmed)}
         busy={busy}
       />
       <GhostButton
         label={mode === "login" ? tr("login.switchToRegister") : tr("login.switchToSignIn")}
         onPress={() => {
+          if (!ownsRenderedView()) return;
           setMode(mode === "login" ? "register" : "login");
           setConfirm("");
           // Re-entering register mode re-arms the declaration: a mode flip

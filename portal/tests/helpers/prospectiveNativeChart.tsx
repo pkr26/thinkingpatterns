@@ -43,7 +43,7 @@ function open(key: Buffer, aadParts: string[], blob: string): Buffer {
   opener.setAAD(Buffer.from(JSON.stringify(aadParts))); opener.setAuthTag(wire.subarray(-16));
   return Buffer.concat([opener.update(wire.subarray(12, -16)), opener.final()]);
 }
-function authenticatedFixture(laterPage: boolean, emptyPatientId: boolean, retryEvidence: boolean, nativeMeasures: boolean) {
+export function authenticatedFixture(laterPage: boolean, emptyPatientId: boolean, retryEvidence: boolean, nativeMeasures: boolean) {
   const patientId = emptyPatientId ? "" : PATIENT;
   const master = pbkdf2Sync(PASSWORD, Buffer.from(SALT, "base64"), 600000, 32, "sha256");
   const auth = Buffer.from(hkdfSync("sha256", master, Buffer.alloc(32), "mindpattern/auth/v1", 32));
@@ -83,7 +83,7 @@ function authenticatedFixture(laterPage: boolean, emptyPatientId: boolean, retry
   } catch (error) { noteKey.fill(0); throw error; }
   finally { master.fill(0); auth.fill(0); wrap.fill(0); privateDer.fill(0); dataKey.fill(0); shared.fill(0); consentKey.fill(0); audioPlain.fill(0); }
 }
-export async function openNativeChart(options: { failFirstDraftRead?: boolean; holdAudio?: boolean; conflict?: boolean; laterPage?: boolean; emptyPatientId?: boolean; nullBackupCodesMfa?: boolean; retryEvidence?: boolean; retiredNotesPagination?: boolean; retiredInitialNotesDecrypt?: boolean; retiredSinglePageNotes?: boolean; retiredMeasures?: boolean; nativeMeasures?: boolean; retiredEditConflict?: "before-refetch" | "failed-refetch" | "after-latest-decrypt" | "after-terminal-refetch"; retiredSasDigest?: boolean; repeatedSas?: boolean; native205Patients?: boolean } = {}) {
+export async function openNativeChart(options: { failFirstDraftRead?: boolean; holdAudio?: boolean; conflict?: boolean; laterPage?: boolean; emptyPatientId?: boolean; nullBackupCodesMfa?: boolean; retryEvidence?: boolean; gcRetry?: boolean; retiredNotesPagination?: boolean; retiredInitialNotesDecrypt?: boolean; retiredSinglePageNotes?: boolean; retiredMeasures?: boolean; nativeMeasures?: boolean; retiredEditConflict?: "before-refetch" | "failed-refetch" | "after-latest-decrypt" | "after-terminal-refetch"; retiredSasDigest?: boolean; repeatedSas?: boolean; native205Patients?: boolean } = {}) {
   const account = authenticatedFixture(options.laterPage === true || options.retiredNotesPagination === true || options.retiredInitialNotesDecrypt === true, options.emptyPatientId === true, options.retryEvidence === true, options.retiredMeasures === true || options.nativeMeasures === true), faults: unknown[] = [];
   const requests: Array<{ path: string; method: string; offset: string | null; revision: string | null }> = [];
   const patchBodies: Array<{ plaintext: string; baseVersion: unknown; aad: string[] }> = [];
@@ -353,7 +353,7 @@ export async function openNativeChart(options: { failFirstDraftRead?: boolean; h
           const offset = Number(url.searchParams.get("offset") ?? "0"), revision = options.retiredEditConflict === "after-terminal-refetch" && conflicted && terminalConflictNotesArrived ? "9" : replacementSnapshot || conflicted ? "8" : "7";
           const terminalConflictSnapshot = options.retiredEditConflict === "after-terminal-refetch" && conflicted && !terminalConflictNotesArrived;
           if (!Number.isSafeInteger(offset) || offset < 0 || (url.searchParams.has("expected_revision") && url.searchParams.get("expected_revision") !== revision)) throw setup("notes snapshot query is incoherent");
-          if (options.retryEvidence && !retryNotesFailed) { retryNotesFailed = true; status = 503; value = { detail: "temporary native notes read unavailable" }; }
+          if ((options.retryEvidence || options.gcRetry) && !retryNotesFailed) { retryNotesFailed = true; status = 503; value = { detail: "temporary native notes read unavailable" }; }
           else {
             if ((options.retiredInitialNotesDecrypt || options.retiredSinglePageNotes) && initialSnapshot && offset === 0 && !firstNotesSeen) {
               firstNotesSeen = true; firstNotesArrived = true;
@@ -807,7 +807,7 @@ export async function openNativeChart(options: { failFirstDraftRead?: boolean; h
     await completed("public required MFA", () => text().includes("Verify code"));
     if (hasSession()) throw setup("password-only login adopted owner before MFA");
     await input("Authenticator code (or recovery code)", "123456"); await press("Verify code"); await completed("public authenticated caseload", () => hasSession() && text().includes("Synthetic native public patient"));
-    await press("Open patterns"); await completed("public chart/notes", () => options.retiredEditConflict ? text().includes(SAVED_NOTE) && text().includes("Retry loading this patient") : options.retiredNotesPagination || options.retiredMeasures || options.retiredInitialNotesDecrypt || options.retiredSinglePageNotes ? text().includes("Retry loading this patient") : text().includes("See the evidence") && (options.retryEvidence ? text().includes("Retry loading this patient") : text().includes(SAVED_NOTE)));
+    await press("Open patterns"); await completed("public chart/notes", () => options.retiredEditConflict ? text().includes(SAVED_NOTE) && text().includes("Retry loading this patient") : options.retiredNotesPagination || options.retiredMeasures || options.retiredInitialNotesDecrypt || options.retiredSinglePageNotes ? text().includes("Retry loading this patient") : text().includes("See the evidence") && (options.retryEvidence || options.gcRetry ? text().includes("Retry loading this patient") : text().includes(SAVED_NOTE)));
     await completed("public encrypted draft settles", () => options.failFirstDraftRead ? text().includes("Local encrypted records could not be read") : composer().props.value === SAVED_DRAFT);
     if (options.failFirstDraftRead && !expectedReadRefusalObserved) throw setup("public draft refusal lacked its exact authored native read abort");
     }

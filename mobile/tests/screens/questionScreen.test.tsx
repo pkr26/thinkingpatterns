@@ -750,3 +750,77 @@ describe("lossy-write and broken-session degradation (2026-10-01 coverage debt)"
     expect(nav.navigate).not.toHaveBeenCalled();
   });
 });
+
+
+it("a retained old feedback callback cannot record after a key change and a new question", async () => {
+  const { default: TestRenderer, act } = await import("react-test-renderer");
+  let root!: import("react-test-renderer").ReactTestRenderer;
+  const settle = async () => { for (let i = 0; i < 3; i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); }); };
+  vi.mocked(api.insights).mockResolvedValue({ phase: "insight", active_days: 31, days_remaining: 0 } as never);
+  vi.mocked(api.questionToday)
+    .mockResolvedValueOnce({ for_date: FOR_DATE, blob: questionBlob("Old question", FOR_DATE, "old-pid") } as never)
+    .mockResolvedValueOnce({ for_date: FOR_DATE, blob: questionBlob("New question", FOR_DATE, "new-pid") } as never);
+  await act(async () => { root = TestRenderer.create(<QuestionScreen />); });
+  try {
+    await settle();
+    expect(textOf(root)).toContain("Old question");
+    const oldPress = touchableByLabel(root, "This resonated").props.onPress as () => void;
+    await act(async () => { vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.from(dataKey) }, "user-1"); });
+    await act(async () => { touchableByLabel(root, "Show today's question").props.onPress(); });
+    await settle();
+    expect(textOf(root)).toContain("New question");
+    expect(await storage.getItem("@mindpattern/question_feedback.user-1")).toBeNull();
+    await act(async () => { oldPress(); });
+    await settle();
+    expect(await storage.getItem("@mindpattern/question_feedback.user-1")).toBeNull();
+    await act(async () => { touchableByLabel(root, "This resonated").props.onPress(); });
+    await settle();
+    const { decrypt } = await import("../../src/crypto/envelope");
+    const raw = await storage.getItem("@mindpattern/question_feedback.user-1");
+    expect(raw).not.toBeNull();
+    const plain = decrypt(dataKey, Buffer.from(raw!, "base64"), buildAad("feedback-local", "user-1"));
+    expect(JSON.parse(plain.toString("utf8"))).toMatchObject([{ pid: "new-pid", resonated: true }]);
+  } finally { await act(async () => { root.unmount(); }); }
+});
+
+
+it("a retired feedback failure does not publish over a committed replacement question", async () => {
+  const { default: TestRenderer, act } = await import("react-test-renderer");
+  const { setBaseUrl, DEFAULT_BASE_URL } = await import("../../src/api/client");
+  const { localWriteScopeEpoch } = await import("../../src/localWriteGuard");
+  let resolveTap!: (value: string) => void;
+  const pendingTap = new Promise<string>(resolve => { resolveTap = resolve; });
+  let root!: import("react-test-renderer").ReactTestRenderer;
+  const settle = async () => { for (let i = 0; i < 3; i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); }); };
+  vi.mocked(api.insights).mockResolvedValue({ phase: "insight", active_days: 31, days_remaining: 0 } as never);
+  vi.mocked(api.getUserId).mockResolvedValueOnce("user-1" as never).mockImplementationOnce(() => pendingTap as never).mockResolvedValue("user-1" as never);
+  vi.mocked(api.questionToday).mockResolvedValueOnce({ for_date: FOR_DATE, blob: questionBlob("Old question", FOR_DATE, "old-pid") } as never).mockResolvedValue({ for_date: FOR_DATE, blob: questionBlob("New question", FOR_DATE, "new-pid") } as never);
+  await act(async () => { root = TestRenderer.create(<QuestionScreen />); });
+  try {
+    await settle();
+    expect(textOf(root)).toContain("Old question");
+    await act(async () => { touchableByLabel(root, "This resonated").props.onPress(); });
+    expect(api.getUserId).toHaveBeenCalledTimes(2);
+    const priorScope = localWriteScopeEpoch();
+    await act(async () => { expect(await setBaseUrl(DEFAULT_BASE_URL)).toBeNull(); });
+    expect(localWriteScopeEpoch()).toBeGreaterThan(priorScope);
+    await act(async () => { touchableByLabel(root, "Refresh").props.onPress(); });
+    await settle();
+    expect(textOf(root)).toContain("New question");
+    await act(async () => { resolveTap("user-1"); });
+    await settle();
+    expect(textOf(root).includes("Your answer stays on this device; it could not be saved just now.")).toBe(false);
+    expect(await storage.getItem("@mindpattern/question_feedback.user-1")).toBeNull();
+    await act(async () => { touchableByLabel(root, "This resonated").props.onPress(); });
+    await settle();
+    const raw = await storage.getItem("@mindpattern/question_feedback.user-1");
+    expect(raw).not.toBeNull();
+    const { decrypt } = await import("../../src/crypto/envelope");
+    expect(JSON.parse(decrypt(dataKey, Buffer.from(raw!, "base64"), buildAad("feedback-local", "user-1")).toString("utf8"))).toMatchObject([{ pid: "new-pid", resonated: true }]);
+  } finally {
+    resolveTap("user-1");
+    await Promise.allSettled([pendingTap]);
+    await settle();
+    await act(async () => { root.unmount(); });
+  }
+});

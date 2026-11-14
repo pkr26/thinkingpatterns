@@ -67,6 +67,14 @@ def test_iteration_floor_is_enforced():
     assert kdf.MIN_ITERATIONS >= 100_000
 
 
+@pytest.mark.parametrize("iterations", [1, 99_999])
+def test_fixed_subfloor_requests_are_rejected(iterations):
+    # A caller supplies its own count. Deriving the rejected input from the
+    # library's floor would let a lowered floor change the test input too.
+    with pytest.raises(ValueError, match="iterations must be at least"):
+        kdf.derive_master_key("p", b"0123456789abcdef", iterations)
+
+
 def test_auth_and_data_keys_are_separated():
     master = fast_master("password", b"0123456789abcdef", 100)
     auth = kdf.derive_auth_key(master)

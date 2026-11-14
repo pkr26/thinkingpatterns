@@ -9,6 +9,20 @@ const corpus = JSON.parse(gunzipSync(readFileSync(new URL("../../shared/frontend
 };
 beforeEach(() => { vi.resetModules(); });
 
+it.each([
+  ["म:suicide", true],
+  ["म_suicide", true],
+  ["म!suicide", true],
+  ["म:want to die", true],
+  ["म:quitarme la vida", true],
+  ["म:suicide prevention", false],
+  ["म:suicide squad", false],
+] as const)("keeps both public crisis decisions at the mixed-script boundary in %s", async (text, expected) => {
+  const { detectCrisisLanguage, matchesCrisisSuppress } = await import("../src/crisisDetect");
+  expect(detectCrisisLanguage(text)).toBe(expected);
+  expect(matchesCrisisSuppress(text)).toBe(expected);
+});
+
 it("honors independent dialog and quotation-suppression results for every phrase alternative", async () => {
   const { detectCrisisLanguage, matchesCrisisSuppress, normalizeCrisisText } = await import("../src/crisisDetect");
   for (const [text, dialog, suppress] of corpus.rows) {

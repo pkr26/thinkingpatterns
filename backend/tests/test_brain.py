@@ -2567,6 +2567,23 @@ class TestEwmaDeployedPathCalibration:
         )
         assert violations / 300 <= 0.08
 
+    def test_zero_autocorrelation_keeps_a_replicated_lower_shift(self, monkeypatch):
+        # The iid chart keeps its original limit when lag correlation is
+        # zero. Widening it here can hide a sustained, meaningful shift.
+        monkeypatch.setattr(brain, "_lag1_autocorr", lambda _values: 0.0)
+        values = [0.01, -0.01] * 5 + [-0.2] * 11
+        first = date(2026, 1, 1)
+        series = [(first + timedelta(days=index), value) for index, value in enumerate(values)]
+
+        signals = brain._detect_mood_shift(series)
+
+        assert len(signals) == 1
+        signal = signals[0]
+        assert signal.kind == "mood_shift"
+        assert signal.detail["direction"] == "lower"
+        assert signal.gate_ok is True
+        assert signal.occurrences >= brain.MOOD_SHIFT_RUN
+
     def test_power_survives_the_deployed_path(self):
         # The estimator's upper branch widens limits, costing power. The
         # K sweep (2026-09-27, seeded, in-tree constants) measured the

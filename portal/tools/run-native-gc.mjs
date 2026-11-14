@@ -16,6 +16,10 @@ export const CASES = Object.freeze({
     receiptEnvironment: { LOCAL_REKEY_TAIL_RETENTION_RECEIPT: 'resource-receipt.json' } },
   'private-key': { package: 'portal', config: 'vitest.private-key-gc.config.ts', testFile:'tests/appPrivateKeyCollection.gc.tsx', minimumBodies: 1,
     receiptEnvironment: { FRONTEND_PORTAL_KEY_COLLECTION_RECEIPT: 'resource-receipt.json' } },
+  'evidence': { package: 'portal', config: 'vitest.evidence-gc.config.ts', testFile:'tests/evidenceCollection.gc.tsx', minimumBodies: 1,
+    receiptEnvironment: { FRONTEND_PORTAL_EVIDENCE_COLLECTION_RECEIPT: 'resource-receipt.json' } },
+  'totp-backup-codes': { package: 'portal', config: 'vitest.totp-gc.config.ts', testFile:'tests/totpBackupCodeCollection.gc.tsx', minimumBodies: 1,
+    receiptEnvironment: { FRONTEND_PORTAL_TOTP_COLLECTION_RECEIPT: 'resource-receipt.json' } },
   'draft-tail': { package: 'portal', config: 'vitest.draft-tail-gc.config.ts', testFile:'tests/draftTailCollection.gc.tsx', minimumBodies: 1,
     receiptEnvironment: { FRONTEND_PORTAL_DRAFT_COLLECTION_RECEIPT: 'resource-receipt.json' } },
 });

@@ -335,3 +335,34 @@ it.each(["sixteenlettersaa", "aaQwerty0123!"])("renders exact password strength 
 it.each([" 123456 ", "xyz123456", "123456!", "ABCDEFGHIJ", "abc1234567"])("preserves bounded authenticator or recovery input %j",async code=>{
  const root=await rootView();await credentials(root);vi.mocked(auth.login).mockRejectedValueOnce(new ApiError(401,"second factor required","totp_required"));await press(root,"Sign in");await flush();await typeInto(root,"Authenticator code (or recovery code)",code);output(root,"second-factor input and verification gate");
 });
+
+
+it("acknowledges an enabled mandatory MFA continuation with complete keys and token without a pending handoff resolver", async () => {
+  const keys = {
+    authKey: new Uint8Array(32).fill(41),
+    wrapKek: new Uint8Array(32).fill(42),
+    noteKey: new Uint8Array(32).fill(43),
+  };
+  provider.derivePortalKeys.mockResolvedValueOnce(keys);
+  vi.mocked(auth.login).mockResolvedValueOnce({ ...token, mfa_enrollment_required: true });
+  const onReady = vi.fn(async (_keys: unknown, _token: unknown, _baseUrl: string) => {});
+  const root = await render(<LoginView onReady={onReady} />);
+  await credentials(root);
+  await press(root, "Sign in");
+  await flush();
+  await typeInto(root, "Authenticator code", "123456");
+  await press(root, "Enable two-factor authentication");
+  await flush();
+  expect(onReady).not.toHaveBeenCalled();
+  await press(root, "I saved the codes — continue");
+  await flush();
+  expect(onReady).toHaveBeenCalledTimes(1);
+  const [receivedKeys, receivedToken, baseUrl] = onReady.mock.calls[0]!;
+  const supplied = receivedKeys as import("../src/views/LoginView").PortalKeys;
+  expect(supplied.username).toBe("drportal");
+  expect(supplied.userId).toBe(token.user_id);
+  expect(supplied.wrapKek).toBe(keys.wrapKek);
+  expect(supplied.noteKey).toBe(keys.noteKey);
+  expect(receivedToken).toEqual({ ...token, mfa_enrollment_required: false });
+  expect(baseUrl).toBe("http://localhost:5173");
+});

@@ -246,6 +246,7 @@ async def test_delete_account_hard_cascades(client, app):
 
     # Other user untouched.
     survivor_entries = await client.get("/api/entries", headers=other.headers)
+    assert survivor_entries.status_code == 200
     assert len(survivor_entries.json()) == 1
 
 

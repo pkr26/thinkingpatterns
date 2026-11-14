@@ -884,12 +884,14 @@ def _compact_audit_journal_unlocked(journal_path: str, cutoff_at: str) -> tuple[
     if evidence_index.corrupt:
         evidence_index.close()
         raise RuntimeError("audit journal contains malformed or unavailable evidence")
-    journal_directory = os.path.dirname(os.path.abspath(journal_path)) or "."
-    descriptor, tmp_path = tempfile.mkstemp(
-        prefix=f".{os.path.basename(journal_path)}.compact-",
-        dir=journal_directory,
-    )
+    descriptor = -1
+    tmp_path = None
     try:
+        journal_directory = os.path.dirname(os.path.abspath(journal_path)) or "."
+        descriptor, tmp_path = tempfile.mkstemp(
+            prefix=".audit.compact-",
+            dir=journal_directory,
+        )
         # Bound the hot lookup cache independently of journal cardinality.
         with closing(sqlite3.connect(evidence_index.path)) as connection, connection:
 
@@ -944,10 +946,11 @@ def _compact_audit_journal_unlocked(journal_path: str, cutoff_at: str) -> tuple[
         evidence_index.close()
         if descriptor >= 0:
             os.close(descriptor)
-        try:
-            os.unlink(tmp_path)
-        except FileNotFoundError:
-            pass
+        if tmp_path is not None:
+            try:
+                os.unlink(tmp_path)
+            except FileNotFoundError:
+                pass
     return kept, dropped
 
 

@@ -19,8 +19,9 @@
  *  - ToastHost: the live region stays mounted when empty.
  *  - Crisis SMS link: `?body=` everywhere except legacy iOS (`&body=`).
  */
-import { act } from "react";
+import { act, useLayoutEffect, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { flushSync } from "react-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CrisisCard, crisisSmsLink, smsBodySeparator } from "../src/crisis";
 import { BarScale, Dialog, DotScale, MoreMenu, MoodScale, SegmentedControl, ToastHost } from "../src/ui";
@@ -469,4 +470,75 @@ describe("crisisSmsLink platform dialect", () => {
     expect(sms).toBeDefined();
     expect(sms!.getAttribute("href")).toBe("sms:741741?body=HOME");
   });
+});
+
+
+describe("SegmentedControl synchronous public callbacks", () => {
+  for (const keepFirst of [false, true]) {
+    it(`safely handles selection when the callback ${keepFirst ? "shrinks" : "removes"} the options`, () => {
+      const options = [{ id: "a", label: "Alpha" }, { id: "b", label: "Beta" }];
+      const selected: string[] = [];
+      const errors: unknown[] = [];
+      const onError = (event: ErrorEvent): void => { errors.push(event.error); event.preventDefault(); };
+      window.addEventListener("error", onError);
+      const select = (id: string): void => {
+        selected.push(id);
+        flushSync(() => root!.render(<SegmentedControl options={keepFirst ? options.slice(0, 1) : []} activeId="a" onSelect={select} a11yLabel="Choice" />));
+      };
+      try {
+        render(<SegmentedControl options={options} activeId="a" onSelect={select} a11yLabel="Choice" />);
+        const first = container!.querySelector('[role="radio"]')!;
+        expect(pressKey(first, "ArrowRight")).toBe(true);
+        expect(selected).toEqual(["b"]);
+        expect(container!.querySelectorAll('[role="radio"]')).toHaveLength(keepFirst ? 1 : 0);
+        expect(errors).toEqual([]);
+      } finally { window.removeEventListener("error", onError); }
+    });
+  }
+});
+
+
+it("does not error when a parent layout effect dispatches a pointer after removing the open menu", () => {
+  const errors: unknown[] = [];
+  const onError = (event: ErrorEvent): void => { errors.push(event.error); event.preventDefault(); };
+  window.addEventListener("error", onError);
+  function Host(): React.JSX.Element {
+    const [show, setShow] = useState(true);
+    useLayoutEffect(() => {
+      if (!show) document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    }, [show]);
+    return <><button onClick={() => setShow(false)}>Remove menu</button>{show && <MoreMenu label="More" items={[{id:"a",label:"Alpha"}]} activeIds={[]} onSelect={() => {}} />}</>;
+  }
+  try {
+    render(<Host />);
+    const buttons = [...container!.querySelectorAll("button")];
+    act(() => buttons.find(button => button.textContent === "More")!.click());
+    expect(container!.querySelector('[role="menu"]')).not.toBeNull();
+    act(() => buttons.find(button => button.textContent === "Remove menu")!.click());
+    expect(container!.querySelector('[role="menu"]')).toBeNull();
+    expect(errors).toEqual([]);
+  } finally { window.removeEventListener("error", onError); }
+});
+
+
+it("does not error when a parent layout effect dispatches Escape after removing the open menu", () => {
+  const errors: unknown[] = [];
+  const onError = (event: ErrorEvent): void => { errors.push(event.error); event.preventDefault(); };
+  window.addEventListener("error", onError);
+  function Host(): React.JSX.Element {
+    const [show, setShow] = useState(true);
+    useLayoutEffect(() => {
+      if (!show) document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    }, [show]);
+    return <><button onClick={() => setShow(false)}>Remove menu</button>{show && <MoreMenu label="More" items={[{id:"a",label:"Alpha"}]} activeIds={[]} onSelect={() => {}} />}</>;
+  }
+  try {
+    render(<Host />);
+    const buttons = [...container!.querySelectorAll("button")];
+    act(() => buttons.find(button => button.textContent === "More")!.click());
+    expect(container!.querySelector('[role="menu"]')).not.toBeNull();
+    act(() => buttons.find(button => button.textContent === "Remove menu")!.click());
+    expect(container!.querySelector('[role="menu"]')).toBeNull();
+    expect(errors).toEqual([]);
+  } finally { window.removeEventListener("error", onError); }
 });

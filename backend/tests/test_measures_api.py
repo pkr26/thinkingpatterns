@@ -160,3 +160,49 @@ async def test_patient_routes_reject_therapist_tokens(client):
         json={"client_measure_id": "m-1", "blob": "QUJD", "measure_date": TODAY.isoformat()},
     )
     assert denied.status_code == 403
+
+
+async def test_measure_metadata_fetches_one_lookahead_row_on_sqlite(client, app):
+    """Bound the metadata query to the requested page plus one row."""
+    import pytest
+    from sqlalchemy import event
+
+    from app.models import Measure
+
+    if app.state.engine.dialect.name != "sqlite":
+        pytest.skip("This SQL-parameter check is specific to SQLite.")
+
+    patient = ClientEmulator("synthetic-measure-lookahead", "synthetic-password")
+    await patient.register(client)
+    async with app.state.sessionmaker() as session:
+        session.add_all(
+            [
+                Measure(
+                    user_id=patient.user_id,
+                    client_measure_id=f"m-{i}",
+                    blob=b"x" * 64,
+                    measure_date=date(2026, 1, 1),
+                )
+                for i in range(3)
+            ]
+        )
+        await session.commit()
+
+    observed = []
+
+    def capture(_conn, _cursor, statement, parameters, _context, _executemany):
+        sql = statement.lower()
+        if "from measures" in sql and "length(" in sql and "order by" in sql:
+            observed.append(tuple(parameters))
+
+    event.listen(app.state.engine.sync_engine, "before_cursor_execute", capture)
+    try:
+        response = await client.get("/api/measures", headers=patient.headers, params={"limit": 1})
+    finally:
+        event.remove(app.state.engine.sync_engine, "before_cursor_execute", capture)
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    assert response.headers["X-Next-Offset"] == "1"
+    assert len(observed) == 1
+    assert observed[0][-2:] == (2, 0)

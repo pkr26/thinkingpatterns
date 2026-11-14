@@ -10,7 +10,7 @@ import { engine } from "./helpers/nodeEngine";
 import storage from "./helpers/storageMock";
 import * as keychain from "./helpers/keychainMock";
 import { runTestControl } from "./helpers/testControl";
-import { __resetLocalKeyLifecycleForTests } from "../src/localWriteGuard";
+import { __resetLocalKeyLifecycleForTests, localWriteScopeEpoch } from "../src/localWriteGuard";
 
 const USER = "a".repeat(32), PASSWORD = "native password proof", SALT = Buffer.alloc(16, 3);
 const MASTER = crypto.pbkdf2Sync(PASSWORD, SALT, 600000, 32, "sha256");
@@ -95,6 +95,25 @@ it.each(["data", "authentication"] as const)("a native proof cannot adopt a chan
   expect(await proof).toEqual({ ok: false, reason: "locked" });
   expect(vault.get().authKey).toBe(replacement.authKey); expect(vault.get().dataKey).toBe(replacement.dataKey);
   expect(vault.get().authKey).toEqual(Buffer.alloc(32, 9));
+});
+
+// Isolate the owner and data-key fences while reusing the vault's public
+// borrowed buffer references. unlock() zeroizes the old buffers; identity,
+// not retained secret bytes, is the important part of this handoff.
+it.each(["owner", "data"] as const)("a pending biometric proof rejects changed %s despite borrowed key identities", async changed => {
+  const pause = gate(); open(false); responseBoundary = async path => { if (path.endsWith("/auth/login")) await pause.run(); };
+  const proof = verifyPasswordForVault(PASSWORD); await vi.waitFor(() => expect(pause.entered()).toBe(true));
+  const old = vault.get(), epoch = localWriteScopeEpoch();
+  vault.unlock({ masterKey: Buffer.alloc(32), authKey: old.authKey, dataKey: changed === "data" ? Buffer.alloc(32, 7) : old.dataKey }, changed === "owner" ? "b".repeat(32) : USER, { authKeyKnown: false });
+  const replacement = vault.get();
+  expect(localWriteScopeEpoch()).toBe(epoch);
+  expect(replacement.authKey).toBe(old.authKey);
+  if (changed === "owner") expect(replacement.dataKey).toBe(old.dataKey);
+  else expect(replacement.dataKey).not.toBe(old.dataKey);
+  pause.release();
+  expect(await proof).toEqual({ ok: false, reason: "locked" });
+  expect(vault.get().authKey).toBe(replacement.authKey);
+  expect(vault.get().dataKey).toBe(replacement.dataKey);
 });
 
 it("a native proof cannot authenticate a different account's vault", async () => {

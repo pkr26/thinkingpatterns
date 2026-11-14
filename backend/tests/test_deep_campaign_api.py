@@ -581,6 +581,7 @@ def test_analysis_uses_server_calendar_and_correct_voice_channel():
         {"created_at": "2026-02-02"},
         {"sleep": 0},
         {"sleep": 6},
+        {"tod": "brunch"},
         {"sentiment": True},
         {"sentiment": float("nan")},
         {"energy": float("inf")},

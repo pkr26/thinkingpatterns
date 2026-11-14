@@ -849,3 +849,396 @@ describe("sharing native dialog and response boundaries", () => {
     expect(lastAlert().slice(0,2)).toEqual(["Couldn’t look up the code",error instanceof RealApiError ? "The server hit a problem — try again in a moment." : "Something went wrong — try again."]); await (await import("../helpers/rtr")).act(async () => root.unmount());
   });
 });
+
+
+it("a pairing lookup settled while hidden permits a fresh lookup after reveal", async () => {
+  const { default: Renderer, act } = await import("react-test-renderer");
+  const { TextInput, TouchableOpacity } = await import("react-native");
+  let resolveLookup!: (value: any) => void;
+  const gate = new Promise<any>(resolve => { resolveLookup = resolve; });
+  const lookupMock = vi.mocked(api.pairingLookup);
+  lookupMock.mockReturnValueOnce(gate).mockResolvedValueOnce({ therapist_id: THERAPIST_ID, display_name: "Dr. Fresh", wrap_pub_key: THERAPIST_PUB });
+  const pending: Promise<void>[] = [];
+  const errors: unknown[] = [];
+  const host = (mode: "visible" | "hidden") => <React.Activity mode={mode}><TherapistShareScreen navigation={nav} /></React.Activity>;
+  let root!: import("react-test-renderer").ReactTestRenderer;
+  const tick = async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); }); };
+  try {
+    await act(async () => { root = Renderer.create(host("visible")); });
+    await tick();
+    const input = root.root.findAllByType(TextInput).find(node => node.props.placeholder === "e.g. 7X2KQM4N");
+    if (!input) throw new Error("SetupError: pairing code input missing");
+    await act(async () => { input.props.onChangeText("7X2KQM4N"); });
+    const findButton = () => root.root.findAllByType(TouchableOpacity).find(node => node.props.accessibilityLabel === "Find my therapist");
+    const start = async () => { const button = findButton(); if (!button) throw new Error("SetupError: Find button missing"); await act(async () => { pending.push(Promise.resolve(button.props.onPress()).then(() => {}, error => { errors.push(error); })); }); };
+    await start();
+    expect(lookupMock).toHaveBeenCalledTimes(1);
+    await act(async () => { root.update(host("hidden")); });
+    await act(async () => { resolveLookup({ therapist_id: THERAPIST_ID, display_name: "Dr. Retired", wrap_pub_key: THERAPIST_PUB }); await pending[0]; });
+    await act(async () => { root.update(host("visible")); });
+    await tick();
+    expect(findButton(), "the lookup action is available after the hidden request settles").toBeTruthy();
+    expect(findButton()?.props.disabled).not.toBe(true);
+    await start();
+    expect(lookupMock).toHaveBeenCalledTimes(2);
+    await act(async () => { await pending[1]; });
+    expect(errors).toEqual([]);
+  } finally {
+    if (root) await act(async () => { root.unmount(); });
+    resolveLookup({ therapist_id: THERAPIST_ID, display_name: "Dr. Retired", wrap_pub_key: THERAPIST_PUB });
+    await act(async () => { await Promise.all(pending); });
+  }
+}, 30_000);
+
+
+it("a retired pairing lookup cannot publish after the screen is revealed", async () => {
+  const { default: Renderer, act } = await import("react-test-renderer");
+  const { TextInput, TouchableOpacity } = await import("react-native");
+  let resolveLookup!: (value: any) => void;
+  const gate = new Promise<any>(resolve => { resolveLookup = resolve; });
+  const lookupMock = vi.mocked(api.pairingLookup);
+  lookupMock.mockReturnValueOnce(gate).mockResolvedValueOnce({ therapist_id: THERAPIST_ID, display_name: "Dr. Fresh", wrap_pub_key: THERAPIST_PUB });
+  const pending: Promise<void>[] = [];
+  const errors: unknown[] = [];
+  const host = (mode: "visible" | "hidden") => <React.Activity mode={mode}><TherapistShareScreen navigation={nav} /></React.Activity>;
+  let root!: import("react-test-renderer").ReactTestRenderer;
+  const tick = async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); }); };
+  try {
+    await act(async () => { root = Renderer.create(host("visible")); });
+    await tick();
+    const input = root.root.findAllByType(TextInput).find(node => node.props.placeholder === "e.g. 7X2KQM4N");
+    if (!input) throw new Error("SetupError: pairing code input missing");
+    await act(async () => { input.props.onChangeText("7X2KQM4N"); });
+    const findButton = () => root.root.findAllByType(TouchableOpacity).find(node => node.props.accessibilityLabel === "Find my therapist");
+    const start = async () => { const button = findButton(); if (!button) throw new Error("SetupError: Find button missing"); await act(async () => { pending.push(Promise.resolve(button.props.onPress()).then(() => {}, error => { errors.push(error); })); }); };
+    await start();
+    expect(lookupMock).toHaveBeenCalledTimes(1);
+    await act(async () => { root.update(host("hidden")); });
+    await act(async () => { root.update(host("visible")); });
+    await tick();
+    expect(lookupMock).toHaveBeenCalledTimes(1);
+    await act(async () => { resolveLookup({ therapist_id: THERAPIST_ID, display_name: "Dr. Retired", wrap_pub_key: THERAPIST_PUB }); await pending[0]; });
+    await tick();
+    expect(JSON.stringify(root.toJSON()), "retired lookup must not publish after reveal").not.toContain("Dr. Retired");
+    expect(findButton()).toBeTruthy();
+    expect(findButton()?.props.disabled).not.toBe(true);
+    await start();
+    expect(lookupMock).toHaveBeenCalledTimes(2);
+    await act(async () => { await pending[1]; });
+    expect(JSON.stringify(root.toJSON())).toContain("Dr. Fresh");
+    expect(errors).toEqual([]);
+  } finally {
+    if (root) await act(async () => { root.unmount(); });
+    resolveLookup({ therapist_id: THERAPIST_ID, display_name: "Dr. Retired", wrap_pub_key: THERAPIST_PUB });
+    await act(async () => { await Promise.all(pending); });
+  }
+}, 30_000);
+
+
+it("a retired password confirmation cannot grant after the screen is revealed", async () => {
+  const { default: Renderer, act } = await import("react-test-renderer");
+  const { TextInput, TouchableOpacity } = await import("react-native");
+  let resolveVerification!: (value: any) => void;
+  const gate = new Promise<any>(resolve => { resolveVerification = resolve; });
+  verifyPasswordForVault.mockReturnValueOnce(gate);
+  const pending: Promise<void>[] = [];
+  const errors: unknown[] = [];
+  const host = (mode: "visible" | "hidden") => <React.Activity mode={mode}><TherapistShareScreen navigation={nav} /></React.Activity>;
+  let root!: import("react-test-renderer").ReactTestRenderer;
+  const tick = async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); }); };
+  const button = (label: string) => { const node = root.root.findAllByType(TouchableOpacity).find(x => x.props.accessibilityLabel === label); if (!node) throw new Error("SetupError: missing button " + label); return node; };
+  const input = (placeholder: string) => { const node = root.root.findAllByType(TextInput).find(x => x.props.placeholder === placeholder); if (!node) throw new Error("SetupError: missing input " + placeholder); return node; };
+  try {
+    await act(async () => { root = Renderer.create(host("visible")); });
+    await tick();
+    await act(async () => { input("e.g. 7X2KQM4N").props.onChangeText("7X2KQM4N"); });
+    await act(async () => { await button("Find my therapist").props.onPress(); });
+    await tick();
+    await act(async () => { button("Share with Dr. Real").props.onPress(); });
+    const options = vi.mocked(Alert.alert).mock.calls.at(-1)?.[2];
+    const match = options?.find(x => x.text === "Fingerprints match — continue");
+    if (!match?.onPress) throw new Error("SetupError: fingerprint confirmation missing");
+    await act(async () => { match.onPress!(); });
+    await act(async () => { input("password").props.onChangeText("correct horse"); });
+    await act(async () => { pending.push(Promise.resolve(button("Confirm with password").props.onPress()).then(() => {}, error => { errors.push(error); })); });
+    expect(verifyPasswordForVault).toHaveBeenCalledTimes(1);
+    await act(async () => { root.update(host("hidden")); });
+    await act(async () => { root.update(host("visible")); });
+    await act(async () => { resolveVerification({ ok: true, verifierB64: authKeyB64() }); await pending[0]; });
+    expect(vi.mocked(api.grantConsent), "retired confirmation must not send a grant").not.toHaveBeenCalled();
+    await tick();
+    await act(async () => { input("password").props.onChangeText("correct horse"); });
+    await act(async () => { pending.push(Promise.resolve(button("Confirm with password").props.onPress()).then(() => {}, error => { errors.push(error); })); await pending[1]; });
+    expect(verifyPasswordForVault).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(api.grantConsent)).toHaveBeenCalledTimes(1);
+    expect(errors).toEqual([]);
+  } finally {
+    if (root) await act(async () => { root.unmount(); });
+    resolveVerification({ ok: true, verifierB64: authKeyB64() });
+    await act(async () => { await Promise.all(pending); });
+  }
+}, 30_000);
+
+
+it("a confirmation settled while hidden clears the password before retry", async () => {
+  const { default: Renderer, act } = await import("react-test-renderer");
+  const { TextInput, TouchableOpacity } = await import("react-native");
+  let resolveVerification!: (value: any) => void;
+  const gate = new Promise<any>(resolve => { resolveVerification = resolve; });
+  verifyPasswordForVault.mockReturnValueOnce(gate);
+  const pending: Promise<void>[] = [];
+  const errors: unknown[] = [];
+  const host = (mode: "visible" | "hidden") => <React.Activity mode={mode}><TherapistShareScreen navigation={nav} /></React.Activity>;
+  let root!: import("react-test-renderer").ReactTestRenderer;
+  const tick = async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); }); };
+  const button = (label: string) => { const node = root.root.findAllByType(TouchableOpacity).find(x => x.props.accessibilityLabel === label); if (!node) throw new Error("SetupError: missing button " + label); return node; };
+  const input = (placeholder: string) => { const node = root.root.findAllByType(TextInput).find(x => x.props.placeholder === placeholder); if (!node) throw new Error("SetupError: missing input " + placeholder); return node; };
+  try {
+    await act(async () => { root = Renderer.create(host("visible")); });
+    await tick();
+    await act(async () => { input("e.g. 7X2KQM4N").props.onChangeText("7X2KQM4N"); });
+    await act(async () => { await button("Find my therapist").props.onPress(); });
+    await tick();
+    await act(async () => { button("Share with Dr. Real").props.onPress(); });
+    const options = vi.mocked(Alert.alert).mock.calls.at(-1)?.[2];
+    const match = options?.find(x => x.text === "Fingerprints match — continue");
+    if (!match?.onPress) throw new Error("SetupError: fingerprint confirmation missing");
+    await act(async () => { match.onPress!(); });
+    await act(async () => { input("password").props.onChangeText("correct horse"); });
+    await act(async () => { pending.push(Promise.resolve(button("Confirm with password").props.onPress()).then(() => {}, error => { errors.push(error); })); });
+    expect(verifyPasswordForVault).toHaveBeenCalledTimes(1);
+    await act(async () => { root.update(host("hidden")); });
+    await act(async () => { resolveVerification({ ok: true, verifierB64: authKeyB64() }); await pending[0]; });
+    await act(async () => { root.update(host("visible")); });
+    await tick();
+    expect(input("password").props.value, "retired password is cleared after reveal").toBe("");
+    expect(vi.mocked(api.grantConsent)).not.toHaveBeenCalled();
+    await act(async () => { input("password").props.onChangeText("correct horse"); });
+    await act(async () => { pending.push(Promise.resolve(button("Confirm with password").props.onPress()).then(() => {}, error => { errors.push(error); })); await pending[1]; });
+    expect(verifyPasswordForVault).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(api.grantConsent)).toHaveBeenCalledTimes(1);
+    expect(errors).toEqual([]);
+  } finally {
+    if (root) await act(async () => { root.unmount(); });
+    resolveVerification({ ok: true, verifierB64: authKeyB64() });
+    await act(async () => { await Promise.all(pending); });
+  }
+}, 30_000);
+
+
+it("a retired metadata response cannot re-enable sharing after a newer disabled response", async () => {
+  const { default: Renderer, act } = await import("react-test-renderer");
+  let resolveOld!: (value: any) => void;
+  let resolveNew!: (value: any) => void;
+  const oldMeta = new Promise<any>(resolve => { resolveOld = resolve; });
+  const newMeta = new Promise<any>(resolve => { resolveNew = resolve; });
+  const metaMock = vi.mocked(api.meta);
+  metaMock.mockReturnValueOnce(oldMeta).mockReturnValueOnce(newMeta);
+  const host = (mode: "visible" | "hidden") => <React.Activity mode={mode}><TherapistShareScreen navigation={nav} /></React.Activity>;
+  let root!: import("react-test-renderer").ReactTestRenderer;
+  const tick = async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); }); };
+  try {
+    await act(async () => { root = Renderer.create(host("visible")); });
+    expect(metaMock).toHaveBeenCalledTimes(1);
+    await act(async () => { root.update(host("hidden")); });
+    await act(async () => { root.update(host("visible")); });
+    expect(metaMock).toHaveBeenCalledTimes(2);
+    await act(async () => { resolveNew({ sharing_available: false }); await newMeta; });
+    await tick();
+    expect(JSON.stringify(root.toJSON())).toContain("Therapist sharing unavailable");
+    await act(async () => { resolveOld({ sharing_available: true }); await oldMeta; });
+    await tick();
+    expect(JSON.stringify(root.toJSON()), "newer disabled sharing must survive retired metadata").toContain("Therapist sharing unavailable");
+    expect(JSON.stringify(root.toJSON())).not.toContain("Add your therapist");
+    expect(vi.mocked(api.listConsents)).not.toHaveBeenCalled();
+  } finally {
+    if (root) await act(async () => { root.unmount(); });
+    resolveOld({ sharing_available: true }); resolveNew({ sharing_available: false });
+    await act(async () => { await Promise.all([oldMeta, newMeta]); });
+  }
+}, 30_000);
+
+
+it("a retired consent list cannot replace the newer view list", async () => {
+  const { default: Renderer, act } = await import("react-test-renderer");
+  let resolveOld!: (value: any) => void;
+  let resolveNew!: (value: any) => void;
+  const oldList = new Promise<any>(resolve => { resolveOld = resolve; });
+  const newList = new Promise<any>(resolve => { resolveNew = resolve; });
+  const listMock = vi.mocked(api.listConsents);
+  listMock.mockReturnValueOnce(oldList).mockReturnValueOnce(newList);
+  vi.mocked(api.meta).mockResolvedValue({ sharing_available: true } as never);
+  const host = (mode: "visible" | "hidden") => <React.Activity mode={mode}><TherapistShareScreen navigation={nav} /></React.Activity>;
+  let root!: import("react-test-renderer").ReactTestRenderer;
+  const tick = async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); }); };
+  try {
+    await act(async () => { root = Renderer.create(host("visible")); });
+    await tick();
+    expect(listMock).toHaveBeenCalledTimes(1);
+    await act(async () => { root.update(host("hidden")); });
+    await act(async () => { root.update(host("visible")); });
+    await tick();
+    expect(listMock).toHaveBeenCalledTimes(2);
+    await act(async () => { resolveNew([{ ...activeConsent, display_name: "Dr. New" }]); await newList; });
+    await tick();
+    expect(JSON.stringify(root.toJSON())).toContain("Dr. New");
+    await act(async () => { resolveOld([{ ...activeConsent, display_name: "Dr. Old" }]); await oldList; });
+    await tick();
+    expect(JSON.stringify(root.toJSON()), "newer consent list must survive retired list").toContain("Dr. New");
+    expect(JSON.stringify(root.toJSON())).not.toContain("Dr. Old");
+  } finally {
+    if (root) await act(async () => { root.unmount(); });
+    resolveOld([]); resolveNew([]);
+    await act(async () => { await Promise.all([oldList, newList]); });
+  }
+}, 30_000);
+
+
+it("a retired metadata completion cannot end a newer loading check", async () => {
+  const { default: Renderer, act } = await import("react-test-renderer");
+  let resolveOld!: (value: any) => void;
+  let resolveNew!: (value: any) => void;
+  const oldMeta = new Promise<any>(resolve => { resolveOld = resolve; });
+  const newMeta = new Promise<any>(resolve => { resolveNew = resolve; });
+  const metaMock = vi.mocked(api.meta);
+  metaMock.mockReturnValueOnce(oldMeta).mockReturnValueOnce(newMeta);
+  const host = (mode: "visible" | "hidden") => <React.Activity mode={mode}><TherapistShareScreen navigation={nav} /></React.Activity>;
+  let root!: import("react-test-renderer").ReactTestRenderer;
+  const tick = async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); }); };
+  try {
+    await act(async () => { root = Renderer.create(host("visible")); });
+    expect(metaMock).toHaveBeenCalledTimes(1);
+    await act(async () => { root.update(host("hidden")); });
+    await act(async () => { root.update(host("visible")); });
+    expect(metaMock).toHaveBeenCalledTimes(2);
+    await act(async () => { resolveOld({ sharing_available: false }); await oldMeta; });
+    await tick();
+    expect(JSON.stringify(root.toJSON()).includes("Can’t reach the server") || JSON.stringify(root.toJSON()).includes("Therapist sharing unavailable"), "older completion must not end new loading").toBe(false);
+    await act(async () => { resolveNew({ sharing_available: true }); await newMeta; });
+    await tick();
+    expect(JSON.stringify(root.toJSON())).toContain("Add your therapist");
+  } finally {
+    if (root) await act(async () => { root.unmount(); });
+    resolveOld({ sharing_available: false }); resolveNew({ sharing_available: true });
+    await act(async () => { await Promise.all([oldMeta, newMeta]); });
+  }
+}, 30_000);
+
+
+it("a retired metadata rejection cannot erase a newer disabled response", async () => {
+  const { default: Renderer, act } = await import("react-test-renderer");
+  let rejectOld!: (value: any) => void;
+  let resolveNew!: (value: any) => void;
+  const oldMeta = new Promise<any>((_resolve, reject) => { rejectOld = reject; });
+  const newMeta = new Promise<any>(resolve => { resolveNew = resolve; });
+  const metaMock = vi.mocked(api.meta);
+  metaMock.mockReturnValueOnce(oldMeta).mockReturnValueOnce(newMeta);
+  const host = (mode: "visible" | "hidden") => <React.Activity mode={mode}><TherapistShareScreen navigation={nav} /></React.Activity>;
+  let root!: import("react-test-renderer").ReactTestRenderer;
+  const tick = async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); }); };
+  try {
+    await act(async () => { root = Renderer.create(host("visible")); });
+    expect(metaMock).toHaveBeenCalledTimes(1);
+    await act(async () => { root.update(host("hidden")); });
+    await act(async () => { root.update(host("visible")); });
+    expect(metaMock).toHaveBeenCalledTimes(2);
+    await act(async () => { resolveNew({ sharing_available: false }); await newMeta; });
+    await tick();
+    expect(JSON.stringify(root.toJSON())).toContain("Therapist sharing unavailable");
+    await act(async () => { rejectOld(new Error("controlled retired meta failure")); await oldMeta.catch(() => {}); });
+    await tick();
+    expect(JSON.stringify(root.toJSON()), "newer disabled sharing must survive retired metadata rejection").toContain("Therapist sharing unavailable");
+    expect(JSON.stringify(root.toJSON())).not.toContain("Add your therapist");
+    expect(vi.mocked(api.listConsents)).not.toHaveBeenCalled();
+  } finally {
+    if (root) await act(async () => { root.unmount(); });
+    rejectOld(new Error("controlled cleanup")); resolveNew({ sharing_available: false });
+    await act(async () => { await Promise.allSettled([oldMeta, newMeta]); });
+  }
+}, 30_000);
+
+
+it("a retired consent rejection cannot erase the newer view list", async () => {
+  const { default: Renderer, act } = await import("react-test-renderer");
+  let rejectOld!: (value: any) => void;
+  let resolveNew!: (value: any) => void;
+  const oldList = new Promise<any>((_resolve, reject) => { rejectOld = reject; });
+  const newList = new Promise<any>(resolve => { resolveNew = resolve; });
+  const listMock = vi.mocked(api.listConsents);
+  listMock.mockReturnValueOnce(oldList).mockReturnValueOnce(newList);
+  vi.mocked(api.meta).mockResolvedValue({ sharing_available: true } as never);
+  const host = (mode: "visible" | "hidden") => <React.Activity mode={mode}><TherapistShareScreen navigation={nav} /></React.Activity>;
+  let root!: import("react-test-renderer").ReactTestRenderer;
+  const tick = async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); }); };
+  try {
+    await act(async () => { root = Renderer.create(host("visible")); });
+    await tick();
+    expect(listMock).toHaveBeenCalledTimes(1);
+    await act(async () => { root.update(host("hidden")); });
+    await act(async () => { root.update(host("visible")); });
+    await tick();
+    expect(listMock).toHaveBeenCalledTimes(2);
+    await act(async () => { resolveNew([{ ...activeConsent, display_name: "Dr. New" }]); await newList; });
+    await tick();
+    expect(JSON.stringify(root.toJSON())).toContain("Dr. New");
+    await act(async () => { rejectOld(new Error("controlled retired list failure")); await oldList.catch(() => {}); });
+    await tick();
+    expect(JSON.stringify(root.toJSON()), "newer consent list must survive retired rejection").toContain("Dr. New");
+    expect(JSON.stringify(root.toJSON())).not.toContain("Dr. Old");
+  } finally {
+    if (root) await act(async () => { root.unmount(); });
+    rejectOld(new Error("controlled cleanup")); resolveNew([]);
+    await act(async () => { await Promise.allSettled([oldList, newList]); });
+  }
+}, 30_000);
+
+
+async function exercisePendingProofAfterVaultChange(kind: "owner" | "key"): Promise<void> {
+  const TestRenderer = await import("react-test-renderer");
+  const { localWriteScopeEpoch } = await import("../../src/localWriteGuard");
+  const proof = { ok: true as const, verifierB64: authKeyB64() };
+  let release!: (value: typeof proof) => void;
+  const delayed = new Promise<typeof proof>(resolve => { release = resolve; });
+  verifyPasswordForVault.mockImplementationOnce(() => delayed);
+  vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 2), dataKey: Buffer.alloc(32, 7) }, "user-1");
+  let root!: Awaited<ReturnType<typeof render>>;
+  let pending: Promise<unknown> | undefined;
+  const settle = async () => { for (let i = 0; i < 3; i++) await TestRenderer.act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); }); };
+  const type = async (placeholder: string, value: string) => { const field = inputByPlaceholder(root, placeholder); await TestRenderer.act(async () => { field.props.onChangeText(value); }); };
+  const press = async (label: string) => { const button = touchableByLabel(root, label); await TestRenderer.act(async () => { await button.props.onPress?.({ nativeEvent: { timestamp: Date.now() }, currentTarget: 1, target: 1 }); }); await settle(); };
+  try {
+    await TestRenderer.act(async () => { root = TestRenderer.create(<TherapistShareScreen navigation={nav} />); });
+    await settle();
+    await type("e.g. 7X2KQM4N", "7X2KQM4N");
+    await press("Find my therapist");
+    await press("Share with Dr. Real");
+    const buttons = lastAlert()[2] ?? [];
+    const accept = buttons.find(button => button.text === "Fingerprints match — continue");
+    expect(accept?.onPress).toBeTypeOf("function");
+    await TestRenderer.act(async () => { accept!.onPress!(); });
+    await settle();
+    await type("password", "correct horse");
+    const confirm = touchableByLabel(root, "Confirm with password");
+    await TestRenderer.act(async () => { pending = confirm.props.onPress?.() as Promise<unknown>; });
+    expect(verifyPasswordForVault).toHaveBeenCalledTimes(1);
+    expect(pending).toBeInstanceOf(Promise);
+    const epoch = localWriteScopeEpoch();
+    const oldKey = vault.get().dataKey;
+    await TestRenderer.act(async () => {
+      const nextKey = kind === "owner" ? oldKey : Buffer.alloc(32, 9);
+      vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 2), dataKey: nextKey }, kind === "owner" ? "user-2" : "user-1");
+    });
+    expect(localWriteScopeEpoch()).toBe(epoch);
+    expect(vault.ownerUserId()).toBe(kind === "owner" ? "user-2" : "user-1");
+    if (kind === "owner") expect(vault.get().dataKey).toBe(oldKey);
+    else expect(vault.get().dataKey).not.toBe(oldKey);
+    await TestRenderer.act(async () => { release(proof); await pending; });
+    expect(api.grantConsent).not.toHaveBeenCalled();
+  } finally {
+    release(proof);
+    await TestRenderer.act(async () => { if (pending) await Promise.allSettled([pending]); if (root) root.unmount(); });
+    vault.lock();
+  }
+}
+it("retired proof cannot grant after the vault owner changes", async () => { await exercisePendingProofAfterVaultChange("owner"); });
+it("retired proof cannot grant after the same-owner data key changes", async () => { await exercisePendingProofAfterVaultChange("key"); });

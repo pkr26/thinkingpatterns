@@ -960,7 +960,10 @@ async def pairing_sas(
     now = utcnow()
     if row is None or row.expires_at <= now or not user.wrap_pub_key:
         raise ApiError(status_code=404, detail="pairing code not found", code="not_found")
-    wrap_pub_der = base64.b64decode(user.wrap_pub_key, validate=True)
+    try:
+        wrap_pub_der = sharing.validate_public_key_b64(user.wrap_pub_key)
+    except sharing.SharingError:
+        raise ApiError(status_code=404, detail="pairing code not found", code="not_found") from None
     return TherapistPairingSasResponse(
         sas=sharing.pairing_sas(code, wrap_pub_der, patient_user_id),
         wrap_key_fingerprint=sharing.wrap_key_fingerprint(wrap_pub_der),

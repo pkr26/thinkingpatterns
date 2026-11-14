@@ -409,6 +409,13 @@ def test_recovered_ewma_tail_is_not_a_current_shift(monkeypatch):
     assert brain._detect_mood_shift(series) == []
     decline = values[:10] + [-0.6] * 11
     assert brain._detect_mood_shift([(START + timedelta(days=i), v) for i, v in enumerate(decline)])
+    moderate_decline = values[:10] + [-0.2] * 11
+    moderate = brain._detect_mood_shift(
+        [(START + timedelta(days=i), v) for i, v in enumerate(moderate_decline)]
+    )
+    assert len(moderate) == 1
+    assert moderate[0].detail["direction"] == "lower"
+    assert moderate[0].gate_ok is True
 
 
 def test_ewma_tail_requires_same_direction_run(monkeypatch):

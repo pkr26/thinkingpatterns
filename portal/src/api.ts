@@ -268,15 +268,21 @@ async function fetchWithTimeout(
           try {
             // Race consumption against abort even for alternate fetch implementations that ignore its signal.
             const value = await new Promise<unknown>((resolve, reject) => {
-              const onAbort = (): void =>
-                reject(
-                  new ApiError(
-                    0,
-                    sessionSignal?.aborted
-                      ? "session ended"
-                      : "request timed out while reading response",
+              const onAbort = (): void => {
+                // An already-settled native body can notify an earlier
+                // observer that signs out synchronously. Its queued result
+                // must reach this consumer before that sign-out's abort.
+                queueMicrotask(() =>
+                  reject(
+                    new ApiError(
+                      0,
+                      sessionSignal?.aborted
+                        ? "session ended"
+                        : "request timed out while reading response",
+                    ),
                   ),
                 );
+              };
               if (controller.signal.aborted) {
                 onAbort();
                 return;
@@ -298,10 +304,6 @@ async function fetchWithTimeout(
           }
         },
       });
-    }
-    if (response.status === 204 || response.body === null) {
-      // Mocks may omit body while still implementing json/text. Native empty bodies need no deadline.
-      if (response instanceof Response && response.body === null) cleanup();
     }
     return response;
   } catch (err) {

@@ -3,7 +3,7 @@
 import ReactTestRenderer, { act } from "react-test-renderer";
 import { createServer, type ServerResponse } from "node:http";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Text } from "react-native";
+import { Text, TouchableOpacity } from "react-native";
 import { SettingsScreen } from "../src/screens/SettingsScreen";
 import { ThemeProvider, themeStorageKey } from "../src/theme";
 import { api, setBaseUrl } from "../src/api/client";
@@ -155,4 +155,16 @@ describe("Settings post-language-read request admission", () => {
       }
     }
   });
+});
+
+// Check the initial public state without requiring a private read to start.
+// This also distinguishes a missing read from a slow/retired fixture producer.
+it("a fresh Settings route shows the encrypted saved language and authenticated recovery status", async () => {
+  await mount();
+  await waitFor("independent original metadata replies", () => INITIAL_ROUTES.every(path => finishedRoutes.has(path)));
+  await flush(); await new Promise<void>(resolve => setImmediate(resolve)); await flush();
+  const english = screen!.root.findAllByType(TouchableOpacity).find(node => node.props.accessibilityLabel === "App language: English");
+  expect(english, "the saved language has a public selectable control").toBeDefined();
+  expect(english!.props.accessibilityState?.selected, "the encrypted saved language is reflected on the first Settings route").toBe(true);
+  await vi.waitFor(() => expect(text()).toContain("Recovery kit active since 2026-10-05."), { timeout: 1000, interval: 5 });
 });

@@ -72,3 +72,58 @@ it("rejects a malformed leading-brace record without waiting for native key cust
     expect(await Promise.race([reading, new Promise<string>(resolve => setTimeout(() => resolve("blocked on native key"), 100))])).toBeNull();
   } finally { release(); await reading; }
 });
+
+it("a late legacy read cannot overwrite a newer secure-store value", async () => {
+  const slot = "legacy-replacement-race";
+  const nonce = Buffer.alloc(12, 4), cipher = createCipheriv("aes-256-gcm", key, nonce);
+  const legacy = Buffer.concat([nonce, cipher.update("old-secret"), cipher.final(), cipher.getAuthTag()]).toString("base64");
+  await Keychain.setGenericPassword("mindpattern-device-key", key.toString("base64"), { service: "com.mindpattern.session-device-key.v1" });
+  await storage.setItem(slot, legacy);
+  const read = storage.getItem.bind(storage);
+  let release!: () => void, entered!: () => void, first = true;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const waiting = new Promise<void>(resolve => { entered = resolve; });
+  vi.spyOn(storage, "getItem").mockImplementation(async name => {
+    const value = await read(name);
+    if (name === slot && first) { first = false; entered(); await gate; }
+    return value;
+  });
+  const oldRead = secureStore.getItem(slot);
+  try {
+    await waiting;
+    await secureStore.setItem(slot, "new-secret");
+    release();
+    expect(await oldRead).toBe("old-secret");
+    expect(await secureStore.getItem(slot)).toBe("new-secret");
+  } finally { release(); await oldRead.catch(() => {}); }
+});
+
+it("strict reads reject structurally invalid envelopes even when their ciphertext is authentic", async () => {
+  const nonce = Buffer.alloc(12, 4);
+  const cipher = createCipheriv("aes-256-gcm", key, nonce);
+  const blob = Buffer.concat([nonce, cipher.update("strict envelope bearer"), cipher.final(), cipher.getAuthTag()]);
+  await Keychain.setGenericPassword("mindpattern-device-key", key.toString("base64"), { service: "com.mindpattern.session-device-key.v1" });
+  for (const record of [{ v: 2, c: blob.toString("base64") }, { v: 1, c: [...blob] }, { v: 1, c: blob.toJSON() }]) {
+    await storage.setItem("@mindpattern/token", JSON.stringify(record));
+    await expect(secureStore.getItemStrict("@mindpattern/token")).rejects.toThrow();
+    expect(await secureStore.getItem("@mindpattern/token")).toBeNull();
+  }
+});
+
+it("strict empty records reject without waiting for unavailable native key custody", async () => {
+  await storage.setItem("@mindpattern/token", "");
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const read = Keychain.getGenericPassword;
+  vi.spyOn(Keychain, "getGenericPassword").mockImplementation(async (...args) => { await held; return read(...args); });
+  const reading = secureStore.getItemStrict("@mindpattern/token").then(() => "resolved", () => "rejected");
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const outcome = await Promise.race([reading, new Promise<string>(resolve => { timer = setTimeout(() => resolve("still pending"), 250); })]);
+    expect(outcome).toBe("rejected");
+  } finally {
+    if (timer) clearTimeout(timer);
+    release();
+    await reading;
+  }
+});

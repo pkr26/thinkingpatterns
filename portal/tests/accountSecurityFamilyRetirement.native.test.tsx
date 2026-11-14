@@ -39,14 +39,19 @@ async function finite<T>(label: string, promise: Promise<T>): Promise<T> {
   finally { if (timer) clearTimeout(timer); }
 }
 
-it.each([["rotation", "live completion"], ["rotation", "retired salt completion"], ["TOTP disable", "live completion"], ["TOTP disable", "retired salt completion"]] as const)("preserves %s security ownership through %s", async (action, scenario) => {
-  // Keep all four original cases; add view retirement with the same API owner.
+// These are the same 28 native protocol schedules previously grouped in four
+// test bodies (including 22 retirement boundaries in the rotation group).
+// Each owns its setup, finite producer deadlines, assertions and cleanup.
+const familyScenarios = [["rotation", "live completion"], ["rotation", "retired salt completion"], ["TOTP disable", "live completion"], ["TOTP disable", "retired salt completion"]] as const;
+const familyCases = familyScenarios.flatMap(([action, scenario]) => {
   const continuations = scenario === "live completion"
-    ? action === "rotation" ? ["original", "recovery", "recovery fallback"] as const : ["original"] as const
+    ? action === "rotation" ? ["original", "recovery", "recovery fallback", "319", "403"] as const : ["original"] as const
     : action === "rotation" ? ["original", "retired rotation salt", "retired recovery salt", "retired recovery KDF", "279", "280", "281", "289", "295", "300", "302", "305", "306", "317", "371", "379", "380", "384", "386", "389", "390", "402"] as const : ["original", "retired view"] as const;
-  for (const continuation of continuations) {
+  return continuations.map(continuation => ({ action, scenario, continuation }));
+});
+it.each(familyCases)("preserves $action security ownership through $scenario at $continuation", async ({ action, scenario, continuation }) => {
   const producerBoundary = /^\d+$/.test(continuation) ? continuation : undefined;
-  const recoveryTargets = ["279", "280", "281", "289", "295", "300", "302", "305", "306", "317"];
+  const recoveryTargets = ["279", "280", "281", "289", "295", "300", "302", "305", "306", "317", "319"];
   const fallback = continuation === "recovery fallback" || producerBoundary === "295";
   const kdfBoundary = continuation === "retired recovery KDF";
   const recovery = continuation === "recovery" || fallback || continuation === "retired recovery salt" || kdfBoundary || !!producerBoundary && recoveryTargets.includes(producerBoundary);
@@ -83,6 +88,8 @@ it.each([["rotation", "live completion"], ["rotation", "retired salt completion"
   let heldResponse: ServerResponse | undefined, root: ReactTestRenderer | undefined, phase = "initial login", origin = "";
   let viewRetired = false, finishing = false, failed = false, submitActOpen = false, boundaryReached = false;
   const retiredBoundary = deferred(), finalRevisionArrived = deferred();
+  const wrapArrived = deferred(), allowWrapCommit = deferred(), wrapCommitted = deferred();
+  let heldWrapResponse: ServerResponse | undefined, activeGrant = true;
   let finalRevisionResponse: ServerResponse | undefined, finalRevisionOriginal: ReturnType<typeof api.noteRevisions> | undefined;
   const admissionEvents: Array<{ kind: string; retired: boolean }> = [];
   let securityPortalKeyCalls = 0, securityProfileCalls = 0, ringOpenCalls = 0, expectedNativeRingFailures = 0, successfulNativeRingDecrypts = 0;
@@ -194,7 +201,7 @@ it.each([["rotation", "live completion"], ["rotation", "retired salt completion"
       if (path === "/api/v1/auth/logout") { logoutRequests += 1; tokens.clear(); return send(response, null, 204); }
       if (!bearer || !tokens.has(bearer.replace(/^Bearer /, ""))) throw setup("protected native request lacks live bearer");
       if (path === "/api/v1/therapist/me") return send(response, { username: USER, display_name: "Dr. Native Retirement", wrap_pub_key: serverPublicKey, wrap_key_blob: envelope, notes_keyring_blob: custodyBlob, custody_version: custodyVersion, totp_enabled: totpEnabled });
-      if (path === "/api/v1/therapist/patients") return send(response, viewBoundary || fallback ? [patient] : []);
+      if (path === "/api/v1/therapist/patients") return send(response, activeGrant && (viewBoundary || fallback) ? [patient] : []);
       if ((viewBoundary || fallback) && path === `/api/v1/therapist/patients/${patientId}/notes`) return send(response, installedRing && !viewRetired ? [note] : []);
       if (installedRing && path === `/api/v1/therapist/notes/${noteId}/revisions`) {
         if ((producerBoundary === "300" || producerBoundary === "384") && !viewRetired) { finalRevisionResponse = response; finalRevisionArrived.resolve(); if (finishing) send(response, []); return; }
@@ -217,7 +224,13 @@ it.each([["rotation", "live completion"], ["rotation", "retired salt completion"
         try {
           const fresh = createPrivateKey({ key: plain, format: "der", type: "pkcs8" });
           if (createPublicKey(fresh).export({ format: "der", type: "spki" }).toString("base64") !== body.wrap_pub_key) throw setup("independent rotated identity does not match public key");
-          serverPublicKey = String(body.wrap_pub_key); envelope = String(body.wrap_key_blob); rotationCommits += 1; if (!recovery) tokens.clear(); return send(response, null, 204);
+          // Match the real route: wrap replacement does not bump token_epoch.
+          // A different identity revokes grants; App teardown retires its bearer.
+          if (producerBoundary === "319" || producerBoundary === "403") { wrapArrived.resolve(); await allowWrapCommit.promise; }
+          serverPublicKey = String(body.wrap_pub_key); envelope = String(body.wrap_key_blob); rotationCommits += 1;
+          if (!recovery) activeGrant = false;
+          if (producerBoundary === "319" || producerBoundary === "403") { heldWrapResponse = response; wrapCommitted.resolve(); if (finishing) send(response, null, 204); return; }
+          return send(response, null, 204);
         } finally { plain.fill(0); }
       }
       if (path === "/api/v1/account/totp/disable") {
@@ -394,7 +407,35 @@ it.each([["rotation", "live completion"], ["rotation", "retired salt completion"
     }
     phase = "security action"; submitActOpen = true;
     try { await press(recovery ? "Recover sharing key" : action === "rotation" ? "Rotate sharing key" : "Disable two-factor"); } finally { submitActOpen = false; }
-    if (scenario === "live completion") {
+    if (producerBoundary === "319" || producerBoundary === "403") {
+      await finite("genuine proof-bearing wrap PUT reached current server", wrapArrived.promise);
+      if (rotationCommits !== 0 || !hasSession()) throw setup("rotation committed before current chart admission");
+      viewRetired = true; phase = "retired action"; await press("Open patterns");
+      await complete("same-session real chart loaded before sharing revocation", () => rendered().includes(patientName) && rendered().includes("Still in the baseline phase") && rendered().includes("No notes yet."));
+      await finite("actual chart notes/measures/insights settle", Promise.all(chartOriginals));
+      if (chartOriginals.length !== 3 || !hasSession() || !tokens.has("owned-retirement-bearer-1")) throw setup("current chart or unchanged original API bearer absent");
+      allowWrapCommit.resolve(); await finite("backend identity replacement committed before ACK release", wrapCommitted.promise);
+      if (Number(rotationCommits) !== 1 || (recovery ? serverPublicKey !== publicKey || !activeGrant : serverPublicKey === publicKey || activeGrant) || !heldWrapResponse || heldWrapResponse.writableEnded) throw setup("independently authenticated committed identity or grant state differs");
+      send(heldWrapResponse, null, 204);
+      await settleSecurityOriginals(); await drain();
+      expect(successfulLogins).toBe(1);
+      expect(rotationCommits).toBe(1); expect(custodyVersion).toBe(1);
+      if (recovery) {
+        expect(serverPublicKey).toBe(publicKey);
+        expect(logoutRequests).toBe(0); expect(hasSession()).toBe(true);
+        await press("Back to patients");
+        await complete("same authenticated account returns to actual caseload", () => rendered().includes("Patients — Dr. Native Retirement") && rendered().includes(patientName));
+        await press("Show account security");
+        await complete("current native account security profile completes", () => rendered().includes("Disable two-factor"));
+        await drain();
+        expect(rendered(), "acknowledged recovery must stop offering the already-completed legacy repair after actual chart navigation").toContain("No interrupted change is remembered for this account");
+        expect(rendered()).not.toContain("An interrupted change from this browser session is repairable right now");
+      } else {
+        expect(serverPublicKey).not.toBe(publicKey);
+        expect(logoutRequests, "acknowledged sharing identity replacement must retire the obsolete active App private key after actual chart navigation").toBe(1);
+        expect(hasSession()).toBe(false); expect(rendered()).toContain("Sign in");
+      }
+    } else if (scenario === "live completion") {
       await complete("authenticated live security action", () => recovery ? rotationCommits === 1 && hasSession() && rendered().includes("Sharing key recovered") : action === "rotation" ? rotationCommits === 1 && !hasSession() && rendered().includes("Every session") : disableCommits === 1 && hasSession() && rendered().includes("Set up authenticator")); await drain();
       await settleSecurityOriginals();
       expect(passwordAdmissions.filter(row => row.phase === "security action").map(row => row.salt)).toEqual(recovery ? [SALT, intendedSalt] : [SALT]);
@@ -463,7 +504,8 @@ it.each([["rotation", "live completion"], ["rotation", "retired salt completion"
     for (const bytes of [...secretArrays, ...saltArrays]) expect(bytes.every(value => value === 0)).toBe(true);
     expect(nativeBodies.length).toBeGreaterThanOrEqual(6); expect(unhandled).toEqual([]); clean();
   } catch (error) { failed = true; originalFailure = error; throw error; } finally {
-    finishing = true;
+    finishing = true; allowWrapCommit.resolve();
+    if (heldWrapResponse && !heldWrapResponse.writableEnded) send(heldWrapResponse, null, 204);
     if (heldResponse && !heldResponse.writableEnded) send(heldResponse, { salt: SALT });
     if (finalRevisionResponse && !finalRevisionResponse.writableEnded) send(finalRevisionResponse, []);
     const cleanupFaults: unknown[] = [];
@@ -485,6 +527,5 @@ it.each([["rotation", "live completion"], ["rotation", "retired salt completion"
       const error = setup("owned cleanup failed", cleanupFailure);
       throw failed ? new AggregateError([originalFailure, error], "original public failure and owned cleanup failure") : error;
     }
-  }
   }
 }, 120000);

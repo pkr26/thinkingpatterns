@@ -429,6 +429,9 @@ async def test_measure_create_duplicate_quota_and_delete_are_owner_scoped(
 
     made = await create(db.owner, "same")
     assert (made.client_measure_id, made.blob, made.measure_date) == ("same", b64(BLOB), TODAY)
+    await db.session.refresh(db.owner)
+    await db.session.refresh(db.other)
+    assert (db.owner.measure_count, db.other.measure_count) == (2000, 0)
     await create(db.other, "same")
     await db.session.refresh(db.owner)
     assert (db.owner.measure_count, db.owner.measures_revision) == (2000, 1)

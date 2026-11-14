@@ -1,6 +1,5 @@
 import { runTestControl } from "../helpers/testControl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import React from "react";
 import { AppState, Alert } from "react-native";
 vi.mock("../../src/api/client", async importOriginal => {
   const actual = await importOriginal<typeof import("../../src/api/client")>();
@@ -36,13 +35,13 @@ const roots: Awaited<ReturnType<typeof renderRaw>>[] = [];
 async function render() { const root = await renderRaw(<EntryScreen navigation={nav} />); roots.push(root); await flush(); return root; }
 async function close(root: Awaited<ReturnType<typeof render>>) { await act(async () => root.unmount()); await waitJournalDraftWrites(); }
 async function background() {
-  await act(async () => { for (const [, cb] of AppState.addEventListener.mock.calls) cb("background"); await waitJournalDraftWrites(); });
+  await act(async () => { for (const [, cb] of vi.mocked(AppState.addEventListener).mock.calls) cb("background"); await waitJournalDraftWrites(); });
   await flush();
 }
 const value = (root: Awaited<ReturnType<typeof render>>) => inputByPlaceholder(root, placeholder).props.value;
 beforeEach(async () => {
   vi.restoreAllMocks(); await waitJournalDraftWrites(); runTestControl(__resetJournalDraftRuntimeForTests); runTestControl(__resetLocalKeyLifecycleForTests);
-  storage.__reset(); resetApi(api as never); AppState.addEventListener.mockClear(); Alert.alert.mockClear();
+  storage.__reset(); resetApi(api as never); vi.mocked(AppState.addEventListener).mockClear(); vi.mocked(Alert.alert).mockClear();
   takeStashedDraft(user); vault.lock(); key = Buffer.alloc(32, 7);
   vault.unlock({ masterKey: Buffer.alloc(32, 1), authKey: Buffer.alloc(32, 2), dataKey: key }, user); scope = await journalDraftScope(user);
 });
@@ -52,14 +51,28 @@ afterEach(async () => {
 });
 describe("EntryScreen persistent typed journal draft", () => {
   it("does not adopt a replacement account while the submit's first owner lookup is suspended", async () => {
-    const root = await render(); await typeInto(root, placeholder, "old account private words");
-    let release!: () => void;
-    vi.mocked(api.getUserId).mockImplementationOnce(async () => { await new Promise<void>(resolve => { release = resolve; }); return "user-2"; });
-    await firePress(root, "Save entry"); await flush(); expect(release).toBeTypeOf("function");
-    changeLocalSessionOwner("user-2");
-    vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 3), dataKey: Buffer.alloc(32, 8) }, "user-2");
-    await act(async () => release()); await flush();
-    expect(api.createEntry).not.toHaveBeenCalled(); expect(value(root)).toBe("old account private words");
+    const root = await render();
+    // Keep the unrelated device backup pending through the approved intermediate surfaces.
+    // On a busy runner its 300 ms debounce and save can otherwise finish before flush().
+    const originalSetItem = storage.setItem;
+    let releaseBackup: (() => void) | undefined;
+    const pendingBackup = vi.spyOn(storage, "setItem").mockImplementation(async (slot, raw) => {
+      if (slot === scope.slot) await new Promise<void>(resolve => { releaseBackup = resolve; });
+      return originalSetItem(slot, raw);
+    });
+    try {
+      await typeInto(root, placeholder, "old account private words");
+      let release!: () => void;
+      vi.mocked(api.getUserId).mockImplementationOnce(async () => { await new Promise<void>(resolve => { release = resolve; }); return "user-2"; });
+      await firePress(root, "Save entry"); await flush(); expect(release).toBeTypeOf("function");
+      changeLocalSessionOwner("user-2");
+      vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 3), dataKey: Buffer.alloc(32, 8) }, "user-2");
+      await act(async () => release()); await flush();
+      expect(api.createEntry).not.toHaveBeenCalled(); expect(value(root)).toBe("old account private words");
+    } finally {
+      pendingBackup.mockRestore();
+      await act(async () => { releaseBackup?.(); await waitJournalDraftWrites(); });
+    }
   });
   it("refuses an old-key producer delayed in draft backup across a completed key-generation transition", async () => {
     installLocalDataKey(user, key);
@@ -161,7 +174,7 @@ describe("EntryScreen persistent typed journal draft", () => {
     await act(async () => release?.()); await flush();
     expect(value(root)).toBe("newer unfinished words during upload");
     expect(touchableByLabel(root, "Light").props.accessibilityState.selected).toBe(true);
-    const call = vi.mocked(api.createEntry).mock.calls[0];
+    const call = vi.mocked(api.createEntry).mock.calls[0]!;
     expect(decryptEntry({ dataKey: key }, user, call[0], call[1], 1)).toMatchObject({ text: "the snapshot that is saved", sentiment: -1 });
     expect((await loadJournalDraft(key, scope))?.draft).toMatchObject({ text: value(root), mood: 1, energy: 1 });
     await close(root); takeStashedDraft(user); runTestControl(__resetJournalDraftRuntimeForTests);

@@ -212,6 +212,50 @@ describe("native local plan completion",()=>{
  });
  it("a held initial restore preserves early typed fields and protects untouched stored fields",async()=>{await saveSafetyPlan(KEY,USER,PLAN);let release!:()=>void;const gate=new Promise<void>(r=>release=r);const get=backend.getItem.bind(backend);let first=true;const before=map.get(SLOT);backend.getItem=async k=>{const value=await get(k);if(k===SLOT&&first){first=false;await gate;}return value;};const root=await render(<SafetyPlanView onCrisis={()=>undefined}/>);await typeArea(root,"My warning signs","early typed warning");await preserveSafetyPlan();expect(map.get(SLOT)).toBe(before);await act(async()=>release());await settle(25,4);expect(warning(root)).toBe("early typed warning");expect(root.root.findAllByType("textarea")[1]!.props.value).toBe(PLAN.coping);await preserveSafetyPlan();expect(await loadSafetyPlan(KEY,USER)).toEqual({...PLAN,warningSigns:"early typed warning"});});
  it("the public retry retires an earlier native restore success",async()=>{await saveSafetyPlan(KEY,USER,PLAN);let release!:()=>void;const gate=new Promise<void>(r=>release=r);let first=true;const get=backend.getItem.bind(backend);backend.getItem=async k=>{const value=await get(k);if(k===SLOT&&first){first=false;await gate;}return value;};const root=await render(<SafetyPlanView onCrisis={()=>undefined}/>);await saveSafetyPlan(KEY,USER,{...PLAN,coping:"latest durable coping"});await press(root,"Retry restoring saved plan");await settle(25,4);expect(warning(root)).toBe(PLAN.warningSigns);await typeArea(root,"My warning signs","newer retry edit");await act(async()=>release());await settle(25,4);expect(warning(root)).toBe("newer retry edit");expect(root.root.findAllByType("textarea")[1]!.props.value).toBe("latest durable coping");expect(textOf(root)).not.toContain("could not");});
+ it("an acknowledged public save cannot reuse the lifetime of an earlier held native restore", async () => {
+  const originalLoad = planStorage.loadSafetyPlan, originalSave = planStorage.saveSafetyPlan;
+  await originalSave(KEY, USER, PLAN);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let first = true;
+  const get = backend.getItem.bind(backend);
+  backend.getItem = async name => {
+   const captured = await get(name);
+   if (name === SLOT && first) { first = false; await gate; }
+   return captured;
+  };
+  const loads: Promise<SafetyPlan | null>[] = [], saves: Promise<void>[] = [];
+  const loadObserver = vi.spyOn(planStorage, "loadSafetyPlan").mockImplementation((...args) => {
+   const original = originalLoad(...args); loads.push(original); void original.catch(() => undefined); return original;
+  });
+  const saveObserver = vi.spyOn(planStorage, "saveSafetyPlan").mockImplementation((...args) => {
+   const original = originalSave(...args); saves.push(original); void original.catch(() => undefined); return original;
+  });
+  let root: Awaited<ReturnType<typeof render>> | undefined;
+  try {
+   root = await render(<SafetyPlanView onCrisis={() => undefined} />);
+   await originalSave(KEY, USER, { ...PLAN, coping: "newer restored coping" });
+   await press(root, "Retry restoring saved plan");
+   await act(async () => { await Promise.all(loads.slice(1)); });
+   await typeArea(root, "My warning signs", "acknowledged current writing");
+   await press(root, "Save my plan");
+   await act(async () => { await Promise.all(saves); });
+   expect(textOf(root)).toContain("Saved — encrypted");
+   const acknowledged = { ...PLAN, warningSigns: "acknowledged current writing", coping: "newer restored coping" };
+   expect(await originalLoad(KEY, USER)).toEqual(acknowledged);
+   // Both full original read/decrypt Promises finish before checking the
+   // renderer. No private generation value or forced callback is exposed.
+   await act(async () => { release(); await Promise.all(loads); });
+   expect(warning(root)).toBe(acknowledged.warningSigns);
+   expect(root.root.findAllByType("textarea")[1]!.props.value).toBe(acknowledged.coping);
+   expect(await originalLoad(KEY, USER)).toEqual(acknowledged);
+  } finally {
+   release();
+   await Promise.allSettled([...loads, ...saves]);
+   if (root) await act(async () => root!.unmount());
+   loadObserver.mockRestore(); saveObserver.mockRestore();
+  }
+ });
  it("the public retry retires an earlier native restore failure",async()=>{let release!:()=>void;const gate=new Promise<void>(r=>release=r);let first=true;const get=backend.getItem.bind(backend);backend.getItem=async k=>{if(k===SLOT&&first){first=false;await gate;throw new Error("old native read failure");}return get(k);};const root=await render(<SafetyPlanView onCrisis={()=>undefined}/>);await press(root,"Retry restoring saved plan");await settle(25,4);await act(async()=>release());await settle(25,4);expect(textOf(root)).not.toContain("Local encrypted records could not be read");await typeArea(root,"My warning signs","new writing");await press(root,"Save my plan");await settle(25,4);expect(textOf(root)).toContain("Saved — encrypted");});
  it("an unhydrated unreadable plan refuses save and stays recoverable",async()=>{map.set(SLOT,"unreadable-recoverable");const root=await ready();expect(textOf(root)).toContain("could not be authenticated");await typeArea(root,"My warning signs","early unsaved");await preserveSafetyPlan();expect(map.get(SLOT)).toBe("unreadable-recoverable");await press(root,"Save my plan");expect(textOf(root)).toContain("Restore the existing encrypted plan");expect(map.get(SLOT)).toBe("unreadable-recoverable");});
  it("the clean flag resets dirty field tracking before a later native restore retry",async()=>{await saveSafetyPlan(KEY,USER,PLAN);let fail=true;const get=backend.getItem.bind(backend);backend.getItem=async k=>{if(k===SLOT&&fail){fail=false;throw new Error("native restore failed");}return get(k);};const root=await ready();await typeArea(root,"My warning signs","early edit");await press(root,"Retry restoring saved plan");await settle(25,4);await press(root,"Save my plan");await settle(25,4);expect((await loadSafetyPlan(KEY,USER))?.warningSigns).toBe("early edit");

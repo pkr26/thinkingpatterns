@@ -323,7 +323,7 @@ describe("Installed safety-plan late publication and discard ownership", () => {
         if (mode === "live") {
           expect(authenticate(saved, "safety-plan")).toBe(NOTE); expect(authenticate(draft, "safety-plan-draft")).toBe(LATER);
           expect(editor()?.props.value).toBe(LATER);
-          expect(words()).toContain(tr("safetyplan.saved")); expect(hasNativeWindow()).toBe(false);
+          expect(words()).not.toContain(tr("safetyplan.saved")); expect(hasNativeWindow()).toBe(false);
         } else { expect(saved).toBeNull(); expect(authenticate(draft, "safety-plan-draft")).toBe(NOTE); }
         authenticated = true;
       } else if (kind === "save ACK refusal") {

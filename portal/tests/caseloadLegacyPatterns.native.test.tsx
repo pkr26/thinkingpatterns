@@ -79,10 +79,11 @@ async function completed(name: string, ready: () => boolean): Promise<void> {
 }
 
 
-type Transport = { server: Server; originals: Promise<Response>[]; retire: () => Promise<void> };
+type Transport = { server: Server; originals: Promise<Response>[]; dispatches: { path: string; method: string }[]; retire: () => Promise<void> };
 let root: ReactTestRenderer | undefined, owned: Transport | undefined;
-async function transport(account: ReturnType<typeof fixture>, witness: Witness, refusedPatient?: string): Promise<Transport> {
-  let origin = "";
+async function transport(account: ReturnType<typeof fixture>, witness: Witness, refusedPatient?: string, firstInsightGate?: { arrived: () => void; completion: Promise<void> }): Promise<Transport> {
+  let origin = "", insightHeld = false;
+  const dispatches: { path: string; method: string }[] = [];
   const server = createServer((request, response) => {
     void (async () => {
       let body = ""; for await (const chunk of request) body += String(chunk);
@@ -109,7 +110,10 @@ async function transport(account: ReturnType<typeof fixture>, witness: Witness, 
           const row = account.rows.find(candidate => path === `/api/v1/therapist/patients/${candidate.patient.user_id}/insights`);
           if (!row) throw new Error(`SetupError: unexpected native HTTP producer ${path}`);
           if (row.patient.user_id === refusedPatient) { status = 403; value = { detail: "Sharing was revoked before this scan" }; }
-          else value = row.insights;
+          else {
+            if (firstInsightGate && !insightHeld) { insightHeld = true; firstInsightGate.arrived(); await firstInsightGate.completion; }
+            value = row.insights;
+          }
         }
       }
       response.once("finish", () => { witness.nativeResponseBodiesCompleted += 1; });
@@ -133,11 +137,11 @@ async function transport(account: ReturnType<typeof fixture>, witness: Witness, 
     const source = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
     if (source.origin !== window.location.origin) throw new Error("SetupError: native fetch wrapper received an unexpected public origin");
     const url = new URL(source.pathname + source.search, origin);
-    const original = nativeFetch(url, init); originals.push(original); witness.nativeFetchPromisesCreated += 1;
+    const original = nativeFetch(url, init); dispatches.push({ path: url.pathname, method: init?.method ?? "GET" }); originals.push(original); witness.nativeFetchPromisesCreated += 1;
     void original.then(() => { witness.nativeFetchPromisesCompleted += 1; }, error => { witness.transportFaults.push(`SetupError: genuine native fetch failure: ${String(error)}`); });
     return original;
   });
-  const current: Transport = { server, originals, retire: async () => {
+  const current: Transport = { server, originals, dispatches, retire: async () => {
     await finite("all native fetch settlement", Promise.allSettled(originals));
     vi.unstubAllGlobals();
     server.closeAllConnections(); await finite("owned native HTTP retirement", new Promise<void>((resolve, reject) => server.close(error => error ? reject(new Error(`SetupError: native HTTP retirement: ${String(error)}`)) : resolve())));
@@ -224,3 +228,40 @@ it.each(["older-authenticated-stats-without-patterns", "authenticated-empty-patt
     vi.restoreAllMocks(); if (current) await current.retire();
   }
 });
+
+it("a pending native scan closes every current public admission and completes once", async () => {
+  const witness: Witness = { requests: [], transportFaults: [], nativeFetchPromisesCreated: 0, nativeFetchPromisesCompleted: 0, nativeResponseBodiesCompleted: 0 };
+  let release!: () => void, arrived!: () => void;
+  const completion = new Promise<void>(resolve => { release = resolve; }), firstArrived = new Promise<void>(resolve => { arrived = resolve; });
+  const decrypts: Promise<unknown>[] = [];
+  const original = cryptography.decryptInsights;
+  const observer = vi.spyOn(cryptography, "decryptInsights").mockImplementation((...args) => { const promise = original(...args); decrypts.push(promise); return promise; });
+  let current: Transport | undefined;
+  try {
+    current = await transport(fixture("authenticated-empty-patterns-positive-control"), witness, undefined, { arrived, completion });
+    root = await render(<App />);
+    await typeInto(root, "Username", USERNAME); await typeInto(root, "Password", PASSWORD); await press(root, "Sign in");
+    await completed("public required MFA", () => root!.root.findAllByType("button").some(button => textOfNode(button) === "Verify code"));
+    await typeInto(root, "Authenticator code (or recovery code)", "123456"); await press(root, "Verify code");
+    await completed("authenticated sensitive summary and scan admission", () => textOf(root!).includes("2 of your patients have sensitive cards") && root!.root.findAllByType("button").some(button => textOfNode(button) === "Scan caseload for triage"));
+    await press(root, "Scan caseload for triage");
+    expect(root.root.findAllByType("button").some(button => textOfNode(button) === "Start the triage scan")).toBe(true);
+    // A second actual main-button press starts the first scan. Once busy,
+    // the enclosing confirmation branch must disappear as well.
+    await press(root, "Scan caseload for triage"); await finite("first authenticated scan HTTP arrival", firstArrived);
+    expect(root.root.findAllByType("button").find(button => textOfNode(button) === "Scanning caseload…")?.props.disabled).toBe(true);
+    const confirmation = root.root.findAllByType("button").find(button => textOfNode(button) === "Start the triage scan");
+    expect(confirmation, "The current confirmation must retire while scanning; no saved handler delivery is a user input").toBeUndefined();
+    expect(current.dispatches.filter(request => request.path.endsWith("/insights")), "One pending public scan must admit only its first genuine native HTTP read; a retained confirmation cannot restart it").toHaveLength(1);
+    release();
+    await completed("genuine scan completion after its held response", () => root!.root.findAllByType("button").some(button => textOfNode(button) === "Scan caseload for triage" && button.props.disabled !== true));
+    await finite("real authenticated decrypt completions", Promise.all(decrypts));
+    expect(current.dispatches.filter(request => request.path.endsWith("/insights"))).toHaveLength(PATIENTS.length);
+    expect(root.root.findAllByType("p").filter(node => textOfNode(node).includes("0 patterns (scanned just now)"))).toHaveLength(PATIENTS.length);
+    expect(textOf(root)).not.toContain("have sensitive cards"); expect(witness.transportFaults).toEqual([]); expect(hasSession()).toBe(true);
+  } finally {
+    release();
+    try { await act(async () => { root?.unmount(); }); root = undefined; await finite("all original native scan decrypts retire", Promise.allSettled(decrypts)); }
+    finally { observer.mockRestore(); clearSession(); if (current) await current.retire(); }
+  }
+}, 30_000);

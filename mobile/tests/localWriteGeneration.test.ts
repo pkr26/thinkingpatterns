@@ -32,7 +32,7 @@ function holdRead(slot: string) {
 }
 beforeEach(() => {
   vi.restoreAllMocks(); vi.unstubAllGlobals(); storage.__reset(); runTestControl(setSecureStoreBackend, null);
-  runTestControl(__resetLocalKeyLifecycleForTests); resetEntryVersionMirrors(); runTestControl(__resetJournalDraftRuntimeForTests);
+  runTestControl(__resetLocalKeyLifecycleForTests); runTestControl(resetEntryVersionMirrors); runTestControl(__resetJournalDraftRuntimeForTests);
   setUnauthorizedHandler(null); setOriginChangeHandler(null);
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); setUnauthorizedHandler(null); });

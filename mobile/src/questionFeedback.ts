@@ -74,6 +74,15 @@ export async function recordFeedbackTap(
   await appendEvent(dataKey, userId, { pid, resonated }, stillCurrent);
 }
 
+/** Track the point beyond which a failed native write has an ambiguous outcome. */
+export function beginFeedbackTap(
+  dataKey: Buffer, userId: string, pid: string, resonated: boolean, stillCurrent?: () => boolean,
+): { result: Promise<void>; status: Readonly<{ dispatched: boolean }> } {
+  const status = { dispatched: false };
+  const result = (async () => { await appendEvent(dataKey, userId, { pid, resonated }, stillCurrent, () => { status.dispatched = true; }); })();
+  return { result, status };
+}
+
 /** Queue a pattern mute (or unmute) for the next recompute. */
 export async function recordPatternMute(
   dataKey: Buffer, userId: string, pid: string, mute: boolean, stillCurrent?: () => boolean,
@@ -81,7 +90,7 @@ export async function recordPatternMute(
   await appendEvent(dataKey, userId, { pid, mute }, stillCurrent);
 }
 
-async function appendEvent(dataKey: Buffer, userId: string, event: FeedbackEvent, stillCurrent?: () => boolean): Promise<void> {
+async function appendEvent(dataKey: Buffer, userId: string, event: FeedbackEvent, stillCurrent?: () => boolean, onWriteDispatched?: () => void): Promise<void> {
   const assertCurrent = () => {
     if (stillCurrent && !stillCurrent()) throw new Error("The feedback view has retired");
   };
@@ -101,6 +110,8 @@ async function appendEvent(dataKey: Buffer, userId: string, event: FeedbackEvent
         const blob = encrypt(keyCopy, plain, buildAad("feedback-local", userId));
         await commitLocalWrite(permit, () => {
           assertCurrent();
+          // After this point a rejection cannot prove the native write did not land.
+          onWriteDispatched?.();
           return AsyncStorage.setItem(key(userId), blob.toString("base64"));
         });
       } finally { zeroize(plain); }

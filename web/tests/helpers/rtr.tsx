@@ -42,6 +42,18 @@ export async function settle(ms = 60, rounds = 4): Promise<void> {
   }
 }
 
+/** Wait for an observable result of real WebCrypto work, pumping React between
+ * checks. The deadline preserves a failure when the result never arrives. */
+export async function waitForResult(ready: () => boolean, description: string, timeoutMs = 20_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (ready()) return;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new Error(`Timed out waiting for ${description}`);
+    await settle(Math.min(100, remaining), 1);
+  }
+}
+
 export async function flush(times = 3): Promise<void> {
   for (let i = 0; i < times; i++) {
     await act(async () => {

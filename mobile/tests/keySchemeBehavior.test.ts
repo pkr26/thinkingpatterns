@@ -80,7 +80,7 @@ it.each(["omitted","null","salt","iterations"])("derives an owned master for a %
 });
 it.each([{...ENVELOPE,scheme:"v1" as const},{...ENVELOPE,kdfParams:null},{...ENVELOPE,wrappedB64:null},{...ENVELOPE,saltB64:Buffer.alloc(7).toString("base64")},{...ENVELOPE,wrappedB64:Buffer.alloc(59).toString("base64")}])("refuses malformed unlock material before derivation %j",async envelope=>{expect(await unwrapSessionDataKey({password:PASSWORD,username:"alice",envelope})).toEqual({ok:false,reason:"bad-envelope"});});
 it.each(["password","username","tag"])("reports an authenticated envelope mismatch for %s",async kind=>{
-  const envelope={...ENVELOPE};if(kind==="tag"){const blob=Buffer.from(envelope.wrappedB64!,"base64");blob[59]^=1;envelope.wrappedB64=blob.toString("base64");}
+  const envelope={...ENVELOPE};if(kind==="tag"){const blob=Buffer.from(envelope.wrappedB64!,"base64");blob[59]=blob[59]!^1;envelope.wrappedB64=blob.toString("base64");}
   expect(await unwrapSessionDataKey({password:kind==="password"?"wrong":PASSWORD,username:kind==="username"?"bob":"alice",envelope})).toEqual({ok:false,reason:"tamper"});
 });
 it.each(["v1","v2"] as const)("retains an origin-bound %s envelope for offline unlock and removes it on request",async scheme=>{

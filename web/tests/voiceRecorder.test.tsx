@@ -259,6 +259,52 @@ describe("useRecorder (voice-audit 2026-09-29)", () => {
     expect(harness.streams[0]!.tracks.every((track) => track.stopped)).toBe(true);
   });
 
+  it("a failed start discards recorder event handlers before releasing the microphone", async () => {
+    const { captured } = await renderProbe();
+    const startSpy = vi.spyOn(MockMediaRecorder.prototype, "start").mockImplementationOnce(() => {
+      throw new Error("start failed");
+    });
+    try {
+      await act(async () => {
+        await captured.current!.start();
+      });
+    } finally {
+      startSpy.mockRestore();
+    }
+    const recorder = MockMediaRecorder.instances[0]!;
+    expect(captured.current!.error).toBe("failed");
+    expect(recorder.onstop).toBeNull();
+    expect(recorder.ondataavailable).toBeNull();
+    expect(harness.streams[0]!.tracks.every((track) => track.stopped)).toBe(true);
+  });
+
+  it("ignores a malformed dataavailable event without adding it to the kept take", async () => {
+    const { captured } = await renderProbe();
+    await act(async () => {
+      await captured.current!.start();
+    });
+    const recorder = MockMediaRecorder.instances[0]!;
+    expect(() => recorder.ondataavailable?.({ data: null as unknown as Blob })).not.toThrow();
+    await act(async () => {
+      captured.current!.stop();
+    });
+    expect(await captured.current!.recording!.blob.text()).toBe("take-bytes");
+  });
+
+  it("a stale stop callback after reset is harmless", async () => {
+    const { captured } = await renderProbe();
+    await act(async () => {
+      await captured.current!.start();
+    });
+    const staleStop = captured.current!.stop;
+    await act(async () => {
+      captured.current!.reset();
+    });
+    expect(() => staleStop()).not.toThrow();
+    expect(captured.current!.state).toBe("idle");
+    expect(captured.current!.recording).toBeNull();
+  });
+
   it("L-6: a stop() that throws still tears the stream down (finalize guard)", async () => {
     const { captured } = await renderProbe();
     await act(async () => {

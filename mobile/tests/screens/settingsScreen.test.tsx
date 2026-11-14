@@ -805,9 +805,9 @@ describe("destructive delete", () => {
     expect(nav.navigate).toHaveBeenCalledWith("Crisis");
   });
 
-  it("Confirm with no typed password is a no-op even if the disabled press leaks through", async () => {
-    // The native button suppresses this press; the guard inside
-    // confirmWithPassword is the second line of defense.
+  it("an empty password keeps Confirm disabled and makes no request", async () => {
+    // The committed empty form exposes a disabled control. A separately
+    // granted native gesture tests the in-handler refusal contract.
     const root = await render(<SettingsScreen navigation={nav} />);
     await flush();
     await pressLabel(root, "Delete my account and data");
@@ -815,8 +815,9 @@ describe("destructive delete", () => {
     await pressAlertButton("Continue to password");
     await flush();
     expect(textOf(root)).toContain("Enter your password to delete everything");
-    // Password field left empty: the Confirm press must not even attempt re-auth.
-    await pressLabel(root, "Confirm with password");
+    // Do not manufacture a new press on a committed disabled control.
+    expect(touchableByLabel(root, "Confirm with password").props.disabled).toBe(true);
+    await flush();
     await flush();
     expect(verifyPasswordForVault).not.toHaveBeenCalled();
     expect(api.deleteAccount).not.toHaveBeenCalled();
@@ -1599,7 +1600,7 @@ describe("recovered entries surface — edge branches", () => {
     );
   });
 
-  it("ignores a second recovery tap while recovery is already busy", async () => {
+  it("a pending recovery keeps its current retry control disabled until receipt", async () => {
     vi.mocked(rejectedEntryCount).mockResolvedValue(1);
     let resolveRequeue: ((v: number) => void) | undefined;
     vi.mocked(requeueRejected).mockImplementation(
@@ -1609,7 +1610,10 @@ describe("recovered entries surface — edge branches", () => {
     await flush();
     const { firePress, act } = await import("../helpers/rtr");
     await firePress(root, "Try syncing them again");
-    await firePress(root, "Try syncing them again");
+    // A new gesture is not admitted by this committed disabled control.
+    // A separate installed already-granted gesture exercises the guard.
+    expect(touchableByLabel(root, "Try syncing them again").props.disabled).toBe(true);
+    await flush();
     expect(requeueRejected).toHaveBeenCalledTimes(1);
     await act(async () => {
       resolveRequeue?.(1);

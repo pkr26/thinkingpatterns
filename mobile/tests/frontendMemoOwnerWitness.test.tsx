@@ -209,7 +209,14 @@ it("a retiring account cannot erase the replacement registration's unseen memo u
   // admitted file write before B's real registration captures that scope.
   await until(() => expect(localWriteScopeEpoch()).toBeGreaterThan(beforeRetirement));
   event("A-retirement-null-owner-scope-observed");
-  await press("New here? Create an account"); await fill("Username", NAME); await fill("Password", PASSWORD); await fill("Confirm password", PASSWORD);
+  await press("New here? Create an account");
+  // The public form may still be verifying its selected server after A retires.
+  // Wait for actual input readiness before delivering B's native typing.
+  await until(() => {
+    const password = root!.root.findAllByType(TextInput).find(node => node.props.accessibilityLabel === "Password");
+    expect(password).toBeDefined(); expect(password!.props.editable).not.toBe(false);
+  });
+  await fill("Username", NAME); await fill("Password", PASSWORD); await fill("Confirm password", PASSWORD);
   await act(async () => root!.root.findByType(Switch).props.onValueChange(true));
   const retiredScope = localWriteScopeEpoch(); phase = "B-register"; await press("Create account");
   await until(() => { expect(registration).toBeDefined(); expect(localWriteScopeEpoch()).toBeGreaterThan(retiredScope); });

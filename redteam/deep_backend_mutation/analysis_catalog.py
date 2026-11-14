@@ -732,16 +732,18 @@ CAMPAIGNS = [
                 "D11-02",
                 "Benign prevention discussion becomes crisis content",
                 "crisis",
-                'text = mask.sub(" ", text)',
-                "text = text",
+                'return "".join(" " if covered[index] else char for index, char in enumerate(text))',
+                "return text",
                 "tests/test_crisis.py::TestDualVariantAndMasking",
             ),
             m(
                 "D11-03",
                 "Partial word splits lose the orphan match channel",
                 "crisis",
-                "if regex.search(variants[i]) or regex.search(variants[i + 1]):",
-                "if regex.search(variants[i]):",
+                "if regex.search(_insert_script_boundaries(variants[i])) or regex.search(\n"
+                "            _insert_script_boundaries(variants[i + 1])\n"
+                "        ):",
+                "if regex.search(_insert_script_boundaries(variants[i])):",
                 "tests/test_deep_campaign_analysis.py::test_partial_crisis_split_still_suppresses_reflective_question",
                 "tests/test_crisis.py::TestDualVariantAndMasking",
             ),

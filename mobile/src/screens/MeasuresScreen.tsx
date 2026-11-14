@@ -225,6 +225,7 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
     if (busy || submitting.current) return;
     const operation = beginOperation();
     if (!operation) return;
+    const submittedEditorGeneration = editorGeneration.current;
     const reusable =
       retryOf ??
       (pendingRef.current !== null &&
@@ -292,7 +293,7 @@ export function MeasuresScreen({ navigation }: { navigation: any }): React.JSX.E
       finishSent = () => {
         pendingRef.current = null;
         setResponses((previous) =>
-          resetAnswers && samePicks(previous, record.picks)
+          resetAnswers && submittedEditorGeneration === editorGeneration.current && samePicks(previous, record.picks)
             ? Array.from({ length: INSTRUMENTS[record.kind].items }, () => null)
             : previous,
         );

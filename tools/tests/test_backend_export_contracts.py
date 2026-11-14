@@ -367,7 +367,7 @@ async def _fixture(monkeypatch, tmp_path, count=1, v2=True):
             if not statement.startswith("SELECT"):
                 return
             queries.append((statement, parameters))
-            for table in ("entries", "measures", "audio_attachments"):
+            for table in ("entries", "measures", "audio_attachments", "consent_events"):
                 if (
                     ("FROM " + table) in statement
                     and "ORDER BY" in statement
@@ -1158,7 +1158,7 @@ def test_small_complete_exports_use_finite_database_pages(monkeypatch, tmp_path)
     asyncio.run(asyncio.wait_for(exercise(), 10))
 
 
-@pytest.mark.parametrize("table", ["entries", "insights"])
+@pytest.mark.parametrize("table", ["entries", "insights", "measures"])
 def test_exact_native_byte_pages_do_not_refetch_stable_ciphertext(
     monkeypatch, tmp_path, table
 ):
@@ -1166,8 +1166,13 @@ def test_exact_native_byte_pages_do_not_refetch_stable_ciphertext(
         async with _fixture(monkeypatch, tmp_path, count=3) as db:
             from sqlalchemy import update
 
-            model = db.models.Entry if table == "entries" else db.models.Insight
-            prefix = "entry" if table == "entries" else "insight"
+            model, prefix = {
+                "entries": (db.models.Entry, "entry"),
+                "insights": (db.models.Insight, "insight"),
+                "measures": (db.models.Measure, "measure"),
+            }[table]
+            for n in range(3):
+                db.blobs.setdefault(prefix + f"{n:04d}", 28)
             opaque = b"c" * (1024 * 1024)
             async with db.maker() as session:
                 for n in range(2):

@@ -759,10 +759,11 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
         Alert.alert(tr("history.loadOlderFailedTitle"), requestFailureCopy(err));
       }
     } finally {
-      if (ownsRead()) {
-        loadingMoreRef.current = false;
-        setLoadingMore(false);
-      }
+      // This operation owns the paging lock until it settles, even if a
+      // same-account credential refresh retired its response. Retiring the
+      // content must not leave the still-mounted screen permanently busy.
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
     }
   };
 
@@ -855,10 +856,10 @@ export function HistoryScreen({ navigation }: { navigation: any }): React.JSX.El
         Alert.alert(tr("history.couldNotDeleteTitle"), requestFailureCopy(err));
       }
     } finally {
-      if (ownsDialog()) {
-        busyRef.current = false;
-        setBusy(false);
-      }
+      // Other edits/deletions cannot acquire this lock while it is held.
+      // Release it on settlement even when the old result stays private.
+      busyRef.current = false;
+      setBusy(false);
     }
   };
 

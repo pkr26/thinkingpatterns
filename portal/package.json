@@ -13,7 +13,8 @@
     "test:mutation": "node tools/run-full-mutation.mjs --file-shards --consumer-shards",
     "test:mutation:full": "node tools/run-full-mutation.mjs --file-shards --consumer-shards",
     "test:gc:private-key": "node tools/run-native-gc.mjs private-key",
-    "test:gc:draft-tail": "node tools/run-native-gc.mjs draft-tail"
+    "test:gc:draft-tail": "node tools/run-native-gc.mjs draft-tail",
+    "test:gc:evidence": "node tools/run-native-gc.mjs evidence"
   },
   "dependencies": {
     "qrcode": "^1.5.4",

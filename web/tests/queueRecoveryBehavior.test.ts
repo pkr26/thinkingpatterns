@@ -38,6 +38,22 @@ it("retains a valid queue during a transient storage read failure and recovers i
   await expect(queueLength()).rejects.toBeInstanceOf(StorageReadError);
   expect(records.get(queue)).toBe(before); expect(records.has(quarantine)).toBe(false); expect(await queueLength()).toBe(1);
 });
+it("retains the rejected drawer and prior loss counts when an eviction counter read fails, then retries", async () => {
+  const { rejected, evictions } = await slots(), rows = Array.from({ length: 201 }, (_, i) => entry(`retained-${i}`));
+  const original = JSON.stringify({ v: 1, items: rows }), prior = JSON.stringify({ rejected: 2, quarantine: 3 });
+  records.set(rejected, original); records.set(evictions, prior); let fail = true;
+  setKvBackendForTests({ getItem: async key => { if (key === evictions && fail) { fail = false; throw new Error("temporary counter read failure"); } return records.get(key) ?? null; }, setItem: async (key, value) => { records.set(key, value); }, removeItem: async key => { records.delete(key); }, keys: async () => [...records.keys()] });
+  await expect(rejectedEntries()).rejects.toBeInstanceOf(StorageReadError);
+  expect(records.get(rejected)).toBe(original); expect(records.get(evictions)).toBe(prior);
+  expect(await rejectedEntries()).toEqual(rows.slice(1));
+  expect(await queueEvictionSummary()).toEqual({ rejected: 3, quarantine: 3 });
+});
+it("reports an unavailable eviction summary without replacing the saved loss counts", async () => {
+  const { evictions } = await slots(), before = JSON.stringify({ rejected: 2, quarantine: 3 }); records.set(evictions, before); let fail = true;
+  setKvBackendForTests({ getItem: async key => { if (key === evictions && fail) { fail = false; throw new Error("temporary device read failure"); } return records.get(key) ?? null; }, setItem: async (key, value) => { records.set(key, value); }, removeItem: async key => { records.delete(key); }, keys: async () => [...records.keys()] });
+  await expect(queueEvictionSummary()).rejects.toBeInstanceOf(StorageReadError); expect(records.get(evictions)).toBe(before);
+  expect(await queueEvictionSummary()).toEqual({ rejected: 2, quarantine: 3 });
+});
 it.each(["null", "42", "true", '"text"', "{}", '{"v":2,"items":[]}', '{"v":1,"items":{}}', '{"v":1,"items":"opaque ciphertext"}'])
   ("parks an unrecognized queue envelope verbatim and repairs its old slot: %s", async raw => {
     const { queue, quarantine } = await slots(); records.set(queue, raw);
@@ -49,6 +65,22 @@ it.each([null, { rejected: 2, quarantine: 3 }, { rejected: "2", quarantine: "3" 
     records.set(rejected, JSON.stringify({ v: 1, items: [entry("oversized", { blobB64: "A".repeat(1_000_001) })] }));
     expect(await rejectedEntries()).toEqual([]); expect(await queueEvictionSummary()).toEqual(prior?.rejected === 2 ? { rejected: 3, quarantine: 3 } : { rejected: 1, quarantine: 0 });
   });
+it("preserves the quarantine drawer when its loss counter cannot be read, then retries once", async () => {
+  const { queue, quarantine, evictions } = await slots();
+  const prior = Array.from({ length: 50 }, (_, i) => `evidence-${i}`);
+  const drawerBefore = JSON.stringify({ v: 1, records: prior });
+  const counterBefore = JSON.stringify({ rejected: 2, quarantine: 3 });
+  const corrupt = "new corrupt ciphertext";
+  records.set(quarantine, drawerBefore); records.set(evictions, counterBefore); records.set(queue, corrupt);
+  let fail = true;
+  setKvBackendForTests({ getItem: async key => { if (key === evictions && fail) { fail = false; throw new Error("temporary counter read failure"); } return records.get(key) ?? null; }, setItem: async (key, value) => { records.set(key, value); }, removeItem: async key => { records.delete(key); }, keys: async () => [...records.keys()] });
+  await expect(queueLength()).rejects.toBeInstanceOf(StorageReadError);
+  expect(records.get(quarantine)).toBe(drawerBefore); expect(records.get(evictions)).toBe(counterBefore); expect(records.get(queue)).toBe(corrupt);
+  expect(await queueLength()).toBe(0);
+  expect(JSON.parse(records.get(quarantine)!).records).toEqual([...prior.slice(1), corrupt]);
+  expect(await queueEvictionSummary()).toEqual({ rejected: 2, quarantine: 4 });
+  expect(records.has(queue)).toBe(false);
+});
 it("keeps exactly fifty evidence records and accepts an exact 250KB evidence drawer", async () => {
   const { queue, quarantine } = await slots(); const prior = Array.from({ length: 49 }, (_, i) => `evidence-${i}`), newest = "new corrupt ciphertext";
   records.set(quarantine, JSON.stringify({ v: 1, records: prior })); records.set(queue, newest); await queueLength();
@@ -228,4 +260,31 @@ it("retains recoverable queue ciphertext when committing its rejection store fai
   vi.spyOn(api, "createEntry").mockRejectedValue(new ApiError(400, "invalid writing"));
   await expect(flushQueue(owner)).rejects.toBeInstanceOf(StorageCommitError);
   expect(records.get(queue)).toBe(before); expect(records.has(rejected)).toBe(false);
+});
+
+it("explains a legacy generation refusal while leaving caller and queued ciphertext recoverable", async () => {
+  const { queue } = await slots(), queueBefore = records.get(queue);
+  const callerOwned = entry("legacy-callback", { blobB64: "caller-retained encrypted writing" });
+  const callerBefore = { ...callerOwned };
+  const markerKey = writeGenerationKey(owner);
+  const marker = await newWriteGeneration(owner, new Uint8Array(32).fill(97));
+  records.set(markerKey, marker);
+  const refusal = await enqueue(callerOwned).then(() => null, (error: unknown) => error);
+  expect(refusal).toBeInstanceOf(StorageCommitError);
+  expect(records.get(queue)).toBe(queueBefore); expect(records.get(markerKey)).toBe(marker);
+  expect(callerOwned).toEqual(callerBefore);
+  const fallback = "Retry saving after unlock", explanation = displayError(refusal, fallback);
+  expect(explanation).not.toBe(fallback);
+  expect(explanation.trim().length).toBeGreaterThan(0);
+  expect(explanation).toMatch(/generation|key|unlock/i);
+});
+
+it("repairs a corrupt loss counter while returning a bounded rejected drawer", async () => {
+  const { rejected, evictions } = await slots();
+  const rows = Array.from({ length: 201 }, (_, i) => entry(`retained-${i}`));
+  records.set(rejected, JSON.stringify({ v: 1, items: rows }));
+  records.set(evictions, "{");
+  await expect(rejectedEntries()).resolves.toEqual(rows.slice(1));
+  expect(JSON.parse(records.get(rejected)!).items).toEqual(rows.slice(1));
+  expect(await queueEvictionSummary()).toEqual({ rejected: 1, quarantine: 0 });
 });

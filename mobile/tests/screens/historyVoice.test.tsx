@@ -106,7 +106,7 @@ beforeEach(() => {
   nav.navigate.mockClear();
   storage.__reset();
   vault.lock();
-  vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey }, "user-1");
+  vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.from(dataKey) }, "user-1");
 });
 
 describe("HistoryScreen.saveEdit preserves v3 voice channels (M4)", () => {
@@ -201,6 +201,49 @@ describe("HistoryScreen.saveEdit preserves v3 voice channels (M4)", () => {
 });
 
 describe("HistoryScreen kept-recording playback failure (audit M1)", () => {
+  it("a mounted recording control does not start playback after the vault locks", async () => {
+    const { blobB64 } = encryptAudio({ dataKey }, "user-1", "e-voice-locked", Buffer.alloc(64, 9));
+    vi.mocked(api.listEntries).mockResolvedValue([
+      {
+        ...voiceRow("e-voice-locked", "Texto de voz", null),
+        audio: { attachment_id: "att-locked", expires_at: "2026-10-29T00:00:00Z" },
+      },
+    ] as never);
+    vi.mocked(api.fetchAudioAttachment).mockResolvedValue({
+      blob: blobB64,
+      mime_type: "audio/m4a",
+      duration_seconds: 4,
+    } as never);
+    const root = await render(<HistoryScreen navigation={nav} />);
+    try {
+      await flush();
+      // The recording control is still mounted while the vault lock event
+      // retires access to the key. A tap must return without reading it.
+      const { touchableByLabel } = await import("../helpers/rtr");
+      expect(touchableByLabel(root, "Play recording")).toBeTruthy();
+      const userLookups = vi.mocked(api.getUserId).mock.calls.length;
+      vault.lock();
+      await flush();
+      expect(vault.isUnlocked()).toBe(false);
+      expect(touchableByLabel(root, "Play recording")).toBeTruthy();
+      await pressLabel(root, "Play recording");
+      expect(api.getUserId).toHaveBeenCalledTimes(userLookups);
+      expect(api.fetchAudioAttachment).not.toHaveBeenCalled();
+      expect(fs.writeAsStringAsync).not.toHaveBeenCalled();
+
+      // The same mounted control must work again after this account unlocks.
+      // A failed locked-key read must not leave preparation stuck busy.
+      vault.unlock({ masterKey: Buffer.alloc(32), authKey: Buffer.alloc(32, 1), dataKey: Buffer.from(dataKey) }, "user-1");
+      await pressLabel(root, "Play recording");
+      await flush();
+      expect(api.fetchAudioAttachment).toHaveBeenCalledTimes(1);
+      const { allText } = await import("../helpers/rtr");
+      expect(allText(root).join(" ")).toContain("Stop playback");
+    } finally {
+      await act(async () => root.unmount());
+    }
+  });
+
   it("a player failure releases the scratch file and clears the ref — the next attempt starts clean", async () => {
     const { blobB64 } = encryptAudio({ dataKey }, "user-1", "e-voice-play", Buffer.alloc(64, 9));
     vi.mocked(api.listEntries).mockResolvedValue([
@@ -228,6 +271,8 @@ describe("HistoryScreen kept-recording playback failure (audit M1)", () => {
     expect(scratch).toContain(".m4a");
     // ...and the failure path DELETED it instead of orphaning it.
     expect(fs.__hasFile(scratch!)).toBe(false);
+    // The failed player's native handle must be released before retry.
+    expect(playerControls.release).toHaveBeenCalledTimes(1);
     // The stale ref is gone: the next tap starts a fresh fetch+play (the
     // button flips to Stop playback), it does not swallow the attempt.
     await pressLabel(root, "Play recording");

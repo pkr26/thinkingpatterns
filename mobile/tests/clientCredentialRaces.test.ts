@@ -312,7 +312,12 @@ it("a retired native file cleanup cannot delete newly published account preferen
   fileSystem.__resetFiles(); const slot = `@mindpattern/reminders_${USER}`, oldValue = JSON.stringify({ enabled: false, hour: 19, minute: 0 }), newValue = JSON.stringify({ enabled: true, hour: 21, minute: 30 });
   await storage.setItem(slot, oldValue); const remove = fileSystem.deleteAsync.getMockImplementation()!; let retired = false;
   vi.spyOn(fileSystem, "deleteAsync").mockImplementation(async (uri, options) => { await remove(uri, options); if (uri === `${fileSystem.documentDirectory}mindpattern-audio/`) { retired = true; changeLocalSessionOwner(USER); await storage.setItem(slot, newValue); } });
-  await expect(setBaseUrl("https://retired-native-inventory-cleanup.example")).rejects.toMatchObject({ code: "stale_operation" }); expect(retired).toBe(true); const { getReminderPrefs } = await import("../src/reminders"); expect(await getReminderPrefs(USER)).toEqual({ enabled: true, hour: 21, minute: 30 }); fileSystem.__resetFiles();
+  try {
+    await expect(setBaseUrl("https://retired-native-inventory-cleanup.example")).rejects.toMatchObject({ code: "stale_operation" }); expect(retired).toBe(true); const { getReminderPrefs } = await import("../src/reminders"); expect(await getReminderPrefs(USER)).toEqual({ enabled: true, hour: 21, minute: 30 });
+  } finally {
+    fileSystem.deleteAsync.mockImplementation(remove);
+    fileSystem.__resetFiles();
+  }
 });
 it.each(["authenticate", "clear", "delete"])("a %s continuation refuses replacement native custody after its drain settles", async operation => {
   await api.setSession("old-token", USER, "alice"); let retired = false; const read = secureStore.getItem, remove = secureStore.removeItem;
@@ -380,4 +385,78 @@ it("reports transition retirement before a mismatched native owner can choose di
   await api.setSession("existing-token", OTHER, "bob"); const read = secureStore.getItem; let retired = false;
   vi.spyOn(secureStore, "getItem").mockImplementation(async slot => { const value = await read(slot); if (slot === OWNER) { retired = true; changeLocalSessionOwner(USER); } return value; });
   await expect(api.retireDeletedSession(USER)).rejects.toMatchObject({ status: 0, code: "stale_operation", message: "A newer account/server transition superseded this operation" }); expect(retired).toBe(true);
+});
+
+it("does not publish an old origin confirmation after a replacement login was admitted during its native lookup", async () => {
+  await setBaseUrl("https://previously-trusted.example");
+  await api.confirmCurrentOrigin();
+  await setBaseUrl("https://pending-confirmation.example");
+  await api.setSession("old-token", USER, "alice");
+  const read = storage.getItem;
+  let replacement: Promise<void> | undefined;
+  let replaced = false;
+  vi.spyOn(storage, "getItem").mockImplementation(async slot => {
+    const value = await read(slot);
+    if (slot === "@mindpattern/base_url" && !replaced) {
+      replaced = true;
+      replacement = api.setSession("replacement-token", OTHER, "bob");
+    }
+    return value;
+  });
+  const confirmation = api.confirmCurrentOrigin().catch((error: unknown) => error);
+  try {
+    await confirmation;
+    if (replacement) await replacement;
+    expect(replaced).toBe(true);
+    expect(await api.pinnedOrigin()).toBe("https://previously-trusted.example");
+    expect(await api.getUserId()).toBe(OTHER);
+  } finally {
+    await confirmation;
+    if (replacement) await replacement;
+  }
+});
+
+it("reports retirement when a replacement login arrives while the native origin pin is committing", async () => {
+  await setBaseUrl("https://confirmation-commit.example");
+  await api.setSession("old-token", USER, "alice");
+  const write = secureStore.setItem;
+  let replacement: Promise<void> | undefined;
+  let replaced = false;
+  vi.spyOn(secureStore, "setItem").mockImplementation(async (slot, value) => {
+    await write(slot, value);
+    if (slot === PIN && !replaced) {
+      replaced = true;
+      replacement = api.setSession("replacement-token", OTHER, "bob");
+    }
+  });
+  const confirmation = api.confirmCurrentOrigin().catch((error: unknown) => error);
+  try {
+    const result = await confirmation;
+    if (replacement) await replacement;
+    expect(replaced).toBe(true);
+    expect(result).toMatchObject({ status: 0, code: "stale_operation" });
+    expect(await api.getUserId()).toBe(OTHER);
+  } finally {
+    await confirmation;
+    if (replacement) await replacement;
+  }
+});
+
+it("retires a queued origin confirmation before accessing unavailable native server preferences", async () => {
+  await api.setSession("old-token", USER, "alice");
+  const read = storage.getItem;
+  const unavailable = new Error("Native server preferences are unavailable");
+  vi.spyOn(storage, "getItem").mockImplementation(slot =>
+    slot === "@mindpattern/base_url" ? Promise.reject(unavailable) : read(slot),
+  );
+  const confirmation = api.confirmCurrentOrigin().catch((error: unknown) => error);
+  const replacement = api.setSession("replacement-token", OTHER, "bob");
+  try {
+    expect(await confirmation).toMatchObject({ status: 0, code: "stale_operation" });
+    await replacement;
+    expect(await api.getUserId()).toBe(OTHER);
+  } finally {
+    await confirmation;
+    await replacement;
+  }
 });

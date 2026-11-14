@@ -8,6 +8,8 @@
     "ios": "react-native run-ios",
     "start": "react-native start",
     "test": "vitest run --coverage",
+    "test:history-paging": "vitest run --config vitest.history-paging-task.config.ts --configLoader runner --coverage.enabled=false",
+    "test:history-playback": "vitest run --config vitest.history-task.config.ts --configLoader runner --coverage.enabled=false",
     "test:watch": "vitest",
     "test:mutation": "node tools/run_frontend_mutation.mjs",
     "verify:vectors": "node tools/verify_vectors.mjs",

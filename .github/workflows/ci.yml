@@ -127,6 +127,16 @@ jobs:
       - name: Mobile tests (global coverage thresholds enforced)
         working-directory: mobile
         run: npm test
+      - name: Mobile history paging admission tests
+        working-directory: mobile
+        env:
+          HISTORY_PAGING_TASK_CACHE: ${{ runner.temp }}/history-paging-cache
+        run: npm run test:history-paging
+      - name: Mobile history playback admission tests
+        working-directory: mobile
+        env:
+          HISTORY_TASK_CACHE_DIR: ${{ runner.temp }}/history-playback-cache
+        run: npm run test:history-playback
       - name: Mobile dependency audit
         working-directory: mobile
         run: npm run audit:dependencies

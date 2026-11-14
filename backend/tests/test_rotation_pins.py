@@ -167,7 +167,7 @@ async def test_recompute_accepts_mixed_aad_generations():
             await emu.create_entry(
                 http,
                 text,
-                date(2026, 9, 1) + timedelta(days=offset),
+                TODAY - timedelta(days=2 - offset),
                 cid,
                 content_version=version,
             )
@@ -193,9 +193,11 @@ async def _seed_rotation_fixture(http: AsyncClient):
     old_key = emu.data_key
     old_auth_b64 = emu.auth_key_b64
 
-    await emu.create_entry(http, "legacy", date(2026, 9, 1), "e-rot-1")
-    await emu.create_entry(http, "modern", date(2026, 9, 2), "e-rot-2", content_version=1)
-    await emu.replace_entry(http, "e-rot-2", "modern edited", date(2026, 9, 2), content_version=2)
+    first_day = TODAY - timedelta(days=2)
+    second_day = TODAY - timedelta(days=1)
+    await emu.create_entry(http, "legacy", first_day, "e-rot-1")
+    await emu.create_entry(http, "modern", second_day, "e-rot-2", content_version=1)
+    await emu.replace_entry(http, "e-rot-2", "modern edited", second_day, content_version=2)
 
     result = await emu.recompute(http)
     assert result["phase"] == "insight"
@@ -211,7 +213,7 @@ async def _seed_rotation_fixture(http: AsyncClient):
         json={
             "client_measure_id": "m-rot-1",
             "blob": base64.b64encode(measure_blob).decode("ascii"),
-            "measure_date": date(2026, 9, 2).isoformat(),
+            "measure_date": second_day.isoformat(),
         },
     )
     assert measure_response.status_code == 201, measure_response.text

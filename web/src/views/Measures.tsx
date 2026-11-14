@@ -182,7 +182,7 @@ export function MeasuresView(props: { onCrisis: () => void }): React.JSX.Element
                 // never render a phq9-scale number — out-of-range rows are
                 // corrupt or hostile and are skipped, never clamped.
                 const ceiling = maxScoreForMeasure(payload.measure);
-                if (ceiling !== null && payload.score >= 0 && payload.score <= ceiling) {
+                if (ceiling !== null && Number.isInteger(payload.score) && payload.score >= 0 && payload.score <= ceiling) {
                   decoded.push({ id: row.id, measureId: payload.measure as MeasureId, score: payload.score, date: row.measure_date });
                 }
               }

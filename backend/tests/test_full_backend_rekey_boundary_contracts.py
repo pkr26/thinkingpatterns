@@ -99,11 +99,23 @@ async def sharing_rows(db, count=1):
 
 
 @pytest.mark.parametrize("count", [100, 101])
-async def test_rekey_native_hundred_live_relationship_boundary_is_exact(rekey_db, count):
+async def test_rekey_native_hundred_live_relationship_boundary_is_exact(
+    rekey_db, count, monkeypatch
+):
     db = rekey_db
     wraps = await sharing_rows(db, count)
     data = body(consent_wraps=wraps[:100])
     if count == 101:
+        entered = []
+        real_hold = insights.sharing_locks.hold
+
+        @asynccontextmanager
+        async def observed_hold(key):
+            entered.append(key)
+            async with real_hold(key) as held:
+                yield held
+
+        monkeypatch.setattr(insights.sharing_locks, "hold", observed_hold)
         with pytest.raises(ApiError) as failure:
             await invoke(db, data)
         envelope(
@@ -112,6 +124,7 @@ async def test_rekey_native_hundred_live_relationship_boundary_is_exact(rekey_db
             "active sharing exceeds the supported rotation size",
             "payload_too_large",
         )
+        assert not entered, "over-cap rekey must refuse before taking sharing locks"
         await db.session.refresh(db.owner)
         assert db.owner.token_epoch == 2 and not db.audit
         assert not list((await db.session.scalars(select(RekeyJournal))).all())
@@ -448,12 +461,65 @@ async def test_rekey_over_capacity_refusal_does_not_queue_on_another_clinicians_
     assert not db.audit
 
 
+async def test_rekey_rechecks_sharing_limit_after_a_concurrent_grant(rekey_db, monkeypatch):
+    db = rekey_db
+    wraps = await sharing_rows(db, 100)
+    clinician = f"{99999:032x}"
+    consent_id = f"{99998:032x}"
+    key = public_key()
+    patient_lock = insights.sharing_patient_lock_key(OWNER)
+    real_hold = insights.sharing_locks.hold
+    granted = False
+
+    @asynccontextmanager
+    async def grant_before_patient_lock(lock_key):
+        nonlocal granted
+        if lock_key == patient_lock and not granted:
+            # A new share can commit after the initial read but before this
+            # rotation acquires the patient-wide sharing lock.
+            async with async_sessionmaker(db.engine, expire_on_commit=False)() as writer:
+                writer.add(account(clinician, role="therapist", wrap_pub_key=key))
+                await writer.flush()
+                writer.add(
+                    Consent(
+                        id=consent_id,
+                        user_id=OWNER,
+                        therapist_id=clinician,
+                        status="active",
+                        disclosure="v3",
+                        ephemeral_pub=key,
+                        wrapped_key=b"old-wrap",
+                        granted_at=NOW,
+                    )
+                )
+                await writer.commit()
+            granted = True
+        async with real_hold(lock_key) as held:
+            yield held
+
+    monkeypatch.setattr(insights.sharing_locks, "hold", grant_before_patient_lock)
+    with pytest.raises(ApiError) as failure:
+        await invoke(db, body(consent_wraps=wraps))
+    assert granted
+    envelope(
+        failure, 413, "active sharing exceeds the supported rotation size", "payload_too_large"
+    )
+    await db.session.refresh(db.owner)
+    assert db.owner.token_epoch == 2 and not db.audit
+    assert not list((await db.session.scalars(select(RekeyJournal))).all())
+    assert (await db.session.get(Consent, consent_id)).wrapped_key == b"old-wrap"
+
+
 async def test_rekey_failed_preflight_releases_its_lifecycle_for_the_next_real_request(rekey_db):
     db = rekey_db
     await sharing_rows(db)
     with pytest.raises(ApiError) as failure:
         await invoke(db)
     envelope(failure, 409, "active sharing changed; rebuild the atomic rotation", "conflict")
+    lifecycle_entry = insights.lifecycle_locks._locks.get(f"llm-lifecycle:{OWNER}")
+    assert lifecycle_entry is None or not lifecycle_entry.lock.locked(), (
+        "failed rekey preflight must release the account lifecycle lock"
+    )
     # Retaining an exception for diagnostics must not retain its API lock.
     minted = await asyncio.wait_for(
         insights.create_processing_session(

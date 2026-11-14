@@ -1,7 +1,6 @@
 /** Root + Native scene-lifecycle module boundary. The device supplies the
  * already committed host's Help gesture and AppState event before passive
  * effects. This does not claim execution of Android/Fabric commit scheduling. */
-import React from "react";
 import ReactTestRenderer,{act} from "react-test-renderer";
 import {beforeEach,afterEach,it,expect,vi} from "vitest";
 import {TouchableOpacity} from "react-native";

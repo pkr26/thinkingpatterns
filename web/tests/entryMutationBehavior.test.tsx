@@ -706,3 +706,21 @@ it("honestly retains an unkept recording receipt when the bounded retry budget e
   for (let i = 0; i < 180 && saved.mock.calls.length === 0; i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); });
   expect(saved).toHaveBeenCalledWith("sent", "2026-10-05"); expect(textOf(root)).toContain(t("entry.voiceAudioNotKept")); expect(api.uploadAudioAttachment).toHaveBeenCalledTimes(3); expect(api.createEntry).toHaveBeenCalledTimes(1);
 });
+
+it("entry public boundary: refreshes the visible streak and queue after same-view owner replacement", async () => {
+  await recordMood(key, owner, "2026-10-05", 0);
+  await enqueue({ userId: owner, clientEntryId: "old-queue-one", blobB64: "old ciphertext one", entryDate: "2026-10-05" });
+  await enqueue({ userId: owner, clientEntryId: "old-queue-two", blobB64: "old ciphertext two", entryDate: "2026-10-05" });
+  const saved = vi.fn(), root = await mount(saved);
+  expect(textOf(root)).toContain(t("common.streakOne", { count: 1 }));
+  expect(textOf(root)).toContain(t("entry.queuedMany", { count: 2 }));
+  const nextOwner = "entry-streak-replacement-owner", nextKey = new Uint8Array(new ArrayBuffer(32)).fill(53);
+  clearSession(); installSession(nextOwner); vault.unlock({ authKey: nextKey.slice(), dataKey: nextKey.slice() }, nextOwner);
+  for (const date of ["2026-10-03", "2026-10-04", "2026-10-05"]) await recordMood(nextKey, nextOwner, date, 0);
+  await enqueue({ userId: nextOwner, clientEntryId: "new-queue-one", blobB64: "new ciphertext one", entryDate: "2026-10-05" });
+  await act(async () => { root.update(<EntryView onSaved={saved} />); });
+  await flush();
+  expect(textOf(root)).toContain(t("common.streakMany", { count: 3 }));
+  expect(textOf(root)).toContain(t("entry.queuedOne", { count: 1 }));
+  expect(textOf(root)).not.toContain(t("entry.queuedMany", { count: 2 }));
+});

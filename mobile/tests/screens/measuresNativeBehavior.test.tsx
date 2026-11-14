@@ -442,3 +442,23 @@ it.each(["online","offline"])("Native %s item-nine support uses its separate sta
   await recordCrisisDialogShown(USER,localDateISO(),"journal");await mount();await complete("phq9",1);if(mode==="offline"){const nativeFetch=globalThis.fetch;vi.stubGlobal("fetch",async(...args:Parameters<typeof fetch>)=>{if(args[1]?.method==="POST")throw new TypeError("Native offline");return nativeFetch(...args);});}
   await press("Record this check-in");await vi.waitFor(()=>expect(Alert.alert).toHaveBeenCalled());expect(await secureStore.getItem(accountStorageKey.crisisItem9(USER))).toBe(localDateISO());expect(await secureStore.getItem(accountStorageKey.crisisJournal(USER))).toBe(localDateISO());inspect();
 });
+
+it("a Native receipt cannot erase a newly restarted questionnaire with the same answers",async()=>{
+  await act(async()=>{ root=ReactTestRenderer.create(<ThemeProvider><MeasuresScreen navigation={navigation}/></ThemeProvider>); });
+  await flush(); await vi.waitFor(()=>expect(words()).toContain("Nothing recorded yet."));
+  const tap=async(label:string)=>{const node=button(label); expect(node.props.disabled).not.toBe(true); await act(async()=>node.props.onPress());};
+  const completeBrief=async()=>{await tap("PHQ-2 (brief, 2 items)"); await tap("Question 1: Not at all"); await tap("Question 2: Not at all");};
+  await completeBrief();
+  const hold=gate(), create=api.createMeasure;
+  vi.spyOn(api,"createMeasure").mockImplementationOnce(async(...args)=>{const value=await create(...args); hold.enter(); await hold.promise; return value;});
+  await tap("Record this check-in"); await vi.waitFor(()=>expect(hold.entered()).toBe(true));
+  await completeBrief();
+  expect(button("Question 1: Not at all").props.accessibilityState.selected).toBe(true);
+  expect(button("Question 2: Not at all").props.accessibilityState.selected).toBe(true);
+  hold.release(); await flush();
+  await vi.waitFor(()=>expect(button("Record this check-in").props.accessibilityState.busy).toBe(false));
+  expect(button("PHQ-2 (brief, 2 items)").props.accessibilityState.selected).toBe(true);
+  expect(button("Question 1: Not at all").props.accessibilityState.selected,"newly restarted first answer survives the previous receipt").toBe(true);
+  expect(button("Question 2: Not at all").props.accessibilityState.selected).toBe(true);
+  expect(button("Record this check-in").props.disabled).toBe(false);
+});

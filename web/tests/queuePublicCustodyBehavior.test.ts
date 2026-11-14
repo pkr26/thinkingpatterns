@@ -159,11 +159,15 @@ it("does not acquire loss-counter storage when its evidence drawer lost no recor
 it("does not acquire loss-counter storage after retirement at an oversized evidence write", async () => {
   const { queue, quarantine, evictions } = await slots(); const raw = "!".repeat(34_000); physical.set(queue, raw);
   let release!: () => void; const receipt = new Promise<void>(resolve => { release = resolve; });
+  const events: string[] = []; let retired = false;
   onDeviceEvent = (event, key) => {
-    if (event === "write" && key === quarantine) abortInFlightFlush();
-    if (event === "read" && key === evictions) return receipt;
+    events.push(`${event}:${key}`);
+    if (event === "write" && key === quarantine) { retired = true; abortInFlightFlush(); }
+    if (event === "read" && key === evictions && retired) return receipt;
   };
   await settlesBeforeUnfinishedDeviceReceipt(queueLength(), release); onDeviceEvent = undefined;
+  expect(events.filter(event => event.endsWith(`:${evictions}`))).toEqual([`read:${evictions}`]);
+  expect(events.indexOf(`read:${evictions}`)).toBeLessThan(events.indexOf(`write:${quarantine}`));
   expect(physical.get(queue)).toBe(raw); expect(physical.has(evictions)).toBe(false);
 });
 it("retains the evidence drawer after retirement at its device read", async () => {
@@ -375,4 +379,151 @@ it("does not report phantom rejected-ciphertext loss after owner retirement at t
   expect(await flushQueue(owner)).toBe(0); onDeviceEvent = undefined;
   expect(physical.get(queue)).toBe(before); expect(await rejectedEntries(owner)).toEqual(old);
   expect(await queueEvictionSummary(owner)).toEqual({ rejected: 0, quarantine: 0 });
+});
+
+it("reads a valid untrimmed rejected drawer when drawer writes are unavailable", async () => {
+  const { rejected } = await slots();
+  const retained = item("retained");
+  const raw = JSON.stringify({ v: 1, items: [retained] });
+  physical.set(rejected, raw);
+  const writes: string[] = [];
+  onDeviceEvent = (kind, key) => {
+    if (key === rejected && (kind === "write" || kind === "remove")) {
+      writes.push(kind);
+      throw new Error("drawer write receipt unavailable");
+    }
+  };
+  await expect(rejectedEntries()).resolves.toEqual([retained]);
+  expect(writes).toEqual([]);
+  expect(physical.get(rejected)).toBe(raw);
+});
+
+it("retains all quarantine evidence when an overflow repair retires at the loss-counter read", async () => {
+  const { queue, quarantine, evictions } = await slots();
+  const earlier = Array.from({ length: 50 }, (_, i) => `retained evidence ${i}`);
+  const drawerBefore = JSON.stringify({ v: 1, records: earlier });
+  const queueBefore = "new corrupt ciphertext", counterBefore = JSON.stringify({ rejected: 2, quarantine: 3 });
+  physical.set(quarantine, drawerBefore); physical.set(queue, queueBefore); physical.set(evictions, counterBefore);
+  const events: string[] = [];
+  onDeviceEvent = (event, key) => {
+    events.push(`${event}:${key}`);
+    if (event === "read" && key === evictions) abortInFlightFlush();
+  };
+  try { expect(await queueLength()).toBe(0); } finally { onDeviceEvent = undefined; }
+  expect(physical.get(quarantine)).toBe(drawerBefore);
+  expect(physical.get(queue)).toBe(queueBefore); expect(physical.get(evictions)).toBe(counterBefore);
+  expect(events.filter(event => event === `read:${evictions}`)).toHaveLength(1);
+  expect(events.filter(event => event.startsWith("write:") || event.startsWith("remove:"))).toEqual([]);
+});
+
+it("retains the rejected ciphertext drawer when a trim retires at its loss-counter read", async () => {
+  const { rejected, evictions } = await slots();
+  const drawerBefore = JSON.stringify({ v: 1, items: Array.from({ length: 201 }, (_, i) => item(`retained-${i}`)) });
+  const counterBefore = JSON.stringify({ rejected: 2, quarantine: 3 });
+  physical.set(rejected, drawerBefore); physical.set(evictions, counterBefore);
+  let retiredAtCounter = false;
+  onDeviceEvent = (event, key) => {
+    if (event === "read" && key === evictions) { retiredAtCounter = true; abortInFlightFlush(); }
+  };
+  try { await rejectedEntries(owner); } finally { onDeviceEvent = undefined; }
+  expect(retiredAtCounter).toBe(true);
+  expect(physical.get(rejected)).toBe(drawerBefore);
+  expect(physical.get(evictions)).toBe(counterBefore);
+});
+it("keeps pending ciphertext after the same owner replaces the drain's captured session", async () => {
+  const { queue } = await slots(), queueBefore = physical.get(queue);
+  let dispatched!: () => void, release!: (response: Response) => void;
+  const sending = new Promise<void>(resolve => { dispatched = resolve; });
+  const receipt = new Promise<Response>(resolve => { release = resolve; });
+  let oldTransportSignal: AbortSignal | undefined;
+  stubFetch((_url, init) => { oldTransportSignal = init.signal ?? undefined; dispatched(); return receipt; });
+  const work = flushQueue(owner);
+  try {
+    await sending;
+    installSession(owner, "replacement-same-owner");
+    expect(oldTransportSignal?.aborted).toBe(true);
+  } finally {
+    release(jsonResponse({ id: "old-response" }, { status: 201 }));
+    await work.catch(() => undefined);
+  }
+  expect(physical.get(queue)).toBe(queueBefore);
+  expect(await work).toBe(0);
+});
+
+it("admits no duplicate HTTP read after a pending conflict retires its queue generation", async () => {
+  const { queue } = await slots(), before = physical.get(queue);
+  const methods: string[] = [];
+  let markPostStarted!: () => void;
+  const postStarted = new Promise<void>(resolve => { markPostStarted = resolve; });
+  let finishPost!: (response: Response) => void;
+  const postResponse = new Promise<Response>(resolve => { finishPost = resolve; });
+  vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const method = init?.method ?? "GET";
+    methods.push(method);
+    if (method === "POST") { markPostStarted(); return postResponse; }
+    return new Response(JSON.stringify({ detail: "entry absent" }), { status: 404 });
+  });
+  const drain = flushQueue(owner);
+  try {
+    await postStarted;
+    abortInFlightFlush();
+    finishPost(new Response(JSON.stringify({ detail: "conflict" }), { status: 409 }));
+    await expect(drain).resolves.toBe(0);
+    expect(physical.get(queue)).toBe(before);
+    expect(methods).toEqual(["POST"]);
+  } finally {
+    finishPost(new Response("{}", { status: 409 }));
+    await drain.catch(() => undefined);
+  }
+});
+
+
+it("retains writing when a loaded v1 document commits before the current document can enter its queue lock", async () => {
+  const { queue } = await slots();
+  const held = new Set<string>(), waiting = new Map<string, Array<() => void>>();
+  let observeRequest: ((admitted: boolean) => void) | undefined;
+  const locks = { request<T>(name: string, run: () => Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const release = () => { held.delete(name); waiting.get(name)?.shift()?.(); };
+      const enter = () => {
+        held.add(name);
+        Promise.resolve().then(run).then(value => { release(); resolve(value); }, error => { release(); reject(error); });
+      };
+      const admitted = !held.has(name), notify = observeRequest; observeRequest = undefined;
+      if (admitted) enter();
+      else { const peers = waiting.get(name) ?? []; peers.push(enter); waiting.set(name, peers); }
+      notify?.(admitted);
+    });
+  } };
+  vi.stubGlobal("navigator", { locks });
+  let allowOldCommit!: () => void, oldRead!: () => void;
+  const oldCommitReceipt = new Promise<void>(resolve => { allowOldCommit = resolve; });
+  const oldReadReceipt = new Promise<void>(resolve => { oldRead = resolve; });
+  // A loaded v1 document shares this origin/account/device slot but owns
+  // its own in-document mutex. Its acknowledged read/modify/write follows
+  // the shipped queue-flush protocol and v1 serialized-items envelope.
+  const oldDocument = locks.request("queue-flush", async () => {
+    const snapshot = JSON.parse(physical.get(queue)!) as { v: number; items: QueuedEntry[] };
+    oldRead(); await oldCommitReceipt;
+    physical.set(queue, JSON.stringify({ v: 1, items: [...snapshot.items, item("old-document")] }));
+  });
+  let localDocument: Promise<void> | undefined;
+  try {
+    await oldReadReceipt;
+    const decision = new Promise<boolean>(resolve => { observeRequest = resolve; });
+    localDocument = enqueue(item("current-document"));
+    // The arbiter's external admission decision selects a legal schedule:
+    // a different lock may finish its write before the old snapshot commits;
+    // a queued same-name request must wait for that old commit first.
+    const admitted = await Promise.race([decision, localDocument.then(() => { throw new Error("lock admission was not observed"); })]);
+    if (admitted) await localDocument;
+    allowOldCommit();
+    await Promise.all([oldDocument, localDocument]);
+    expect(await queueLength()).toBe(3);
+    const saved = JSON.parse(physical.get(queue)!) as { items: QueuedEntry[] };
+    expect(saved.items.map(row => row.clientEntryId).sort()).toEqual(["seed", "old-document", "current-document"].sort());
+  } finally {
+    allowOldCommit();
+    await Promise.allSettled([oldDocument, ...(localDocument ? [localDocument] : [])]);
+  }
 });

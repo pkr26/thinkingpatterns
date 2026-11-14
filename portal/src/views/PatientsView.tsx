@@ -375,7 +375,9 @@ export function PatientsView(props: {
         // Identical operation IDs/payloads make lost-response retries safe;
         // backend commits credential/privatewrap/custody/epoch together.
         for (let attempt = 0; ; attempt += 1) {
-          try { requireSecurityCurrent(current); await api.changePasswordAtomic(payload); requireSecurityCurrent(current); break; }
+          // An acknowledged credential commit ends this bearer epoch even if
+          // navigation retired its form. The API rejects a replaced session.
+          try { requireSecurityCurrent(current); await api.changePasswordAtomic(payload); break; }
           catch (err) { if (attempt >= 3 || !(err instanceof ApiError) || (err.status !== 0 && err.status < 500)) throw err; }
         }
       } finally { identityKey.fill(0); wipeNotesKeyring(ring); }
@@ -457,7 +459,7 @@ export function PatientsView(props: {
         const resealedBlob = await sealPrivateKeyForUpload(currentKeys.wrapKek, pkcs8, username);
         requireSecurityCurrent(current);
         await api.rotateWrapKey(verifierB64, me.wrap_pub_key, resealedBlob, version + 1);
-        requireSecurityCurrent(current);
+        // Successful recovery clears its obsolete checkpoint even after navigation.
       } finally { identityKey.fill(0); wipeNotesKeyring(ring); }
       setInterruptedSaltB64(null);
       if (props.session) sessionStore.removePrefix(interruptedSaltKey(props.session.userId));
@@ -526,7 +528,7 @@ export function PatientsView(props: {
         const pair = await generateTherapistKeyPair(currentKeys.wrapKek, username);
         requireSecurityCurrent(current);
         await api.rotateWrapKey(verifierB64, pair.publicKeySpkiB64, pair.wrapKeyBlobB64, version);
-        requireSecurityCurrent(current);
+        // Acknowledged identity replacement retires this App's keys even after navigation.
         setSecNotice("Sharing identity rotated. Existing patient grants were revoked. Sign in again. Each patient must verify the new pairing fingerprint and share again; historical notes remain readable through independent encrypted custody.");
         if (props.onSessionsEnded) props.onSessionsEnded(); else props.onSignOut();
       } finally { privateBytes.fill(0); identityKey?.fill(0); wipeNotesKeyring(ring); }

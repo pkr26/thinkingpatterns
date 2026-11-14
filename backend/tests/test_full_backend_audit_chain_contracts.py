@@ -1413,3 +1413,32 @@ async def test_locked_operations_refresh_state_cached_before_another_commit(oper
             ) == _audit.IncrementalChainVerification(True, False, 3, None)
             assert state.head_seq == 4 and cursor.verification_snapshot_head_seq == 4
             assert cursor.verification_next_seq == 4
+
+
+async def test_failed_incremental_resume_keeps_canonical_checkpoint_fields():
+    """A failed resumed page must not leave null or stale cursor metadata."""
+    async with seeded_chain() as (session, rows, _state):
+        cursor = AuditSweepCursor(
+            id=1,
+            verification_owner_id=OWNER,
+            verification_snapshot_head_seq=3,
+            verification_snapshot_head_hash=rows[-1].entry_hash,
+            verification_next_seq=0,
+            verification_previous_hash="e" * 64,
+            verification_rows_checked=99,
+        )
+        _audit.seal_verification_checkpoint(cursor, {7: KEY}, 7)
+        await session.delete(rows[0])
+        result = await _audit.verify_access_log_chain_incremental(
+            session,
+            cursor,
+            OWNER,
+            mac_keys={7: KEY},
+            current_mac_key_version=7,
+            row_budget=1,
+        )
+        assert result == _audit.IncrementalChainVerification(
+            False, False, 0, "chain_seq gap before 2"
+        )
+        assert cursor.verification_next_seq == 1
+        assert cursor.verification_rows_checked == 0

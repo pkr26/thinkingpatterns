@@ -52,7 +52,7 @@ afterEach(() => { resetTestState(); vi.restoreAllMocks(); vi.unstubAllGlobals();
 
 it("investigates real protected-envelope return windows across finite native response delivery orders", async () => {
   vi.useRealTimers();
-  const witness: { observedWindows: number } = { observedWindows: 0 };
+  const witness: { observedWindows: number; preventedAdmissions: number } = { observedWindows: 0, preventedAdmissions: 0 };
   const check = (action: () => void) => { { action();  } };
   const fixture = await derivePatientKeys(await deriveMasterKey(PASSWORD, fromBase64(SALT)));
   const oldKey = new Uint8Array(new ArrayBuffer(32)).fill(31);
@@ -97,7 +97,21 @@ it("investigates real protected-envelope return windows across finite native res
         root = await render(<App />);
         await completion("actual boot", () => buttonByLabel(root!, "Sign in"));
         await typeInto(root, "Username", "synthetic_window_a"); await typeInto(root, "Password", PASSWORD); await submit(root);
-        await completion("first actual App awaits protected native stream and public Login is enabled", () => firstRequests === 1 && envelopeRequests === 1 && buttonByLabel(root!, "Sign in") && !isDisabled(root!, "Sign in"));
+        await completion("first App awaits protected envelope", () => firstRequests === 1 && envelopeRequests === 1 && (buttonByLabel(root!, "Working…") || buttonByLabel(root!, "Sign in")));
+        if (buttonByLabel(root!, "Working…")) {
+          expect(isDisabled(root!, "Working…")).toBe(true);
+          await act(async () => { root!.root.findByType("form").props.onSubmit({ preventDefault() {} }); });
+          await flush();
+          expect(secondRequests).toBe(0);
+          expect(sessionUserId()).toBe(A);
+          expect(vault.ownerUserId()).toBe(A);
+          expect(await kv.getItem(`mindpattern.localRotation.${A}`)).toBe(originalCheckpoint);
+          witness.preventedAdmissions += 1;
+          envelope.deliver(); onboarding.release();
+          await act(async () => { await nativeCompletion("protected adoption completion", withLock("account-transition", async () => undefined)); });
+          continue;
+        }
+        expect(isDisabled(root!, "Sign in")).toBe(false);
         await typeInto(root, "Username", "synthetic_window_b"); await submit(root);
         await completion("second actual Login reaches its native response stream", () => secondRequests === 1);
         await act(async () => {
@@ -133,7 +147,7 @@ it("investigates real protected-envelope return windows across finite native res
         observer.mockRestore();
       }
     }
-    if (witness.observedWindows === 0) {
+    if (witness.observedWindows + witness.preventedAdmissions === 0) {
       throw new Error("ExecutionError: producer completion timed out: no protected-result window was observed within sixteen finite native delivery schedules");
     }
 
@@ -144,3 +158,44 @@ it("investigates real protected-envelope return windows across finite native res
 
   }
 });
+
+it("a real expiry retires a held protected envelope before the successor signs in", async () => {
+  vi.useRealTimers(); resetTestState(); applyLanguagePref("en"); await loadFullCatalogs("en");
+  const fixture = await derivePatientKeys(await deriveMasterKey(PASSWORD, fromBase64(SALT)));
+  const oldKey = new Uint8Array(new ArrayBuffer(32)).fill(31);
+  const backend = memoryKvBackend(); setKvBackendForTests(backend);
+  await stageLocalRotation(A, oldKey, fixture.dataKey, { operation_id: "11223344556677889900aabbccddeeff", new_salt: SALT, new_verifier: toBase64(fixture.authKey) });
+  const checkpoint = await kv.getItem(`mindpattern.localRotation.${A}`);
+  const envelope = streamed({ key_scheme: "v1", salt: SALT, kdf_params: null, wrapped_data_key: null });
+  const outcomes: string[] = []; const nativeEnvelope = api.keyEnvelope;
+  const observer = vi.spyOn(api, "keyEnvelope").mockImplementation(() => {
+    const result = nativeEnvelope(); void result.then(() => outcomes.push("fulfilled"), () => outcomes.push("rejected")); return result;
+  });
+  let envelopeRequests = 0;
+  stubFetch((url, init) => {
+    if (url.endsWith("/auth/salt")) return jsonResponse({ salt: SALT });
+    if (url.endsWith("/auth/login")) { const data = JSON.parse(String(init.body)); const owner = data.username === "expiry_a" ? A : B; return jsonResponse({ token: owner === A ? "expiry-a" : "expiry-b", user_id: owner, expires_in: 86400, role: "user", key_scheme: "v1" }); }
+    if (url.endsWith("/auth/key-envelope")) { envelopeRequests++; return envelope.response; }
+    if (url.endsWith("/meta")) return jsonResponse({ code: "unauthorized" }, { status: 401 });
+    return jsonResponse({ code: "not_found" }, { status: 404 });
+  });
+  let root: ReactTestRenderer | undefined;
+  try {
+    root = await render(<App />); await completion("expiry control Login", () => buttonByLabel(root!, "Sign in"));
+    await typeInto(root, "Username", "expiry_a"); await typeInto(root, "Password", PASSWORD); await submit(root);
+    await completion("protected envelope held for A", () => envelopeRequests === 1 && buttonByLabel(root!, "Working…"));
+    await act(async () => { await api.meta().catch(() => undefined); });
+    await completion("retired A envelope settles and Login returns", () => outcomes.length === 1 && buttonByLabel(root!, "Sign in") && !isDisabled(root!, "Sign in"));
+    expect(outcomes).toEqual(["rejected"]); expect(await kv.getItem(`mindpattern.localRotation.${A}`)).toBe(checkpoint);
+    await typeInto(root, "Username", "expiry_b"); await typeInto(root, "Password", PASSWORD); await submit(root);
+    await completion("B owns session", () => sessionUserId() === B && vault.ownerUserId() === B);
+    envelope.deliver();
+    await act(async () => { await nativeCompletion("successor App adoption", withLock("account-transition", async () => undefined)); });
+    expect(sessionUserId()).toBe(B); expect(vault.ownerUserId()).toBe(B);
+    expect(await kv.getItem(`mindpattern.localRotation.${A}`)).toBe(checkpoint);
+  } finally {
+    envelope.deliver(); if (root) await act(async () => root!.unmount());
+    await nativeCompletion("expiry control cleanup", withLock("account-transition", async () => undefined));
+    observer.mockRestore(); zeroize(oldKey, fixture.masterKey, fixture.authKey, fixture.dataKey);
+  }
+}, 30000);

@@ -79,13 +79,16 @@ async def test_clinician_password_is_one_atomic_custody_transaction(client, app)
     assert (
         await client.put("/api/therapist/password", headers=old_headers, json=transaction)
     ).status_code == 204
-    assert (
-        await client.put(
-            "/api/therapist/password",
-            headers=old_headers,
-            json={**transaction, "notes_keyring_blob": installed},
-        )
-    ).status_code == 409
+    conflict = await client.put(
+        "/api/therapist/password",
+        headers=old_headers,
+        json={**transaction, "notes_keyring_blob": installed},
+    )
+    assert conflict.status_code == 409
+    assert conflict.json() == {
+        "detail": "operation identifier already used",
+        "code": "conflict",
+    }
     assert (await client.get("/api/therapist/me", headers=old_headers)).status_code == 401
     assert (
         await client.post(

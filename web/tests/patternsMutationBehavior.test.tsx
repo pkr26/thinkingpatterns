@@ -2,17 +2,19 @@ import { act, useState } from "react";
 import { IDBFactory, IDBObjectStore } from "fake-indexeddb";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { PatternsView, type PatternPayload } from "../src/views/Patterns";
-import { api, sessionAbortSignal, setSessionExpiredHandler } from "../src/api/client";
+import { api, sessionAbortSignal, setSession, setSessionExpiredHandler } from "../src/api/client";
 import { encrypt, toBase64 } from "../src/crypto/core";
 import { buildAad } from "../src/crypto/aad";
 import { kv, StorageCommitError, newWriteGeneration, resetKvConnectionForTests, setKvBackendForTests, writeGenerationKey } from "../src/kvstore";
 import { recordMood } from "../src/moodLog";
 import * as moodService from "../src/moodLog";
 import { writeMutedPids, readMutedPids } from "../src/patternMutes";
+import * as muteService from "../src/patternMutes";
 import { buildFeedbackBlob, recordFeedbackTap } from "../src/questionFeedback";
 import { decrypt, fromBase64 } from "../src/crypto/core";
 import { clearThresholdNotice, recordThresholdNotice } from "../src/thresholdNotice";
 import * as thresholdService from "../src/thresholdNotice";
+import * as syncService from "../src/sync";
 import { __setLocaleForTests, t } from "../src/strings";
 import { notifyPaletteChanged, PALETTES } from "../src/tokens";
 import { vault } from "../src/vault";
@@ -269,6 +271,37 @@ it("a session retired during native lock release leaves no rejected chart contin
   }
 });
 
+it("does not publish an older verified analysis after its account key changes during native lock release", async () => {
+  let callbackSettled = false, release!: () => void, observedOutcome: unknown;
+  const releaseTask = new Promise<void>(resolve => { release = resolve; });
+  const originals: Promise<unknown>[] = [];
+  vi.stubGlobal("navigator", { locks: { request: (name: string, callback: () => Promise<unknown>) => {
+    if (name !== "mindpattern-reconcile") return callback();
+    const original = (async () => {
+      const result = await callback(); observedOutcome = result; callbackSettled = true;
+      await releaseTask; return result;
+    })();
+    originals.push(original); void original.catch(() => undefined); return original;
+  } } });
+  const oldPattern = pattern("topic");
+  server(() => response([oldPattern]));
+  const root = await render(<PatternsView onCrisis={() => {}} />);
+  try {
+    await vi.waitFor(() => expect(callbackSettled).toBe(true));
+    expect(observedOutcome).toMatchObject({ kind: "ok", payload: { stats: { patterns: [oldPattern] } } });
+    // The same authenticated account has adopted a replacement data key.
+    // Only the native Web Lock release is pending; the genuine analysis
+    // request, decrypt and generation check have already completed.
+    vault.unlock({ authKey: key(), dataKey: new Uint8Array(32).fill(83) }, OWNER);
+    await act(async () => { release(); await Promise.all(originals); });
+    expect(textOf(root)).not.toContain(oldPattern.label);
+    expect(root.root.findAllByType("details")).toHaveLength(0);
+  } finally {
+    release(); await Promise.allSettled(originals);
+    await act(async () => root.unmount());
+  }
+});
+
 it("a legacy mute without a pid cannot evict genuine feedback waiting for recomputation", async () => {
   for (let i = 0; i < 64; i++) await recordFeedbackTap(key(), OWNER, `known-${i}`, true);
   const p = pattern("topic"); delete p.detail.pattern_pid;
@@ -296,6 +329,151 @@ it("a pending encrypted mood read keeps the public baseline loading placeholder 
   try { expect(reading).toBe(true); expect(publicSurface(root.toJSON())).toMatchSnapshot("mood read pending"); }
   finally { finish(); await settle(15, 3); }
   expect(root.root.findAllByType("rect")).toHaveLength(2);
+});
+
+it("a completed native mood decrypt under a retired key cannot publish its old trend into the current view", async () => {
+  const expected = [{ date: "2026-09-01", value: -1 }, { date: "2026-09-02", value: 1 }];
+  for (const day of expected) await recordMood(key(), OWNER, day.date, day.value);
+  server(() => response([], "baseline"));
+  const native = globalThis.crypto, moodAad = new TextDecoder().decode(buildAad("moodlog", OWNER));
+  let release!: () => void, decrypted = false;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const nativeDecryptions: Promise<ArrayBuffer>[] = [], deliveries: Promise<ArrayBuffer>[] = [], moodReads: Promise<unknown>[] = [];
+  const subtle = new Proxy(native.subtle, { get(target, property) {
+    if (property === "decrypt") return (...args: Parameters<SubtleCrypto["decrypt"]>) => {
+      const original = target.decrypt(...args); nativeDecryptions.push(original);
+      const algorithm = args[0];
+      if (typeof algorithm !== "object" || !("additionalData" in algorithm) || new TextDecoder().decode(algorithm.additionalData) !== moodAad) return original;
+      const delivery = original.then(async plaintext => {
+        expect(JSON.parse(new TextDecoder().decode(plaintext))).toEqual(expected);
+        decrypted = true; await held; return plaintext;
+      });
+      deliveries.push(delivery); return delivery;
+    };
+    const value = Reflect.get(target, property, target); return typeof value === "function" ? value.bind(target) : value;
+  } });
+  vi.stubGlobal("crypto", new Proxy(native, { get(target, property) {
+    if (property === "subtle") return subtle;
+    const value = Reflect.get(target, property, target); return typeof value === "function" ? value.bind(target) : value;
+  } }));
+  const recent = moodService.recentMoods;
+  const reading = vi.spyOn(moodService, "recentMoods").mockImplementation((...args) => {
+    const original = recent(...args); moodReads.push(original); return original;
+  });
+  let root: Awaited<ReturnType<typeof render>> | undefined;
+  try {
+    root = await ready();
+    try { await vi.waitFor(() => { if (!decrypted) throw new Error("The real mood plaintext is not ready"); }, { timeout: 10_000 }); }
+    catch (cause) { throw new Error("SetupError: native mood decryption did not complete", { cause }); }
+    await act(async () => {
+      vault.unlock({ authKey: key(), dataKey: new Uint8Array(new ArrayBuffer(32)).fill(83) }, OWNER);
+      release(); await Promise.all([...nativeDecryptions, ...deliveries, ...moodReads]);
+    });
+    expect(vault.isUnlocked()).toBe(true);
+    expect(root.root.findAll(node => node.props.role === "img" && node.props["aria-label"] === t("insights.localTrendA11y")),
+      "A retired key's decrypted mood values cannot become the replacement key's current baseline trend").toHaveLength(0);
+  } finally {
+    release();
+    try { await act(async () => { await Promise.all([...nativeDecryptions, ...deliveries, ...moodReads]); if (root) root.unmount(); }); }
+    finally { reading.mockRestore(); vi.stubGlobal("crypto", native); }
+  }
+});
+
+it.each(["read", "write"])("a late real threshold storage %s refusal under a retired key cannot report current analysis corruption", async boundary => {
+  const backend = memoryKvBackend(), marker = `mindpattern.thresholdNotice.v1.${OWNER}`;
+  const refusal = new DOMException("The threshold metadata store is unavailable", "InvalidStateError");
+  let release!: () => void, admitted = false;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  setKvBackendForTests({ ...backend, async getItem(slot) {
+    if (boundary === "read" && slot === marker) { admitted = true; await held; throw refusal; }
+    return backend.getItem(slot);
+  }, async setItem(slot, value, permit) {
+    if (boundary === "write" && slot === marker) { admitted = true; await held; throw refusal; }
+    return backend.setItem(slot, value, permit);
+  } });
+  const shown = thresholdService.thresholdNoticeShown, record = thresholdService.recordThresholdNotice, thresholdOperations: Promise<unknown>[] = [];
+  const reading = vi.spyOn(thresholdService, "thresholdNoticeShown").mockImplementation((...args) => {
+    const original = shown(...args); thresholdOperations.push(original); void original.catch(() => undefined); return original;
+  });
+  const writing = vi.spyOn(thresholdService, "recordThresholdNotice").mockImplementation((...args) => {
+    const original = record(...args); thresholdOperations.push(original); void original.catch(() => undefined); return original;
+  });
+  let root: Awaited<ReturnType<typeof render>> | undefined;
+  const drain = async (): Promise<void> => {
+    const outcomes = await Promise.allSettled(thresholdOperations);
+    outcomes.forEach(outcome => {
+      if (outcome.status === "rejected" && (outcome.reason as Error & { cause?: unknown }).cause !== refusal) throw outcome.reason;
+    });
+  };
+  try {
+    server(() => response([pattern("temporal")])); root = await ready();
+    try { await vi.waitFor(() => { if (!admitted) throw new Error("The real threshold read has not been admitted"); }, { timeout: 10_000 }); }
+    catch (cause) { throw new Error("SetupError: the real threshold storage provider was not reached", { cause }); }
+    await act(async () => {
+      vault.unlock({ authKey: key(), dataKey: new Uint8Array(new ArrayBuffer(32)).fill(83) }, OWNER);
+      release(); await drain();
+    });
+    expect(vault.isUnlocked()).toBe(true);
+    expect(textOf(root), "A retired operation's metadata refusal does not describe the replacement key's analysis").not.toContain(t("insights.decryptFailedWeb"));
+  } finally {
+    release();
+    try { await act(async () => { await drain(); if (root) root.unmount(); }); }
+    finally { reading.mockRestore(); writing.mockRestore(); }
+  }
+});
+
+it("a retired authenticated reconciliation cannot describe a replacement same-account session as ended", async () => {
+  const verifiedResponse = await response([pattern("temporal")]);
+  let release!: () => void, admitted = false;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  server(async () => { admitted = true; await held; return verifiedResponse; });
+  const reconcile = syncService.reconcile, originals: ReturnType<typeof reconcile>[] = [];
+  const reconciling = vi.spyOn(syncService, "reconcile").mockImplementation((...args) => {
+    const original = reconcile(...args); originals.push(original); return original;
+  });
+  let root: Awaited<ReturnType<typeof render>> | undefined;
+  try {
+    root = await ready();
+    try { await vi.waitFor(() => { if (!admitted) throw new Error("The real insights HTTP request is not pending"); }, { timeout: 10_000 }); }
+    catch (cause) { throw new Error("SetupError: the original insights request did not reach transport", { cause }); }
+    const retired = sessionAbortSignal();
+    await act(async () => {
+      setSession("replacement-token", OWNER, "tester");
+      release(); await Promise.all(originals);
+    });
+    expect(retired?.aborted).toBe(true);
+    expect(sessionAbortSignal()?.aborted).toBe(false);
+    expect(vault.isUnlocked()).toBe(true);
+    expect((await Promise.all(originals)).map(outcome => outcome.kind)).toEqual(["locked"]);
+    expect(textOf(root), "The old request's retirement cannot publish a session-ended error into a replacement authenticated view").not.toContain(t("errors.sessionEndedWeb"));
+  } finally {
+    release();
+    try { await act(async () => { await Promise.all(originals); if (root) root.unmount(); }); }
+    finally { reconciling.mockRestore(); }
+  }
+});
+
+it("an unlocked vault without a bound account cannot consume an unowned legacy mute record", async () => {
+  const legacy = "mindpattern.mutedPids.v1.null", raw = JSON.stringify(["pid:unclaimed-private-pattern"]);
+  window.localStorage.setItem(legacy, raw);
+  vault.unlock({ authKey: key(), dataKey: key() });
+  const durableBefore = await kv.keys(), original = muteService.adoptLegacyPlaintextMutes;
+  const adoptions: ReturnType<typeof original>[] = [];
+  const adopting = vi.spyOn(muteService, "adoptLegacyPlaintextMutes").mockImplementation((...args) => {
+    const actual = original(...args); adoptions.push(actual); void actual.catch(() => undefined); return actual;
+  });
+  let root: Awaited<ReturnType<typeof render>> | undefined;
+  try {
+    server(() => response([])); root = await ready();
+    await act(async () => { await Promise.allSettled(adoptions); });
+    expect(vault.isUnlocked()).toBe(true); expect(vault.ownerUserId()).toBeNull();
+    expect(textOf(root)).toContain(t("common.sessionLocked"));
+    expect(window.localStorage.getItem(legacy), "A refused ownerless view must preserve metadata whose account ownership it cannot establish").toBe(raw);
+    expect(await kv.keys()).toEqual(durableBefore);
+  } finally {
+    try { await act(async () => { await Promise.allSettled(adoptions); if (root) root.unmount(); }); }
+    finally { adopting.mockRestore(); }
+  }
 });
 
 it("a transport baseline label cannot spend the one-time insight threshold notice", async () => {

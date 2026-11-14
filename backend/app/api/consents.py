@@ -201,7 +201,12 @@ async def lookup_pairing(
     # fingerprint) out of band before the grant is confirmed, so a
     # malicious server that substituted its own wrap key changes both
     # values and the mismatch is HUMAN-visible.
-    wrap_pub_der = base64.b64decode(therapist.wrap_pub_key or "", validate=True)
+    try:
+        wrap_pub_der = sharing.validate_public_key_b64(therapist.wrap_pub_key or "")
+    except sharing.SharingError:
+        # A damaged or legacy stored key is an unavailable pairing target,
+        # just like a missing key. Never send a malformed key to the patient.
+        raise ApiError(status_code=404, detail="pairing code not found", code="not_found") from None
     return PairingLookupResponse(
         therapist_id=therapist.id,
         display_name=therapist.display_name or therapist.username,

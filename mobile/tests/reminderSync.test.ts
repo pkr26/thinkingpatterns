@@ -136,6 +136,8 @@ describe("syncMeasureReminderSchedule (2026-09-27: opt-in AND cadence)", () => {
   });
 
   it("a fresh completion schedules the next cadence even if the app stays closed", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 9, 23, 10, 0, 0)); // one day before the expected nudge
     await setMeasureReminderEnabled("user-1", true);
     await recordMeasureCompleted("user-1", "2026-09-26");
     await expect(syncMeasureReminderSchedule("user-1")).resolves.toBe(true);

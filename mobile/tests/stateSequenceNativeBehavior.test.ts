@@ -89,3 +89,19 @@ it.each([1,2])("a retired Native read at handoff %s cannot contaminate the repla
 it("a genuine Native legacy migration write refusal retains its authoritative generation and permits a later repair",async()=>{
  const slot=accountStorageKey.stateSequence(USER);await storage.setItem(slot,"109");const set=storage.setItem.bind(storage);let refuse=true;vi.spyOn(storage,"setItem").mockImplementation(async(name,value)=>{if(name===slot&&refuse)throw new Error("The Native metadata volume cannot commit this migration");return set(name,value);});await expect(checkAnalysisGeneration(USER,109,109)).resolves.toBeUndefined();expect(await storage.getItem(slot)).toBe("109");await expect(checkAnalysisGeneration(USER,108,108)).rejects.toThrow("freshness check");refuse=false;await expect(checkAnalysisGeneration(USER,110,110)).resolves.toBeUndefined();expect(await secureStore.getItem(slot)).toBe("110");
 });
+
+it("a pinned Native generation refuses missing payload or echo without changing the mark",async()=>{
+ const slot=accountStorageKey.stateSequence(USER);
+ await expect(checkAnalysisGeneration(USER,undefined,undefined)).resolves.toBeUndefined();
+ await expect(checkAnalysisGeneration(USER,5,5)).resolves.toBeUndefined();
+ for(const [payload,echo] of [[undefined,undefined],[undefined,5],[5,undefined]] as const)
+  await expect(checkAnalysisGeneration(USER,payload,echo)).rejects.toThrow("freshness check");
+ expect(await secureStore.getItem(slot)).toBe("5");
+});
+
+it("a newer mismatched Native generation cannot advance the sealed mark",async()=>{
+ const slot=accountStorageKey.stateSequence(USER);
+ await expect(checkAnalysisGeneration(USER,5,5)).resolves.toBeUndefined();
+ await expect(checkAnalysisGeneration(USER,7,6)).rejects.toThrow("freshness check");
+ expect(await secureStore.getItem(slot)).toBe("5");
+});

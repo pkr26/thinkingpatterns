@@ -492,3 +492,66 @@ it("an acknowledged restored-editor backup retains its earlier rollover receipt 
  const entryId="c".repeat(32),createdAt=new Date().toISOString(),blob=encryptEntry({dataKey:KEY},USER,entryId,acknowledged.text,createdAt,null,undefined,1).blobB64;await api.createEntry(entryId,blob,localDateISO(),1);expect(decryptEntry({dataKey:KEY},USER,entryId,stored.get(entryId)!.blob,1).text).toBe(acknowledged.text);expect(await acknowledgeJournalDraft(KEY,scope,acknowledged.editorId,acknowledged.revision)).toBe(false);
  await press(tr("entry.keepCurrentDraft"));await waitJournalDraftWrites();await flush();expect((await loadJournalDraft(KEY,scope))!.draft).toEqual(earlier);const latest="These subsequent actual Native edits still replace the authentic rollover receipt";await act(async()=>nativeInputChange(editor().props,latest));await act(async()=>emitAppState("background"));await waitJournalDraftWrites();await flush();expect((await loadJournalDraft(KEY,scope))!.draft).toMatchObject({editorId:acknowledged.editorId,revision:2,text:latest});expect(words()).toContain(tr("entry.deviceDraft.saved"));
 });
+
+
+it("an already granted Native Save released after the current editor becomes whitespace admits no journal upload",async()=>{
+ await mount();await type(ORIGINAL);
+ const currentSave=()=>root!.root.findAllByType(TouchableOpacity).find(node=>node.props.accessibilityLabel==="Save entry")!;
+ expect(currentSave().props.disabled).toBe(false);
+ const gesture=nativeGrantedPress(currentSave().props);
+ try{
+  await act(async()=>nativeInputChange(editor().props,"   "));
+  expect(currentSave().props.disabled).toBe(true);
+  gesture.configure(currentSave().props);
+  await act(async()=>gesture.release());await flush();
+  expect(stored.size).toBe(0);expect(await queueLength(USER)).toBe(0);
+  expect(editor().props.value).toBe("   ");expect(vi.mocked(Alert.alert).mock.calls).toEqual([]);
+ }finally{gesture.dispose();}
+});
+
+
+it("the first completed Native draft receipt makes a stable editor ready even while later device reads are held",async()=>{
+ const scope=await journalDraftScope(USER),read=storage.getItem.bind(storage),later=hold();
+ let received!:()=>void;const firstReceipt=new Promise<void>(resolve=>{received=resolve;});let first=true,setupTimer:ReturnType<typeof setTimeout>|undefined;
+ vi.spyOn(storage,"getItem").mockImplementation(async slot=>{
+  const value=await read(slot);
+  if(slot===scope.slot){if(first){first=false;received();}else await later.run();}
+  return value;
+ });
+ try{
+  await act(async()=>{root=ReactTestRenderer.create(<ThemeProvider><EntryScreen navigation={{navigate:()=>{},addListener:()=>()=>{}}}/></ThemeProvider>);});
+  // The first real forwarded read already owns its completed receipt.
+  // Later admitted device reads may wait independently; no provider read
+  // capacity or physical device latency ceiling is imposed.
+  await Promise.race([firstReceipt,new Promise<never>((_resolve,reject)=>{setupTimer=setTimeout(()=>reject(new Error("SetupError: the initial forwarded Native draft receipt was not delivered")),5000);})]);
+  if(setupTimer)clearTimeout(setupTimer);setupTimer=undefined;await flush();
+  expect(words()).not.toContain(tr("entry.deviceDraft.loading"));
+  expect(words()).not.toContain(tr("entry.deviceDraft.unreadable"));
+  expect(editor().props.value).toBe("");expect(stored.size).toBe(0);
+ }finally{
+  if(setupTimer)clearTimeout(setupTimer);
+  if(root){await act(async()=>root!.unmount());root=undefined;}
+  later.release();await flush();await waitJournalDraftWrites();
+ }
+});
+
+
+it("an admitted Scene Save stays quiet after its public vault owner is relabeled with the transferred same Buffer",async()=>{
+ await mount();await type(ORIGINAL);
+ const save=root!.root.findAllByType(TouchableOpacity).find(node=>node.props.accessibilityLabel==="Save entry")!;
+ expect(save.props.disabled).toBe(false);
+ const gesture=nativeGrantedPress(save.props),transferred=vault.get().dataKey,nextOwner="b".repeat(32);
+ try{
+  // This is an exported Scene/vault integration counterdomain. The caller
+  // deliberately transfers the same Buffer into a differently owned vault;
+  // shipped Login/Unlock/Recovery publish fresh allocations instead.
+  // No Root account-publication or physical device schedule is claimed.
+  await act(async()=>{
+   vault.unlock({masterKey:Buffer.alloc(32),authKey:Buffer.alloc(32,83),dataKey:transferred},nextOwner);
+   gesture.release();
+  });await flush();
+  expect(vault.ownerUserId()).toBe(nextOwner);expect(vault.get().dataKey).toBe(transferred);
+  expect(stored.size).toBe(0);expect(await queueLength(USER)).toBe(0);
+  expect(vi.mocked(Alert.alert).mock.calls).toEqual([]);expect(editor().props.value).toBe(ORIGINAL);
+ }finally{gesture.dispose();}
+});

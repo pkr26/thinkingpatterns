@@ -247,12 +247,14 @@ async def test_entries_byte_page_stops_after_a_fitting_row_before_later_oversize
                     client_entry_id="fits-first",
                     blob=b"a" * 512,
                     entry_date=date.today(),
+                    received_at=datetime(2020, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
                 ),
                 Entry(
                     user_id=emu.user_id,
                     client_entry_id="oversize-second",
                     blob=b"b" * 2_048,
                     entry_date=date.today(),
+                    received_at=datetime(2020, 1, 1, 0, 0, 1, tzinfo=timezone.utc),
                 ),
             ]
         )
@@ -807,12 +809,14 @@ async def test_therapist_entry_paging_stops_after_selected_row_before_oversize(c
                     client_entry_id="evidence-fits",
                     blob=b"a" * 512,
                     entry_date=date.today(),
+                    received_at=datetime(2020, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
                 ),
                 Entry(
                     user_id=patient.user_id,
                     client_entry_id="evidence-oversize",
                     blob=b"b" * 2_048,
                     entry_date=date.today(),
+                    received_at=datetime(2020, 1, 1, 0, 0, 1, tzinfo=timezone.utc),
                 ),
             ]
         )
@@ -901,6 +905,7 @@ async def test_note_id_cannot_retarget_another_patient(client):
     assert original.status_code == 201, original.text
     assert retarget.status_code == 409
     assert retarget.json()["code"] == "conflict"
+    assert retarget.json()["detail"] == "note id already used for another patient"
 
 
 def test_therapist_binary_helpers_and_note_quota_fail_closed():

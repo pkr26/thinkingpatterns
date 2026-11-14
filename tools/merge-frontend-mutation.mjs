@@ -7,7 +7,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import { inventory, mutantKey } from './audit-frontend-mutation.mjs';
-import { timedOut, runnerFault, incompleteRun as emptyRun, runtimeKill } from './mutation-observation.mjs';
+import { observationClassifierVersion, timedOut, runnerFault, incompleteRun as emptyRun, runtimeKill } from './mutation-observation.mjs';
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const validStatuses = new Set(['Killed','Survived','NoCoverage','Timeout','CompileError','RuntimeError','Ignored']);
@@ -97,7 +97,7 @@ export function mergeReports(sources, inputs, { skipStale = false } = {}) {
     }) };
   }
   return { schemaVersion: '1.0', files, testFiles, thresholds: { high: 100, low: 0 },
-    campaign: { note: 'Exact-source operator union; raw inputs and selected per-operator provenance retained. Requires independent inventory and residual/oracle review.', inputs: manifests, skippedStaleSources: skipped },
+    campaign: { observationClassifierVersion, note: 'Exact-source operator union; raw inputs and selected per-operator provenance retained. Requires independent inventory and residual/oracle review.', inputs: manifests, skippedStaleSources: skipped },
     provenance };
 }
 

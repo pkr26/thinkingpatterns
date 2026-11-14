@@ -899,7 +899,16 @@
     "share.voiceOff": "Therapist cannot hear my recordings",
     "share.voiceA11y": "Let {name} hear my recordings",
     "share.voiceNote": "Your therapist can already read your entries (and their English translation). Turning this on also lets them play the original voice recordings you keep — tone can carry what text does not. They keep this access only while sharing is active.",
-    "share.reauthShareVoiceTitle": "Enter your password to change what {name} can hear"
+    "share.reauthShareVoiceTitle": "Enter your password to change what {name} can hear",
+    "login.serverPreviouslyChanged": "A different server was detected earlier. Its current status could not be verified.",
+    "login.serverRetry": "Retry server check",
+    "login.serverContinueUnverified": "Continue without verification",
+    "login.registrationUncertain": "The previous account creation may have completed on the server used for that attempt. Return to that server and try signing in there before creating the account again.",
+    "login.registrationTrySignIn": "Try signing in",
+    "login.serverChecking": "Checking the saved server address…",
+    "login.serverUnverified": "Could not verify the saved server address. Check the address before entering credentials.",
+    "login.serverSaveUnverified": "The server address could not be saved or verified. Check the selected address before entering credentials.",
+    "question.feedbackSaveUnknown": "Your answer may have been saved. To avoid a duplicate, it cannot be sent again right now."
   },
   "es": {
     "app.crashTitle": "Algo salió mal",
@@ -1801,6 +1810,15 @@
     "share.voiceOff": "Mi terapeuta no puede escuchar mis grabaciones",
     "share.voiceA11y": "Permitir que {name} escuche mis grabaciones",
     "share.voiceNote": "Su terapeuta ya puede leer sus entradas (y su traducción al inglés). Activar esto también le permite reproducir las grabaciones de voz que conserve — el tono puede transmitir lo que el texto no. Conserva este acceso solo mientras el compartir esté activo.",
-    "share.reauthShareVoiceTitle": "Escriba su contraseña para cambiar lo que {name} puede escuchar"
+    "share.reauthShareVoiceTitle": "Escriba su contraseña para cambiar lo que {name} puede escuchar",
+    "login.serverPreviouslyChanged": "Antes se detectó un servidor diferente. No se pudo verificar su estado actual.",
+    "login.serverRetry": "Volver a comprobar el servidor",
+    "login.serverContinueUnverified": "Continuar sin verificar",
+    "login.registrationUncertain": "La creación anterior de la cuenta podría haberse completado en el servidor usado en ese intento. Vuelve a ese servidor e intenta iniciar sesión allí antes de volver a crear la cuenta.",
+    "login.registrationTrySignIn": "Intentar iniciar sesión",
+    "login.serverChecking": "Comprobando la dirección del servidor guardada…",
+    "login.serverUnverified": "No se pudo verificar la dirección del servidor guardada. Comprueba la dirección antes de introducir tus credenciales.",
+    "login.serverSaveUnverified": "No se pudo guardar o verificar la dirección del servidor. Comprueba la dirección seleccionada antes de introducir tus credenciales.",
+    "question.feedbackSaveUnknown": "Es posible que se haya guardado su respuesta. Para evitar duplicados, no puede volver a enviarla ahora."
   }
 }

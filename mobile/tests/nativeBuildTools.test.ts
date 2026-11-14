@@ -21,4 +21,5 @@ it("the iOS release wrapper runs its real preflight from the mobile root and pre
     expect(output).toContain("Native release preflight passed: all 26 checks green.");
     expect(output).toContain(`Xcode bundle working directory: ${ios}`);
   } finally { rmSync(native, { recursive: true, force: true }); }
-});
+  // Cover the existing 30-second child limit plus setup, assertions, and cleanup.
+}, 45_000);

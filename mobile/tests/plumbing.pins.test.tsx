@@ -124,6 +124,8 @@ describe("navigation pins: BootSplash themed styles are pinned to their nodes", 
 
 describe("navigation pins: inMain conjunction and pending onboarding", () => {
   it("a non-main state with unlocked=true must not consume the pending onboarding flag", async () => {
+    // Pin the local calendar day used by the navigation surface fixture.
+    vi.setSystemTime(new Date(2026, 9, 5, 21));
     queueOnboarding();
     // loggedOut + unlocked: NOT the main flow — the pending flag survives.
     sessionState = { authStatus: "loggedOut", unlocked: true };

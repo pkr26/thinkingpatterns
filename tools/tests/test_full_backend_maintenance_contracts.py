@@ -1346,3 +1346,54 @@ async def test_account_purge_keeps_a_retry_delay_when_a_waiting_tombstone_disapp
         monkeypatch.setattr(AsyncSession, "scalar", competing_cleanup)
         assert await main._purge_deleted_account_once(app) is True
         assert raced and app.state.account_deletion_retry_delay_seconds == 60
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid_probe", [True, "invalid"], ids=["boolean", "string"])
+async def test_audit_maintenance_rejects_invalid_pending_probe_from_observer(monkeypatch, invalid_probe):
+    from app.api import _audit
+
+    real_prune = _audit.prune_access_logs
+    seen = []
+
+    async def wrapped_prune(*args, progress_observer, **kwargs):
+        def forward(**values):
+            original_probe = values["pending_rows_probe"]
+            assert isinstance(original_probe, int) and not isinstance(original_probe, bool)
+            seen.append(original_probe)
+            progress_observer(**{**values, "pending_rows_probe": invalid_probe})
+
+        return await real_prune(*args, progress_observer=forward, **kwargs)
+
+    monkeypatch.setattr(_audit, "prune_access_logs", wrapped_prune)
+    async with maintenance() as (main, app):
+        with pytest.raises(RuntimeError, match=r"^audit prune progress is invalid$"):
+            await main._prune_access_log_once(app)
+    assert seen == [0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["rows_deleted", "oldest_pending_at"])
+async def test_audit_maintenance_rejects_invalid_auxiliary_progress_fields(monkeypatch, field):
+    from app.api import _audit
+
+    real_prune = _audit.prune_access_logs
+    seen = []
+
+    async def wrapped_prune(*args, progress_observer, **kwargs):
+        def forward(**values):
+            original = values[field]
+            if field == "rows_deleted":
+                assert isinstance(original, int) and not isinstance(original, bool)
+            else:
+                assert original is None or isinstance(original, datetime)
+            seen.append(original)
+            progress_observer(**{**values, field: "invalid"})
+
+        return await real_prune(*args, progress_observer=forward, **kwargs)
+
+    monkeypatch.setattr(_audit, "prune_access_logs", wrapped_prune)
+    async with maintenance() as (main, app):
+        with pytest.raises(RuntimeError, match=r"^audit prune progress is invalid$"):
+            await main._prune_access_log_once(app)
+    assert len(seen) == 1

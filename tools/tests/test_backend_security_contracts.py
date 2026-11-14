@@ -914,9 +914,11 @@ def test_trusted_bootstrap_uses_native_eight_row_pages_and_preserves_existing_si
                     or "FROM entries \nWHERE entries.id >" in statement
                 ):
                     queries.append(parameters)
+                    assert len(queries) <= 4
 
             before = datetime.now(timezone.utc)
             assert await guard.bootstrap_trusted_entries(sessions, settings) == 17
+            event.remove(engine.sync_engine, "before_cursor_execute", record)
             assert len(queries) == 4 and all(
                 parameters[-2] == 8 for parameters in queries
             )

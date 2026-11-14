@@ -1,4 +1,4 @@
-import { beforeEach, expect, it } from "vitest";
+import { beforeEach, expect, it, vi } from "vitest";
 import { crisisDialogShownOn, recordCrisisDialogShown, resetCrisisDialogStampsForTests, sweepLegacyCrisisStamps } from "../src/crisisDialog";
 import { INSTRUMENTS, maxScoreForMeasure, measureComplete, measurePayload, measureScore, optionSelected, safetyItemEndorsed, safetyItemValue } from "../src/measures";
 import { localStore } from "../src/platform";
@@ -53,4 +53,23 @@ it("carries the raw PHQ-9 safety response independently of total score and omits
   }
   for (const id of ["gad7", "phq2"] as const) { expect(safetyItemValue(id, [3, 3, 3])).toBeNull(); expect(safetyItemEndorsed(id, [3, 3, 3])).toBe(false); expect(JSON.parse(measurePayload(id, [1, 2], "2026-10-05"))).toEqual({ v: 1, measure: id, score: 3, completed_at: "2026-10-05" }); }
   for (const id of ["unreleased", "constructor", "toString", "__proto__", null, 1, {}, ["phq9"], { toString: null }, ""] as const) expect(maxScoreForMeasure(id)).toBeNull();
+});
+
+it("clears legacy crisis dates on the first module load without resetting its session state", async () => {
+  const legacy = "mindpattern.crisisDialog.v1.before-first-mount";
+  localStore.set(legacy, "2026-10-05");
+  localStore.set("another.application.first-load", "retained");
+  vi.resetModules();
+  try {
+    const fresh = await import("../src/crisisDialog");
+    fresh.sweepLegacyCrisisStamps();
+    expect(localStore.get(legacy)).toBeNull();
+    expect(localStore.get("another.application.first-load")).toBe("retained");
+    localStore.set(legacy, "arrived after the first sweep");
+    fresh.sweepLegacyCrisisStamps();
+    expect(localStore.get(legacy)).toBe("arrived after the first sweep");
+  } finally {
+    window.localStorage.clear();
+    vi.resetModules();
+  }
 });

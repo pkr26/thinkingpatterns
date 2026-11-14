@@ -1,4 +1,5 @@
 import { act, useState } from "react";
+import { IDBObjectStore } from "fake-indexeddb";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { MeasuresView } from "../src/views/Measures";
 import { decrypt, encrypt, fromBase64, toBase64 } from "../src/crypto/core";
@@ -8,6 +9,7 @@ import { loadPendingMeasure, savePendingMeasure } from "../src/pendingMeasure";
 import * as pendingService from "../src/pendingMeasure";
 import { api, ApiError } from "../src/api/client";
 import { readMeasureCadence, writeMeasureCadence } from "../src/measureCadence";
+import * as cadenceService from "../src/measureCadence";
 import { __setLocaleForTests, t } from "../src/strings";
 import { vault } from "../src/vault";
 import { installSession, jsonResponse, memoryKvBackend, resetTestState, stubFetch } from "./helpers/api";
@@ -46,6 +48,13 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); setKvBackendForTests(null); __setLocaleForTests("en"); });
 
 it.each([1, 2, 8])("renders %i real authenticated history rows per instrument with quantitative trend geometry", async count => {
+  const originalConsoleError = console.error.bind(console), duplicateKeyErrors: unknown[][] = [];
+  const errors = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+    originalConsoleError(...args);
+    if (typeof args[0] === "string" && args[0].startsWith("Encountered two children with the same key,") &&
+      args[0].includes("Keys should be unique so that components maintain their identity across updates.")) duplicateKeyErrors.push(args);
+  });
+  try {
   const rows = [];
   for (const [kind, max] of [["phq9", 27], ["gad7", 21], ["phq2", 6]] as const) {
     for (let i = count - 1; i >= 0; i--) rows.push(await row(`${kind}-${i}`, { measure: kind, score: i % 2 ? max : 0 }, `2026-09-${String(i + 1).padStart(2, "0")}`));
@@ -53,11 +62,140 @@ it.each([1, 2, 8])("renders %i real authenticated history rows per instrument wi
   server(rows); const root = await ready();
   expect(root.root.findAllByType("rect")).toHaveLength(count > 1 ? count * 3 : 0);
   expect(root.root.findAll(n => n.props.role === "img")).toHaveLength(3);
+  const instrumentGroups = root.root.findAll(n => n.type === "div" && n.props.role === "radiogroup" && n.props["aria-label"] === t("settings.measures"));
+  expect(instrumentGroups).toHaveLength(1);
+  expect(instrumentGroups[0]!.findAllByType("button").map(textOfNode)).toEqual(["PHQ-9", "GAD-7", "PHQ-2"]);
   expect(publicSurface(root.toJSON())).toMatchSnapshot();
+  expect(duplicateKeyErrors, "Real authenticated trend bars retain unique identities for React reconciliation").toEqual([]);
+  } finally { errors.mockRestore(); }
+});
+
+it("keeps an incomplete questionnaire editable and states why no measure was submitted", async () => {
+  let submitted = false;
+  server([], () => { submitted = true; return jsonResponse({ id: "unexpected" }, { status: 201 }); });
+  const root = await ready(); await press(root, "PHQ-2");
+  await pick(root, 0, 1);
+  await press(root, "Save measure");
+  expect(textOf(root)).toContain(t("measures.incomplete"));
+  expect(submitted).toBe(false);
+  expect(await loadPendingMeasure(key(), OWNER)).toBeNull();
+  await pick(root, 1, 2);
+  expect(root.root.findAllByType("button").some(node => textOfNode(node) === "Save measure" && !node.props.disabled)).toBe(true);
+});
+
+it("a replacement unlocked key during pending persistence never announces that the current session locked", async () => {
+  const backend = memoryKvBackend(), recoveryKey = key();
+  let release!: () => void, reached = false, submitted = false;
+  const completionGate = new Promise<void>(resolve => { release = resolve; });
+  setKvBackendForTests({ ...backend, async setItem(slot, value, permit) {
+    await backend.setItem(slot, value, permit);
+    if (slot === `mindpattern.pendingMeasure.${OWNER}`) {
+      reached = true;
+      await completionGate;
+    }
+  } });
+  const actualSaves: Promise<void>[] = [], save = pendingService.savePendingMeasure;
+  const saveObserver = vi.spyOn(pendingService, "savePendingMeasure").mockImplementation((...args) => {
+    const actual = save(...args); actualSaves.push(actual); return actual;
+  });
+  let root: Awaited<ReturnType<typeof render>> | undefined;
+  try {
+    server([], () => { submitted = true; return jsonResponse({ id: "unexpected" }, { status: 201 }); });
+    root = await ready(); await press(root, "PHQ-2"); await pick(root, 0, 1); await pick(root, 1, 2);
+    await press(root, "Save measure");
+    try { await vi.waitFor(() => { if (!reached) throw new Error("The real pending ciphertext commit has not completed"); }, { timeout: 10_000 }); }
+    catch (cause) { throw new Error("SetupError: the real pending persistence boundary was not reached", { cause }); }
+    // The native commit has completed, but its acknowledgement is still
+    // pending. A current same-account unlock replaces the retired key.
+    await act(async () => {
+      vault.unlock({ authKey: key(), dataKey: new Uint8Array(new ArrayBuffer(32)).fill(83) }, OWNER);
+      release(); await Promise.all(actualSaves);
+    });
+    expect(vault.isUnlocked()).toBe(true);
+    expect(vault.ownerUserId()).toBe(OWNER);
+    expect(submitted, "The retired operation must retain its recovery record without dispatching a POST").toBe(false);
+    expect(await loadPendingMeasure(recoveryKey, OWNER)).toMatchObject({ kind: "phq2", picks: [1, 2] });
+    expect(textOf(root), "An unlocked replacement session must not be described as locked").not.toContain(t("measures.saveLockedNote"));
+  } finally {
+    release();
+    try { await act(async () => { await Promise.all(actualSaves); if (root) root.unmount(); }); }
+    finally { saveObserver.mockRestore(); }
+  }
+});
+
+it("a pending questionnaire decrypted under a retired key cannot replace the current unlocked questionnaire", async () => {
+  const retained = { kind: "phq2" as const, clientMeasureId: "retired-key-questionnaire", picks: [1, 2], date: "2026-10-05" };
+  await savePendingMeasure(key(), OWNER, retained);
+  const native = globalThis.crypto;
+  let release!: () => void, decrypted = false, submitted = false;
+  const deliveryGate = new Promise<void>(resolve => { release = resolve; });
+  const nativeDecryptions: Promise<ArrayBuffer>[] = [], deliveries: Promise<ArrayBuffer>[] = [], actualLoads: Promise<unknown>[] = [];
+  const subtle = new Proxy(native.subtle, { get(target, property) {
+    if (property === "decrypt") return (...args: Parameters<SubtleCrypto["decrypt"]>) => {
+      const original = target.decrypt(...args); nativeDecryptions.push(original);
+      const delivery = original.then(async plaintext => { decrypted = true; await deliveryGate; return plaintext; });
+      deliveries.push(delivery); return delivery;
+    };
+    const value = Reflect.get(target, property, target); return typeof value === "function" ? value.bind(target) : value;
+  } });
+  vi.stubGlobal("crypto", new Proxy(native, { get(target, property) {
+    if (property === "subtle") return subtle;
+    const value = Reflect.get(target, property, target); return typeof value === "function" ? value.bind(target) : value;
+  } }));
+  const load = pendingService.loadPendingMeasure;
+  const loadObserver = vi.spyOn(pendingService, "loadPendingMeasure").mockImplementation((...args) => {
+    const original = load(...args); actualLoads.push(original); return original;
+  });
+  let root: Awaited<ReturnType<typeof render>> | undefined;
+  try {
+    server([], () => { submitted = true; return jsonResponse({ id: "unexpected" }, { status: 201 }); });
+    root = await ready();
+    try { await vi.waitFor(() => { if (!decrypted) throw new Error("The genuine native pending decrypt has not completed"); }, { timeout: 10_000 }); }
+    catch (cause) { throw new Error("SetupError: the genuine native pending plaintext was not obtained", { cause }); }
+    await act(async () => {
+      vault.unlock({ authKey: key(), dataKey: new Uint8Array(new ArrayBuffer(32)).fill(83) }, OWNER);
+      release(); await Promise.all([...nativeDecryptions, ...deliveries, ...actualLoads]);
+    });
+    expect(vault.isUnlocked()).toBe(true);
+    expect(submitted).toBe(false);
+    expect(textOf(root), "Retired plaintext cannot seed the replacement key's current questionnaire").toContain(t("measures.progressNote", { answered: 0, total: 9 }));
+    expect(root.root.findAllByType("button").filter(node => textOfNode(node) === "Nearly every day")).toHaveLength(9);
+  } finally {
+    release();
+    try { await act(async () => { await Promise.all([...nativeDecryptions, ...deliveries, ...actualLoads]); if (root) root.unmount(); }); }
+    finally { loadObserver.mockRestore(); vi.stubGlobal("crypto", native); }
+  }
+});
+
+it("an unlocked vault without a bound account admits no account cadence IndexedDB read", async () => {
+  setKvBackendForTests(null);
+  vault.unlock({ authKey: key(), dataKey: key() });
+  const admitted: IDBValidKey[] = [], get = IDBObjectStore.prototype.get;
+  const getting = vi.spyOn(IDBObjectStore.prototype, "get").mockImplementation(function (this: IDBObjectStore, slot) {
+    const original = get.call(this, slot);
+    if (typeof slot === "string" && slot.startsWith("mindpattern.measureCadence.")) admitted.push(slot);
+    return original;
+  });
+  const read = cadenceService.readMeasureCadence, reads: ReturnType<typeof read>[] = [];
+  const reading = vi.spyOn(cadenceService, "readMeasureCadence").mockImplementation((...args) => {
+    const original = read(...args); reads.push(original); return original;
+  });
+  let root: Awaited<ReturnType<typeof render>> | undefined;
+  try {
+    server([]); root = await ready();
+    await act(async () => { await Promise.all(reads); });
+    expect(vault.isUnlocked()).toBe(true); expect(vault.ownerUserId()).toBeNull();
+    expect(textOf(root)).toContain(t("common.sessionLocked"));
+    expect(admitted, "A refused view must identify an account before admitting account-local preference reads").toEqual([]);
+  } finally {
+    try { await act(async () => { await Promise.all(reads); if (root) root.unmount(); }); }
+    finally { reading.mockRestore(); getting.mockRestore(); }
+  }
 });
 
 it.each([
   { measure: "phq2", score: -1 }, { measure: "phq2", score: 7 }, { measure: "gad7", score: 22 },
+  { v: 1, measure: "phq2", score: 1.5 }, { v: 1, measure: "gad7", score: 4.5 },
   { measure: "phq9", score: 28 }, { measure: "phq2", score: "3" }, { measure: "phq2", score: null },
   { measure: "unknown", score: 3 }, { measure: null, score: 3 },
 ])("does not render an authenticated invalid measurement %j", async payload => {
@@ -352,6 +490,8 @@ it("restores a GAD-7 pending questionnaire once, keeps every answer, and reports
   const attempts: string[] = [];
   server([], init => { attempts.push(JSON.parse(String(init.body)).client_measure_id); return jsonResponse({ detail: "private" }, { status: 500 }); });
   const root = await ready(); await settle(15, 3);
+  const selectedInstrument = root.root.findAllByType("button").filter(node => node.props.role === "radio" && node.props["aria-checked"] === true);
+  expect(selectedInstrument.map(textOfNode)).toEqual(["GAD-7"]);
   expect(attempts).toEqual(["pending-gad7"]);
   expect(textOf(root)).toContain(t("errors.serverError"));
   expect(publicSurface(root.toJSON())).toMatchSnapshot();

@@ -59,6 +59,9 @@ def test_backend_asgi_application_starts_serves_and_shuts_down(monkeypatch):
 
     async def serve_once():
         async with application.router.lifespan_context(application):
+            assert isinstance(application.state.account_deletion_sweep_task, asyncio.Task), (
+                "startup must schedule the account deletion sweep"
+            )
             await asyncio.wait_for(initial_purge.wait(), timeout=10)
             async with AsyncClient(
                 transport=ASGITransport(app=application), base_url="http://testserver"

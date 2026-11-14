@@ -124,6 +124,9 @@ it("plots three chronological mood observations across the full visible chart wi
  provider.decryptInsights.mockResolvedValueOnce({state_seq:7,stats:{patterns:[pattern("temporal",{evidence_dates:["2026-09-03","2026-09-01","2026-09-02"]})]}});
  vi.mocked(api.patientEntries).mockImplementationOnce(async(_id,params)=>{expect(params).toMatchObject({since:"2026-09-01",until:"2026-09-03"});return {entries:[3,1,2].map(day=>({id:`entry-${day}`,client_entry_id:`entry-${day}`,entry_date:`2026-09-0${day}`,received_at:`2026-09-0${day}`,blob:"sealed"})),nextOffset:null};});
  provider.decryptEntry.mockImplementation(async(_key,_owner,row)=>({text:"work",sentiment:Number(row.client_entry_id.at(-1))-2}));const root=await chart();await press(root,"See the evidence");await flush(10);
+ const grid=root.root.findAllByType("dl").find(node=>node.props.className==="evidence-grid")!;
+ const publicRows=grid.findAllByType("div").map(row=>[row.findByType("dt").children.join(""),row.findByType("dd").children.join("")]);
+ expect(publicRows, "A pattern with three accepted evidence dates displays its evidence-day label and count").toContainEqual(["evidence days","3"]);
  const svg=root.root.findAllByType("svg").find(node=>String(node.props["aria-label"]).startsWith("Mood over the 3"))!;expect(svg.findByType("path").props.d).toBe("M0.0,45.0 L160.0,24.0 L320.0,3.0");
  expect(listKeys.count).toBe(0);
  } finally { listKeys.restore(); }
@@ -135,6 +138,34 @@ it.each([200,201])("enforces the %i-row evidence aggregate across individually p
  const root=await chart();await press(root,"See the evidence");await flush(16);
  if(count===201){expect(textOf(root)).toContain("evidence window exceeds this portal's safe page limit");expect(provider.decryptEntry).not.toHaveBeenCalled();}
  else expect(provider.decryptEntry).toHaveBeenCalledTimes(200);
+});
+
+it("rejects an oversized evidence response before decrypting any entries", async () => {
+  provider.decryptInsights.mockResolvedValueOnce({
+    state_seq: 7,
+    stats: { patterns: [pattern("temporal", { evidence_dates: ["2026-09-01"] })] },
+  });
+  vi.mocked(api.patientEntries).mockResolvedValueOnce({
+    entries: Array.from({ length: 201 }, (_, index) => ({
+      id: `oversized-${index}`,
+      client_entry_id: `oversized-${index}`,
+      entry_date: "2026-09-01",
+      received_at: "2026-09-01",
+      blob: "sealed",
+    })),
+    nextOffset: null,
+    revision: "17",
+  });
+  const root = await chart();
+  try {
+    await press(root, "See the evidence");
+    await flush(16);
+    expect(textOf(root)).toContain("evidence window exceeds this portal's safe entry limit");
+    expect(api.patientEntries).toHaveBeenCalledTimes(1);
+    expect(provider.decryptEntry).not.toHaveBeenCalled();
+  } finally {
+    await act(async () => root.unmount());
+  }
 });
 
 it("preserves the supplied custody generation when the note receiver requires it",async()=>{
@@ -323,6 +354,19 @@ it("shows zero remaining days when the public recording expiry cannot be parsed"
 
 it("explains a failed playback key unwrap without starting an unauthenticated player",async()=>{
  const root=await evidence();provider.unwrapPatientDataKey.mockRejectedValueOnce(new Error("encrypted key could not be opened"));await press(root,"play recording");await flush();expect(textOf(root)).toContain("could not unlock this patient's data key — sign out and back in, then retry");expect(root.root.findAllByType("audio")).toHaveLength(0);
+});
+
+it("shows a playback failure if the recording provider rejects without an Error object", async () => {
+  vi.mocked(api.patientAudio).mockRejectedValueOnce(null);
+  const root = await evidence();
+  try {
+    await press(root, "play recording");
+    await flush(8);
+    expect(textOf(root)).toContain("playback failed — try again");
+    expect(root.root.findAllByType("audio")).toHaveLength(0);
+  } finally {
+    await act(async () => root.unmount());
+  }
 });
 
 it("filters the visible clinical record by a trimmed case-insensitive note search",async()=>{

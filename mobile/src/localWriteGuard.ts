@@ -15,6 +15,24 @@ const installedKeys = new Map<string, { originEpoch: number; keyId: string }>();
 const commits = new Map<string | symbol, Set<Promise<unknown>>>();
 const ORIGIN_ERASURE_LANE = Symbol("origin-erasure");
 let scopeEpoch = 0;
+const scopeListeners = new Set<() => void>();
+let pendingScopeNotice = false;
+function notifyScopeListeners(): void {
+  if (pendingScopeNotice) return;
+  pendingScopeNotice = true;
+  // Retire the epoch synchronously, but notify only after transition callers
+  // can capture their own epoch. Coalesce bursts and isolate subscriber errors.
+  queueMicrotask(() => {
+    pendingScopeNotice = false;
+    for (const listener of [...scopeListeners]) {
+      try { listener(); } catch { /* A subscriber cannot prevent scope retirement. */ }
+    }
+  });
+}
+export function subscribeLocalWriteScope(listener: () => void): () => void {
+  scopeListeners.add(listener);
+  return () => { scopeListeners.delete(listener); };
+}
 let originEpoch = 0;
 // No account owns writes until a verified login or cold-start credential
 // hydration explicitly publishes one. `undefined` is reserved for the
@@ -28,10 +46,10 @@ function keyId(key: Buffer): string {
   return engine.createHash("sha256").update(key).digest().toString("hex");
 }
 export function localWriteScopeEpoch(): number { return scopeEpoch; }
-export function advanceLocalWriteScope(): number { return ++scopeEpoch; }
+export function advanceLocalWriteScope(): number { const ownEpoch = ++scopeEpoch; notifyScopeListeners(); return ownEpoch; }
 /** Called before the first asynchronous credential/origin mutation. */
 export function changeLocalSessionOwner(userId: string | null): void {
-  scopeEpoch++; sessionOwner = userId;
+  scopeEpoch++; sessionOwner = userId; notifyScopeListeners();
 }
 /** Cold-start credential hydration establishes the owner that was already
  * durably authenticated. Unlike a fresh login transition, rereading the
@@ -40,9 +58,10 @@ export function hydrateLocalSessionOwner(userId: string | null): void {
   if (sessionOwner === userId) return;
   scopeEpoch++;
   sessionOwner = userId;
+  notifyScopeListeners();
 }
 export function changeLocalOrigin(): void {
-  originEpoch++; scopeEpoch++; sessionOwner = null;
+  originEpoch++; scopeEpoch++; sessionOwner = null; notifyScopeListeners();
 }
 /** The authoritative origin lifetime, unchanged by login/key rotation. */
 export function localWriteOriginEpoch(): number { return originEpoch; }
@@ -143,5 +162,5 @@ export function clearLocalKeyState(userId: string): void {
   advance(userId); installedKeys.delete(userId); frozen.delete(userId);
 }
 export function __resetLocalKeyLifecycleForTests(): void {
-  frozen.clear(); deleted.clear(); generations.clear(); installedKeys.clear(); commits.clear(); sessionOwner = undefined; scopeEpoch++; originEpoch++;
+  frozen.clear(); deleted.clear(); generations.clear(); installedKeys.clear(); commits.clear(); sessionOwner = undefined; scopeEpoch++; originEpoch++; notifyScopeListeners();
 }

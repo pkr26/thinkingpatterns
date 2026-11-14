@@ -10,6 +10,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
+import { drainPortalDraftWritesForTests } from "../src/noteDrafts";
 
 vi.mock("../src/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/api")>();
@@ -1003,6 +1004,9 @@ describe("mutation pins 2026-09-22: PatientView", () => {
     expect(mockedApi.createNote).not.toHaveBeenCalled();
     await typeTextarea(root, "Note about this patient…", "  real text  ");
     await press(root, "Save note");
+    // The idempotent request is dispatched only after its genuine encrypted
+    // draft write. Drain that producer before checking the public save result.
+    await React.act(async () => { await drainPortalDraftWritesForTests(); });
     await flush();
     expect(mockedApi.createNote).toHaveBeenCalledTimes(1);
     expect(textOf(root)).toContain("real text");

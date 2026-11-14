@@ -24,7 +24,7 @@ import { savePendingMeasure } from "../src/pendingMeasure";
 import { applyLanguagePref, getLanguagePref, getLocale } from "../src/strings";
 import { vault } from "../src/vault";
 import { installSession, jsonResponse, resetTestState, stubFetch } from "./helpers/api";
-import { press, pressAria, pressSwitch, render, settle, textOf, textOfNode, typeInto } from "./helpers/rtr";
+import { press, pressAria, pressSwitch, render, settle, textOf, textOfNode, typeInto, waitForResult } from "./helpers/rtr";
 
 const ORIGIN = "http://localhost:5173";
 const USER = "user-1";
@@ -822,7 +822,7 @@ describe("SettingsView v1 rotation × mid-flow vault lock (FE-4, pentest 2026-09
     await settle(40, 3);
     await fillRotateForm(root);
     await press(root, "Change password");
-    await settle(60, 4);
+    await waitForResult(() => textOf(root).includes("Your session locked"), "rotation abort after vault lock during session opening");
     expect(textOf(root)).toContain("Your session locked");
     expect(onLockdown).not.toHaveBeenCalled();
     const urls = mock.mock.calls.map(([u]) => String(u));
@@ -847,7 +847,7 @@ describe("SettingsView v1 rotation × mid-flow vault lock (FE-4, pentest 2026-09
     await settle(40, 3);
     await fillRotateForm(root);
     await press(root, "Change password");
-    await settle(120, 8);
+    await waitForResult(() => onLockdown.mock.calls.length > 0, "post-rekey rotation lockdown");
     expect(onLockdown).toHaveBeenCalledTimes(1);
     expect(onLockdown.mock.calls[0]![0]).toContain("Password changed");
     // The mood log SURVIVED the zeroizing lock: readable under the NEW

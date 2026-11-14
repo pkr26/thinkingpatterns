@@ -7,7 +7,7 @@
  * Registration records an affirmative age attestation without a birth date.
  */
 import { useState } from "react";
-import { ApiError, api, auth, clearSession, MINIMUM_AGE_ATTESTATION, setSession, type TokenResponse } from "../api/client";
+import { ApiError, api, auth, clearSession, MINIMUM_AGE_ATTESTATION, sessionAbortSignal, setSession, type TokenResponse } from "../api/client";
 import { displayError } from "../errors";
 import { deriveMasterKey, fromBase64, toBase64, zeroize, KDF_ITERATIONS, type Bytes } from "../crypto/core";
 import { createRegistrationEnvelope, unwrapEnvelope, validateKdfParams } from "../crypto/envelope";
@@ -83,7 +83,7 @@ function strengthOf(password: string): 0 | 1 | 2 | 3 | 4 {
 /** Adopt a successful token response: install the session, hand the keys
  *  to the vault (which zeroizes the master key), or wipe everything. */
 type AdoptionResult = "ok" | "therapist-role" | "invalid-response";
-function adoptSession(keys: PatientKeys, token: TokenResponse, username: string, onSuccess: (s: LoginSuccess) => void): AdoptionResult {
+async function adoptSession(keys: PatientKeys, token: TokenResponse, username: string, onSuccess: (s: LoginSuccess) => void | Promise<void>): Promise<AdoptionResult> {
   if (token.role !== "user") {
     // A therapist account cannot use the patient app — fail closed, and
     // leave nothing behind. (The v2 path pre-installs the session for the
@@ -106,9 +106,37 @@ function adoptSession(keys: PatientKeys, token: TokenResponse, username: string,
   // proactive lockDown slightly before the token dies, instead of
   // discovering expiry as a 401 mid-write.
   setSession(token.token, token.user_id, username, token.expires_in);
+  const signal = sessionAbortSignal();
   vault.unlock(keys, token.user_id); // zeroizes masterKey
-  onSuccess({ userId: token.user_id, username });
-  return "ok";
+  let abortAdoption: (() => void) | null = null;
+  try {
+    if (!signal || signal.aborted) throw new ApiError(0, "session ended");
+    const retired = new Promise<never>((_resolve, reject) => {
+      abortAdoption = () => reject(new ApiError(0, "session ended"));
+      signal.addEventListener("abort", abortAdoption, { once: true });
+    });
+    // Observe both branches even if the callback throws or retires this
+    // session synchronously before Promise.race can be constructed.
+    void retired.catch(() => undefined);
+    if (signal.aborted) throw new ApiError(0, "session ended");
+    const adoption = Promise.resolve(onSuccess({ userId: token.user_id, username }));
+    void adoption.catch(() => undefined);
+    if (signal.aborted) throw new ApiError(0, "session ended");
+    await Promise.race([adoption, retired]);
+    return "ok";
+  } catch (error) {
+    // Resource notifications may synchronously install a successor. Clear
+    // only this session, then recheck before touching its exact vault keys.
+    if (signal && sessionAbortSignal() === signal) clearSession();
+    const currentSignal = sessionAbortSignal();
+    if ((currentSignal === null || currentSignal === signal) && vault.isUnlocked() && vault.ownerUserId() === token.user_id) {
+      const currentKeys = vault.get();
+      if (currentKeys.authKey === keys.authKey && currentKeys.dataKey === keys.dataKey && (sessionAbortSignal() === null || sessionAbortSignal() === signal)) vault.lock();
+    }
+    throw error;
+  } finally {
+    if (signal && abortAdoption) signal.removeEventListener("abort", abortAdoption);
+  }
 }
 
 /** v2 unlock half (2026-09-26): a key_scheme "v2" account's data key is
@@ -179,7 +207,7 @@ async function adoptEnvelopeDataKey(
   }
 }
 
-export function LoginView(props: { onSuccess: (success: LoginSuccess) => void }): React.JSX.Element {
+export function LoginView(props: { onSuccess: (success: LoginSuccess) => void | Promise<void> }): React.JSX.Element {
   const [mode, setMode] = useState<"signin" | "register">("signin");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -271,7 +299,7 @@ export function LoginView(props: { onSuccess: (success: LoginSuccess) => void })
             return;
           }
         }
-        const adoption = adoptSession(keys, token, username, props.onSuccess);
+        const adoption = await adoptSession(keys, token, username, props.onSuccess);
         if (adoption === "therapist-role") {
           setError(t("login.therapistRoleWeb"));
           return;
@@ -320,7 +348,7 @@ export function LoginView(props: { onSuccess: (success: LoginSuccess) => void })
           zeroize(keys.authKey, keys.dataKey, keys.masterKey, derivedDataKey);
           throw err;
         }
-        const adoption = adoptSession(keys, token, username, props.onSuccess);
+        const adoption = await adoptSession(keys, token, username, props.onSuccess);
         if (adoption === "therapist-role") {
           setError(t("login.therapistRoleWeb"));
           return;

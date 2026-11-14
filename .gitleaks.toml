@@ -67,10 +67,14 @@ paths = [
 # binary: the full-HISTORY scan — CI's authoritative gate, and the one
 # that sees every tests/ file, since CI checks out committed content only —
 # enforces the AND (a planted AKIA…/ghp_… value under backend/tests/ is
-# caught). The --no-git scanner (and pre-commit's staged pass) skips whole
+# caught). The --no-git scanner skips whole
 # files on a bare paths match in sources/common.go shouldSkipPath without
 # consulting the condition — a v8.30.1 limitation upstream marks
-# "TODO: Remove this in v9"; re-test both modes when the pin next moves.
+# "TODO: Remove this in v9". This entry is therefore targeted to the generic
+# rule instead of the global path list: rule-level AND checks both path and
+# value in every scan mode. Other default secret rules remain enforced.
+# verify_secret_scan plants both generic keys and PATs beside the approved
+# fixtures in all three modes; re-test when the scanner pin next moves.
 #
 # Marker vocabulary, kept honest and minimal: the classic placeholder words
 # plus the exact synthetic values this repo's fixtures actually use today —
@@ -81,6 +85,7 @@ paths = [
 # deliberately NOT matched: synthetic and real base32 are indistinguishable
 # by shape, so an enrollment secret in a test must stay a FINDING.
 description = "test fixtures and throwaway test credentials (tests path + clearly-fake value)"
+targetRules = ["generic-api-key"]
 paths = [
   '''(^|[/\\])tests?([/\\]|$)''',
 ]
@@ -310,4 +315,112 @@ regexes = [
   '''^data_key": "p4PA\+VukfyRnYRL6lqmSG8TnqNgrGU1O37BxlgyM8lg="$''',
   '''^data_key": "QgqO\+sMHoLmcI4CxTFj2KFOzJj0ewRS6fhPh7lG1Dug="$''',
   '''^data_key": "ASZtTjPHv7iZEdVW3\+wI4H6AEHqbYJlFlKS3HsLSTHY="$''',
+]
+
+[[allowlists]]
+# The reference fixture publishes master bytes 0..31. Its note key is HKDF
+# with the public portal-notes label, and its wrapped PKCS8 ciphertext belongs
+# only to the synthetic reference account. The consumer decrypts it locally.
+# targetRules keeps this out of the global path-shortcut list in v8.30.1;
+# the rule-level AND requires this exact path AND complete assignment.
+# Planted adjacent generic keys/PATs and unlisted values/paths are checked by
+# verify_secret_scan in staged, working-tree and history scans.
+description = "exact synthetic portal reference assignments"
+targetRules = ["generic-api-key"]
+condition = "and"
+paths = ['''(^|[/\\])backend/tests/fixtures/portal_reference_security_vectors\.json$''']
+regexTarget = "match"
+regexes = [
+  '''^noteKeyHex": "06f1afeb4bc93f028e70a58a4f270a1ecdce9e0fb5672dad13198715c03b1a3e"$''',
+  '''^wrapKeyBlobB64": "vLHMdXp1Due86K8rCrDcB3S07DQG9lyLQBzEA6fPjXwzlYRGppBnjy\+G292mD\+wVUBVnNEiwft4hvJJ2Rqk737veKinpyflWOmzAva0dysXZRTCUDGJka9/AfZsSI4jgzdb7/p5PJ8A6DRsVPGrfUaQ8qq1Xo5qiK5zgGKjjtyTCj9HSwnWK4yzUqV7IFujJydntSCQltNZVjTmr45cZemxt7W11Yw=="$''',
+]
+
+[[allowlists]]
+# This fixed password feeds local WebCrypto and stubFetch/memory storage only;
+# no account or remote service exists. Keep other credentials in this file
+# visible by requiring the exact rule, path and full assignment together.
+description = "exact isolated account adoption and native login password assignments"
+targetRules = ["generic-api-key"]
+condition = "and"
+paths = [
+  '''(^|[/\\])web/tests/accountAdoption\.public\.regression\.test\.tsx$''',
+  '''(^|[/\\])web/tests/loginNativeCompletion\.test\.tsx$''',
+]
+regexTarget = "match"
+regexes = [
+  '''^PASSWORD = "quiet\-morning\-lantern\-42"$''',
+  '''^PASSWORD="quiet\-morning\-lantern\-42"$''',
+]
+
+[[allowlists]]
+# A reverse-hex comparison value returned by mocked pairingSas and the
+# mocked local fingerprint function; it is not key material or a credential.
+description = "exact mocked portal key fingerprint"
+targetRules = ["generic-api-key"]
+condition = "and"
+paths = ['''(^|[/\\])portal/tests/accountSecurityPresentation\.test\.tsx$''']
+regexTarget = "match"
+regexes = [
+  '''^wrap_key_fingerprint:"fedcba9876543210"$''',
+]
+
+[[allowlists]]
+# The descending-hex therapist row ID belongs only to the local stubFetch
+# protocol fixture; it identifies no deployed account and carries no authority.
+description = "exact synthetic share protocol therapist row identifier"
+targetRules = ["generic-api-key"]
+condition = "and"
+paths = ['''(^|[/\\])web/tests/sharePublicProtocol\.test\.tsx$''']
+regexTarget = "match"
+regexes = [
+  '''^THERAPIST = "fedcba9876543210fedcba9876543210"$''',
+]
+
+[[allowlists]]
+# These are 36 public locale message identifiers, serialized twice (en/es),
+# not secret key values. Each is declared in current locale source and used
+# by catalogOutput.test.ts through t(key) and t(key, vars). Enumerate only the
+# reviewed complete assignments; never exempt the key property or whole file.
+description = "exact public bilingual catalog message identifiers"
+targetRules = ["generic-api-key"]
+condition = "and"
+paths = ['''(^|[/\\])web/tests/fixtures/catalog-output\.json$''']
+regexTarget = "match"
+regexes = [
+  '''^key": "insights\.hideMutedA11y"$''',
+  '''^key": "insights\.muteA11y"$''',
+  '''^key": "insights\.unmuteA11y"$''',
+  '''^key": "insights\.whySeeingA11y"$''',
+  '''^key": "measures\.gad7\.item1"$''',
+  '''^key": "measures\.gad7\.item2"$''',
+  '''^key": "measures\.gad7\.item3"$''',
+  '''^key": "measures\.gad7\.item4"$''',
+  '''^key": "measures\.gad7\.item5"$''',
+  '''^key": "measures\.gad7\.item6"$''',
+  '''^key": "measures\.item9Body"$''',
+  '''^key": "measures\.phq2\.item1"$''',
+  '''^key": "measures\.phq2\.item2"$''',
+  '''^key": "measures\.phq9\.item1"$''',
+  '''^key": "measures\.phq9\.item2"$''',
+  '''^key": "measures\.phq9\.item3"$''',
+  '''^key": "measures\.phq9\.item4"$''',
+  '''^key": "measures\.phq9\.item5"$''',
+  '''^key": "measures\.phq9\.item6"$''',
+  '''^key": "measures\.phq9\.item7"$''',
+  '''^key": "measures\.phq9\.item8"$''',
+  '''^key": "measures\.phq9\.item9"$''',
+  '''^key": "measures\.questionA11y"$''',
+  '''^key": "measures\.trendA11y"$''',
+  '''^key": "privacy\.s1Body"$''',
+  '''^key": "privacy\.s2Body"$''',
+  '''^key": "privacy\.s3Body"$''',
+  '''^key": "privacy\.s4Body"$''',
+  '''^key": "privacy\.s5Body"$''',
+  '''^key": "privacy\.webS1"$''',
+  '''^key": "privacy\.webS2"$''',
+  '''^key": "privacy\.webS3"$''',
+  '''^key": "privacy\.webS4"$''',
+  '''^key": "privacy\.webS5"$''',
+  '''^key": "question\.notMeA11y"$''',
+  '''^key": "question\.resonatedA11y"$''',
 ]

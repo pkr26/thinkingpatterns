@@ -10,7 +10,7 @@ import { SettingsView } from "../src/views/Settings";
 import { setKvBackendForTests, type KvBackend } from "../src/kvstore";
 import { vault } from "../src/vault";
 import { installSession, jsonResponse, resetTestState, stubFetch } from "./helpers/api";
-import { isDisabled, press, pressSwitch, render, settle, textOf, textOfNode, typeInto } from "./helpers/rtr";
+import { isDisabled, press, pressSwitch, render, settle, textOf, textOfNode, typeInto, waitForResult } from "./helpers/rtr";
 
 const ORIGIN = "http://localhost:5173";
 const USER = "user-1";
@@ -406,7 +406,7 @@ describe("SettingsView", () => {
     await typeInto(root, "New password", "a-brand-new-passcode-1");
     await typeInto(root, "Confirm new password", "a-brand-new-passcode-1");
     await press(root, "Change password");
-    await settle(60, 5);
+    await waitForResult(() => onLockdown.mock.calls.length > 0, "atomic rotation lockdown");
     expect(order).toEqual(["session", "session", "rekey"]);
     expect(onLockdown).toHaveBeenCalledTimes(1);
     expect(onLockdown.mock.calls[0]![0]).toContain("mobile app");

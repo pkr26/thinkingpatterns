@@ -13,7 +13,7 @@ import { act } from "react";
 import type { ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App";
-import { hasSession, sessionAbortSignal, sessionUserId } from "../src/api/client";
+import { api, hasSession, sessionAbortSignal, sessionUserId } from "../src/api/client";
 import { deriveMasterKey, fromBase64, toBase64, zeroize } from "../src/crypto/core";
 import { createRegistrationEnvelope, unwrapEnvelope } from "../src/crypto/envelope";
 import { withLock } from "../src/platform";
@@ -185,6 +185,7 @@ describe("real App queued adoption followed by an enabled Login refusal", () => 
             expect(body.username).toBe(NEXT_USERNAME);
             return jsonResponse(refusal.token);
           }
+          if (url.endsWith("/meta")) return jsonResponse({ code: "unauthorized" }, { status: 401 });
           if (url.endsWith("/auth/key-envelope") && refusal.envelope) {
             envelopeRequests += 1;
             expect(new Headers(init.headers).get("Authorization")).toBe("Bearer synthetic-second-token");
@@ -198,19 +199,42 @@ describe("real App queued adoption followed by an enabled Login refusal", () => 
         await typeInto(root, "Username", FIRST_USERNAME);
         await typeInto(root, "Password", PASSWORD);
         await submitPublicForm(root, witness.trace, "first-public-form-submit");
-        await producerCompletion("first Login adopts real keys and releases busy", () =>
-          logins === 1 && vault.isUnlocked() && buttonByLabel(root!, SIGN_IN) && !isDisabled(root!, SIGN_IN));
+        await producerCompletion("first Login adopts real keys while App waits", () =>
+          logins === 1 && vault.isUnlocked() && (buttonByLabel(root!, "Working…") || buttonByLabel(root!, SIGN_IN)));
         const adopted = vault.get();
         const firstSignal = sessionAbortSignal();
+        let retiredByExpiry = false;
+        if (buttonByLabel(root!, "Working…")) {
+          expect(isDisabled(root!, "Working…")).toBe(true);
+          await act(async () => { root!.root.findByType("form").props.onSubmit({ preventDefault() {} }); });
+          await flush();
+          expect(logins).toBe(1);
+          expect(envelopeRequests).toBe(0);
+          // A genuine session-expiry response releases the waiting Login;
+          // exercise every refusal while A's App adoption remains queued.
+          retiredByExpiry = true;
+          await act(async () => { await api.meta().catch(() => undefined); });
+          await producerCompletion("expiry returns Login while old App adoption waits", () => buttonByLabel(root!, SIGN_IN) && !isDisabled(root!, SIGN_IN));
+          expect(firstSignal?.aborted).toBe(true);
+          expect(adopted.authKey.every(byte => byte === 0)).toBe(true);
+          expect(adopted.dataKey.every(byte => byte === 0)).toBe(true);
+        }
+        expect(isDisabled(root!, SIGN_IN)).toBe(false);
 
         const accountRequests = () => witness.trace.filter(row => row.name === "account-transition" && row.phase === "lock-requested");
         const accountAdmissions = () => witness.trace.filter(row => row.name === "account-transition" && row.phase === "lock-admitted");
         check(() => {
-          expect(vault.ownerUserId()).toBe(FIRST_OWNER);
-          expect(sessionUserId()).toBe(FIRST_OWNER);
-          expect(firstSignal?.aborted).toBe(false);
-          expect(adopted.authKey.some(byte => byte !== 0)).toBe(true);
-          expect(adopted.dataKey.some(byte => byte !== 0)).toBe(true);
+          if (retiredByExpiry) {
+            expect(vault.isUnlocked()).toBe(false);
+            expect(sessionUserId()).toBeNull();
+            expect(firstSignal?.aborted).toBe(true);
+          } else {
+            expect(vault.ownerUserId()).toBe(FIRST_OWNER);
+            expect(sessionUserId()).toBe(FIRST_OWNER);
+            expect(firstSignal?.aborted).toBe(false);
+            expect(adopted.authKey.some(byte => byte !== 0)).toBe(true);
+            expect(adopted.dataKey.some(byte => byte !== 0)).toBe(true);
+          }
         });
         check(() => {
           expect(accountRequests()).toHaveLength(2);
@@ -219,6 +243,7 @@ describe("real App queued adoption followed by an enabled Login refusal", () => 
           expect(isDisabled(root!, SIGN_IN)).toBe(false);
         });
         await typeInto(root, "Username", NEXT_USERNAME);
+        if (retiredByExpiry) await typeInto(root, "Password", PASSWORD);
         // The real field/form remains mounted; the password is retained by
         // that very consumer, not installed through a session/vault helper.
         await submitPublicForm(root, witness.trace, "second-enabled-public-form-submit");
@@ -236,8 +261,8 @@ describe("real App queued adoption followed by an enabled Login refusal", () => 
           (() => { expect(envelopeRequests).toBe(refusal.envelope ? 1 : 0); })();
           (() => { expect(unexpected).toEqual([]); })();
           const alerts = root!.root.findAll(node => node.props.role === "alert");
-          expect(alerts).toHaveLength(1);
-          expect(textOfNode(alerts[0])).toContain(refusal.errorText);
+          if (!retiredByExpiry) expect(alerts).toHaveLength(1);
+          expect(alerts.some(alert => textOfNode(alert).includes(refusal.errorText))).toBe(true);
           (() => { expect(accountRequests()).toHaveLength(2); })();
           (() => { expect(accountAdmissions()).toHaveLength(1); })();
 
@@ -328,8 +353,9 @@ describe("real App queued adoption followed by an enabled Login refusal", () => 
       await typeInto(root, "Username", FIRST_USERNAME);
       await typeInto(root, "Password", PASSWORD);
       await submitPublicForm(root, witness.trace, "control-public-form-submit");
-      await producerCompletion("control Login releases busy while App waits", () =>
-        vault.isUnlocked() && buttonByLabel(root!, SIGN_IN) && !isDisabled(root!, SIGN_IN));
+      await producerCompletion("control Login is awaiting App", () =>
+        vault.isUnlocked() && (buttonByLabel(root!, "Working…") || buttonByLabel(root!, SIGN_IN)));
+      if (buttonByLabel(root!, "Working…")) expect(isDisabled(root!, "Working…")).toBe(true);
 
       check(() => {
         expect(vault.ownerUserId()).toBe(FIRST_OWNER);

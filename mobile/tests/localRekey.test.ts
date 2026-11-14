@@ -13,7 +13,7 @@ const user = "local-rekey-owner";
 const oldKey = Buffer.alloc(32, 5), newKey = Buffer.alloc(32, 9);
 beforeEach(async () => {
   await clearLocalRekey(user).catch(() => {});
-  storage.__reset(); fs.__resetFiles(); runTestControl(setSecureStoreBackend, null); resetEntryVersionMirrors();
+  storage.__reset(); fs.__resetFiles(); runTestControl(setSecureStoreBackend, null); runTestControl(resetEntryVersionMirrors);
 });
 describe("durable registered local rekey", () => {
   it("a prepared proof alone cannot apply local replacements before credential commit", async () => {
@@ -40,7 +40,7 @@ describe("durable registered local rekey", () => {
     await resumeLocalRekey(user, newKey);
     expect(await loadSafetyPlan(newKey, user)).toEqual(plan);
     expect(await loadPendingMeasure(newKey, user)).toEqual(measure);
-    resetEntryVersionMirrors(); expect(await isV2Bound(user, newKey, "entry:one")).toBe(true);
+    runTestControl(resetEntryVersionMirrors); expect(await isV2Bound(user, newKey, "entry:one")).toBe(true);
     const descriptorKey = (await storage.getAllKeys()).find(k => k.startsWith("@mindpattern/audioqueue.v1:"))!;
     const descriptor = JSON.parse((await storage.getItem(descriptorKey))!);
     const ciphertext = await fs.readAsStringAsync(descriptor.uri);

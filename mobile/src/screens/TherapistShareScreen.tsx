@@ -85,6 +85,9 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
   const t = useTheme();
   const mounted = useRef(true);
   const submitting = useRef(false);
+  const viewLifetime = useRef(0);
+  const refreshGeneration = useRef(0);
+  const clearPasswordOnReveal = useRef(false);
   const [consents, setConsents] = useState<ListedConsent[]>([]);
   /** L-66: a FAILED consents load is "unknown", not "not sharing" — this
    *  screen is where a revoke gets verified, so the empty-state copy must
@@ -110,9 +113,12 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
   const [disclosureStale, setDisclosureStale] = useState(false);
 
   const refresh = useCallback(() => {
+    const generation = ++refreshGeneration.current, lifetime = viewLifetime.current;
+    const current = () => mounted.current && lifetime === viewLifetime.current && generation === refreshGeneration.current;
     setMetaPending(true);
     api.meta()
       .then((meta) => {
+        if (!current()) return;
         const enabled = meta?.sharing_available === true;
         setSharingAvailable(enabled);
         // Only a server that has sharing enabled reports a disclosure
@@ -123,10 +129,12 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
         if (enabled) {
           api.listConsents()
             .then((list) => {
+              if (!current()) return;
               setConsents(list);
               setConsentsFailed(false);
             })
             .catch(() => {
+              if (!current()) return;
               setConsents([]);
               setConsentsFailed(true);
             });
@@ -136,31 +144,36 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
         }
       })
       .catch(() => {
+        if (!current()) return;
         // Unreachable is UNKNOWN, not a server policy decision: null keeps
         // the two situations distinct in the copy (and sends nothing).
         setSharingAvailable(null);
         setConsents([]);
         setConsentsFailed(false);
       })
-      .finally(() => setMetaPending(false));
+      .finally(() => { if (current()) setMetaPending(false); });
   }, []);
   useEffect(() => {
     mounted.current = true;
+    if (!submitting.current) {
+      setBusy(false);
+      if (clearPasswordOnReveal.current) { clearPasswordOnReveal.current = false; setPassword(""); }
+    }
     refresh();
-    return () => { mounted.current = false; };
+    return () => { mounted.current = false; viewLifetime.current += 1; };
   }, [refresh]);
 
   const findTherapist = async () => {
     if (!mounted.current || submitting.current || busy || sharingAvailable !== true || !code.trim()) return;
-    const scope = localWriteScopeEpoch();
+    const scope = localWriteScopeEpoch(), lifetime = viewLifetime.current;
     submitting.current = true;
     setBusy(true);
     try {
       const found = await api.pairingLookup(code.trim());
-      if (!mounted.current || scope !== localWriteScopeEpoch()) return;
+      if (!mounted.current || lifetime !== viewLifetime.current || scope !== localWriteScopeEpoch()) return;
       setLookup(found);
     } catch (err) {
-      if (!mounted.current || scope !== localWriteScopeEpoch()) return;
+      if (!mounted.current || lifetime !== viewLifetime.current || scope !== localWriteScopeEpoch()) return;
       if (isSessionExpiredError(err)) {
         Alert.alert(tr("common.sessionExpiredTitle"), tr("common.unlockAgainBody"));
       } else if (err instanceof ApiError && err.status === 404) {
@@ -248,9 +261,9 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
   const confirmWithPassword = async () => {
     if (!mounted.current || submitting.current || !pending || busy || !password || !vault.isUnlocked()) return;
     submitting.current = true;
-    const scope = localWriteScopeEpoch(), owner = vault.ownerUserId();
+    const scope = localWriteScopeEpoch(), owner = vault.ownerUserId(), lifetime = viewLifetime.current;
     const key = vault.isUnlocked() ? vault.get().dataKey : null;
-    const current = () => mounted.current && scope === localWriteScopeEpoch() &&
+    const current = () => mounted.current && lifetime === viewLifetime.current && scope === localWriteScopeEpoch() &&
       owner === vault.ownerUserId() && (key === null || (vault.isUnlocked() && vault.get().dataKey === key));
     setBusy(true);
     const done = () => { setBusy(false); setPending(null); setPassword(""); setLookup(null); setCode(""); };
@@ -331,6 +344,8 @@ export function TherapistShareScreen({ navigation }: { navigation: any }): React
       if (mounted.current) {
         setBusy(false);
         setPassword("");
+      } else {
+        clearPasswordOnReveal.current = true;
       }
     }
   };

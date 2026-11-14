@@ -193,16 +193,17 @@ it.each(["delete", "forget-version", "remove-mood"] as const)("does not refresh 
 it.each(["timer", "native idle callback"] as const)("lets a queued native navigation retire a large malformed tail during decryption: %s", async host => {
   const valid = await Promise.all(Array.from({ length: 25 }, (_, index) => row(`host-${index}`, `Host event writing ${index}`))), broken = Array.from({ length: 80 }, (_, index) => ({ ...valid[0]!, id: `broken-server-${index}`, client_entry_id: `broken-${index}`, blob: "!" }));
   if (host === "native idle callback") vi.stubGlobal("requestIdleCallback", (callback: () => void) => setTimeout(callback, 0)); else vi.stubGlobal("requestIdleCallback", undefined);
+  const retired = deferred<void>();
   const real = crypto.subtle.decrypt.bind(crypto.subtle);
   vi.spyOn(crypto.subtle, "decrypt").mockImplementation(async (...args) => {
     const plaintext = await real(...args);
     // Identify the known last entry at the actual decrypt boundary. Other
     // encrypted metadata can decrypt during a walk, so counting all native
     // decrypt calls would retire the session before the intended row.
-    try { if (JSON.parse(new TextDecoder().decode(plaintext)).text === "Host event writing 24") setTimeout(() => { clearSession(); }, 0); } catch { /* non-entry binary output */ }
+    try { if (JSON.parse(new TextDecoder().decode(plaintext)).text === "Host event writing 24") setTimeout(() => { clearSession(); retired.resolve(); }, 0); } catch { /* non-entry binary output */ }
     return plaintext;
   });
-  vi.mocked(client.listEntriesWalk).mockResolvedValue([...valid, ...broken]); const root = await render(<HistoryView />); await flush(); expect(textOf(root)).not.toContain("Host event writing"); expect(root.root.findAllByType("article")).toHaveLength(0); expect(await versions.entryV2Bindings(owner, reference)).toEqual(new Set()); expect(await (await import("../src/kvstore")).kv.getItem(`mindpattern.entryV2Bound.${owner}`)).toBeNull(); for (const entry of valid) expect(await versions.knownEntryVersion(owner, reference, entry.client_entry_id)).toBeNull(); vi.unstubAllGlobals();
+  vi.mocked(client.listEntriesWalk).mockResolvedValue([...valid, ...broken]); const root = await render(<HistoryView />); await retired.promise; await flush(); expect(textOf(root)).not.toContain("Host event writing"); expect(root.root.findAllByType("article")).toHaveLength(0); expect(await versions.entryV2Bindings(owner, reference)).toEqual(new Set()); expect(await (await import("../src/kvstore")).kv.getItem(`mindpattern.entryV2Bound.${owner}`)).toBeNull(); for (const entry of valid) expect(await versions.knownEntryVersion(owner, reference, entry.client_entry_id)).toBeNull(); vi.unstubAllGlobals();
 });
 it("completes a normal large history walk when the browser grants its native idle callback", async () => {
   vi.stubGlobal("requestIdleCallback", (callback: () => void) => setTimeout(callback, 0));

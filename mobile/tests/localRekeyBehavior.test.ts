@@ -4,15 +4,16 @@ import storage from "./helpers/storageMock";
 import * as files from "./helpers/expoFsMock";
 import { runTestControl } from "./helpers/testControl";
 import { secureStore, setSecureStoreBackend } from "../src/secureStore";
-import { api, canonicalOrigin, DEFAULT_BASE_URL } from "../src/api/client";
+import { api, canonicalOrigin, DEFAULT_BASE_URL, setBaseUrl } from "../src/api/client";
 import { accountStorageKey, ACCOUNT_STORAGE_PREFIX } from "../src/accountStorage";
-import { advanceLocalWriteScope, localWriteScopeEpoch, localKeyGeneration, __resetLocalKeyLifecycleForTests } from "../src/localWriteGuard";
+import { advanceLocalWriteScope, localWriteScopeEpoch, localKeyGeneration, captureLocalWritePermit, __resetLocalKeyLifecycleForTests } from "../src/localWriteGuard";
 import { clearLocalRekey, localRekeyRequest, markLocalRekeyPhase, pendingLocalRekey, pendingLocalRekeyOldSalt, prepareLocalRekey, resumeLocalRekey, storeLocalRekeyRequest, storeLocalRekeyTokens, type AtomicRekeyBody } from "../src/localRekey";
 import { emptySafetyPlan, loadSafetyPlan, saveSafetyPlan } from "../src/safetyPlan";
 import { enqueueAudio, flushAudioQueue } from "../src/audioQueue";
 import { encryptAudio } from "../src/crypto/journalCrypto";
 import * as envelopeCrypto from "../src/crypto/envelope";
 import { enqueue, flushQueue } from "../src/offlineQueue";
+import { journalDraftScope, loadJournalDraft, newJournalDraft, saveJournalDraft } from "../src/journalDraft";
 
 const USER="c".repeat(32),OLD=Buffer.alloc(32,5),NEXT=Buffer.alloc(32,9),SALT=Buffer.alloc(16,3).toString("base64");
 const origin=new URL(DEFAULT_BASE_URL).origin,slot=accountStorageKey.localRekey(origin,USER);
@@ -248,4 +249,81 @@ it("settles an interrupted recording before rereading unavailable native descrip
   try{await prepareLocalRekey(USER,OLD,NEXT);obsolete=true;releaseFetch();expect(await Promise.race([result,new Promise(resolve=>setTimeout(()=>resolve({blocked:true}),100))])).toEqual({value:0});}
   finally{releaseFetch();releaseRead();await result;}
   expect(await pendingLocalRekey(USER)).toBe(true);
+});
+
+it("preserves the origin-bound journal draft across a completed key rotation", async () => {
+  const scope = await journalDraftScope(USER);
+  const draft = { ...newJournalDraft(), text: "A draft worth keeping" };
+  expect(await saveJournalDraft(OLD, scope, draft)).toBe("saved");
+  await prepareLocalRekey(USER, OLD, NEXT);
+  await markLocalRekeyPhase(USER, "credential");
+  await resumeLocalRekey(USER, NEXT);
+  expect((await loadJournalDraft(NEXT, scope))?.draft).toEqual(draft);
+});
+
+it("binds the verified data key on unlock without a pending rotation", async () => {
+  await resumeLocalRekey(USER, NEXT);
+  await expect(saveSafetyPlan(OLD, USER, emptySafetyPlan())).rejects.toThrow("local data-key generation changed");
+  await expect(saveSafetyPlan(NEXT, USER, emptySafetyPlan())).resolves.toBeUndefined();
+  expect(await loadSafetyPlan(NEXT, USER)).toEqual(emptySafetyPlan());
+});
+
+
+it("rejects a retired unlock after its server changes while the checkpoint read is held", async () => {
+  const read = secureStore.getItem.bind(secureStore);
+  let release!: () => void, ready!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const started = new Promise<void>(resolve => { ready = resolve; });
+  vi.spyOn(secureStore, "getItem").mockImplementation(async key => {
+    const value = await read(key);
+    if (key === slot) { ready(); await gate; }
+    return value;
+  });
+  const recovery = resumeLocalRekey(USER, NEXT);
+  const early = recovery.then(
+    () => { throw new Error("recovery settled before the checkpoint read was held"); },
+    () => { throw new Error("recovery settled before the checkpoint read was held"); },
+  );
+  try {
+    await Promise.race([started, early]);
+    expect(await setBaseUrl("https://replacement.example")).toBeNull();
+    release();
+    await expect(recovery).rejects.toThrow("local account/server changed during key transition");
+  } finally { release(); await recovery.catch(() => {}); }
+});
+
+
+it("preserves a valid formatted retained queue across local key rotation", async () => {
+  const id = "formatted-retained-entry";
+  const blob = envelopeCrypto.encrypt(OLD, Buffer.from("retained entry"), Buffer.from(JSON.stringify(["entry", USER, id]))).toString("base64");
+  await enqueue({ userId: USER, clientEntryId: id, entryDate: "2026-10-05", blobB64: blob });
+  const queueKey = (await storage.getAllKeys()).find(key => key.startsWith("@mindpattern/queue.v2.items."));
+  expect(queueKey).toBeDefined();
+  const raw = (await storage.getItem(queueKey!))!;
+  const formatted = JSON.stringify(JSON.parse(raw), null, 2);
+  expect(formatted).toContain("  ");
+  await storage.setItem(queueKey!, formatted);
+  await prepareLocalRekey(USER, OLD, NEXT);
+  await markLocalRekeyPhase(USER, "credential");
+  await expect(resumeLocalRekey(USER, NEXT)).resolves.toBeUndefined();
+  const migrated = JSON.parse((await storage.getItem(queueKey!))!);
+  expect(migrated.items).toHaveLength(1);
+  expect(migrated.items[0].clientEntryId).toBe(id);
+});
+
+
+it("clears an account key transition when no rotation checkpoint exists", async () => {
+  expect(await pendingLocalRekey(USER)).toBe(false);
+  await expect(clearLocalRekey(USER)).resolves.toBeUndefined();
+  expect(await pendingLocalRekey(USER)).toBe(false);
+});
+
+
+it("rejects a retained encrypted queue producer after clearing the local key transition", async () => {
+  await resumeLocalRekey(USER, OLD);
+  const retained = captureLocalWritePermit(USER, OLD);
+  await clearLocalRekey(USER);
+  const id = "retired-queue-producer";
+  const blob = envelopeCrypto.encrypt(OLD, Buffer.from("retired entry"), Buffer.from(JSON.stringify(["entry", USER, id]))).toString("base64");
+  await expect(enqueue({ userId: USER, clientEntryId: id, entryDate: "2026-10-05", blobB64: blob }, retained)).rejects.toThrow("retired account or key generation");
 });

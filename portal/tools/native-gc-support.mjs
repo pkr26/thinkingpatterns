@@ -16,6 +16,8 @@ export const BODY_NAMES = Object.freeze({
   'settled-slot': ["a retiring account cannot erase the replacement registration's unseen memo under FIFO native storage", 'releases fulfilled public slot-write Promise allocations after the real UI rotation and erasure flow'],
   'local-rekey-tail': ['completed public rotations release settled journal factory Promise allocations across successor generations'],
   'private-key': ['collects the imported nonextractable private key after actual portal unmount'],
+  'evidence': ['releases decrypted evidence owners after public Back and current chart interactions'],
+  'totp-backup-codes': ['releases the accepted one-time recovery code array after public two-factor disable'],
   'draft-tail': ['releases fulfilled native draft-write Promises after legitimate clinician chart navigation'],
 });
 
@@ -68,6 +70,8 @@ function controlPair(resource, stages, kind) {
   for (const c of controls) {
     require(object(c) && c.positiveRetained === true && c.negativeCollected === true && natural(c.attempts, 1) && c.attempts <= 24, 'collector capability control did not pass finitely');
     if (kind === 'private-key') require(c.algorithm === 'ECDH/P-256' && c.extractable === false, 'native nonextractable ECDH controls missing');
+    if (kind === 'evidence') require(c.resource === 'plain-authenticated-entry-owner' && c.retainedOwners === 1 && c.releasedOwners === 0, 'same-shape evidence owner controls missing');
+    if (kind === 'totp-backup-codes') require(c.resource === 'public-backup-code-array', 'same-shape public recovery code array controls missing');
     if (kind === 'draft-tail') require(c.resource === 'fulfilled-native-Promise', 'native fulfilled Promise controls missing');
   }
 }
@@ -120,6 +124,14 @@ export function validateWitnesses(caseId, witnesses, nodeVersion) {
     }
     require(scopes.reduce((sum,s)=>sum+s.count,0) === resource.capturedPromiseAllocations && resource.retainedPromiseCount === 0
       && Array.isArray(resource.retainedFactories) && resource.retainedFactories.length === 0, 'local rekey finite collection census differs');
+  } else if (caseId === 'evidence') {
+    truths(resource.publicProducer, ['complete', 'authenticatedChart', 'evidenceVisible', 'backCompleted', 'currentWritingCompleted'], 'public evidence owner producer incomplete');
+    require(resource.observedEvidenceOwners === 1 && resource.retainedEvidenceOwnerCount === 0, 'completed public Back retained its authenticated plaintext owner');
+  } else if (caseId === 'totp-backup-codes') {
+    truths(resource.publicProducer, ['complete', 'authenticatedSession', 'genuine600kPasswordProofs', 'acceptedEnable', 'acceptedDisable', 'codeArrayWasPubliclyVisible', 'disabledCodesAbsent', 'currentWritingCompleted'], 'public authenticator enable/disable producer incomplete');
+    truths(resource, ['observerRestoredBeforeCollection', 'originalProductionPromiseForwarded'], 'public recovery code observer/Promise retirement incomplete');
+    require(resource.observedBackupCodeArrays === 1 && resource.retainedBackupCodeArrayCount === 0
+      && natural(resource.collectionAttempts, 1) && resource.collectionAttempts <= 21, 'completed public disable retained its accepted recovery code array');
   } else if (caseId === 'draft-tail') {
     truths(resource, ['originalProductionPromisesUnmodified', 'observerDisabledBeforeGc', 'actualAppUnmountCompleted', 'ownedRendererAndNativeMocksReleased'], 'draft original Promise/observer/renderer retirement incomplete');
     const stages = resource.publicProducerStages, retired = resource.completedPublicOwnerRetirements;

@@ -15,11 +15,11 @@ import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from "react-native";
 import { api, ApiError } from "../api/client";
 import { decryptQuestion } from "../crypto/journalCrypto";
-import { buildFeedbackBlob, clearFeedback, recordFeedbackTap, type FeedbackReceipt } from "../questionFeedback";
+import { beginFeedbackTap, buildFeedbackBlob, clearFeedback, type FeedbackReceipt } from "../questionFeedback";
 import { lightHaptic } from "../haptics";
 import { vault } from "../vault";
 import { assertLocalWritePermit, captureLocalWritePermit, type LocalWritePermit } from "../localRekey";
-import { localWriteScopeEpoch } from "../localWriteGuard";
+import { localKeyGeneration, localWriteScopeEpoch } from "../localWriteGuard";
 import { useSession, stashDraft } from "../store";
 import { genericQuestionForDate } from "../genericQuestions";
 import { localDateISO } from "../moodLog";
@@ -37,6 +37,8 @@ function failureCopy(err: unknown): string {
   return tr("errors.generic");
 }
 type QuestionOwnership = { scope: number; owner: string | null; dataKey: Buffer | null; view: number };
+type FeedbackAttemptState = { owner: string | null; status: Readonly<{ dispatched: boolean }> | null; settled: boolean; uncertain: boolean; revalidated: { scope: number; keyGeneration: number; vaultGeneration: symbol } | null };
+type FeedbackRecovery = { scope: number; owner: string | null; keyGeneration: number | null; vaultGeneration: symbol; feedbackEpoch: number; attempt: FeedbackAttemptState; kind: "prewrite" | "uncertain" };
 
 export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.Element {
   const t = useTheme();
@@ -87,7 +89,7 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
     // The blob's AAD is bound to the server's calendar date — always
     // decrypt with the for_date the server reported, never a locally
     // computed "today" (timezones would break authentication).
-    return decryptQuestion(vault.get(), userId, direct.for_date, direct.blob);
+    return { payload: decryptQuestion(vault.get(), userId, direct.for_date, direct.blob), forDate: direct.for_date };
   };
 
   /** The pattern behind today's question (null on generic days): powers
@@ -97,17 +99,61 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
   const feedbackLatched = useRef(false);
   const feedbackGeneration = useRef(0);
   const renderedFeedbackGeneration = feedbackGeneration.current;
-  const displayedQuestion = useRef<{ question: string | null; pid: string | null }>({ question: null, pid: null });
-  const showQuestion = (payload: Awaited<ReturnType<typeof decryptToday>>, fresh = false) => {
+  const viewActive = useRef(false);
+  const pendingFeedbackRecovery = useRef<FeedbackRecovery | null>(null);
+  const feedbackAttemptState = useRef<FeedbackAttemptState | null>(null);
+  const viewIdentity = useRef<{ owner: string | null; generation: symbol } | null>(null);
+  const displayedQuestion = useRef<{ question: string | null; pid: string | null; forDate: string | null }>({ question: null, pid: null, forDate: null });
+  const showQuestion = ({ payload, forDate }: Awaited<ReturnType<typeof decryptToday>>, fresh = false) => {
     const pid = typeof payload.pattern_pid === "string" ? payload.pattern_pid : null;
-    if (fresh || displayedQuestion.current.question !== payload.question || displayedQuestion.current.pid !== pid) {
+    const sameContent = displayedQuestion.current.question === payload.question && displayedQuestion.current.pid === pid;
+    const datesKnown = typeof forDate === "string" && forDate.length > 0 && typeof displayedQuestion.current.forDate === "string" && displayedQuestion.current.forDate.length > 0;
+    const sameDatedQuestion = sameContent && datesKnown && displayedQuestion.current.forDate === forDate;
+    const differentDate = sameContent && datesKnown && displayedQuestion.current.forDate !== forDate;
+    const attempt = feedbackAttemptState.current;
+    const sameOwnerAttempt = attempt && attempt.owner !== null && attempt.owner === vault.ownerUserId();
+    // A dispatched attempt is ambiguous until settled, or after a rejected
+    // acknowledgement. An identical question on the same date must not enable another tap.
+    const ambiguous = sameOwnerAttempt && (attempt.uncertain || (attempt.status?.dispatched === true && !attempt.settled));
+    const preserveUncertain = sameContent && !differentDate && ambiguous;
+    if (!sameContent || (fresh && !preserveUncertain) || (sameOwnerAttempt && differentDate)) {
       feedbackGeneration.current++;
       feedbackLatched.current = false;
+      feedbackAttemptState.current = null;
+      pendingFeedbackRecovery.current = null;
       setFeedbackGiven(false);
+    } else if (sameOwnerAttempt && sameDatedQuestion) {
+      attempt.revalidated = { scope: localWriteScopeEpoch(), keyGeneration: localKeyGeneration(attempt.owner!), vaultGeneration: vault.dataKeyGeneration() };
+      if (attempt.uncertain) setNotice(tr("question.feedbackSaveUnknown"));
     }
-    displayedQuestion.current = { question: payload.question, pid };
+    displayedQuestion.current = { question: payload.question, pid, forDate };
     setQuestion(payload.question);
     setPatternPid(pid);
+  };
+  const recoverFeedback = (recovery: FeedbackRecovery) => {
+    if (
+      recovery.owner === null || recovery.owner !== vault.ownerUserId() ||
+      feedbackAttemptState.current !== recovery.attempt || !vault.isUnlocked()
+    ) return;
+    if (!viewActive.current) {
+      pendingFeedbackRecovery.current = recovery;
+      return;
+    }
+    const sameGeneration = recovery.feedbackEpoch === feedbackGeneration.current &&
+      recovery.scope === localWriteScopeEpoch() && recovery.keyGeneration === localKeyGeneration(recovery.owner) &&
+      recovery.vaultGeneration === vault.dataKeyGeneration();
+    if (recovery.kind === "uncertain") {
+      const revalidated = recovery.attempt.revalidated;
+      const sameReloadedQuestion = revalidated !== null && revalidated.scope === localWriteScopeEpoch() &&
+        revalidated.keyGeneration === localKeyGeneration(recovery.owner) && revalidated.vaultGeneration === vault.dataKeyGeneration();
+      if (sameGeneration || sameReloadedQuestion) setNotice(tr("question.feedbackSaveUnknown"));
+      return;
+    }
+    // No write was dispatched; the same account/question can safely retry.
+    if (sameGeneration) setNotice(tr("question.feedbackSaveFailed"));
+    feedbackLatched.current = false;
+    feedbackAttemptState.current = null;
+    setFeedbackGiven(false);
   };
   const recordTap = async (resonated: boolean) => {
     const pid = patternPid;
@@ -115,6 +161,16 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
     feedbackLatched.current = true;
     const operation = captureOwnership();
     const feedbackEpoch = feedbackGeneration.current;
+    // Only non-secret identity metadata may outlive this attempt while hidden.
+    const attemptState: FeedbackAttemptState = { owner: operation.owner, status: null, settled: false, uncertain: false, revalidated: null };
+    feedbackAttemptState.current = attemptState;
+    const recovery: FeedbackRecovery = {
+      scope: operation.scope, owner: operation.owner, feedbackEpoch, attempt: attemptState, kind: "prewrite",
+      keyGeneration: operation.owner === null ? null : localKeyGeneration(operation.owner),
+      vaultGeneration: vault.dataKeyGeneration(),
+    };
+    let feedbackAttempt: ReturnType<typeof beginFeedbackTap> | null = null;
+    let feedbackSaved = false;
     const current = () => ownsOperation(operation) && feedbackEpoch === feedbackGeneration.current;
     const sameQuestionView = () => feedbackEpoch === feedbackGeneration.current && ownsView(operation);
     const assertCurrent = () => { assertOwnership(operation); if (feedbackEpoch !== feedbackGeneration.current) throw new Error(tr("common.sessionDamagedTitle")); };
@@ -124,14 +180,29 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
       const userId = await api.getUserId();
       assertCurrent();
       if (userId && userId === operation.owner) {
-        await recordFeedbackTap(operation.dataKey!, userId, pid, resonated, current);
+        feedbackAttempt = beginFeedbackTap(operation.dataKey!, userId, pid, resonated, current);
+        attemptState.status = feedbackAttempt.status;
+        await feedbackAttempt.result;
+        attemptState.settled = true;
+        feedbackSaved = true;
         assertCurrent();
         setNotice(resonated ? tr("question.noticedMore") : tr("question.noticedLess"));
       } else throw new Error(tr("common.sessionDamagedTitle"));
     } catch {
-      if (!current() && !sameQuestionView()) return;
+      const dispatched = feedbackAttempt?.status.dispatched === true;
+      attemptState.settled = true;
+      attemptState.uncertain = dispatched && !feedbackSaved;
+      if (!current() && !sameQuestionView()) {
+        if (!feedbackSaved) recoverFeedback({ ...recovery, kind: dispatched ? "uncertain" : "prewrite" });
+        return;
+      }
+      if (dispatched) {
+        if (!feedbackSaved) setNotice(tr("question.feedbackSaveUnknown"));
+        return;
+      }
       setNotice(tr("question.feedbackSaveFailed"));
       feedbackLatched.current = false;
+      feedbackAttemptState.current = null;
       setFeedbackGiven(false);
     }
   };
@@ -333,16 +404,40 @@ export function QuestionScreen({ navigation }: { navigation: any }): React.JSX.E
   // runs from here (see load's allowKeyShip guard) — mounting a screen
   // must not ship the data key or fire the consent dialog at the user.
   useEffect(() => {
-    let owner = vault.ownerUserId(), dataKey = vault.isUnlocked() ? vault.get().dataKey : null;
+    viewActive.current = true;
+    const nextIdentity = { owner: vault.ownerUserId(), generation: vault.dataKeyGeneration() };
+    const previous = viewIdentity.current;
+    const retireForVaultChange = (owner: string | null) => {
+      viewGeneration.current++;
+      feedbackGeneration.current++;
+      // A same-account tap may already be committed or still in flight. Keep
+      // its latch until it settles; never assume a rekey erased that event.
+      const preserveFeedback = owner !== null && feedbackAttemptState.current?.owner === owner;
+      if (!preserveFeedback) {
+        feedbackLatched.current = false;
+        feedbackAttemptState.current = null;
+        pendingFeedbackRecovery.current = null;
+        displayedQuestion.current = { question: null, pid: null, forDate: null };
+        setFeedbackGiven(false);
+      }
+      setBusy(false); setQuestion(null); setPatternPid(null); setGeneric(null); setError(null); setNotice(null); setPhase("unknown");
+    };
+    if (previous && (previous.owner !== nextIdentity.owner || previous.generation !== nextIdentity.generation)) {
+      retireForVaultChange(nextIdentity.owner);
+    }
+    viewIdentity.current = nextIdentity;
     const unsubscribe = vault.subscribe(() => {
-      const nextOwner = vault.ownerUserId(), nextKey = vault.isUnlocked() ? vault.get().dataKey : null;
-      if (owner === nextOwner && dataKey === nextKey) return;
-      owner = nextOwner; dataKey = nextKey; viewGeneration.current++;
-      feedbackGeneration.current++; feedbackLatched.current = false; displayedQuestion.current = { question: null, pid: null };
-      setBusy(false); setQuestion(null); setPatternPid(null); setFeedbackGiven(false); setGeneric(null); setError(null); setNotice(null); setPhase("unknown");
+      const next = { owner: vault.ownerUserId(), generation: vault.dataKeyGeneration() };
+      const prior = viewIdentity.current;
+      if (prior && prior.owner === next.owner && prior.generation === next.generation) return;
+      viewIdentity.current = next;
+      retireForVaultChange(next.owner);
     });
-    void load(false);
-    return () => { viewGeneration.current++; unsubscribe(); };
+    const recovery = pendingFeedbackRecovery.current;
+    pendingFeedbackRecovery.current = null;
+    const loading = load(false);
+    if (recovery) void loading.then(() => recoverFeedback(recovery)).catch(() => {});
+    return () => { viewActive.current = false; viewGeneration.current++; unsubscribe(); };
   }, []);
 
   const onShowQuestion = () => {

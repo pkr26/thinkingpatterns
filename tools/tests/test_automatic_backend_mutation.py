@@ -323,6 +323,48 @@ class AutomaticOracleTests(unittest.TestCase):
             self.assertEqual(self.command(oracle, f"fresh-{index}")["status"], status)
         self.assertNotIn("app.logic", sys.modules)
 
+    def test_static_typecheck_assertions_stay_separate_from_runtime_kills(self):
+        static = (
+            "def test_models_pass_the_existing_backend_static_typecheck_gate():\n"
+            "    assert False, 'mypy rejected a changed annotation'\n"
+        )
+        row = self.command(static, "static-typecheck-only")
+        self.assertEqual(row["returncode"], 1)
+        self.assertEqual(row["status"], "NON_BEHAVIORAL_FAILURE")
+        self.assertEqual(row["behavior_failures"], [])
+        self.assertEqual(len(row["non_behavioral_failures"]), 1)
+        mixed = self.command(
+            "def test_actual_response():\n    assert False, 'wrong response'\n" + static,
+            "static-and-runtime",
+        )
+        self.assertEqual(mixed["status"], "KILLED")
+        self.assertEqual(len(mixed["behavior_failures"]), 1)
+        self.assertEqual(len(mixed["non_behavioral_failures"]), 0)
+
+    def test_crisis_inventory_and_intermediate_pins_cannot_earn_runtime_credit(self):
+        for index, body in enumerate([
+            "class TestParity:\n    def test_dialog_list_matches_json(self):\n        assert False\n",
+            "def test_crisis_consumed_catalog_matches_the_released_cross_platform_contract():\n    assert False\n",
+            "def test_concat_patterns_are_the_marked_twins():\n    assert False\n",
+            "def test_crisis_normalized_variants_and_released_verdicts():\n    assert False\n",
+            "def test_folded_channel_only_adds_catches():\n    assert False\n",
+            "def test_crisis_leet_normalization_reaches_its_fixed_point():\n    assert False\n",
+        ]):
+            if index == 0:
+                path = self.root / "test_crisis.py"
+                path.write_text(body)
+                row = runner.pytest_child(self.root, [path.name], self.root / "crisis-parity.log", 20)
+            else:
+                row = self.command(body, f"crisis-pin-{index}")
+            self.assertEqual(row["status"], "NON_BEHAVIORAL_FAILURE")
+            self.assertEqual(row["behavior_failures"], [])
+            self.assertEqual(len(row["non_behavioral_failures"]), 1)
+        observed = self.command(
+            "def test_released_crisis_decisions_through_both_public_tiers():\n    assert False\n",
+            "crisis-consumer",
+        )
+        self.assertEqual(observed["status"], "KILLED")
+
     def test_preload_disables_bytecode_in_the_already_running_interpreter(self):
         with (
             mock.patch.object(sys, "dont_write_bytecode", False),

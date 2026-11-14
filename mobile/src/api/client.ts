@@ -1301,9 +1301,7 @@ export const api = {
    *  origin — the LoginScreen warning state. Canonicalized comparison so
    *  loopback alias spellings do not false-alarm. */
   originPinChanged: async (): Promise<boolean> => {
-    const pinned = await secureStore
-      .getItem(PINNED_ORIGIN_KEY)
-      .catch(() => null);
+    const pinned = await secureStore.getItemStrict(PINNED_ORIGIN_KEY);
     if (pinned === null) return false;
     const current = canonicalOrigin(await originOf(await getBaseUrl()));
     return current !== pinned;
@@ -1311,10 +1309,14 @@ export const api = {
   /** M-3: explicitly trust the currently selected origin (called from the
    *  warning's confirm action after the user has verified the URL). */
   confirmCurrentOrigin: async (): Promise<void> => {
-    await secureStore.setItem(
-      PINNED_ORIGIN_KEY,
-      canonicalOrigin(await originOf(await getBaseUrl())),
-    );
+    const epoch = localWriteScopeEpoch();
+    await serializedCredentials(async () => {
+      assertCredentialEpoch(epoch);
+      const origin = canonicalOrigin(await originOf(await getBaseUrl()));
+      assertCredentialEpoch(epoch);
+      await secureStore.setItem(PINNED_ORIGIN_KEY, origin);
+      assertCredentialEpoch(epoch);
+    });
   },
   getUserId: async () => secureStore.getItem(USER_ID_KEY),
   getUsername: async () => secureStore.getItem(USERNAME_KEY),

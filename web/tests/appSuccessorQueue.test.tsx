@@ -9,7 +9,7 @@ import { act } from "react";
 import type { ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { App } from "../src/App";
-import { hasSession, sessionUserId } from "../src/api/client";
+import { api, hasSession, sessionUserId } from "../src/api/client";
 import { buildAad } from "../src/crypto/aad";
 import { decrypt, deriveMasterKey, encrypt, fromBase64, toBase64, zeroize } from "../src/crypto/core";
 import { derivePatientKeys } from "../src/crypto/keys";
@@ -77,8 +77,9 @@ it("an invalidated first App adoption cannot upload the successor's old-key queu
     const beforeJournal = await kv.getItem(`mindpattern.localRotation.${B}`);
     expect(beforeQueue).toContain(beforeBlob); expect(beforeJournal).toBeTruthy();
     const uploads: { user: string; blob: string; id: string }[] = [];
-    let logins = 0;
+    let logins = 0; let expireFirst = false;
     stubFetch((url, init) => {
+      if (url.endsWith("/meta")) return jsonResponse(expireFirst ? { code: "unauthorized" } : {}, { status: expireFirst ? 401 : 200 });
       if (url.endsWith("/auth/salt")) return jsonResponse({ salt: SALT });
       if (url.endsWith("/auth/login")) {
         const body = JSON.parse(String(init.body));
@@ -104,7 +105,53 @@ it("an invalidated first App adoption cannot upload the successor's old-key queu
     root = await render(<App />);
     await completion("actual App boot", () => buttonByLabel(root!, "Sign in"));
     await typeInto(root, "Username", "synthetic_first"); await typeInto(root, "Password", PASSWORD); await submit(root);
-    await completion("first real App native generation read admitted and actual form re-enabled", () => aStarted && vault.ownerUserId() === A && buttonByLabel(root!, "Sign in") && !isDisabled(root!, "Sign in"));
+    await completion("first real App native generation read admitted", () => aStarted && vault.ownerUserId() === A && (buttonByLabel(root!, "Working…") || buttonByLabel(root!, "Sign in")));
+    if (buttonByLabel(root!, "Working…")) {
+      expect(isDisabled(root!, "Working…")).toBe(true);
+      await act(async () => { root!.root.findByType("form").props.onSubmit({ preventDefault() {} }); });
+      await flush();
+      expect(logins).toBe(1);
+      expect(sessionUserId()).toBe(A);
+      expect(vault.ownerUserId()).toBe(A);
+      expect(uploads).toEqual([]);
+      expect(await kv.getItem(queueKey!)).toBe(beforeQueue);
+      expect(await backend.getItem(`mindpattern.localRotation.${B}`)).toBe(beforeJournal);
+      aRead.release();
+      await completedNative("first genuine App adoption completes", withLock("account-transition", async () => undefined));
+      await completedNative("background flushes complete", Promise.all(observedFlushes));
+      expect(uploads).toEqual([]);
+      expect(await kv.getItem(queueKey!)).toBe(beforeQueue);
+      expect(await backend.getItem(`mindpattern.localRotation.${B}`)).toBe(beforeJournal);
+      // A's real expiry returns the app to Login. B can then begin normally;
+      // its own migration must finish before B's old-key queue is uploaded.
+      expireFirst = true;
+      await act(async () => { await api.meta().catch(() => undefined); });
+      await completion("expired A returns to Login", () => buttonByLabel(root!, "Sign in") && !isDisabled(root!, "Sign in"));
+      await typeInto(root, "Username", "synthetic_successor"); await typeInto(root, "Password", PASSWORD); await submit(root);
+      await completion("B's real migration is held", () => bStarted && sessionUserId() === B && vault.ownerUserId() === B);
+      await completedNative("all started flushes while B migration waits", Promise.all(observedFlushes));
+      await completedNative("queue lane while B migration waits", withLock("queue-flush", async () => undefined));
+      expect(uploads).toEqual([]);
+      expect(await kv.getItem(queueKey!)).toBe(beforeQueue);
+      expect(await backend.getItem(`mindpattern.localRotation.${B}`)).toBe(beforeJournal);
+      bRead.release();
+      await completedNative("B's migration completes", withLock("account-transition", async () => undefined));
+      await completedNative("post-recovery flushes complete", Promise.all(observedFlushes));
+      // A's earlier reconnect pass may throttle the automatic B pass. A
+      // supported explicit drain demonstrates that B's preserved queue is
+      // usable after migration without depending on wall-clock timing.
+      await completedNative("explicit post-recovery B drain", withLock("queue-flush", () => queue.flushQueue(B)));
+      await flush();
+      expect(await kv.getItem(`mindpattern.localRotation.${B}`)).toBeNull();
+      expect(uploads).toHaveLength(1);
+      expect(uploads[0]?.user).toBe("Bearer synthetic-token-b");
+      expect(uploads[0]?.id).toBe(ENTRY);
+      expect(uploads[0]?.blob).not.toBe(beforeBlob);
+      const restoredPlain = await decrypt(newKeys.dataKey, fromBase64(uploads[0]!.blob), aad);
+      expect(restoredPlain).toEqual(plain);
+      zeroize(restoredPlain);
+    } else {
+    expect(isDisabled(root!, "Sign in")).toBe(false);
     const firstKeys = vault.get();
     await typeInto(root, "Username", "synthetic_successor"); await submit(root);
     await completion("second real Login adopts accountB while first App still owns native account-transition", () => logins === 2 && vault.ownerUserId() === B && buttonByLabel(root!, "Sign in") && !isDisabled(root!, "Sign in"));
@@ -174,7 +221,7 @@ it("an invalidated first App adoption cannot upload the successor's old-key queu
 }
 }
     zeroize(currentPlain);
-
+    }
   }
   finally {
     aRead.release(); bRead.release();

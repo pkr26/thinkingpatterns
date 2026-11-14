@@ -354,7 +354,7 @@ describe("EntryScreen save pipeline", () => {
     const root = await render(<EntryScreen navigation={nav} />);
     await writeEntry(root, "   ");
     expect(touchableByLabel(root, "Save entry").props.disabled).toBe(true);
-    await pressLabel(root, "Save entry");
+    await flush();
     expect(Alert.alert).not.toHaveBeenCalled();
     expect(api.createEntry).not.toHaveBeenCalled();
   });

@@ -85,6 +85,8 @@ class TestStudentT:
 
     def test_zero_t_is_certain(self):
         assert statsig.student_t_sf_two_sided(0.0, 8.0) == 1.0
+        # Zero remains certain in the normal limit of infinite degrees of freedom.
+        assert statsig.student_t_sf_two_sided(0.0, math.inf) == 1.0
 
     def test_huge_t_is_negligible(self):
         assert statsig.student_t_sf_two_sided(100.0, 8.0) < 1e-12

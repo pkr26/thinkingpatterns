@@ -247,6 +247,28 @@ def test_gitleaks_false_positive_exceptions_stay_at_reviewed_locations():
     approved.update(
         {needle: locations | policy_and_guard for needle, locations in vector_locations.items()}
     )
+    # Public reference keys/ciphertext derive from the published synthetic
+    # master input; the account password is confined to stubbed local tests.
+    # The scanner allowances also require the exact rule, path and assignment.
+    public_fixture_locations = {
+        b"06f1afeb4bc93f028e70a58a4f270a1ecdce9e0fb5672dad13198715c03b1a3e": {
+            Path("backend/tests/fixtures/portal_reference_security_vectors.json")
+        },
+        b"vLHMdXp1Due86K8rCrDcB3S07DQG9lyLQBzEA6fPjXwzlYRGppBnjy+G292mD+wVUBVnNEiwft4hvJJ2Rqk737veKinpyflWOmzAva0dysXZRTCUDGJka9/AfZsSI4jgzdb7/p5PJ8A6DRsVPGrfUaQ8qq1Xo5qiK5zgGKjjtyTCj9HSwnWK4yzUqV7IFujJydntSCQltNZVjTmr45cZemxt7W11Yw==": {
+            Path("backend/tests/fixtures/portal_reference_security_vectors.json")
+        },
+        b"quiet-morning-lantern-42": {
+            Path("web/tests/accountAdoption.public.regression.test.tsx"),
+            Path("web/tests/login.test.tsx"),
+            Path("web/tests/loginNativeCompletion.test.tsx"),
+        },
+    }
+    approved.update(
+        {
+            needle: locations | policy_and_guard
+            for needle, locations in public_fixture_locations.items()
+        }
+    )
     found = {needle: set() for needle in approved}
     source_files = _working_tree_source_files()
     if not source_files:

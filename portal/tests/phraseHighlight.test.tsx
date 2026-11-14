@@ -3,7 +3,7 @@
  *  appeared anywhere in it — highlighting everything is highlighting
  *  nothing. These pins hold the normalized-match → raw-offset mapping and
  *  the mark-only-the-span rendering. */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import React from "react";
 
 import { HighlightedEntry, rawMatchSpans } from "../src/views/PatientView";
@@ -38,6 +38,27 @@ describe("rawMatchSpans", () => {
   it("returns nothing when the phrase is absent or the label folds empty", async () => {
     expect(rawMatchSpans("nothing relevant here", "quiet phrase")).toEqual([]);
     expect(rawMatchSpans("anything at all", "!!!")).toEqual([]);
+  });
+
+  it.each([
+    { label: "cafe", needle: "cafe", expected: [[0, 4], [5, 9]] },
+    { label: "absent", needle: "absent", expected: [] },
+    { label: "!!!", needle: "", expected: [] },
+  ])("finishes a finite phrase search with bounded forward progress: $label", ({ label, needle, expected }) => {
+    const text = "café café", normalized = "cafe cafe";
+    const indexOf = String.prototype.indexOf;
+    let searches = 0;
+    const observer = vi.spyOn(String.prototype, "indexOf").mockImplementation(function (this: string, search: string, position?: number) {
+      if (String(this) === normalized && search === needle) {
+        searches += 1;
+        // Every successful nonempty match advances at least one character;
+        // one terminal miss suffices. Empty labels require no repeated scan.
+        expect(searches, "Finite clinical highlighting must complete without repeating a stalled search").toBeLessThanOrEqual(text.length + 1);
+      }
+      return indexOf.call(this, search, position);
+    });
+    try { expect(rawMatchSpans(text, label)).toEqual(expected); }
+    finally { observer.mockRestore(); }
   });
 
   it.each(["cafe\u0301", "cafe\u0301\u0308", "\u0301cafe\u0301", "cafe\u0301!"])("keeps decomposed accents inside the raw highlighted phrase %j", text => {

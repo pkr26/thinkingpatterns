@@ -331,12 +331,12 @@ export function SettingsScreen({ navigation }: { navigation: any }): React.JSX.E
         // proves the enabler knows the password, not merely that they hold
         // the foregrounded unlocked session (M-4).
         const userId = await api.getUserId().catch(() => null);
+        assertSensitiveOwnership(operation);
         if (!userId) {
           Alert.alert(tr("common.couldNotVerifyTitle"), tr("common.reauthNoAccount"));
           retry();
           return;
         }
-        assertSensitiveOwnership(operation);
         if (userId !== operation.owner) throw new Error(tr("common.sessionDamagedTitle"));
         await enableBiometricWrap(userId, operation);
       } else if (pending.kind === "recovery-create") {

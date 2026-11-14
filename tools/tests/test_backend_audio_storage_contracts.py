@@ -279,8 +279,11 @@ def test_local_bounded_read_connection_and_prefetch_budgets_are_native(
         )
 
 
+@pytest.mark.parametrize(
+    "include_directories", [False, True], ids=["files-only", "mixed-paths"]
+)
 def test_local_native_manifest_batches_skip_directories_and_remove_crash_stale_rows(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, include_directories
 ):
     module = _storage(monkeypatch)
     store = module.LocalAudioStore(str(tmp_path))
@@ -288,9 +291,12 @@ def test_local_native_manifest_batches_skip_directories_and_remove_crash_stale_r
     audio.mkdir()
     for n in range(501):
         (audio / f"{n:04d}.enc").write_bytes(b"opaque")
-    (audio / "zzz-directory.enc").mkdir()
-    # Filesystem enumeration order is provider-dependent. Exercise a
-    # legitimate deterministic order with all 501 files preceding a directory.
+    if include_directories:
+        (audio / "0000-directory.enc").mkdir()
+        (audio / "zzz-directory.enc").mkdir()
+    # Files-only exercises the 500-row batch boundary directly. The mixed case
+    # also verifies that matching directories never become manifest rows.
+    # Enumeration order is provider-dependent, so keep both cases deterministic.
     actual_glob = Path.glob
 
     def ordered_glob(path, pattern):
@@ -1659,3 +1665,64 @@ def test_live_storage_configuration_race_recovers_one_pooled_provider(
     cloud = module.get_audio_store_cached(settings)
     assert isinstance(cloud, module.S3AudioStore)
     assert module.get_audio_store_cached(settings) is cloud
+
+
+@pytest.mark.parametrize("mismatch", ["backend", "locator"])
+def test_compatibility_sweep_skips_first_wrong_target_and_deletes_later_match(
+    monkeypatch, tmp_path, mismatch
+):
+    # A wrong target must not stop deletion of a later matching target.
+    module = _storage(monkeypatch)
+    models = importlib.import_module("app.models")
+    monkeypatch.setattr(module, "utcnow", lambda: NOW)
+    store = module.LocalAudioStore(str(tmp_path))
+    locator = module.storage_locator(store)
+    tombstone_ids = ("0" * 31 + "1", "0" * 31 + "2")
+    identifiers = iter(tombstone_ids)
+    monkeypatch.setattr(module, "new_id", lambda: next(identifiers))
+    bad_backend = "other" if mismatch == "backend" else "local"
+    bad_locator = locator if mismatch == "backend" else "wrong-target"
+    cases = (("bad", bad_backend, bad_locator), ("good", "local", locator))
+    for key, _, _ in cases:
+        asyncio.run(store.put("audio/" + key + ".enc", b"opaque"))
+
+    async def exercise(session, maker):
+        session.add(_user(models))
+        for n, (key, backend, target) in enumerate(cases):
+            session.add(models.AudioAttachment(
+                id=key, user_id="patient", client_entry_id=key,
+                backend=backend, storage_key="audio/" + key + ".enc",
+                storage_locator=target, size_bytes=30,
+                mime_type="audio/webm", duration_seconds=1,
+                created_at=NOW, expires_at=NOW - timedelta(seconds=2 - n),
+            ))
+        await session.commit()
+        native_scalars = session.scalars
+        queried = []
+
+        async def ordered_tombstones(statement, *args, **kwargs):
+            # Execute the real SQLite query, selecting one legal order for its
+            # otherwise unordered result. No rows or deletion results are faked.
+            descriptions = statement.column_descriptions
+            assert len(descriptions) == 1
+            assert descriptions[0]["entity"] is models.AudioDeletion
+            queried.append(True)
+            return await native_scalars(
+                statement.order_by(models.AudioDeletion.id), *args, **kwargs
+            )
+
+        monkeypatch.setattr(session, "scalars", ordered_tombstones)
+        assert await module.sweep_expired_audio(session, store) == 2
+        assert queried == [True]
+        assert (store.root / "audio/bad.enc").exists()
+        assert not (store.root / "audio/good.enc").exists()
+        assert await session.get(models.AudioDeletion, tombstone_ids[0],
+                                 populate_existing=True) is not None
+        assert await session.get(models.AudioDeletion, tombstone_ids[1],
+                                 populate_existing=True) is None
+        assert await session.get(models.AudioAttachment, "bad") is None
+        assert await session.get(models.AudioAttachment, "good") is None
+        await session.refresh(await session.get(models.User, "patient"))
+        assert (await session.get(models.User, "patient")).entries_revision == 2
+
+    asyncio.run(_database(models, exercise))

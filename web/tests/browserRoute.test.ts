@@ -32,6 +32,8 @@ describe("authenticated browser routes", () => {
   it("rejects text preceding a fragment route marker", () => {
     vi.stubGlobal("window", { location: { hash: "prefix#/history" } });
     expect(readBrowserView()).toBe("today");
+    vi.stubGlobal("window", { location: { hash: "history#/" } });
+    expect(readBrowserView()).toBe("today");
   });
   it("accepts only known destinations and stores no journal content", () => {
     const location = { hash: "#/patterns" };

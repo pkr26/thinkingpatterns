@@ -135,6 +135,10 @@ class TestDualVariantAndMasking:
             "𝐎 𝐅𝐅 𝐌𝐘𝐒𝐄𝐋𝐅",
             "k i ll myself",
             "s uicide is on my mind",
+            "I w a nt to die",
+            "I w ant to die",
+            "I k ill myself",
+            "I h urt myself",
         ):
             assert crisis.matches_dialog(text), f"orphan variant missed {text!r}"
 

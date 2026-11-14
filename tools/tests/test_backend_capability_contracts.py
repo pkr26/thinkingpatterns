@@ -173,6 +173,10 @@ def test_human_codes_reject_biased_entropy_and_keep_exact_native_lengths(monkeyp
     monkeypatch.setattr(sharing.os, "urandom", lambda n: entropy[:n])
     assert sharing.generate_pairing_code() == alphabet[:8]
     assert totp.generate_backup_code() == alphabet[:10]
+    # The last byte of eight complete 30-symbol groups remains unbiased.
+    entropy = bytes([239, 240, 255]) + bytes(range(30))
+    assert totp.generate_backup_code() == "Z" + alphabet[:9]
+    assert sharing.generate_pairing_code() == "Z" + alphabet[:7]
     for invalid in ("ß", "雪", "O1234567", "2345-678", "23456789\u00a0"):
         assert sharing.normalize_pairing_code(invalid) == ""
     assert sharing.normalize_pairing_code(" \t2345abcd\r\n") == "2345ABCD"

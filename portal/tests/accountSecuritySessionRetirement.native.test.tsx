@@ -41,10 +41,20 @@ async function finite<T>(label: string, promise: Promise<T>): Promise<T> {
   finally { if (timer) clearTimeout(timer); }
 }
 
-it.each(["live completion", "retired salt completion", "legacy to snapshot custody"] as const)("preserves account-security ownership through %s", async scenario => {
-  for (const custodyBoundary of scenario === "live completion" ? ["none", "after notes", "after note", "after revisions", "after revision", "after salt", "after current keys", "after profile", "after private key", "after identity key", "after final custody", "after sealed ring", "after password failure"] as const : ["none"] as const) {
-    // Keep the modern success control and also accept a fully headerless legacy listing.
-    for (const legacyHeaderless of scenario === "live completion" && custodyBoundary === "none" ? [false, true] : [false]) {
+// Each genuine KDF/HTTP flow is a separate case so a failed scenario has
+// independent cleanup and mutation coverage selects only its actual consumers.
+// Every original producer keeps its separate finite completion deadline.
+const custodyBoundaries = ["none", "after notes", "after note", "after revisions", "after revision", "after salt", "after current keys", "after profile", "after private key", "after identity key", "after final custody", "after sealed ring", "after password failure", "after password commit"] as const;
+type CustodyBoundary = typeof custodyBoundaries[number];
+type Scenario = "live completion" | "retired salt completion" | "legacy to snapshot custody";
+const cases: { scenario: Scenario; custodyBoundary: CustodyBoundary; legacyHeaderless: boolean }[] = [
+  ...custodyBoundaries.flatMap(custodyBoundary => (custodyBoundary === "none" ? [false, true] : [false]).map(legacyHeaderless => ({
+    scenario: "live completion" as const, custodyBoundary, legacyHeaderless,
+  }))),
+  { scenario: "retired salt completion", custodyBoundary: "none", legacyHeaderless: false },
+  { scenario: "legacy to snapshot custody", custodyBoundary: "none", legacyHeaderless: false },
+];
+it.each(cases)("preserves account-security ownership through $scenario at $custodyBoundary (legacy headers: $legacyHeaderless)", async ({ scenario, custodyBoundary, legacyHeaderless }) => {
       vi.useRealTimers(); clearSession(); window.localStorage.clear(); window.sessionStorage.clear(); window.location.hash = "";
       const accountKeys = keys(PASSWORD, SALT), pair = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
       const privateBytes = pair.privateKey.export({ format: "der", type: "pkcs8" }), publicKey = pair.publicKey.export({ format: "der", type: "spki" }).toString("base64");
@@ -102,7 +112,9 @@ it.each(["live completion", "retired salt completion", "legacy to snapshot custo
       const passwordKdfWindow = custodyBoundary === "after salt" || custodyBoundary === "after current keys";
       const credentialWindow = custodyBoundary === "after profile" || custodyBoundary === "after private key" || custodyBoundary === "after identity key";
       const finalSecurityWindow = custodyBoundary === "after final custody" || custodyBoundary === "after sealed ring";
-      const atomicRetryWindow = custodyBoundary === "after password failure";
+      const atomicCommitWindow = custodyBoundary === "after password commit";
+      const atomicRetryWindow = custodyBoundary === "after password failure" || atomicCommitWindow;
+      let permitCommit!: () => void; const commitPermission = new Promise<void>(resolve => { permitCommit = resolve; });
       const originalPasswordAtomic = api.changePasswordAtomic, oldPasswordAtomic = Object.getOwnPropertyDescriptor(api, "changePasswordAtomic");
       const atomicOriginals: Array<{ retired: boolean; original: ReturnType<typeof api.changePasswordAtomic> }> = [];
       const firstAtomicArrived = deferred(); let heldAtomicResponse: ServerResponse | undefined, atomicPasswordRequests = 0;
@@ -198,7 +210,8 @@ it.each(["live completion", "retired salt completion", "legacy to snapshot custo
       function releaseCustodyRevisions() {
         if (originalRevisionsHeld && !originalRevisionsHeld.writableEnded) send(originalRevisionsHeld, boundaryRevisions);
       }
-      function releaseAtomicFailure() {
+      function releaseAtomicResponse() {
+        if (atomicCommitWindow) { permitCommit(); return; }
         if (heldAtomicResponse && !heldAtomicResponse.writableEnded) send(heldAtomicResponse, { detail: "Owned transient failure before an atomic commit" }, 500);
       }
       async function settleOriginalAtomicProducers() {
@@ -339,7 +352,8 @@ it.each(["live completion", "retired salt completion", "legacy to snapshot custo
             atomicPasswordRequests += 1;
             if (atomicRetryWindow && atomicPasswordRequests === 1) {
               heldAtomicResponse = response; firstAtomicArrived.resolve();
-              if (cleanupReleasesCustody) releaseAtomicFailure(); return;
+              if (cleanupReleasesCustody) releaseAtomicResponse();
+              if (atomicCommitWindow) await commitPermission; else return;
             }
             if (body.verifier !== verifier || body.expected_custody_version !== custodyVersion || body.custody_version !== custodyVersion + 1 || body.wrap_pub_key !== publicKey) throw setup("atomic password proof/identity/version mismatch");
             const next = keys(NEW_PASSWORD, String(body.new_salt)); let reopened: Buffer | undefined, ringPlain: Buffer | undefined;
@@ -546,8 +560,8 @@ it.each(["live completion", "retired salt completion", "legacy to snapshot custo
         if (atomicRetryWindow) Object.defineProperty(api, "changePasswordAtomic", { ...oldPasswordAtomic, value: function (this: unknown, ...args: Parameters<typeof api.changePasswordAtomic>) {
           const original = originalPasswordAtomic.apply(this, args);
           atomicOriginals.push({ retired: custodyRetired, original });
-          // The service's own genuine 500 rejection remains unchanged. Observe
-          // and return the identical full exported API Promise to its caller.
+          // Observe the genuine server response and return the identical full
+          // exported API Promise for both refusal and successful epoch commit.
           return track(original, error => error instanceof ApiError && error.status === 500);
         } });
         if (custodyBoundary !== "none") {
@@ -581,20 +595,24 @@ it.each(["live completion", "retired salt completion", "legacy to snapshot custo
         custodyActOpen = custodyBoundary !== "none";
         try { await press("Change password"); } finally { custodyActOpen = false; }
         if (atomicRetryWindow) {
-          await finite("genuine retry third salt request after submit act closes", heldSalt.promise);
-          if (!heldResponse || heldResponse.writableEnded || custodyActOpen) throw setup("atomic retry original salt gate or closed submit act missing");
+          await finite("genuine atomic third salt request after submit act closes", heldSalt.promise);
+          if (!heldResponse || heldResponse.writableEnded || custodyActOpen) throw setup("atomic original salt gate or closed submit act missing");
           send(heldResponse, { salt: SALT });
           await finite("original custody A notes HTTP arrival before first atomic attempt", notesArrived.promise); releaseCustodyNotes();
           await finite("first original atomic password HTTP awaits genuine response", firstAtomicArrived.promise);
           if (atomicOriginals.length !== 1 || atomicOriginals[0]!.retired || !heldAtomicResponse || heldAtomicResponse.writableEnded) throw setup("first live atomic password request not genuinely held");
           retireCustodyThroughCurrentB();
-          await complete("distinct current B authenticates under the still-live bearer before old 500 release", () => hasSession() && rendered().includes(currentPlain) && rendered().includes("Still in the baseline phase"));
-          if (passwordCommits !== 0 || !tokens.has("owned-retirement-bearer-1")) throw setup("owned transient failure must precede any credential/token-epoch commit");
-          releaseAtomicFailure();
+          await complete("distinct current B authenticates before the original atomic response completes", () => hasSession() && rendered().includes(currentPlain) && rendered().includes("Still in the baseline phase"));
+          if (passwordCommits !== 0 || !tokens.has("owned-retirement-bearer-1")) throw setup("owned response gate must precede any credential/token-epoch commit");
+          releaseAtomicResponse();
           await settleOriginalAtomicProducers(); await settleOriginalCustodyProducers(); await settleOriginalSecurityKeyProducers(); await drain();
           expect(atomicOriginals.filter(row => row.retired), "An obsolete password action cannot retry its authenticated atomic write after current chart navigation").toEqual([]);
-          expect(atomicPasswordRequests).toBe(1); expect(passwordCommits).toBe(0); expect(logoutRequests).toBe(0);
-          expect(hasSession()).toBe(true); expect(successfulLogins).toBe(1); expect(rendered()).toContain(currentPlain);
+          expect(atomicPasswordRequests).toBe(1);
+          if (atomicCommitWindow) {
+            expect(passwordCommits).toBe(1); expect(tokens.size).toBe(0);
+            expect(hasSession(), "A real successful password commit invalidates the shared bearer epoch even after public navigation; its current plaintext and session must lock").toBe(false);
+            expect(rendered()).toContain("Password changed. Every session"); expect(rendered()).not.toContain(currentPlain);
+          } else { expect(passwordCommits).toBe(0); expect(logoutRequests).toBe(0); expect(hasSession()).toBe(true); expect(successfulLogins).toBe(1); expect(rendered()).toContain(currentPlain); }
         } else if (finalSecurityWindow) {
           await finite("genuine final-security third salt request after submit act closed", heldSalt.promise);
           if (!heldResponse || heldResponse.writableEnded || custodyActOpen) throw setup("final-security original salt gate or closed submit act missing");
@@ -705,10 +723,11 @@ it.each(["live completion", "retired salt completion", "legacy to snapshot custo
           expect(noteProbes.map(({ calls, failures, successes }) => ({ calls, failures, successes }))).toEqual([{ calls: 4, failures: 3, successes: 1 }, { calls: 4, failures: 3, successes: 1 }]);
           expect(secretArrays.length).toBeGreaterThanOrEqual(9); expect(saltArrays.length).toBe(2);
         } else if (scenario === "legacy to snapshot custody") {
-          // Both outcomes settle normally: the baseline commits, while the fixed
-          // view refuses the mixed collection before constructing a mutation.
-          await complete("public custody verification outcome", () => passwordCommits === 1 || rendered().includes("server changed the note pagination protocol during custody verification"));
+          // Await the real producer graph and the public action's busy state;
+          // keep diagnostic correctness in an assertion rather than its wait.
           await drain();
+          await complete("public custody verification action settles", () => passwordCommits === 1 || root!.root.findAllByType("button").some(node => text(node) === "Change password"));
+          expect(rendered()).toContain("server changed the note pagination protocol during custody verification");
           expect(passwordCommits).toBe(0);
           expect(custodyVersion).toBe(0); expect(successfulLogins).toBe(1); expect(hasSession()).toBe(true);
           expect(rendered()).toContain("nothing was changed.");
@@ -733,7 +752,7 @@ it.each(["live completion", "retired salt completion", "legacy to snapshot custo
         expect(nativeBodies.length).toBeGreaterThanOrEqual(6); expect(unhandled).toEqual([]); clean();
       } finally {
         if (heldResponse && !heldResponse.writableEnded) send(heldResponse, { salt: SALT });
-        cleanupReleasesCustody = true; releaseAtomicFailure(); releaseCustodyNotes(); releaseCustodyRevisions(); releaseCredentialMe(); releaseFinalRevisions();
+        cleanupReleasesCustody = true; releaseAtomicResponse(); releaseCustodyNotes(); releaseCustodyRevisions(); releaseCredentialMe(); releaseFinalRevisions();
         const cleanupFaults: unknown[] = [];
         if (custodyBoundary !== "none") try { await settleOriginalCustodyProducers(); } catch (error) { cleanupFaults.push(error); }
         if (passwordKdfWindow || credentialWindow || finalSecurityWindow || atomicRetryWindow) try { await settleOriginalSecurityKeyProducers(); } catch (error) { cleanupFaults.push(error); }
@@ -759,6 +778,4 @@ it.each(["live completion", "retired salt completion", "legacy to snapshot custo
         if (cleanupFaults.length) throw setup("owned cleanup failed", cleanupFaults[0]);
         clean(); if (unhandled.length) throw setup("native unhandled rejection", unhandled[0]);
       }
-    }
-  }
-});
+}, 120000);

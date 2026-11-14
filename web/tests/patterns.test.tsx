@@ -139,6 +139,7 @@ describe("PatternsView", () => {
     });
     const root = await render(<PatternsView onCrisis={() => undefined} />);
     await settle(40, 4);
+    expect(textOf(root)).not.toMatch(/\b\d+ patterns? muted\b/);
     await press(root, "Mute");
     await settle(40, 2);
     // The card body is gone; the label survives only on the unmute control.

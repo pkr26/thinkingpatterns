@@ -108,6 +108,16 @@ test('a Vitest timeout reported as Killed earns no runtime kill credit', () => {
   assert.equal(result.runtimeKills, 0);
 });
 
+test('public API timeout and hook assertion failures are behavioral observations', () => {
+  for (const reason of ["expected 'request timed out after 15s' to be 'server unreachable'", 'expected hook result to be ready']) {
+    const failed = report('Killed'); failed.files['src/example.ts'].mutants[0].statusReason = reason;
+    const result = auditReport(sources, enumeration, failed);
+    assert.equal(result.runtimeKills, 1); assert.equal(result.testTimeoutFailures, 0);
+    assert.equal(result.runnerFaultFailures, 0); assert.equal(result.complete, true);
+    assert.equal(result.observationClassifierVersion, 2);
+  }
+});
+
 test('reviewed finite resource expansion stays separate from nontermination and kills', () => {
   const review = { key: mutantKey('src/example.ts',mutant), disposition: 'ResourceExhaustion', contract: 'A short on-device input completes within the established execution budget.',
     reason: 'Each empty global mask doubles its intermediate string; 27 fixed masks expand empty input to 134217727 characters.', evidence: ['growth-proof.json','bounded-replay.json'] };

@@ -107,6 +107,7 @@ async def test_upload_requires_consent_and_entry(client, settings):
     )
     assert unknown.status_code == 404
     assert unknown.json()["code"] == "unknown_entry"
+    assert unknown.json()["detail"] == "no entry with that client_entry_id"
 
 
 async def test_upload_fetch_roundtrip_and_expiry_metadata(client, app, settings):

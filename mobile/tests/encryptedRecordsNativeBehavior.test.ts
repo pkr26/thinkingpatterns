@@ -33,8 +33,8 @@ function allocations(expectedReads: string[] = []) {
   return { written, read, keys };
 }
 function erased(values: Buffer[]) { expect(values.length).toBeGreaterThan(0); for (const value of values) expect(value.every(byte => byte === 0)).toBe(true); }
-beforeEach(() => { vi.restoreAllMocks(); storage.__reset(); resetEntryVersionMirrors(); runTestControl(__resetLocalKeyLifecycleForTests); changeLocalSessionOwner(USER); installLocalDataKey(USER, KEY); });
-afterEach(() => { vi.restoreAllMocks(); resetEntryVersionMirrors(); });
+beforeEach(() => { vi.restoreAllMocks(); storage.__reset(); runTestControl(resetEntryVersionMirrors); runTestControl(__resetLocalKeyLifecycleForTests); changeLocalSessionOwner(USER); installLocalDataKey(USER, KEY); });
+afterEach(() => { vi.restoreAllMocks(); runTestControl(resetEntryVersionMirrors); });
 it.each([false, true])("version-map native write failure=%s erases its owned serialization and key", async failure => {
   const held = allocations(); if (failure) vi.spyOn(storage, "setItem").mockRejectedValueOnce(new Error("Native version-map unavailable"));
   expect(await observeEntryVersions(USER, KEY, [{ clientEntryId: "private-native-entry", contentVersion: 5 }])).toEqual({ rolledBack: [], advanced: true });
@@ -86,7 +86,7 @@ it("both Native rollback mirrors retain their observations when storage disappea
 });
 it("Native entry deletion persists removal of its version and required-AAD binding", async () => {
   await observeEntryVersions(USER, KEY, [{ clientEntryId: "deleted-native-entry", contentVersion: 8 }]); await noteV2Bound(USER, KEY, "deleted-native-entry");
-  const held = allocations(); await forgetEntryVersion(USER, KEY, "deleted-native-entry"); erased(held.keys); expect(await storage.getItem(accountStorageKey.entryVersions(USER))).toBeNull(); resetEntryVersionMirrors();
+  const held = allocations(); await forgetEntryVersion(USER, KEY, "deleted-native-entry"); erased(held.keys); expect(await storage.getItem(accountStorageKey.entryVersions(USER))).toBeNull(); runTestControl(resetEntryVersionMirrors);
   expect(await knownEntryVersion(USER, KEY, "deleted-native-entry")).toBeNull(); expect(await isV2Bound(USER, KEY, "deleted-native-entry")).toBe(false);
   expect(await observeEntryVersions(USER, KEY, [{ clientEntryId: "deleted-native-entry", contentVersion: 1 }])).toEqual({ rolledBack: [], advanced: true });
 });
@@ -177,7 +177,7 @@ it("Native whole-account forgetting clears persisted and process-only observatio
 });
 it("Native version rebinding survives a restart under the installed replacement key", async () => {
   await observeEntryVersions(USER, KEY, [{ clientEntryId: "native-entry", contentVersion: 8 }]); await noteV2Bound(USER, KEY, "native-entry");
-  installLocalDataKey(USER, NEXT); await rebindEntryVersions(USER, KEY, NEXT); resetEntryVersionMirrors();
+  installLocalDataKey(USER, NEXT); await rebindEntryVersions(USER, KEY, NEXT); runTestControl(resetEntryVersionMirrors);
   expect(await knownEntryVersion(USER, NEXT, "native-entry")).toBe(8); expect(await isV2Bound(USER, NEXT, "native-entry")).toBe(true);
 });
 it("Native mood parsing keeps valid days and clamps both mood and energy while dropping hostile rows", async () => {
@@ -321,7 +321,7 @@ it("a Native version observation with no advancement does not depend on a later 
 it("nonstring authenticated Native binding baggage cannot exhaust the write budget for a valid new binding",async()=>{
  await storage.setItem(accountStorageKey.entryV2Bound(USER),seal("entry-v2-bound",["native-existing",{padding:"x".repeat(4096)},null,17,true]));
  const write=storage.setItem.bind(storage);vi.spyOn(storage,"setItem").mockImplementation(async(slot,value)=>{if(slot===accountStorageKey.entryV2Bound(USER)&&Buffer.byteLength(value,"utf8")>512)throw new Error("Native storage byte budget exhausted");return write(slot,value);});
- await expect(noteV2Bound(USER,KEY,"native-new-binding")).resolves.toBeUndefined();resetEntryVersionMirrors();expect(await isV2Bound(USER,KEY,"native-new-binding")).toBe(true);expect(await isV2Bound(USER,KEY,"native-existing")).toBe(true);
+ await expect(noteV2Bound(USER,KEY,"native-new-binding")).resolves.toBeUndefined();runTestControl(resetEntryVersionMirrors);expect(await isV2Bound(USER,KEY,"native-new-binding")).toBe(true);expect(await isV2Bound(USER,KEY,"native-existing")).toBe(true);
 });
 it("a refused Native legacy migration cannot reinterpret a JSON carrier as authenticated mood ciphertext",async()=>{
  const raw=JSON.stringify([seal("moodlog",[{date:"2026-10-07",value:0.75,energy:0.5}])]);await storage.setItem(accountStorageKey.moodLog(USER),raw);vi.spyOn(storage,"setItem").mockRejectedValue(new Error("Native migration write refused"));

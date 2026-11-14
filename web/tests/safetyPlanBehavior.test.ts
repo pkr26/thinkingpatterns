@@ -85,10 +85,14 @@ it("takes custody of a live key synchronously so an immediately following vault 
 });
 it.each(["no source", "undefined source", "locked", "unverified owner"])("does not replace existing writing without a verified live editor: %s", async condition => {
   await saveSafetyPlan(key, owner, valid); const original = records.get(slot);
+  const originalRecords = [...records.entries()];
   registerSafetyPlanSource(() => condition === "undefined source" ? undefined : null);
   if (condition === "locked") { registerSafetyPlanSource(() => ({ ...valid, coping: "locked writing" })); vault.lock(); }
   if (condition === "unverified owner") { registerSafetyPlanSource(() => ({ ...valid, coping: "unverified writing" })); vault.unlock({ dataKey: key.slice(), authKey: new Uint8Array(32) }); }
   await preserveSafetyPlan(); expect(records.get(slot)).toBe(original);
+  // A refused editor must not park the same writing under an unverified
+  // fallback owner either. Checking only the expected slot misses that leak.
+  expect([...records.entries()]).toEqual(originalRecords);
 });
 it("propagates explicit save failure, while parking failure settles and retains the previous recoverable record", async () => {
   await saveSafetyPlan(key, owner, valid); const original = records.get(slot);

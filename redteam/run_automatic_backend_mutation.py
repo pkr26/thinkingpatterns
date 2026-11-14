@@ -38,6 +38,16 @@ NON_BEHAVIORAL_TESTS = (
     'test_encrypt_with_nonce_absent_from_production_paths',
     'test_production_code_never_calls_the_v1_patterns_analyzer',
     'test_es_function_words_carry_no_duplicate_literals',
+    'static_typecheck',
+    'test_crisis.py::TestParity::',
+    'test_crisis_consumed_catalog_matches_the_released_cross_platform_contract',
+    'test_concat_patterns_are_the_marked_twins',
+    'test_crisis_unicode_token_and_regex_transform_boundaries',
+    'test_crisis_normalized_variants_and_released_verdicts',
+    'test_crisis_each_confusable_invisible_leet_and_concat_boundary',
+    'test_crisis_lowercases_ascii_capitals_introduced_by_nfkc',
+    'test_folded_channel_only_adds_catches',
+    'test_crisis_leet_normalization_reaches_its_fixed_point',
 )
 
 

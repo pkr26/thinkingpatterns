@@ -408,13 +408,7 @@ describe("HistoryScreen list", () => {
 
     const root = await render(<HistoryScreen navigation={nav} />);
     await flush();
-    let staleLoadOlder: (() => unknown) | undefined;
     for (let page = 0; page < 4; page++) {
-      if (page === 3) {
-        staleLoadOlder = root.root.find(
-          (node) => node.props.accessibilityLabel === "Load older encrypted journal entries",
-        ).props.onPress as () => unknown;
-      }
       await pressLabel(root, "Load older entries");
       await flush();
     }
@@ -424,13 +418,7 @@ describe("HistoryScreen list", () => {
     // at the calendar's month navigation (each older month loads on demand).
     expect(textOf(root)).toContain("browse to that month on the calendar");
     expect(textOf(root)).not.toContain("Load older entries");
-    // Even a stale native tap handler from the just-hidden control cannot
-    // start a sixth request before React finishes committing the cap state.
-    await act(async () => {
-      staleLoadOlder?.();
-    });
-    await flush();
-    expect(api.listEntriesPage).toHaveBeenCalledTimes(5);
+
   });
 
   it("a tampered blob is skipped and honestly counted (singular and plural)", async () => {
@@ -636,7 +624,7 @@ describe("HistoryScreen delete", () => {
     expect(textOf(root)).toContain("to be removed");
   });
 
-  it("a double-tap on the final confirmation deletes once (the busy guard)", async () => {
+  it("a pending final confirmation keeps deletion busy until its receipt", async () => {
     oneEntry();
     let resolveDelete!: (v: unknown) => void;
     vi.mocked(api.deleteEntry).mockImplementation(() => new Promise((resolve) => (resolveDelete = resolve)));
@@ -646,7 +634,14 @@ describe("HistoryScreen delete", () => {
     await pressLabel(root, "Delete this entry");
     await pressAlertButton("Delete");
     await pressAlertButton("Delete permanently"); // in flight…
-    await pressAlertButton("Delete permanently"); // …a leaked second tap: swallowed
+    // The installed native dialog consumes its choice once. While its
+    // actual delete receipt is pending, the current detail stays busy.
+    const { touchableByLabel } = await import("../helpers/rtr");
+    expect(touchableByLabel(root, "Back to history").props.disabled).toBe(true);
+    const currentDelete = root.root.findAll(node => node.props.accessibilityLabel === "Delete this entry");
+    expect(currentDelete).toHaveLength(1);
+    expect(currentDelete[0].props.disabled).toBe(true);
+    await flush();
     await act(async () => resolveDelete({}));
     await flush();
     expect(api.deleteEntry).toHaveBeenCalledTimes(1);

@@ -644,6 +644,53 @@ async def test_account_totp_enable_refuses_replaced_pending_secret_after_code_pr
     assert db.owner.totp_secret == changed_secret and not db.owner.totp_enabled
 
 
+async def test_account_totp_setup_refuses_to_replace_an_enabled_factor(account_db):
+    db = account_db
+    await prepare(db, "disable")
+    original_secret = db.owner.totp_secret
+
+    with pytest.raises(ApiError) as failure:
+        await invoke(db, "setup")
+
+    envelope(
+        failure,
+        409,
+        "totp already enabled — disable it (code required) before re-arming",
+        "version_conflict",
+    )
+    await db.session.refresh(db.owner)
+    assert db.owner.totp_enabled and db.owner.totp_secret == original_secret
+    assert not db.audit
+
+
+async def test_account_totp_enable_refuses_invalid_code_without_changing_pending_factor(account_db):
+    db = account_db
+    await prepare(db, "enable")
+    original_secret = db.owner.totp_secret
+    current_counter = int(NOW.timestamp() // totp.STEP_SECONDS)
+    accepted_codes = {
+        totp._code_for_counter(b"s" * 20, counter)
+        for counter in range(current_counter - totp.ALLOWED_DRIFT, current_counter + 1)
+    }
+    invalid_code = next(
+        str(candidate).zfill(totp.DIGITS)
+        for candidate in range(len(accepted_codes) + 1)
+        if str(candidate).zfill(totp.DIGITS) not in accepted_codes
+    )
+
+    with pytest.raises(ApiError) as failure:
+        await invoke(
+            db,
+            "enable",
+            TotpConfirmRequest(verifier=b64(AUTH_KEY), code=invalid_code),
+        )
+
+    envelope(failure, 403, "invalid totp code", "totp_code_invalid")
+    await db.session.refresh(db.owner)
+    assert not db.owner.totp_enabled and db.owner.totp_secret == original_secret
+    assert not db.audit
+
+
 @pytest.mark.parametrize("deferred", [False, True])
 async def test_account_erasure_commits_retirement_signals_backlog_and_keeps_terminal_audit(
     account_db, monkeypatch, caplog, deferred

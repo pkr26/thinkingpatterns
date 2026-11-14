@@ -112,6 +112,10 @@ it("an older Insights owner receipt cannot clear Entry's pending save-triggered 
     });
     await act(async () => { root = ReactTestRenderer.create(<ThemeProvider><SessionProvider><Screen /></SessionProvider></ThemeProvider>); });
     await until("actual logged-out boot", () => route === "loggedOut");
+    await until("login server verification readiness", () => {
+      const password = root!.root.findAllByType(TextInput).find(node => node.props.accessibilityLabel === "Password");
+      return Boolean(password && password.props.editable !== false);
+    });
     await fill("Username", NAME); await fill("Password", PASSWORD);
     await act(async () => { await finite("actual Login Promise", button("Sign in").props.onPress()); });
     await until("initial progress refusal and Entry readiness", () => route === "Entry" && !session.activeDaysKnown && !session.activeDaysLoading);

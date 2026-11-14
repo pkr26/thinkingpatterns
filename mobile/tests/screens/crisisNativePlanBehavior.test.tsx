@@ -1,6 +1,5 @@
 /** Public Crisis resources and optional encrypted-plan navigation against
  * the actual vault. Linked Native views/Linking are supplied by the runner. */
-import React from "react";
 import {beforeEach,afterEach,it,expect,vi} from "vitest";
 import {CrisisScreen} from "../../src/screens/CrisisScreen";
 import {ThemeProvider} from "../../src/theme";

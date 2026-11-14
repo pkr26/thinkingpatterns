@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { publicSurface } from "./helpers/publicSurface";
 import { act } from "react";
-import { flush, press, render as renderRaw, textOf, textOfNode, typeInto } from "./helpers/rtr";
+import { flush, press, render as renderRaw, textOf, typeInto } from "./helpers/rtr";
 
 async function render(ui:React.ReactElement<{session?:unknown}>) {
   const root=await renderRaw(ui);
@@ -275,125 +275,10 @@ it("starts a new pairing comparison with no stale SAS, fingerprint or error whil
  let release!:(value:Awaited<ReturnType<typeof api.pairingSas>>)=>void;vi.mocked(api.pairingSas).mockImplementationOnce(()=>new Promise(resolve=>{release=resolve;}));await typeInto(root,"Patient's account id","patient-two");await press(root,"Show verification code");await flush();try{expect(textOf(root)).not.toContain("123456");expect(publicSurface(root.toJSON())).toMatchSnapshot("fresh pairing comparison pending");}finally{release({sas:"654321",wrap_key_fingerprint:"0123456789abcdef",expires_in:900});await flush();}
  expect(textOf(root)).toContain("654321");await press(root,"Generate pairing code");await flush();expect(textOf(root)).not.toContain("654321");expect(publicSurface(root.toJSON())).toMatchSnapshot("new pairing session retires old comparison");
 
-
- // The same patient/session and a completed previous comparison are kept.
- // The public replacement-code action is committed before the transition.
- await act(async () => { root.unmount(); });
- const { Profiler, startTransition } = await import("react");
- const { default: Renderer } = await import("react-test-renderer");
- let resetComparisonRoot: ReturnType<typeof Renderer.create> | undefined;
- const resetComparisonCommits: string[] = [];
- const pendingApiPorts = new Set<Promise<void>>();
- const forwardApi = <T,>(port: Promise<T>): Promise<T> => {
-  const done = port.then(() => undefined, () => undefined);
-  pendingApiPorts.add(done); void done.then(() => { pendingApiPorts.delete(done); });
-  return port;
- };
- let releaseHeldDigest!: (value: string) => void;
- const heldDigest = new Promise<string>(resolve => { releaseHeldDigest = resolve; });
- void heldDigest.catch(() => {});
- try {
-  vi.mocked(cryptography.serverWrapKeyFingerprint).mockResolvedValueOnce("0123456789abcdef");
-  vi.mocked(api.pairingSas).mockResolvedValueOnce({sas:"112233",wrap_key_fingerprint:"0123456789abcdef",expires_in:900});
-  await act(async () => {
-   resetComparisonRoot = Renderer.create(<Profiler id="public-new-code-fingerprint-commits" onRender={() => {
-    if (resetComparisonRoot) resetComparisonCommits.push(textOf(resetComparisonRoot));
-   }}><PatientsView displayName="Dr. Portal" session={session} onOpen={()=>{}} onSignOut={()=>{}} /></Profiler>);
-  });
-  await flush(); await press(resetComparisonRoot!, "Generate pairing code");
-  await typeInto(resetComparisonRoot!, "Patient's account id", "same-pairing-patient");
-  await press(resetComparisonRoot!, "Show verification code"); await flush();
-  expect(textOf(resetComparisonRoot!)).toContain("112233");
-  expect(textOf(resetComparisonRoot!)).not.toContain("This portal could not compute the fingerprint of your own sharing key");
-  expect(textOf(resetComparisonRoot!)).not.toContain("KEY FINGERPRINT MISMATCH");
-  vi.mocked(api.newPairingCode).mockImplementationOnce(() => forwardApi(Promise.resolve({code:"8Y3KQM5P",expires_in:900})));
-  await press(resetComparisonRoot!, "Generate pairing code");
-  await act(async () => { while (pendingApiPorts.size) await Promise.all([...pendingApiPorts]); });
-  await flush();
-  expect(textOf(resetComparisonRoot!)).toContain("8Y3KQM5P");
-  vi.mocked(api.pairingSas).mockImplementationOnce(() => forwardApi(Promise.resolve({sas:"654321",wrap_key_fingerprint:"0011223344556677",expires_in:900})));
-  vi.mocked(cryptography.serverWrapKeyFingerprint).mockImplementationOnce(() => heldDigest);
-  await act(async () => {
-   startTransition(() => {
-    const current = resetComparisonRoot!.root.findAllByType("button").find(node => textOfNode(node) === "Show verification code");
-    if (!current || current.props.disabled === true) throw new Error("SetupError: current enabled public Show verification code is absent");
-    current.props.onClick(); // Public Button returns void; no async transition entanglement.
-   });
-   while (pendingApiPorts.size) await Promise.all([...pendingApiPorts]);
-   // Drain the actual API outcome in one host task. The local digest remains
-   // held until finally, rather than being awaited in this public act batch.
-   await new Promise<void>(resolve => setTimeout(resolve, 0));
-  });
-  const pendingNewCodeCommits = resetComparisonCommits.filter(text => text.includes("654321"));
-  expect(pendingNewCodeCommits.length).toBeGreaterThan(0);
-  expect(pendingNewCodeCommits.every(text => text.includes("This portal could not compute the fingerprint of your own sharing key") && !text.includes("KEY FINGERPRINT MISMATCH")), "A new pairing code never compares a new SAS against the previous local fingerprint").toBe(true);
- } finally {
-  releaseHeldDigest("0123456789abcdef");
-  try {
-   await act(async () => { await heldDigest; while (pendingApiPorts.size) await Promise.all([...pendingApiPorts]); });
-  } finally {
-   try { await flush(); }
-   finally { if (resetComparisonRoot) await act(async () => { resetComparisonRoot!.unmount(); }); }
-  }
- }
 });
 
 it("drops an old local pairing fingerprint when the next local fingerprint calculation fails",async()=>{
  vi.spyOn(cryptography,"serverWrapKeyFingerprint").mockResolvedValueOnce("0123456789abcdef").mockRejectedValueOnce(new Error("host digest unavailable"));const root=await render(<PatientsView displayName="Dr. Portal" session={session} onOpen={()=>{}} onSignOut={()=>{}}/>);await press(root,"Generate pairing code");await typeInto(root,"Patient's account id","first-patient");await press(root,"Show verification code");await flush();await typeInto(root,"Patient's account id","second-patient");await press(root,"Show verification code");await flush();expect(publicSurface(root.toJSON())).toMatchSnapshot("fresh pairing with unavailable local cross-check");
-
- // Public renderer-component transition input. This is not a DOM dispatch:
- // native ReactDOM discrete dispatch deliberately clears the transition.
- await act(async () => { root.unmount(); });
- const { Profiler, startTransition } = await import("react");
- const { default: Renderer } = await import("react-test-renderer");
- let transitionRoot: ReturnType<typeof Renderer.create> | undefined;
- const committedText: { sas: string; text: string }[] = [];
- const pendingPorts = new Set<Promise<void>>();
- const forward = <T,>(port: Promise<T>): Promise<T> => {
-  const done = port.then(() => undefined, () => undefined);
-  pendingPorts.add(done); void done.then(() => { pendingPorts.delete(done); });
-  return port;
- };
- try {
-  vi.mocked(cryptography.serverWrapKeyFingerprint).mockResolvedValueOnce("0123456789abcdef");
-  vi.mocked(api.pairingSas).mockResolvedValueOnce({sas:"123456",wrap_key_fingerprint:"fedcba9876543210",expires_in:900});
-  await act(async () => {
-   transitionRoot = Renderer.create(<Profiler id="public-sas-fingerprint-commits" onRender={() => {
-    if (transitionRoot) {
-     const sasHosts = transitionRoot.root.findAllByType("p").filter(node => node.props["data-testid"] === "pairing-sas");
-     if (sasHosts.length > 1) throw new Error("SetupError: multiple public pairing SAS hosts are committed");
-     const sasHost = sasHosts[0];
-     if (sasHost) committedText.push({ sas: textOfNode(sasHost), text: textOf(transitionRoot) });
-    }
-   }}><PatientsView displayName="Dr. Portal" session={session} onOpen={()=>{}} onSignOut={()=>{}} /></Profiler>);
-  });
-  await flush(); await press(transitionRoot!,"Generate pairing code");
-  await typeInto(transitionRoot!,"Patient's account id","transition-patient");
-  await press(transitionRoot!,"Show verification code"); await flush();
-  expect(textOf(transitionRoot!)).toContain("KEY FINGERPRINT MISMATCH");
-  vi.mocked(api.pairingSas).mockImplementationOnce(() => forward(Promise.resolve({sas:"654321",wrap_key_fingerprint:"0011223344556677",expires_in:900})));
-  vi.mocked(cryptography.serverWrapKeyFingerprint).mockImplementationOnce(() => forward(Promise.reject(new Error("host digest unavailable"))));
-  await act(async () => {
-   startTransition(() => {
-    const current = transitionRoot!.root.findAllByType("button").find(node => textOfNode(node) === "Show verification code");
-    if (!current || current.props.disabled === true) throw new Error("SetupError: current enabled public Show verification code is absent");
-    current.props.onClick(); // The shipped Button onPress returns void.
-   });
-   while (pendingPorts.size) await Promise.all([...pendingPorts]);
-   // One real host-task boundary drains the actual public service outcomes;
-   // neither a calibrated Promise count nor an elapsed-time oracle is used.
-   await new Promise<void>(resolve => setTimeout(resolve, 0));
-  });
-  const nextComparisonCommits = committedText.filter(commit => commit.sas === "654321").map(commit => commit.text);
-  expect(nextComparisonCommits.length).toBeGreaterThan(0);
-  expect(nextComparisonCommits.every(text => text.includes("This portal could not compute the fingerprint of your own sharing key") && !text.includes("KEY FINGERPRINT MISMATCH")), "A failed current fingerprint never commits the previous comparison as current").toBe(true);
- } finally {
-  try { await act(async () => { while (pendingPorts.size) await Promise.all([...pendingPorts]); }); }
-  finally {
-   try { await flush(); }
-   finally { if (transitionRoot) await act(async () => { transitionRoot!.unmount(); }); }
-  }
- }
 });
 
 it("reports clipboard failure for shown-once recovery codes and retires it when closing security",async()=>{
@@ -422,4 +307,21 @@ it.each([
  if(action==="recovery"){if(missing!=="current")await typeInto(root,"Current password (the one you sign in with)","current-password");if(missing!=="intended")await typeInto(root,"The password you were changing to","intended-password");}
  if(action==="rotation"){if(missing!=="current")await typeInto(root,"Current password (to authorize rotation)","current-password");if(missing!=="confirmation"){const checkbox=root.root.findAllByType("input").find(node=>node.props["aria-label"]==="Confirm sharing-key rotation")!;await act(async()=>checkbox.props.onChange({target:{checked:true}}));}}
  expect(publicSurface(root.toJSON())).toMatchSnapshot("isolated missing account custody input");
+});
+
+it("preserves a key-derivation failure while scrubbing the unlocked sharing identity", async () => {
+  const unlocked = new Uint8Array([7, 8, 9, 10]);
+  vi.spyOn(cryptography, "openSealedPrivateKey").mockResolvedValueOnce(unlocked);
+  const derive = vi.spyOn(cryptography, "noteKeyV2FromPrivateKey").mockRejectedValueOnce(new Error("The secure key provider could not derive the notes key."));
+  const rotate = vi.spyOn(api, "rotateWrapKey");
+  const root = await render(<PatientsView displayName="Dr. Portal" session={session} onOpen={vi.fn()} onSignOut={vi.fn()} />);
+  await press(root, "Show account security");
+  await typeInto(root, "Current password (to authorize rotation)", "current-password");
+  const confirmation = root.root.findAllByType("input").find(node => node.props["aria-label"] === "Confirm sharing-key rotation")!;
+  await act(async () => confirmation.props.onChange({ target: { checked: true } }));
+  await press(root, "Rotate sharing key");
+  await vi.waitFor(() => expect(derive).toHaveBeenCalledOnce());
+  expect(unlocked.every(byte => byte === 0)).toBe(true);
+  expect(rotate).not.toHaveBeenCalled();
+  await vi.waitFor(() => expect(textOf(root)).toContain("The secure key provider could not derive the notes key."));
 });

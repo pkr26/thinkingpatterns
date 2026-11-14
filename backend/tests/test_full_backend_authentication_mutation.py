@@ -57,7 +57,7 @@ async def authentication_db(collection_db, monkeypatch):  # noqa: F811 - importe
     db.settings.sharing_enabled = True
     db.settings.token_secret = "legacy-session-secret"
     db.settings.auth_token_secret_explicit = "split-session-secret"
-    db.settings.decoy_secret = "dedicated-decoy-secret"
+    db.settings.decoy_secret = "dedicated-decoy-secret-for-native-fixture"
     db.settings.auth_rate_limit = 1000
     db.settings.verifier_failure_limit = 3
     db.owner.scrypt_salt = b"s" * 16
@@ -2490,6 +2490,8 @@ async def test_pairing_issuance_retries_unique_collisions_and_stops_with_exact_r
 async def test_clinician_sas_credential_expiry_and_minimum_display_lifetime(sharing_db, state):
     from datetime import timedelta
 
+    from sqlalchemy import event
+
     db = sharing_db
     if state != "unknown":
         await seed_pairing(
@@ -2510,21 +2512,36 @@ async def test_clinician_sas_credential_expiry_and_minimum_display_lifetime(shar
         response = await therapist.pairing_sas(db.request, db.other, db.session, OWNER, db.code)
         assert response.expires_in == 1
     else:
-        with pytest.raises(ApiError) as failure:
-            await therapist.pairing_sas(
-                db.request,
-                db.other,
-                db.session,
-                OWNER,
-                None if state == "empty_header" else db.code,
-            )
-        envelope(failure, 404, "pairing code not found", "not_found")
+        queried = []
+
+        def observe_query(_connection, _cursor, statement, _parameters, _context, _many):
+            queried.append(statement)
+
+        if state == "empty_header":
+            event.listen(db.engine.sync_engine, "before_cursor_execute", observe_query)
+        try:
+            with pytest.raises(ApiError) as failure:
+                await therapist.pairing_sas(
+                    db.request,
+                    db.other,
+                    db.session,
+                    OWNER,
+                    None if state == "empty_header" else db.code,
+                )
+            envelope(failure, 404, "pairing code not found", "not_found")
+        finally:
+            if state == "empty_header":
+                event.remove(db.engine.sync_engine, "before_cursor_execute", observe_query)
+        if state == "empty_header":
+            assert not queried, "missing pairing credential must refuse before database lookup"
 
 
 @pytest.mark.parametrize(
     "state", ["active", "revoked", "inactive_patient", "other_patient", "oversized"]
 )
 async def test_active_clinical_consent_scope_is_flat_and_patient_specific(sharing_db, state):
+    from sqlalchemy import event
+
     db = sharing_db
     row = await seed_consent(db, status="revoked" if state == "revoked" else "active")
     if state == "inactive_patient":
@@ -2540,9 +2557,22 @@ async def test_active_clinical_consent_scope_is_flat_and_patient_specific(sharin
     if state == "active":
         assert await therapist._active_consent(db.session, db.other, target) is row
     else:
-        with pytest.raises(ApiError) as failure:
-            await therapist._active_consent(db.session, db.other, target)
-        envelope(failure, 404, "patient not found", "not_found")
+        queried = []
+
+        def observe_query(_connection, _cursor, statement, _parameters, _context, _many):
+            queried.append(statement)
+
+        if state == "oversized":
+            event.listen(db.engine.sync_engine, "before_cursor_execute", observe_query)
+        try:
+            with pytest.raises(ApiError) as failure:
+                await therapist._active_consent(db.session, db.other, target)
+            envelope(failure, 404, "patient not found", "not_found")
+        finally:
+            if state == "oversized":
+                event.remove(db.engine.sync_engine, "before_cursor_execute", observe_query)
+        if state == "oversized":
+            assert not queried, "oversized patient identifier must refuse before database lookup"
 
 
 @pytest.mark.parametrize("changed", ["inactive", "epoch"])
@@ -3754,3 +3784,92 @@ async def test_consent_grant_unavailable_clinician_is_flat_before_fences(sharing
         )
     envelope(failure, 404, "pairing code not found", "not_found")
     assert not db.audit
+
+
+@pytest.mark.parametrize("patient", ["active", "unknown_32", "oversized_33"])
+async def test_note_target_identifier_boundary_refuses_before_consent_lookup(sharing_db, patient):
+    from sqlalchemy import event
+
+    db = sharing_db
+    await seed_consent(db)
+    target = OWNER if patient == "active" else "x" * (32 if patient == "unknown_32" else 33)
+    queried = []
+
+    def observe_query(_connection, _cursor, statement, _parameters, _context, _many):
+        queried.append(statement)
+
+    event.listen(db.engine.sync_engine, "before_cursor_execute", observe_query)
+    try:
+        if patient == "active":
+            assert await therapist._note_target(db.session, db.other, target) == OWNER
+        else:
+            with pytest.raises(ApiError) as failure:
+                await therapist._note_target(db.session, db.other, target)
+            envelope(failure, 404, "patient not found", "not_found")
+    finally:
+        event.remove(db.engine.sync_engine, "before_cursor_execute", observe_query)
+    if patient == "oversized_33":
+        assert not queried, "oversized note patient identifier must refuse before database lookup"
+    else:
+        assert any(
+            "SELECT" in statement.upper() and "consents" in statement.lower()
+            for statement in queried
+        ), "valid-length note target must resolve the real consent scope"
+
+
+async def test_pairing_housekeeping_preserves_one_day_grace_then_prunes(authentication_db):
+    from datetime import timedelta
+
+    from app import main
+    from app.models import PairingCode
+
+    db = authentication_db
+    # Fixed ages describe the existing one-day dead-row housekeeping grace;
+    # they must not follow the implementation's mutable retention constant.
+    # This does not extend the separate fifteen-minute credential lifetime.
+    expiries = {
+        "old": NOW - timedelta(hours=25),
+        "past-boundary": NOW - timedelta(hours=24, seconds=1),
+        "at-boundary": NOW - timedelta(hours=24),
+        "within-grace": NOW - timedelta(hours=24) + timedelta(seconds=1),
+        "unexpired": NOW + timedelta(minutes=15),
+    }
+    ids = {label: "retention-" + label for label in expiries}
+    for label, expires in expiries.items():
+        db.session.add(
+            PairingCode(
+                id=ids[label],
+                therapist_id=OTHER,
+                code_hash="retention-hash-" + label,
+                created_at=expires - timedelta(minutes=15),
+                expires_at=expires,
+            )
+        )
+    await db.session.commit()
+
+    first = await main._prune_auxiliary_retention_once(db.request.app, db.session, now=NOW)
+    await db.session.commit()
+    retained = set(
+        (
+            await db.session.scalars(select(PairingCode.id).where(PairingCode.id.in_(ids.values())))
+        ).all()
+    )
+    expected = {ids[label] for label in ("at-boundary", "within-grace", "unexpired")}
+    assert retained == expected, (
+        "housekeeping must prune only pairing rows more than one day past expiry"
+    )
+    assert first["pairing"] == (False, 0.0, 2)
+
+    second = await main._prune_auxiliary_retention_once(db.request.app, db.session, now=NOW)
+    await db.session.commit()
+    assert second["pairing"] == (False, 0.0, 0)
+    assert (
+        set(
+            (
+                await db.session.scalars(
+                    select(PairingCode.id).where(PairingCode.id.in_(ids.values()))
+                )
+            ).all()
+        )
+        == expected
+    )

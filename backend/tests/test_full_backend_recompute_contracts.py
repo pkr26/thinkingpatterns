@@ -22,7 +22,7 @@ from app.models import Consent, Entry, Insight, User
 from app.security import crypto, sharing
 from app.security.enclave import InMemoryKeyStore, KeyNotFound
 from app.security.entry_guard import seal_entry_guard, validate_entry_guard
-from app.services import brain, questions
+from app.services import brain, questions, threshold
 from app.services.patterns import Pattern
 from tests.test_full_backend_collection_mutation import (
     NOW,
@@ -86,6 +86,7 @@ async def recompute_db(collection_db, monkeypatch):
     ]
     db.stats = {"language": "es", "days": 3, "custom": "retained"}
     monkeypatch.setattr(insights, "_utc_today", lambda: db.clock)
+    monkeypatch.setattr(threshold, "_utc_today", lambda: db.clock)
     monkeypatch.setattr(insights, "utcnow", lambda: NOW)
     monkeypatch.setattr(insights, "lifecycle_locks", UserLocks())
     monkeypatch.setattr(insights, "_recompute_locks", UserLocks())
@@ -910,3 +911,107 @@ async def test_recompute_write_failures_preserve_account_deletion_identity(
         assert failure.value is fault
     assert db.key_store.popped == bytearray(32)
     assert await stored(db) == []
+
+
+@pytest.mark.asyncio
+async def test_english_question_fallback_preserves_first_same_day_choice_after_write_retry(
+    recompute_db, monkeypatch
+):
+    """A failed write cannot silently reselect the same-day English question on retry."""
+    from datetime import date
+
+    db = recompute_db
+    db.clock = date(2026, 12, 1)
+    db.stats["language"] = "other"
+    db.cards = [
+        Pattern(
+            "temporal",
+            "work",
+            12,
+            0.875,
+            {"day": "Monday", "pattern_pid": "work-pid", "is_new": True, "last_seen": "2026-10-03"},
+        ),
+        Pattern(
+            "rumination",
+            "same thought",
+            9,
+            0.8,
+            {
+                "pattern_pid": "thought-pid",
+                "sensitive": True,
+                "pattern_state": "fading",
+                "last_seen": "2026-10-04",
+            },
+        ),
+        Pattern(
+            "topic",
+            "family",
+            8,
+            0.7,
+            {"pattern_pid": "family-pid", "pattern_state": "active", "trend": "steady"},
+        ),
+    ]
+    questions._DAY_PINNED_QUESTIONS.clear()
+    real_question = questions.question_for_today
+    chosen = []
+
+    def observed_question(*args, **kwargs):
+        value = real_question(*args, **kwargs)
+        chosen.append(value)
+        return value
+
+    monkeypatch.setattr(questions, "question_for_today", observed_question)
+    real_replace = insights._replace_insight
+    failed = False
+
+    async def fail_first_write(*args, **kwargs):
+        nonlocal failed
+        if args[2] == "patterns" and not failed:
+            failed = True
+            raise RuntimeError("injected write failure after question selection")
+        return await real_replace(*args, **kwargs)
+
+    monkeypatch.setattr(insights, "_replace_insight", fail_first_write)
+    try:
+        with pytest.raises(RuntimeError, match="injected write failure"):
+            await call(db)
+        assert len(chosen) == 1
+        assert not [r for r in await stored(db) if r.kind == "question" and r.for_date == db.clock]
+
+        db.cards = [
+            Pattern(
+                "topic",
+                "friendship",
+                8,
+                0.7,
+                {"pattern_pid": "friend-pid", "pattern_state": "active", "trend": "steady"},
+            ),
+            Pattern("temporal", "sleep", 6, 0.81, {"day": "Tuesday", "pattern_pid": "sleep-pid"}),
+        ]
+        db.stats["language"] = "en"
+        response = await call(db)
+        assert response.question_stored is True
+        assert len(chosen) == 2
+        daily = [r for r in await stored(db) if r.kind == "question" and r.for_date == db.clock]
+        assert len(daily) == 1
+        assert decrypt(daily[0])["question"] == chosen[0]
+    finally:
+        questions._DAY_PINNED_QUESTIONS.clear()
+
+
+@pytest.mark.asyncio
+async def test_recompute_skips_nonstring_public_key_even_when_bytes_encode_valid_key(recompute_db):
+    db = recompute_db
+    therapist_id = f"{90:032x}"
+    _, consent = await therapist(db, therapist_id)
+    async with db.factory() as session:
+        user = await session.get(User, therapist_id)
+        # Simulate malformed stored BLOB data, retaining valid base64 key bytes.
+        user.wrap_pub_key = user.wrap_pub_key.encode("ascii")
+        await session.commit()
+    await call(db)
+    async with db.factory() as session:
+        stored = await session.get(Consent, consent.id)
+        user = await session.get(User, therapist_id)
+        assert stored.summary_blob is None
+        assert user.patients_revision == 9

@@ -1,8 +1,9 @@
 import React from "react";
+import TestRenderer from "react-test-renderer";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { Alert, AppState, BackHandler, TextInput, TouchableOpacity, emitAppState, emitBackPress } from "../helpers/rnMock";
 import storage from "../helpers/storageMock";
-import { render, act, flush, pressLabel, firePress, textOf, pressAlertButton } from "../helpers/rtr";
+import { render, act, flush, pressLabel, firePress, textOf, pressAlertButton, touchableByLabel } from "../helpers/rtr";
 import { runTestControl } from "../helpers/testControl";
 import { __resetLocalKeyLifecycleForTests, waitLocalWriteCommits } from "../../src/localWriteGuard";
 vi.mock("../../src/api/client", async original => {
@@ -22,6 +23,18 @@ afterEach(async () => { await act(async () => { for (const root of roots.splice(
 async function open() { const root = await render(<SafetyPlanScreen navigation={nav} />); roots.push(root); await flush(); return root; }
 function input(root: Awaited<ReturnType<typeof open>>, label: string) { const node = root.root.findAllByType(TextInput).find(n => n.props.accessibilityLabel === label); if (!node) throw Error(`Missing plan field ${label}`); return node; }
 async function edit(root: Awaited<ReturnType<typeof open>>, label: string, value: string) { await act(async () => { input(root, label).props.onChangeText(value); }); }
+// These additional scenarios assert visible state directly with the same native
+// handlers. Existing rendered-public-surface snapshot scenarios remain intact.
+async function openDirect() {
+  let root!: Awaited<ReturnType<typeof render>>;
+  await act(async () => { root = TestRenderer.create(<SafetyPlanScreen navigation={nav} />); });
+  roots.push(root);
+  for (let i = 0; i < 3; i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+  return root;
+}
+async function pressDirect(root: Awaited<ReturnType<typeof open>>, label: string) {
+  await act(async () => { await touchableByLabel(root, label).props.onPress?.({nativeEvent:{timestamp:Date.now()},currentTarget:1,target:1}); });
+}
 
 it("edits and saves each personal field without changing another field", async () => {
   const root = await open(); for (const [index, label] of labels.entries()) await edit(root, label, `Personal safety note ${index}`);
@@ -128,6 +141,31 @@ it("a later saved status receives its own complete display interval", async () =
   const root = await open(); vi.useFakeTimers(); await pressLabel(root, "Save my safety plan"); await act(async () => { await vi.advanceTimersByTimeAsync(2000); }); await pressLabel(root, "Save my safety plan");
   await act(async () => { await vi.advanceTimersByTimeAsync(600); }); expect(textOf(root)).toContain("Saved — encrypted, as always."); await act(async () => { await vi.advanceTimersByTimeAsync(2000); }); expect(textOf(root)).not.toContain("Saved — encrypted, as always.");
 });
+it("clears the saved status when the current plan is edited, and shows it again after saving that edit", async () => {
+  const root = await openDirect(); await pressDirect(root, "Save my safety plan");
+  expect(textOf(root)).toContain("Saved — encrypted, as always.");
+  await edit(root, labels[0]!, "A change after saving");
+  expect(textOf(root)).not.toContain("Saved — encrypted, as always.");
+  await pressDirect(root, "Save my safety plan");
+  expect((await loadSafetyPlan(key, owner))?.warningSigns).toBe("A change after saving");
+  expect(textOf(root)).toContain("Saved — encrypted, as always.");
+});
+it("clears a saved notice even when the edit callback was captured before the save", async () => {
+  const root = await openDirect(); const queuedEdit = input(root, labels[0]!).props.onChangeText;
+  await pressDirect(root, "Save my safety plan");
+  expect(textOf(root)).toContain("Saved — encrypted, as always.");
+  await act(async () => { queuedEdit("A queued edit"); });
+  expect(input(root, labels[0]!).props.value).toBe("A queued edit");
+  expect(textOf(root)).not.toContain("Saved — encrypted, as always.");
+});
+it("preserves queued edits to different fields from the same render", async () => {
+  const root = await openDirect(); const first = input(root, labels[0]!).props.onChangeText, second = input(root, labels[1]!).props.onChangeText;
+  await act(async () => { first("First queued field"); second("Second queued field"); });
+  expect(input(root, labels[0]!).props.value).toBe("First queued field");
+  expect(input(root, labels[1]!).props.value).toBe("Second queued field");
+  await pressDirect(root, "Save my safety plan");
+  expect(await loadSafetyPlan(key, owner)).toMatchObject({warningSigns:"First queued field",copingStrategies:"Second queued field"});
+});
 it("a save action refreshes the actual session's idle lease", async () => {
   const root = await open(); vi.useFakeTimers(); let lease: ReturnType<typeof setTimeout> | undefined;
   touchActivity.mockImplementation(() => { if (lease) clearTimeout(lease); lease = setTimeout(() => vault.lock(), 1000); });
@@ -146,7 +184,7 @@ it("finishing an older save preserves a newer edit immediately as a separate enc
   const write = storage.setItem; let release!: () => void, entered!: () => void; const gate = new Promise<void>(resolve => { release = resolve; }), reached = new Promise<void>(resolve => { entered = resolve; });
   vi.spyOn(storage, "setItem").mockImplementation(async (slot, value) => { if (slot === `@mindpattern/safety_plan_${owner}`) { entered(); await gate; } await write(slot, value); });
   const saving = firePress(root, "Save my safety plan"); await saving; await reached;
-  try { await edit(root, labels[0]!, "Newer unfinished edit"); await act(async () => { release(); }); await saving; await waitLocalWriteCommits(); await act(async () => {}); expect((await loadSafetyPlan(key, owner))?.warningSigns).toBe("Explicitly saved snapshot"); expect((await loadSafetyPlanDraft(key, owner))?.warningSigns).toBe("Newer unfinished edit"); }
+  try { await edit(root, labels[0]!, "Newer unfinished edit"); await act(async () => { release(); }); await saving; await waitLocalWriteCommits(); await act(async () => {}); expect((await loadSafetyPlan(key, owner))?.warningSigns).toBe("Explicitly saved snapshot"); expect((await loadSafetyPlanDraft(key, owner))?.warningSigns).toBe("Newer unfinished edit"); expect(textOf(root)).not.toContain("Saved — encrypted, as always."); }
   finally { release(); await saving; }
 });
 it.each(["identity", "saved", "draft"])("unmounting during the pending %s native hydration erases every provider-held screen key", async stage => {
@@ -219,7 +257,7 @@ it("a later dirty draft does not require a native deletion when its earlier expl
   // The already-admitted explicit write remains held. Observe the draft
   // through its reader without draining that separate pending write.
   vi.spyOn(storage, "removeItem").mockImplementation(slot => slot === `@mindpattern/safety_plan_draft_${owner}` ? Promise.reject(new Error("The newer recovery drawer is read-only for deletion")) : remove(slot));
-  try { await act(async () => { release(); }); await waitLocalWriteCommits(); await act(async () => {}); expect(Alert.alert).not.toHaveBeenCalled(); expect(textOf(root)).toContain("Saved — encrypted, as always."); expect((await loadSafetyPlanDraft(key, owner))?.warningSigns).toBe("Later recoverable draft"); }
+  try { await act(async () => { release(); }); await waitLocalWriteCommits(); await act(async () => {}); expect(Alert.alert).not.toHaveBeenCalled(); expect(textOf(root)).not.toContain("Saved — encrypted, as always."); expect((await loadSafetyPlanDraft(key, owner))?.warningSigns).toBe("Later recoverable draft"); }
   finally { release(); }
 });
 it("a replacement native navigation handle receives dirty-editor confirmation and its own action", async () => {

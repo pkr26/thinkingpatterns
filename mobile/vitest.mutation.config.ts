@@ -6,6 +6,7 @@ export default mergeConfig(base, {
     coverage: { enabled: false },
     // These verify native files/source packaging, not JS mutant behavior.
     // The same-process bootstrap.runtime tests exercise the entry mutations.
-    exclude: ["tests/healthBridge.pins.test.ts", "tests/nativeBuildTools.test.ts", "tests/bootstrap.test.ts", "tests/lexiconArtifact.test.ts", "tests/crisisArtifact.test.ts", "tests/genericQuestionsArtifact.test.ts"],
+    // Apia timezone changes require a forked process; Stryker uses threads.
+    exclude: ["tests/healthBridge.pins.test.ts", "tests/nativeBuildTools.test.ts", "tests/bootstrap.test.ts", "tests/lexiconArtifact.test.ts", "tests/crisisArtifact.test.ts", "tests/genericQuestionsArtifact.test.ts", "tests/measureReminders.timezone.test.ts"],
   },
 });

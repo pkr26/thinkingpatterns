@@ -240,6 +240,17 @@ async def test_v1_consent_refuses_measures_but_keeps_entries_and_insights(client
 
     assert SHARING_DISCLOSURE_VERSION == "v3"
     assert body["meta"]["sharing_disclosure_version"] == SHARING_DISCLOSURE_VERSION
+    # Re-consent needs the complete refusal envelope, including a readable
+    # explanation, while exposing no measures under the old disclosure.
+    assert body == {
+        "detail": (
+            "sharing disclosure is outdated; this consent does not cover "
+            "measures. The patient must review the updated disclosure and "
+            "re-consent."
+        ),
+        "code": "disclosure_outdated",
+        "meta": {"sharing_disclosure_version": SHARING_DISCLOSURE_VERSION},
+    }
     # The refusal served no data — and wrote no audit row.
     assert "read_measures" not in [row.action for row in await _audit_rows(client)]
 
@@ -640,6 +651,10 @@ async def test_notes_read_audit_survives_a_collection_changed_409(client, monkey
     )
     monkeypatch.undo()
     assert refused.status_code == 409, refused.text
+    assert refused.json() == {
+        "detail": "notes changed while paging; retry the request",
+        "code": "collection_changed",
+    }
 
     rows = [row for row in await _audit_rows(client) if row.action == "read_notes"]
     assert rows, "the audit row must survive the post-fetch 409"

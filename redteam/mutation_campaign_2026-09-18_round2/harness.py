@@ -442,8 +442,8 @@ MUTANTS: list[dict] = [
         id="J4", campaign="J", name="split-variant matching dropped (primary form only)",
         expectation="orphan-join/concat bypass corpus must fail (s u i c i d e)",
         file="backend/app/services/crisis.py",
-        find="        if regex.search(variants[i]) or regex.search(variants[i + 1]):\n            return True\n        if concat_regex.search(variants[i + 2]):\n            return True",
-        replace="        if regex.search(variants[i]):\n            return True",
+        find="        if regex.search(_insert_script_boundaries(variants[i])) or regex.search(\n            _insert_script_boundaries(variants[i + 1])\n        ):\n            return True\n        if concat_regex.search(variants[i + 2]):\n            return True",
+        replace="        if regex.search(_insert_script_boundaries(variants[i])):\n            return True",
         tests=backend_pytest("tests/test_crisis.py", "tests/test_questions.py"),
     ),
     dict(

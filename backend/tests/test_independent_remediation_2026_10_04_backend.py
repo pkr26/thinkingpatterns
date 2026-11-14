@@ -26,6 +26,10 @@ def _authenticate_authorized_entry_fixture_inserts():
 @pytest.fixture
 def settings(settings, tmp_path):
     settings.audit_journal_path = str(tmp_path / "committed-evidence.jsonl")
+    # Provision the journal before lifespan maintenance, as production startup
+    # does. A missing file otherwise schedules a retry against the same
+    # in-memory SQLite connection used by these transaction-boundary tests.
+    _audit.validate_audit_journal_path(settings.audit_journal_path)
     return settings
 
 

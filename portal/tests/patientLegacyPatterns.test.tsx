@@ -153,7 +153,6 @@ for (const scenario of ["older-authenticated-stats-without-patterns", "authentic
       expect(textOf(root!)).toContain("No recurring pattern has enough evidence yet.");
       expect(textOf(root!)).toContain("General notes about this patient");
       expect(textOf(root!)).not.toContain("Something went wrong");
-      expect(textOf(root!)).not.toContain("Stryker was here");
       expect(root!.root.findAll(node => node.props.role === "alert")).toHaveLength(0);
 
       check(() => {

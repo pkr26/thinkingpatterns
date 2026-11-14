@@ -1,0 +1,22 @@
+{
+  "format": 1,
+  "producerSnapshot": "source-069",
+  "sourceManifestSha256": "387ed79bb038ccc015ebba64b539dd112a3c1fe310d47240565486979c7a04d4",
+  "username": "native-persisted-custody-retry",
+  "verifier": "UpafN3d0wtW5e854dRT6VVGGMV4lVTRG5Vrs07QbJeg=",
+  "totp_backup_code": "JWENVMST5A",
+  "token_secret": "native-custody-receipt-fixture-test-secret",
+  "scrypt_n": 131072,
+  "custody_request": {
+    "verifier": "UpafN3d0wtW5e854dRT6VVGGMV4lVTRG5Vrs07QbJeg=",
+    "operation_id": "91af972a-6d77-4de5-afb2-d680194da3c1",
+    "expected_custody_version": 0,
+    "custody_version": 1,
+    "notes_keyring_blob": "3s09MOjP8+HWePAiyZxlkmsyDWtVOlDDQcjoHg=="
+  },
+  "expected_public_user_id": "e49b9a5ad8b347ae9b2df9b75499591f",
+  "first_public_status": 204,
+  "same_process_exact_retry_status": 204,
+  "public_custody_version": 1,
+  "public_keyring": "3s09MOjP8+HWePAiyZxlkmsyDWtVOlDDQcjoHg=="
+}

@@ -24,6 +24,14 @@ test('a reached survivor supersedes a watchdog and stays unresolved',()=>{
  const report=mergeReports(sources,[input('Killed',{statusReason:'Hook timed out in 10000ms.'}),input('Survived')]);
  const audit=auditReport(sources,enumeration,report);assert.equal(audit.runtimeKills,0);assert.equal(audit.unresolved,1);assert.equal(audit.counts.Survived,1);
 });
+test('an API timeout assertion outranks a survivor without being mistaken for a watchdog',()=>{
+ const failure={statusReason:"expected 'request timed out after 15s' to be 'server unreachable'"};
+ for(const inputs of [[input('Killed',failure),input('Survived')],[input('Survived'),input('Killed',failure)]]){
+  const merged=mergeReports(sources,inputs);const audit=auditReport(sources,enumeration,merged);
+  assert.equal(audit.runtimeKills,1);assert.equal(audit.testTimeoutFailures,0);assert.equal(audit.complete,true);
+  assert.equal(merged.campaign.observationClassifierVersion,2);
+ }
+});
 test('rejects stale sources by default and makes explicit skips reviewable',()=>{
  const stale=input('Killed');stale.report.files['src/example.ts'].source+='// changed\n';
  assert.throws(()=>mergeReports(sources,[stale]),/Stale source/);

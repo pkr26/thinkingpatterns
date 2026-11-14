@@ -310,8 +310,32 @@ it.each(Array.from({length:32},(_,i)=>i+1))("a Native summary body retired at %i
  await mount();const get=secureStore.getItem.bind(secureStore),nativeFetch=globalThis.fetch;let first=true,retired=false,replacement=false,entered=false,releaseBody!:()=>void,releaseBlocked!:()=>void,lane:Promise<unknown>=Promise.resolve();const body=new Promise<void>(resolve=>{releaseBody=resolve;}),blocked=new Promise<void>(resolve=>{releaseBlocked=resolve;});release=()=>{releaseBody();releaseBlocked();};vi.spyOn(secureStore,"getItem").mockImplementation(name=>{const obsolete=retired&&!replacement,pending=lane.then(async()=>{const value=await get(name);if(obsolete)await blocked;return value;});lane=pending.then(()=>{},()=>{});return pending;});vi.stubGlobal("fetch",async(...args:Parameters<typeof fetch>)=>{const response=await nativeFetch(...args);if(first){first=false;const read=response.json.bind(response);response.json=async()=>{const value=await read();entered=true;await body;let remaining=hops;const step=()=>{if(--remaining>0)queueMicrotask(step);else{retired=true;reactAct(()=>{root!.unmount();root=undefined;});}};queueMicrotask(step);return value;};}return response;});let old:Promise<void>|undefined;await act(async()=>{old=root!.root.findByType(ScrollView).props.refreshControl.props.onRefresh();});await vi.waitFor(()=>expect(entered).toBe(true));releaseBody();await new Promise(resolve=>setTimeout(resolve,0));expect(retired).toBe(true);replacement=true;try{await mount(false);expect(words()).toContain("Native original topic");}finally{releaseBlocked();await old;await flush();}
 });
 
-it("a retired Native payload account receipt leaves cipher capacity for the current pattern view",async()=>{
- await mount();const get=secureStore.getItem.bind(secureStore);let ordinal=0,entered=false,releaseHeld!:()=>void;const held=new Promise<void>(resolve=>{releaseHeld=resolve;});release=releaseHeld;vi.spyOn(secureStore,"getItem").mockImplementation(async name=>{const raw=await get(name);if(name==="@mindpattern/user_id"&&++ordinal===4){entered=true;await held;}return raw;});let old:Promise<void>|undefined;await act(async()=>{old=root!.root.findByType(ScrollView).props.refreshControl.props.onRefresh();});await vi.waitFor(()=>expect(entered).toBe(true));await act(async()=>{root!.unmount();root=undefined;});const contexts:Array<WeakRef<object>>=[],borrow=<T extends object>(create:()=>T):T=>{if(contexts.filter(ref=>ref.deref()!==undefined).length>=9)throw new Error("The Native cipher contexts remain occupied until host collection");const value=create();contexts.push(new WeakRef(value));return value;},decipher=engine.createDecipheriv.bind(engine),hash=engine.createHash.bind(engine);vi.spyOn(engine,"createDecipheriv").mockImplementation((...args)=>borrow(()=>decipher(...args)));vi.spyOn(engine,"createHash").mockImplementation((...args)=>borrow(()=>hash(...args)));releaseHeld();await old;await flush();try{await mount(false);expect(words()).toContain("Native original topic");}finally{releaseHeld();await flush();}
+it("a retired Native payload receipt cannot pin its generation or alter a remounted pattern view",async()=>{
+ await mount();
+ const responseFor=(seq:number)=>JSON.stringify({phase:"insight",active_days:40,days_remaining:0,state_seq:seq,blob:encrypt(KEY,Buffer.from(JSON.stringify({v:INSIGHTS_PAYLOAD_VERSION,state_seq:seq,stats:{patterns:serverPatterns}})),buildAad("insights",USER,"patterns")).toString("base64")});
+ serverResponse=responseFor(900);
+ const get=secureStore.getItem.bind(secureStore);
+ let ordinal=0,entered=false,releaseHeld!:()=>void;
+ const held=new Promise<void>(resolve=>{releaseHeld=resolve;});release=releaseHeld;
+ vi.spyOn(secureStore,"getItem").mockImplementation(async name=>{
+  const raw=await get(name);
+  if(name==="@mindpattern/user_id"&&++ordinal===4){entered=true;await held;}
+  return raw;
+ });
+ let old:Promise<void>|undefined;
+ await act(async()=>{old=root!.root.findByType(ScrollView).props.refreshControl.props.onRefresh();});
+ await vi.waitFor(()=>expect(entered).toBe(true));
+ await act(async()=>{root!.unmount();root=undefined;});
+ releaseHeld();await old;await flush();
+ // The unnumbered initial payload made no high-water receipt. A retired
+ // numbered response cannot create one before the replacement view opens.
+ expect(await get(accountStorageKey.stateSequence(USER))).toBeNull();
+ serverResponse=responseFor(11);
+ try{
+  await mount(false);
+  expect(words()).toContain("Native original topic");
+  expect(await get(accountStorageKey.stateSequence(USER))).toBe("11");
+ }finally{releaseHeld();await flush();}
 });
 it.each(Array.from({length:32},(_,i)=>i+1))("a Native freshness receipt at %i completion handoffs preserves the accepted pattern while a new refresh is pending",async hops=>{
  await mount();serverPatterns=[{kind:"topic",label:"The earlier Native receipt candidate",occurrences:7,confidence:.4}];const get=secureStore.getItem.bind(secureStore),nativeFetch=globalThis.fetch;let first=true,entered=false,newEntered=false,second=false,releaseOld!:()=>void,releaseFresh!:()=>void;const oldGate=new Promise<void>(resolve=>{releaseOld=resolve;}),freshGate=new Promise<void>(resolve=>{releaseFresh=resolve;});release=()=>{releaseOld();releaseFresh();};let newer:Promise<void>=Promise.resolve();vi.spyOn(secureStore,"getItem").mockImplementation(async name=>{const raw=await get(name);if(first&&name===accountStorageKey.stateSequence(USER)){first=false;entered=true;await oldGate;let remaining=hops;const step=()=>{if(--remaining>0)queueMicrotask(step);else{second=true;serverPatterns=[{kind:"topic",label:"The current Native refresh candidate",occurrences:7,confidence:.4}];reactAct(()=>{newer=root!.root.findByType(ScrollView).props.refreshControl.props.onRefresh();});}};queueMicrotask(step);}return raw;});vi.stubGlobal("fetch",async(...args:Parameters<typeof fetch>)=>{const response=await nativeFetch(...args);if(second){const read=response.json.bind(response);response.json=async()=>{const value=await read();newEntered=true;await freshGate;return value;};}return response;});let older:Promise<void>|undefined;await act(async()=>{older=root!.root.findByType(ScrollView).props.refreshControl.props.onRefresh();});await vi.waitFor(()=>expect(entered).toBe(true));releaseOld();await vi.waitFor(()=>expect(newEntered).toBe(true));await flush();expect(words()).not.toContain("The current Native refresh candidate");releaseFresh();await act(async()=>{await Promise.all([older,newer]);});await flush();expect(words()).toContain("The current Native refresh candidate");

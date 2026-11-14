@@ -11,7 +11,8 @@ import { render, settle } from "./rtr";
  * remains in each view's interaction suites; no source objects are serialized. */
 export function viewPresentation(name: string, make: () => ReactElement): void {
   beforeEach(() => {
-    vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-10-05T12:00:00Z"));
+    // The surfaces assert a local morning, independent of the runner's TZ.
+    vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date(2026, 9, 5, 5, 0, 0));
     resetTestState(); __setLocaleForTests("en");
     const records = new Map<string, string>();
     setKvBackendForTests({ getItem: async key => records.get(key) ?? null, setItem: async (key, value) => { records.set(key, value); }, removeItem: async key => { records.delete(key); }, keys: async () => [...records.keys()] });

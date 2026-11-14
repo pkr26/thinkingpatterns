@@ -3624,6 +3624,22 @@ def test_crisis_each_confusable_invisible_leet_and_concat_boundary(monkeypatch):
     assert crisis_character_cases() == runtime_contract()["crisis_characters"]
 
 
+@pytest.mark.parametrize("text", ["a𝐗b", "a𝕏b"])
+def test_crisis_lowercases_ascii_capitals_introduced_by_nfkc(text):
+    import unicodedata
+
+    from app.services import crisis
+
+    # These compatibility letters survive the first lowercase pass. NFKC
+    # introduces an ASCII capital, which must then join the lowercase token.
+    assert unicodedata.normalize("NFKC", text.lower()) == "aXb"
+    assert crisis._normalize_pre_punct(text) == "axb"
+    assert crisis.normalize_crisis_text(text) == "axb"
+    assert crisis.normalize_crisis_text("𝐒𝐔𝐈𝐂𝐈𝐃𝐄") == "suicide"
+    assert crisis.matches_dialog("𝐎 𝐅𝐅 𝐌𝐘𝐒𝐄𝐋𝐅") is True
+    assert crisis.matches_suppress("𝐎 𝐅𝐅 𝐌𝐘𝐒𝐄𝐋𝐅") is True
+
+
 def test_phrase_hash_similarity_and_calendar_cluster_outputs(monkeypatch):
     bound_phrase_walks(monkeypatch)
     assert phrase_cases() == runtime_contract()["phrases"]

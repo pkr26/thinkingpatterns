@@ -550,6 +550,42 @@ async def test_replacement_identity_revokes_exact_native_caseload_and_refuses_ov
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("missing_custody", [True, False])
+async def test_wrap_key_rotation_refuses_missing_or_stale_notes_custody(
+    sharing_db, monkeypatch, missing_custody
+):
+    from app.api import account as account_api, auth
+
+    db = sharing_db
+    monkeypatch.setattr(account_api, "hash_verifier_off_loop", auth.hash_verifier_off_loop)
+    db.other.notes_keyring_blob = None if missing_custody else BLOB
+    db.other.custody_version = 3
+    await db.session.commit()
+    original_public_key = db.other.wrap_pub_key
+    original_wrapped_key = db.other.wrap_key_blob
+    body = WrapKeyRotateRequest(
+        wrap_pub_key=db.spki,
+        wrap_key_blob=b64(BLOB),
+        expected_custody_version=3 if missing_custody else 2,
+    )
+
+    with pytest.raises(ApiError) as failure:
+        await therapist.rotate_wrap_key(body, db.request, db.other, db.session, b64(AUTH_KEY))
+
+    detail = (
+        "install notes custody before rotating sharing keys"
+        if missing_custody
+        else "custody changed; reload account"
+    )
+    envelope(failure, 409, detail, "conflict")
+    await db.session.refresh(db.other)
+    assert db.other.wrap_pub_key == original_public_key
+    assert db.other.wrap_key_blob == original_wrapped_key
+    assert db.other.custody_version == 3
+    assert db.audit == []
+
+
+@pytest.mark.asyncio
 async def test_replacement_identity_waits_for_each_active_patients_pending_rotation(
     sharing_db, monkeypatch
 ):
@@ -764,6 +800,7 @@ async def test_therapist_erasure_commits_retirement_and_attempts_real_bounded_cl
     # wakeup alone is insufficient evidence that cleanup was attempted.
     remaining = (await db.session.scalars(select(TherapistNote))).all()
     assert len(remaining) == (104 if inline_failure else 4)
+    assert db.request.app.state.account_deletion_backlog is True
     assert db.request.app.state.account_deletion_wakeup.is_set()
     assert [(r["actor_id"], r["user_id"], r["action"]) for r in db.audit] == [
         (OTHER, OTHER, "account_deleted")

@@ -255,7 +255,7 @@ describe("entry content-version binding (M-2)", () => {
   });
 
   it("flags a rolled-back row and remembers the high-water mark", async () => {
-    resetEntryVersionMirrors();
+    runTestControl(resetEntryVersionMirrors);
     const first = await observeEntryVersions(USER, DATA_KEY, [
       { clientEntryId: "e-1", contentVersion: 3 },
       { clientEntryId: "e-2", contentVersion: 1 },
@@ -273,7 +273,7 @@ describe("entry content-version binding (M-2)", () => {
   });
 
   it("forgets a deleted entry's mark (recreate at version 1 is legitimate)", async () => {
-    resetEntryVersionMirrors();
+    runTestControl(resetEntryVersionMirrors);
     await observeEntryVersions(USER, DATA_KEY, [{ clientEntryId: "e-x", contentVersion: 4 }]);
     const { forgetEntryVersion } = await import("../src/entryVersions");
     await forgetEntryVersion(USER, DATA_KEY, "e-x");
@@ -283,15 +283,15 @@ describe("entry content-version binding (M-2)", () => {
   });
 
   it("rebinds the store under a rotated data key and drops corrupt bytes to empty", async () => {
-    resetEntryVersionMirrors();
+    runTestControl(resetEntryVersionMirrors);
     await observeEntryVersions(USER, DATA_KEY, [{ clientEntryId: "e-1", contentVersion: 2 }]);
     const newKey = Buffer.alloc(32, 5);
     await rebindEntryVersions(USER, DATA_KEY, newKey);
-    resetEntryVersionMirrors();
+    runTestControl(resetEntryVersionMirrors);
     expect(await knownEntryVersion(USER, newKey, "e-1")).toBe(2);
     // A corrupt persisted blob degrades to an empty map, never a crash.
     store.set("mindpattern.entryVersions." + USER, "bm90IGNpcGhlcnRleHQ=");
-    resetEntryVersionMirrors();
+    runTestControl(resetEntryVersionMirrors);
     expect(await knownEntryVersion(USER, newKey, "e-1")).toBeNull();
     await forgetAllEntryVersions(USER);
   });

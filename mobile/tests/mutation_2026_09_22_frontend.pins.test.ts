@@ -260,7 +260,7 @@ describe("mutation pins 2026-09-22: entry version mirror", () => {
     spec.map(([clientEntryId, contentVersion]) => ({ clientEntryId, contentVersion }));
 
   beforeEach(() => {
-    resetEntryVersionMirrors();
+    runTestControl(resetEntryVersionMirrors);
     storage.__reset();
   });
 
@@ -373,7 +373,7 @@ describe("mutation pins 2026-09-22: password rotation stages", () => {
       dataKey: Buffer.alloc(32, password.length),
     }));
     mockedCrypto.decryptEntry.mockReset();
-    resetEntryVersionMirrors();
+    runTestControl(resetEntryVersionMirrors);
     storage.__reset();
     runTestControl((await import("../src/localRekey")).__resetLocalKeyLifecycleForTests);
     (await import("../src/vault")).vault.unlock({

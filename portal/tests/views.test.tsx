@@ -785,6 +785,75 @@ describe("PatientView", () => {
     expect(textOf(root)).toContain("existing note text");
   });
 
+  it.each([
+    { label: "repeated snapshot conflicts", status: 409, code: "collection_changed", budget: 2, explanation: "rows changed while paging; retry the request" },
+    { label: "a non-retryable service failure", status: 503, code: "unavailable", budget: 1, explanation: "server is busy — try again" },
+  ])("finishes note collection recovery within its request budget after $label", async ({ status, code, budget, explanation }) => {
+    const failure = new ApiError(status, "The note collection could not be loaded safely.", code);
+    const transports: Promise<never>[] = [];
+    const originalNotes = mockedApi.notes.getMockImplementation();
+    let requests = 0;
+    mockedApi.notes.mockImplementation(() => {
+      requests++;
+      // Each real transport completion gives the view and its caller a
+      // scheduling turn. Repeated failures must finish, rather than spend
+      // the connection indefinitely in an immediately-rejected retry loop.
+      const response = (async () => { await new Promise(resolve => setTimeout(resolve, 0)); throw failure; })();
+      transports.push(response); void response.catch(() => undefined); return response;
+    });
+    let root: Awaited<ReturnType<typeof render>> | undefined;
+    try {
+      root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+      await vi.waitFor(() => {
+        if (requests <= budget && !textOf(root!).includes(explanation)) throw new Error("The note request is still completing");
+      }, { timeout: 2_000, interval: 5 });
+      expect(requests, "A failed private-note collection must retain a bounded transport budget").toBeLessThanOrEqual(budget);
+      expect(textOf(root)).toContain(explanation);
+      expect(textOf(root)).not.toContain(failure.message);
+      expect(textOf(root)).not.toContain("existing note text");
+    } finally {
+      try {
+        if (root) await act(async () => { root!.unmount(); });
+        let drained = -1;
+        while (drained !== transports.length) {
+          drained = transports.length;
+          const outcomes = await Promise.allSettled([...transports]);
+          outcomes.forEach(outcome => { if (outcome.status === "rejected" && outcome.reason !== failure) throw outcome.reason; });
+          await flush(2);
+        }
+      } finally { if (originalNotes) mockedApi.notes.mockImplementation(originalNotes); }
+    }
+  });
+
+  it("refuses an overfull measure history before consuming the transport's terminal-probe quota", async () => {
+    const originalMeasures = mockedApi.patientMeasures.getMockImplementation();
+    let requests = 0;
+    mockedApi.patientMeasures.mockImplementation(async () => {
+      requests++;
+      // Twenty retained hundred-row pages plus one terminal probe are
+      // available. A twenty-second read has a real service quota outcome,
+      // so even an incorrect traversal completes with an observable error.
+      if (requests > 21) throw new ApiError(429, "measure transport quota exhausted", "rate_limited");
+      return {
+        measures: Array.from({ length: 100 }, (_, index) => ({
+          id: `measure-${requests}-${index}`, client_measure_id: `client-${requests}-${index}`, blob: "b", measure_date: "2026-09-01", received_at: "2026-09-02",
+        })),
+        nextOffset: requests * 100, revision: "bounded-measures",
+      };
+    });
+    let root: Awaited<ReturnType<typeof render>> | undefined;
+    try {
+      root = await render(<PatientView patient={patient} session={session} onBack={vi.fn()} />);
+      await flush(30);
+      expect(requests, "An overfull history must be rejected within its twenty retained pages and one terminal probe").toBeLessThanOrEqual(21);
+      expect(textOf(root)).toContain("measure history exceeds this portal's safe page limit");
+      expect(textOf(root)).not.toContain("measure transport quota exhausted");
+    } finally {
+      if (root) await act(async () => { root!.unmount(); });
+      if (originalMeasures) mockedApi.patientMeasures.mockImplementation(originalMeasures);
+    }
+  });
+
   it("shows an honest placeholder for notes it cannot decrypt", async () => {
     mockedApi.notes.mockResolvedValueOnce({
       notes: [

@@ -75,10 +75,10 @@ describe("fixed-nonce encrypt vectors (mobile -> backend direction)", () => {
     expect(encryptVectors.length).toBeGreaterThanOrEqual(2);
     // Pins the families beyond 3-part 'entry': 2-part moodlog/unlockproof
     // AADs, an empty plaintext, and the AAD-less secureStore path.
-    expect(encryptVectors.some((v) => v.aad_parts === null)).toBe(true);
-    expect(encryptVectors.some((v) => v.plaintext === "")).toBe(true);
-    expect(encryptVectors.some((v) => v.aad_parts?.[0] === "moodlog")).toBe(true);
-    expect(encryptVectors.some((v) => v.aad_parts?.[0] === "unlockproof")).toBe(true);
+    expect(encryptVectors.some((v: { aad_parts: string[] | null }) => v.aad_parts === null)).toBe(true);
+    expect(encryptVectors.some((v: { plaintext: string }) => v.plaintext === "")).toBe(true);
+    expect(encryptVectors.some((v: { aad_parts: string[] | null }) => v.aad_parts?.[0] === "moodlog")).toBe(true);
+    expect(encryptVectors.some((v: { aad_parts: string[] | null }) => v.aad_parts?.[0] === "unlockproof")).toBe(true);
   });
 
   for (const [i, v] of encryptVectors.entries()) {

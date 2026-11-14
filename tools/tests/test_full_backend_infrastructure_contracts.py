@@ -1152,3 +1152,17 @@ def test_failed_guard_identity_io_releases_kernel_custody(
                 os.close(descriptor)
             except OSError:
                 pass
+
+
+def test_single_process_guard_keeps_distinct_database_endpoint_custody(tmp_path, monkeypatch):
+    from app.singleprocess import single_process_guard
+
+    lock_dir = tmp_path / "guard-custody"
+    monkeypatch.setenv("MINDPATTERN_LOCK_DIR", str(lock_dir))
+    secret = "synthetic-private-deployment-key"
+    loopback = "postgresql+asyncpg://user:pass@127.0.0.1/db"
+    remote = "postgresql+asyncpg://user:pass@XX127.0.0.1XX/db"
+
+    with single_process_guard(secret, loopback), single_process_guard(secret, remote):
+        lock_files = list(lock_dir.glob("mindpattern-single-*.lock"))
+        assert len(lock_files) == 2, "distinct database endpoints need independent guard custody"

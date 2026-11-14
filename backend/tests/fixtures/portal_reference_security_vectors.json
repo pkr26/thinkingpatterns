@@ -1,0 +1,26 @@
+{
+  "scope": "Actual frozen portal exported WebCrypto functions with native Node24 WebCrypto, ECDH P256, HKDF-SHA256 and AES-GCM; synthetic reference account only. Backend exported reference constants are the consumer contract; no current Python shipped caller claim.",
+  "portalSourceSha256": "e22624c8ff824bc87d242d4eff5bde32aca60e1f59c2c1d1b8721fdb021b2249",
+  "portalAadSourceSha256": "c844bdae436b06c78256dee104c15a5389800fcd603efc3461894d926894c24e",
+  "actualNodeVersion": "v24.21.0",
+  "actorBundleSha256": "f637f091fd0ca894e8936057a0aa73948cda98d9d1901831dce774b4e4012ecc",
+  "generatorSha256": "0f983b3f58fa35edd38b7242d654c7289909c48701c5ac35b82a77c6b9cd81d2",
+  "masterHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "username": "reference-therapist-ñ",
+  "therapistId": "11111111111141118111111111111111",
+  "patientId": "22222222222242228222222222222222",
+  "clientNoteId": "reference-note-1",
+  "text": "Cross-language reference note 雪",
+  "portalDerivedKeys": {
+    "wrapKekHex": "191182fa45337a872ff9bb007009b3dd29a56cf3e0c888f2b4aa00116d00651f",
+    "noteKeyHex": "06f1afeb4bc93f028e70a58a4f270a1ecdce9e0fb5672dad13198715c03b1a3e"
+  },
+  "keyPair": {
+    "publicKeySpkiB64": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEFwYzCwxcUPaqgv2daAjMCfhWHz/BIGMikgefkZBsHi5IS7WfV6u7fxRqnehjbUO2dIl6+qrJBY5bUogD6srbzQ==",
+    "wrapKeyBlobB64": "vLHMdXp1Due86K8rCrDcB3S07DQG9lyLQBzEA6fPjXwzlYRGppBnjy+G292mD+wVUBVnNEiwft4hvJJ2Rqk737veKinpyflWOmzAva0dysXZRTCUDGJka9/AfZsSI4jgzdb7/p5PJ8A6DRsVPGrfUaQ8qq1Xo5qiK5zgGKjjtyTCj9HSwnWK4yzUqV7IFujJydntSCQltNZVjTmr45cZemxt7W11Yw=="
+  },
+  "note": {
+    "clientNoteId": "reference-note-1",
+    "blobB64": "8haoj1/2ljGIXH47JvhP/qkyFXGE8wYd+eGTEqUf0RjmXp3IXs50l//pe/AjVUeA9Fx9hfN1Y0boVe/JD3XIgZ6j3Lu5qNE2BQYXAGDR"
+  }
+}

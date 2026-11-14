@@ -83,9 +83,12 @@ it("validates declared password envelope costs and refuses unknown or malformed 
 });
 
 it("matches the independent server fingerprint and treats unsupported legacy representations as undecidable", () => {
-  const { publicKey } = nodeCrypto.generateKeyPairSync("ec", { namedCurve: "prime256v1" });
-  const der = publicKey.export({ format: "der", type: "spki" }), encoded = der.toString("base64");
+  // A fixed public P-256 point keeps the digest alphabetic: random all-digit
+  // fingerprints are already valid after uppercasing and are not malformed.
+  const encoded = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEaxfR8uEsQkf4vOblY6RA8ncDfYEt6zOg9KE5RdiYwpZP40Li/hp/m47n60p8D54WK84zV2sxXs7LtkBoN79R9Q==";
+  const der = Buffer.from(encoded, "base64");
   const honest = nodeCrypto.createHash("sha256").update(der).digest("hex").slice(0, 16);
+  expect(honest).toBe("5cd252fb0ce89324");
   expect(serverFingerprintMatches(encoded, honest)).toBe(true);
   expect(serverFingerprintMatches(encoded, honest === "0000000000000000" ? "1111111111111111" : "0000000000000000")).toBe(false);
   for (const unsupported of ["", honest.toUpperCase(), `x${honest}`, `${honest}x`, honest.slice(1), `${honest}${honest}`]) expect(serverFingerprintMatches(encoded, unsupported)).toBeNull();

@@ -12,6 +12,7 @@ vi.mock("../src/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/api")>();
   return {
     ...actual,
+    __originalPatients: actual.api.patients,
     auth: {
       meta: vi.fn(async () => ({ sharing_available: true })),
       saltFor: vi.fn(async () => ({ salt: "QUJDREVGR0hJSktMTU5P" })),
@@ -125,10 +126,21 @@ it("does not adopt a retired shell's late custody while a replacement shell has 
 
 it("releases the host's navigation and interaction callbacks and idle timer on shell teardown",async()=>{
  const original=window,originalDocument=document;const hostWindow=new EventTarget(),hostDocument=new EventTarget();
+ const hostAdd=vi.spyOn(hostWindow,"addEventListener");
  vi.stubGlobal("window",{...original,addEventListener:hostWindow.addEventListener.bind(hostWindow),removeEventListener:hostWindow.removeEventListener.bind(hostWindow),dispatchEvent:hostWindow.dispatchEvent.bind(hostWindow)});
  vi.stubGlobal("document",{...originalDocument,addEventListener:hostDocument.addEventListener.bind(hostDocument),removeEventListener:hostDocument.removeEventListener.bind(hostDocument),dispatchEvent:hostDocument.dispatchEvent.bind(hostDocument)});
- vi.useFakeTimers();const root=await login();await flush();expect(textOf(root)).toContain("Patients — Dr. Portal");expect(vi.getTimerCount()).toBeGreaterThan(0);await act(async()=>root.unmount());
+ vi.useFakeTimers();const root=await login();await flush();expect(textOf(root)).toContain("Patients — Dr. Portal");for(const event of ["wheel","touchstart"])expect(hostAdd).toHaveBeenCalledWith(event,expect.any(Function),expect.objectContaining({passive:true}));expect(vi.getTimerCount()).toBeGreaterThan(0);await act(async()=>root.unmount());
  for(const name of ["click","keydown","scroll","wheel","touchstart","pageshow","popstate","hashchange"])expect(getEventListeners(hostWindow,name)).toHaveLength(0);expect(getEventListeners(hostDocument,"visibilitychange")).toHaveLength(0);expect(vi.getTimerCount()).toBe(0);
+});
+
+it("keeps a replacement session after a retired shell receives a later 401",async()=>{
+ const apiModule=await import("../src/api") as typeof import("../src/api") & {__originalPatients:()=>Promise<unknown>};
+ const root=await render(<App/>);
+ await act(async()=>root.unmount());
+ apiModule.setSession("replacement-token","http://localhost:5173");
+ vi.stubGlobal("fetch",vi.fn(async()=>new Response(JSON.stringify({detail:"expired"}),{status:401,headers:{"Content-Type":"application/json"}})));
+ await expect(apiModule.__originalPatients()).rejects.toMatchObject({status:401});
+ expect(apiModule.hasSession()).toBe(true);
 });
 
 it("locks immediately when a previously hidden chart reaches exactly the inactivity boundary",async()=>{

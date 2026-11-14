@@ -199,3 +199,36 @@ class TestRotationStability:
         en = questions.question_for_today("stab-es", [], day)
         assert es != en
         assert es.endswith("?") and en.endswith("?")
+
+
+def test_negative_feedback_demotes_pattern_rank():
+    neutral = Pattern("temporal", "neutral", 4, 0.5, {})
+    rejected = Pattern("temporal", "rejected", 4, 0.5, {"feedback": {"not_me": 2}})
+
+    assert sorted([rejected, neutral], key=questions.feedback_rank) == [neutral, rejected]
+
+
+def test_pin_cache_is_scoped_by_language(monkeypatch):
+    monkeypatch.setattr(questions, "_DAY_PINNED_QUESTIONS", {})
+    monkeypatch.setattr(
+        questions, "build_pool", lambda patterns, language: [f"synthetic-{language}"]
+    )
+    day = date(2027, 3, 3)
+
+    assert questions.question_for_today("synthetic", (), day, "en") == "synthetic-en"
+    assert questions.question_for_today("synthetic", (), day, "es") == "synthetic-es"
+
+
+def test_pin_cache_returns_first_value_without_rebuilding(monkeypatch):
+    monkeypatch.setattr(questions, "_DAY_PINNED_QUESTIONS", {})
+    calls = []
+
+    def synthetic_pool(patterns, language):
+        calls.append((patterns, language))
+        return ["synthetic-first" if len(calls) == 1 else "synthetic-next"]
+
+    monkeypatch.setattr(questions, "build_pool", synthetic_pool)
+    day = date(2027, 3, 3)
+    assert questions.question_for_today("synthetic", (), day) == "synthetic-first"
+    assert questions.question_for_today("synthetic", (), day) == "synthetic-first"
+    assert len(calls) == 1

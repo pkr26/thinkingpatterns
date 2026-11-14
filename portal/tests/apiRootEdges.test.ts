@@ -1,12 +1,13 @@
 import { afterEach,beforeEach,expect,it,vi } from "vitest";
-import { api,auth,clearSession,setSession } from "../src/api";
+import { api,auth,clearSession,hasSession,setSession } from "../src/api";
 const NativeResponse=Response;
 beforeEach(()=>{vi.restoreAllMocks();clearSession();setSession("native-edge-bearer","https://clinic.example.com");vi.useFakeTimers();});
 afterEach(()=>{clearSession();vi.restoreAllMocks();vi.unstubAllGlobals();vi.useRealTimers();});
-it("refuses an atomic native acknowledgement that arrives after its session ended",async()=>{
+it.each(["cleared", "replaced"])("refuses an atomic native acknowledgement after its session was %s",async retirement=>{
  let finish!:(response:Response)=>void;vi.stubGlobal("fetch",vi.fn(()=>new Promise<Response>(resolve=>{finish=resolve;})));
  const outcome:{settled:boolean,value?:unknown,error?:unknown}={settled:false};void api.changePasswordAtomic({operation_id:"native-operation",expected_custody_version:1,custody_version:2,verifier:"old",new_salt:"salt",new_verifier:"new",wrap_pub_key:"public",wrap_key_blob:"private",notes_keyring_blob:"notes"}).then(value=>{outcome.settled=true;outcome.value=value;},error=>{outcome.settled=true;outcome.error=error;});
- clearSession();finish(new NativeResponse(null,{status:204}));for(let i=0;i<120;i++)await Promise.resolve();expect(outcome.settled).toBe(true);expect(outcome.value).toBeUndefined();expect(outcome.error).toMatchObject({status:0,message:"session ended"});
+ if(retirement === "replaced") setSession("replacement-bearer", "https://clinic.example.com"); else clearSession();
+ finish(new NativeResponse(null,{status:204}));for(let i=0;i<120;i++)await Promise.resolve();expect(outcome.settled).toBe(true);expect(outcome.value).toBeUndefined();expect(outcome.error).toMatchObject({status:0,message:"session ended"});expect(hasSession()).toBe(retirement === "replaced");
 });
 it("refuses native JSON that finished just before the originating session retired",async()=>{
  const json=NativeResponse.prototype.json;vi.spyOn(NativeResponse.prototype,"json").mockImplementation(async function(this:Response){const data=await json.call(this);clearSession();return data;});

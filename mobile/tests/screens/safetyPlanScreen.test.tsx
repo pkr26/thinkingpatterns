@@ -140,19 +140,22 @@ describe("SafetyPlanScreen: edit and save", () => {
   it("a late explicit-save ACK retains a newer encrypted draft instead of acknowledging different words", async () => {
     const root = await render(<SafetyPlanScreen navigation={nav} />); await flush();
     await typeIntoField(root, "My warning signs", "the explicitly saved older words");
-    const original = storage.setItem; let release!: () => void;
+    const original = storage.setItem; let release: (() => void) | undefined;
     const gate = vi.spyOn(storage, "setItem").mockImplementation(async (slot, raw) => {
       await original(slot, raw);
       if (slot === SLOT) await new Promise<void>(resolve => { release = resolve; });
     });
-    await firePress(root, "Save my safety plan"); await flush(); expect(release).toBeTypeOf("function");
-    await typeIntoField(root, "My warning signs", "newer words while save was waiting");
-    await act(async () => { await new Promise(resolve => setTimeout(resolve, 350)); });
-    await act(async () => release()); await flush(); gate.mockRestore();
-    const { loadSafetyPlan, loadSafetyPlanDraft } = await import("../../src/safetyPlan");
-    expect((await loadSafetyPlan(dataKey, USER))?.warningSigns).toBe("the explicitly saved older words");
-    expect((await loadSafetyPlanDraft(dataKey, USER))?.warningSigns).toBe("newer words while save was waiting");
-    expect(inputByLabel(root, "My warning signs").props.value).toBe("newer words while save was waiting");
+    try {
+      await firePress(root, "Save my safety plan"); await flush(); expect(release).toBeTypeOf("function");
+      await typeIntoField(root, "My warning signs", "newer words while save was waiting");
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 350)); });
+      await act(async () => release?.()); await flush();
+      const { loadSafetyPlan, loadSafetyPlanDraft } = await import("../../src/safetyPlan");
+      expect((await loadSafetyPlan(dataKey, USER))?.warningSigns).toBe("the explicitly saved older words");
+      expect((await loadSafetyPlanDraft(dataKey, USER))?.warningSigns).toBe("newer words while save was waiting");
+      expect(inputByLabel(root, "My warning signs").props.value).toBe("newer words while save was waiting");
+      expect(textOf(root)).not.toContain("Saved — encrypted, as always.");
+    } finally { release?.(); gate.mockRestore(); }
   });
   it("typing updates the field and marks activity; saving persists ciphertext and shows the calm status", async () => {
     const root = await render(<SafetyPlanScreen navigation={nav} />);

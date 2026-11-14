@@ -48,14 +48,46 @@ def command(args, cwd, log_path):
         return subprocess.run(args, cwd=cwd, stdout=log, stderr=subprocess.STDOUT).returncode
 
 
-def input_paths():
+def input_paths(root=ROOT):
     paths = []
     for directory in ["src", "tests", "public", "tools"]:
-        paths.extend(path for path in (ROOT / directory).rglob("*") if path.is_file() and "__pycache__" not in path.parts)
-    paths.extend(ROOT / name for name in ["package.json", "package-lock.json", "vite.config.ts", "tsconfig.json", "index.html", "stryker.config.json"])
-    paths.extend(path for path in (ROOT.parent / "shared").rglob("*") if path.is_file())
-    paths.append(ROOT.parent / "deploy/nginx/mindpattern.conf.example")
+        paths.extend(path for path in (root / directory).rglob("*") if path.is_file() and "__pycache__" not in path.parts)
+    paths.extend(root / name for name in ["package.json", "package-lock.json", "vite.config.ts", "tsconfig.json", "index.html", "stryker.config.json"])
+    paths.extend(path for path in (root.parent / "shared").rglob("*") if path.is_file())
+    paths.append(root.parent / "deploy/nginx/mindpattern.conf.example")
     return sorted(paths)
+
+
+def input_manifest(root):
+    return {str(path.relative_to(root.parent)): digest(path) for path in input_paths(root)}
+
+
+def verify_inputs(root, expected, phase):
+    actual = input_manifest(root)
+    if actual != expected:
+        changed = sorted(name for name in expected.keys() | actual.keys() if expected.get(name) != actual.get(name))
+        raise RuntimeError(f"{phase}: frozen source/oracle inputs changed: {changed}")
+
+
+def validate_report(payload, source, source_hash, code, threshold):
+    if set(payload.get("files", {})) != {source}:
+        raise RuntimeError(f"{source}: report omitted the selected source or contains unexpected files")
+    file = payload["files"][source]
+    if hashlib.sha256(file["source"].encode()).hexdigest() != source_hash:
+        raise RuntimeError(f"{source}: report source differs from frozen input")
+    mutants = file.get("mutants", [])
+    terminal = {"Killed", "Timeout", "Survived", "NoCoverage", "CompileError", "RuntimeError", "Ignored"}
+    if not mutants or any(mutant.get("status") not in terminal for mutant in mutants):
+        raise RuntimeError(f"{source}: report contains no operators or unfinished/unknown statuses")
+    counts = {}
+    for mutant in mutants:
+        counts[mutant["status"]] = counts.get(mutant["status"], 0) + 1
+    scored = sum(counts.get(status, 0) for status in ["Killed", "Timeout", "Survived", "NoCoverage"])
+    score = (counts.get("Killed", 0) + counts.get("Timeout", 0)) / scored * 100 if scored else 100
+    expected_code = 1 if score < threshold else 0
+    if code != expected_code:
+        raise RuntimeError(f"{source}: runner exit {code} does not match the completed report's score exit {expected_code}")
+    return counts
 
 
 def freeze(destination):
@@ -80,10 +112,17 @@ def bootstrap(snapshot, scratch, supplied, reports):
         package.mkdir(parents=True)
         for name in ["package.json", "package-lock.json"]:
             shutil.copy2(snapshot / "web" / name, package / name)
-        if command(["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"], package, reports / "runner-install.log"):
+        # Resolve the isolated compatibility runner before installing. In-place
+        # downgrades from Vitest 5 make npm 10 crash while traversing stale peer
+        # edges; the application's frozen lock remains untouched.
+        manifest_path = package / "package.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["devDependencies"].update({"vitest": "4.1.10", "@vitest/coverage-v8": "4.1.10"})
+        write_json(manifest_path, manifest)
+        if command(["npm", "install", "--package-lock-only", "--legacy-peer-deps", "--ignore-scripts", "--no-audit", "--no-fund"], package, reports / "runner-lock.log"):
+            raise RuntimeError("Isolated Vitest 4 lock resolution failed")
+        if command(["npm", "ci", "--legacy-peer-deps", "--ignore-scripts", "--no-audit", "--no-fund"], package, reports / "runner-install.log"):
             raise RuntimeError("Runner npm ci failed")
-        if command(["npm", "install", "--ignore-scripts", "--no-audit", "--no-fund", "--save-exact", "vitest@4.1.10", "@vitest/coverage-v8@4.1.10"], package, reports / "runner-vitest4-install.log"):
-            raise RuntimeError("Isolated Vitest 4 install failed")
         modules = package / "node_modules"
     versions = {}
     for name, expected in [("vitest", "4.1.10"), ("@stryker-mutator/core", "10.0.0"), ("@stryker-mutator/vitest-runner", "10.0.0")]:
@@ -108,6 +147,11 @@ def selectors(package, source):
     if source.startswith("src/locales/"):
         return ["tests/catalogOutput.test.ts"]
     focused = {
+        # Keep model and view consumers together: the storage/retirement suites
+        # exercise real crypto and public completion paths absent from the
+        # original happy-path-only selections. Fully mocked targets are omitted.
+        "src/crisisDetect.ts": ["tests/contractPins.test.ts", "tests/crisisBehavior.test.ts", "tests/crisisBoundedCompletion.test.ts", "tests/deepCrisisNormalization.test.ts"],
+        "src/entryDraft.ts": ["tests/app.test.tsx", "tests/entryDraft.test.tsx", "tests/entryDraftContract.test.ts", "tests/entryDraftQueueAdmission.test.ts", "tests/entryDraftRejectedPermit.test.ts", "tests/entryMutationBehavior.test.tsx", "tests/remediationClientOwnership.test.tsx", "tests/remediationVoice.test.tsx"],
         "src/App.tsx": ["tests/appMutationBehavior.test.tsx"],
         "src/ui.tsx": ["tests/ui.test.tsx", "tests/interaction.test.tsx", "tests/uiPresentation.test.tsx", "tests/moodBehavior.test.tsx", "tests/tokenConsumers.test.tsx"],
         "src/main.tsx": ["tests/main.test.tsx"],
@@ -123,19 +167,19 @@ def selectors(package, source):
         "src/historyFind.ts": ["tests/storageBehavior.test.ts"],
         "src/measureCadence.ts": ["tests/storageBehavior.test.ts"],
         "src/moodLog.ts": ["tests/stores.test.ts", "tests/gapFill.test.ts", "tests/encryptedMetadataBehavior.test.ts"],
-        "src/offlineQueue.ts": ["tests/queue.test.ts", "tests/auditRegressions.test.ts"],
-        "src/patternMutes.ts": ["tests/storageBehavior.test.ts"],
+        "src/offlineQueue.ts": ["tests/queue.test.ts", "tests/auditRegressions.test.ts", "tests/queuePublicCustodyBehavior.test.ts"],
+        "src/patternMutes.ts": ["tests/storageBehavior.test.ts", "tests/storageResidualBehavior.test.ts", "tests/patternMutesInvocationOrder.test.tsx", "tests/patterns.test.tsx", "tests/patternsMutationBehavior.test.tsx", "tests/patternsNativeDisclosure.test.tsx", "tests/settings.test.tsx"],
         "src/pendingMeasure.ts": ["tests/storageBehavior.test.ts"],
         "src/questionFeedback.ts": ["tests/storageBehavior.test.ts"],
         "src/stateSeqGuard.ts": ["tests/storageBehavior.test.ts"],
         "src/thresholdNotice.ts": ["tests/storageBehavior.test.ts"],
-        "src/reauth.ts": ["tests/reauth.test.ts"],
+        "src/reauth.ts": ["tests/reauth.test.ts", "tests/reauthBehavior.test.ts", "tests/settingsReauthAuthCost.test.tsx", "tests/settingsMutationBehavior.test.tsx", "tests/shareMutationBehavior.test.tsx", "tests/sharePublicProtocol.test.tsx"],
         "src/genericQuestions.ts": ["tests/contractPins.test.ts", "tests/i18n.test.ts"],
-        "src/api/client.ts": ["tests/api.test.ts", "tests/apiSurface.test.ts"],
+        "src/api/client.ts": ["tests/api.test.ts", "tests/apiSurface.test.ts", "tests/apiTransportBehavior.test.ts"],
         "src/vault.ts": ["tests/vault.test.ts"],
         "src/platform.ts": ["tests/platform.test.ts", "tests/platformBehavior.test.ts"],
         "src/strings.ts": ["tests/catalogOutput.test.ts", "tests/languageLifecycle.test.ts"],
-        "src/kvstore.ts": ["tests/kvstore.idb.test.ts"],
+        "src/kvstore.ts": ["tests/kvstore.idb.test.ts", "tests/kvGenerationBehavior.test.ts"],
         "src/brain/stats.ts": ["tests/brainVectors.test.ts", "tests/brainStatsBehavior.test.ts"],
         "src/crisisDialog.ts": ["tests/smallStateBehavior.test.ts"],
         "src/crypto/envelope.ts": ["tests/envelope.test.ts", "tests/envelopeBoundaryBehavior.test.ts", "tests/crypto.test.ts"],
@@ -144,20 +188,20 @@ def selectors(package, source):
         "src/localErasure.ts": ["tests/localErasure.test.ts"],
         "src/measures.ts": ["tests/measures.test.tsx", "tests/smallStateBehavior.test.ts"],
         "src/ownerStorage.ts": ["tests/smallConsumerContracts.test.ts", "tests/localErasure.test.ts"],
-        "src/safetyPlan.ts": ["tests/safetyPlan.test.tsx"],
+        "src/safetyPlan.ts": ["tests/safetyPlan.test.tsx", "tests/safetyPlanBehavior.test.ts", "tests/safetyPlanQueueCustody.test.ts", "tests/safetyPlanRejectedPermit.test.ts", "tests/safetyPlanInvocationOrder.test.tsx", "tests/planNativeCompletion.test.tsx", "tests/auditRegressionsUI.test.tsx", "tests/localRotation.idb.test.ts"],
         "src/sync.ts": ["tests/sync.test.ts"],
         "src/tokens.ts": ["tests/tokenConsumers.test.tsx", "tests/themeBehavior.test.ts", "tests/ui.test.tsx"],
         "src/views/History.tsx": ["tests/history.test.tsx", "tests/historyPresentation.test.tsx"],
         "src/views/Entry.tsx": ["tests/entry.test.tsx", "tests/entryVoiceUi.test.tsx", "tests/entryPresentation.test.tsx"],
         "src/views/LoginView.tsx": ["tests/login.test.tsx", "tests/loginPresentation.test.tsx"],
-        "src/views/Measures.tsx": ["tests/measures.test.tsx", "tests/measuresPresentation.test.tsx", "tests/measuresMutationBehavior.test.tsx", "tests/measuresPatternsInitialDom.test.tsx"],
+        "src/views/Measures.tsx": ["tests/measures.test.tsx", "tests/measuresPresentation.test.tsx", "tests/measuresMutationBehavior.test.tsx", "tests/measuresPatternsInitialDom.test.tsx", "tests/a11y.test.tsx", "tests/i18nViews.test.tsx", "tests/parity.test.tsx", "tests/parityBranches.test.tsx"],
         "src/views/Onboarding.tsx": ["tests/onboarding.test.tsx", "tests/onboardingPresentation.test.tsx"],
         "src/views/Privacy.tsx": ["tests/i18nViews.test.tsx", "tests/a11y.test.tsx", "tests/privacyPresentation.test.tsx"],
         "src/views/Question.tsx": ["tests/patterns.test.tsx", "tests/questionPresentation.test.tsx"],
-        "src/views/SafetyPlan.tsx": ["tests/safetyPlan.test.tsx", "tests/planPresentation.test.tsx"],
-        "src/views/Share.tsx": ["tests/settings.test.tsx", "tests/sharePresentation.test.tsx"],
-        "src/views/Patterns.tsx": ["tests/patterns.test.tsx", "tests/patternsPresentation.test.tsx", "tests/patternsMutationBehavior.test.tsx", "tests/measuresPatternsInitialDom.test.tsx", "tests/patternsNativeDisclosure.test.tsx"],
-        "src/views/Settings.tsx": ["tests/settings.test.tsx", "tests/settingsPresentation.test.tsx"],
+        "src/views/SafetyPlan.tsx": ["tests/safetyPlan.test.tsx", "tests/planPresentation.test.tsx", "tests/planNativeCompletion.test.tsx", "tests/safetyPlanInvocationOrder.test.tsx", "tests/auditRegressionsUI.test.tsx"],
+        "src/views/Share.tsx": ["tests/settings.test.tsx", "tests/sharePresentation.test.tsx", "tests/shareMutationBehavior.test.tsx", "tests/sharePublicProtocol.test.tsx", "tests/shareOwnerAndPairingInput.native.test.tsx"],
+        "src/views/Patterns.tsx": ["tests/patterns.test.tsx", "tests/patternsPresentation.test.tsx", "tests/patternsMutationBehavior.test.tsx", "tests/measuresPatternsInitialDom.test.tsx", "tests/patternsNativeDisclosure.test.tsx", "tests/a11y.test.tsx", "tests/auditRegressionsUI.test.tsx", "tests/funnels.test.tsx", "tests/patternMutesInvocationOrder.test.tsx"],
+        "src/views/Settings.tsx": ["tests/settings.test.tsx", "tests/settingsPresentation.test.tsx", "tests/settingsMutationBehavior.test.tsx"],
     }
     if source in focused:
         return focused[source]
@@ -173,7 +217,7 @@ def wrapper(package, selected, setup_file=None, test_name_pattern=None):
             raise RuntimeError(f"Selected oracle does not exist in frozen package: {test}")
     # mergeConfig concatenates include arrays and silently selects all tests.
     path.write_text('import { defineConfig } from "vitest/config";\nimport base from "./vite.config";\n'
-                    'export default defineConfig({...base, test: {...base.test, update: "none", testTimeout: 120000, hookTimeout: 120000, include: '
+                    'export default defineConfig({...base, cacheDir: ".campaign-cache-" + (process.env.STRYKER_MUTATOR_WORKER ?? "baseline"), test: {...base.test, cache: false, update: "none", testTimeout: 120000, hookTimeout: 120000, include: '
                     + json.dumps(selected) + (", setupFiles: " + json.dumps([setup_file]) if setup_file else "")
                     + (", testNamePattern: " + json.dumps(test_name_pattern) if test_name_pattern else "") + ', exclude: ["tests/brainArtifact.test.ts", "tests/crisisArtifact.test.ts", "tests/designTokens.test.ts", "tests/audioArtifact.test.ts"], coverage: {...base.test?.coverage, enabled: false}}});\n')
     return path
@@ -189,8 +233,8 @@ def config_for(source, report, timeout, mutant_workers=1):
 
 
 def canary(package, reports, timeout):
-    (package / "runner-witness.ts").write_text('export const visible = "visible";\nexport const unchecked = "opaque";\nexport function choice(value: boolean) { return value ? true : false; }\nexport const externalSnapshot = "external";\nexport const inlineSnapshot = "inline";\n')
-    (package / "runner-witness.test.ts").write_text('import { expect, it } from "vitest";\nimport { visible, unchecked, choice, externalSnapshot, inlineSnapshot } from "./runner-witness";\nit("static and runtime witness", () => { expect(visible).toBe("visible"); expect(typeof unchecked).toBe("string"); expect(choice(true)).toBe(true); expect(choice(false)).toBe(false); });\nit("external snapshot witness", () => { expect(externalSnapshot).toMatchSnapshot(); });\nit("inline snapshot witness", () => { expect(inlineSnapshot).toMatchInlineSnapshot(\'"inline"\'); });\n')
+    (package / "runner-witness.ts").write_text('export const visible = "visible";\nexport const unchecked = "opaque";\nexport function choice(value: boolean) { return value ? true : false; }\nexport const externalSnapshot = "external";\nexport const inlineSnapshot = "inline";\nexport function runtimeSurvivor() { return "loose"; }\nexport function closureKill() { return () => false; }\n')
+    (package / "runner-witness.test.ts").write_text('import { expect, it } from "vitest";\nimport { visible, unchecked, choice, externalSnapshot, inlineSnapshot, runtimeSurvivor, closureKill } from "./runner-witness";\nit("static and runtime witness", () => { expect(visible).toBe("visible"); expect(typeof unchecked).toBe("string"); expect(choice(true)).toBe(true); expect(choice(false)).toBe(false); });\nit("external snapshot witness", () => { expect(externalSnapshot).toMatchSnapshot(); });\nit("inline snapshot witness", () => { expect(inlineSnapshot).toMatchInlineSnapshot(\'"inline"\'); });\nit("runtime survivor witness", () => { expect(typeof runtimeSurvivor()).toBe("string"); });\nit("runtime closure witness", () => { expect(closureKill()()).toBe(false); });\n')
     snapshots = package / "__snapshots__"
     snapshots.mkdir(exist_ok=True)
     snapshot = snapshots / "runner-witness.test.ts.snap"
@@ -199,23 +243,27 @@ def canary(package, reports, timeout):
     output = reports / "runner-witness.json"
     output.unlink(missing_ok=True)
     write_json(package / "stryker.shard.json", config_for("runner-witness.ts", output, timeout))
+    control_inputs = {str(path): digest(path) for path in [package / "runner-witness.ts", package / "runner-witness.test.ts", snapshot]}
     code = command([str(package / "node_modules/.bin/stryker"), "run", "stryker.shard.json"], package, reports / "runner-witness.log")
     if not output.exists():
         raise RuntimeError(f"Runner witness failed without a report (exit {code})")
-    mutants = json.loads(output.read_text())["files"]["runner-witness.ts"]["mutants"]
-    static = [mutant for mutant in mutants if mutant.get("static")]
-    if not any(m["status"] == "Killed" for m in static) or not any(m["status"] == "Survived" for m in static):
-        raise RuntimeError("Runner did not distinguish static kill and survivor witnesses")
-    if not any(m["status"] == "Killed" and not m.get("static") for m in mutants):
-        raise RuntimeError("Runner did not execute runtime kill witness")
-    if any(m["status"] not in ["Killed", "Survived"] or not m.get("testsCompleted") for m in mutants):
-        raise RuntimeError("Runner witness has unexecuted/error/timeout controls")
-    for line in [4, 5]:
-        observed = [m for m in mutants if m["location"]["start"]["line"] == line]
-        if not observed or any(m["status"] != "Killed" for m in observed):
-            raise RuntimeError(f"Runner snapshot mismatch witness failed at line {line}")
+    payload = json.loads(output.read_text())
+    validate_report(payload, "runner-witness.ts", control_inputs[str(package / "runner-witness.ts")], code, 55)
+    mutants = payload["files"]["runner-witness.ts"]["mutants"]
+    expected = [(1, "StringLiteral", "Killed", True), (2, "StringLiteral", "Survived", True),
+                (3, "BlockStatement", "Killed", False), (3, "BooleanLiteral", "Killed", False), (3, "BooleanLiteral", "Killed", False),
+                (4, "StringLiteral", "Killed", True), (5, "StringLiteral", "Killed", True),
+                (6, "BlockStatement", "Killed", False), (6, "StringLiteral", "Survived", False),
+                (7, "BlockStatement", "Killed", False), (7, "ArrowFunction", "Killed", False), (7, "BooleanLiteral", "Killed", False)]
+    actual = [(m["location"]["start"]["line"], m["mutatorName"], m["status"], m.get("static")) for m in mutants]
+    if sorted(actual) != sorted(expected) or any(not m.get("testsCompleted") for m in mutants):
+        raise RuntimeError("Runner did not distinguish all executed static/runtime/snapshot/closure kill and survivor controls")
     if snapshot.read_text() != '// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html\n\nexports[`external snapshot witness 1`] = `"external"`;\n':
         raise RuntimeError("Mutation runner changed its external snapshot oracle")
+    if any(digest(Path(path)) != sha256 for path, sha256 in control_inputs.items()):
+        raise RuntimeError("Mutation runner did not restore qualification source/test inputs")
+    write_json(reports / "runner-qualification.json", {"passed": True, "controls": len(mutants), "source_restored": True,
+               "snapshot_restored": True, "report_sha256": digest(output), "exit_code": code})
     snapshot.unlink()
     for name in ["runner-witness.ts", "runner-witness.test.ts"]:
         (package / name).unlink()
@@ -226,7 +274,9 @@ def run_lane(worker, sources, snapshot, scratch, modules, reports, timeout, sele
     shutil.copytree(snapshot, lane)
     package = lane / "web"
     (package / "node_modules").symlink_to(modules, target_is_directory=True)
+    frozen_inputs = input_manifest(snapshot / "web")
     for source in sources:
+        verify_inputs(package, frozen_inputs, f"{source}: before pristine baseline")
         label = source.replace("/", "__").rsplit(".", 1)[0]
         report = reports / (label + ".json")
         report.unlink(missing_ok=True)
@@ -246,6 +296,7 @@ def run_lane(worker, sources, snapshot, scratch, modules, reports, timeout, sele
         code = command(args, package, reports / (label + "-baseline.log"))
         if code or not baseline.exists() or not json.loads(baseline.read_text()).get("numPassedTests"):
             raise RuntimeError(f"{source}: pristine selector baseline failed or ran zero tests")
+        verify_inputs(package, frozen_inputs, f"{source}: after pristine baseline")
         config = config_for(source, report, timeout, mutant_workers)
         if replay:
             config["mutate"] = replay[source]["ranges"]
@@ -253,17 +304,10 @@ def run_lane(worker, sources, snapshot, scratch, modules, reports, timeout, sele
         code = command([str(package / "node_modules/.bin/stryker"), "run", "stryker.shard.json"], package, reports / (label + ".log"))
         if not report.exists():
             raise RuntimeError(f"{source}: no fresh report; runner exit {code}")
-        restored = digest(package / source) == pristine_hash
-        if not restored:
-            raise RuntimeError(f"{source}: Stryker did not restore source")
+        verify_inputs(package, frozen_inputs, f"{source}: after mutation execution")
         payload = json.loads(report.read_text())
-        file = payload["files"].get(source)
-        if not file or hashlib.sha256(file["source"].encode()).hexdigest() != pristine_hash:
-            raise RuntimeError(f"{source}: report source differs from frozen input")
-        counts = {}
-        for mutant in file["mutants"]:
-            counts[mutant["status"]] = counts.get(mutant["status"], 0) + 1
-        metadata = {"source": source, "source_sha256": pristine_hash, "source_restored": restored, "selectors": selected, "snapshot": "inputs.json",
+        counts = validate_report(payload, source, pristine_hash, code, config["thresholds"]["break"])
+        metadata = {"source": source, "source_sha256": pristine_hash, "source_restored": True, "all_frozen_inputs_restored": True, "selectors": selected, "snapshot": "inputs.json",
                     "runner": "runner-dependencies.json", "runner_witness": "runner-witness.json", "baseline": baseline.name, "baseline_sha256": digest(baseline),
                     "config": config, "vitest_wrapper_sha256": digest(wrapper_path), "report_sha256": digest(report), "exit_code": code,
                     "counts": counts, "scratch_directory": str(package), "setup_file": effective_setup, "test_name_pattern": test_name_pattern,
@@ -296,6 +340,8 @@ def main():
         parser.error("workers and timeout must be positive")
     reports = args.reports.resolve()
     reports.mkdir(parents=True, exist_ok=True)
+    if any(reports.iterdir()):
+        raise RuntimeError(f"Campaign output directory must be fresh and empty: {reports}")
     scratch = Path(tempfile.mkdtemp(prefix="fathom-web-mutation-"))
     snapshot = scratch / "snapshot"
     manifest = freeze(snapshot)

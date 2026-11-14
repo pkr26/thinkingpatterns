@@ -93,7 +93,8 @@ beforeEach(() => {
 
 it("shows exact initial, unlocked and signed-out shell output", async () => {
   const root = await render(<App />);
-  await flush(); expect(publicSurface(root.toJSON())).toMatchSnapshot("initial sign-in shell");
+  await flush(); expect(textOf(root)).toContain("Sign in");
+  expect(publicSurface(root.toJSON())).toMatchSnapshot("initial sign-in shell");
   await typeInto(root,"Username","drportal"); await typeInto(root,"Password","pw"); await press(root,"Sign in");
   await vi.waitFor(()=>expect(textOf(root)).toContain("Patients — Dr. Portal"));
   expect(publicSurface(root.toJSON())).toMatchSnapshot("unlocked caseload shell");
@@ -729,12 +730,14 @@ it("opens a deep chart URL only after authenticated accessible-patient resolutio
   window.location.hash = "#/patient/route-patient";
   const root = await login(); await flush(8);
   expect(textOf(root)).toContain("routeperson");
+  expect(textOf(root)).toContain("Back to patients");
   window.location.hash = "#/patients";
   await act(async()=>{window.dispatchEvent(new Event("popstate"));});await flush(5);
   expect(textOf(root)).toContain("Patients — Dr. Portal");
   window.location.hash = "#/patient/route-patient";
   await act(async()=>{window.dispatchEvent(new Event("popstate"));});await flush(8);
   expect(textOf(root)).toContain("routeperson");
+  expect(textOf(root)).toContain("Back to patients");
   await act(async()=>root.unmount());window.location.hash="";lookup.mockResolvedValue([]);
 });
 

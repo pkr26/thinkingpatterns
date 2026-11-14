@@ -5,7 +5,6 @@
  * Linking.openURL NEVER becomes a dead tap.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import React from "react";
 import { Alert } from "react-native";
 
 // rnMock has no Linking and pins Platform.OS to "ios"; this screen needs
@@ -36,7 +35,7 @@ const { render, flush, textOf, pressLabel } = await import("../helpers/rtr");
 beforeEach(() => {
   mocks.openURL.mockReset();
   mocks.openURL.mockImplementation(async () => true);
-  Alert.alert.mockClear();
+  vi.mocked(Alert.alert).mockClear();
   mocks.platform.os = "ios";
 });
 

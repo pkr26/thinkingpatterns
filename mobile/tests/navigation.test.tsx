@@ -5,7 +5,6 @@ import { runTestControl } from "./helpers/testControl";
  * unlocked → the four app screens.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import React from "react";
 import { ActivityIndicator } from "react-native";
 
 vi.mock("../src/api/client", async (importOriginal) => {

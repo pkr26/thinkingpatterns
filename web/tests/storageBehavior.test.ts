@@ -61,6 +61,36 @@ describe("persisted optional account metadata consumed by patient views", () => 
     await expect(writeMutedPids(key, owner, ["failed"])).rejects.toThrow();
     await writeMutedPids(key, owner, ["recovered"]); expect(await readMutedPids(key, owner)).toEqual(new Set(["recovered"]));
   });
+  it.each(["missing", "empty", "unreadable"] as const)("keeps the public mute lifecycle unchanged when legacy metadata is %s", async legacy => {
+    await writeMutedPids(key, owner, ["retained"]);
+    const encryptedSlot = `mindpattern.patternMutes.v1.${owner}`;
+    const legacySlot = `mindpattern.mutedPids.v1.${owner}`;
+    const original = records.get(encryptedSlot);
+    if (legacy === "empty") window.localStorage.setItem(legacySlot, "");
+    const get = platform.localStore.get;
+    const unreadable = legacy === "unreadable" ? vi.spyOn(platform.localStore, "get").mockImplementation(name => {
+      if (name === legacySlot) throw new Error("optional legacy metadata unavailable");
+      return get(name);
+    }) : null;
+    try {
+      expect(await adoptLegacyPlaintextMutes(key, owner)).toEqual(new Set(["retained"]));
+      expect(await adoptLegacyPlaintextMutes(key, owner)).toEqual(new Set(["retained"]));
+      expect(await readMutedPids(key, owner)).toEqual(new Set(["retained"]));
+      expect(records.get(encryptedSlot)).toBe(original);
+      // An empty legacy slot and its absence contain the same no-PID
+      // state. Either representation may be cleaned up; content may not leak.
+      expect([null, ""]).toContain(window.localStorage.getItem(legacySlot));
+    } finally { unreadable?.mockRestore(); }
+    await writeMutedPids(key, owner, ["updated"]);
+    expect(await readMutedPids(key, owner)).toEqual(new Set(["updated"]));
+    window.localStorage.setItem(legacySlot, JSON.stringify(["adopted"]));
+    expect(await adoptLegacyPlaintextMutes(key, owner)).toEqual(new Set(["updated", "adopted"]));
+    expect(window.localStorage.getItem(legacySlot)).toBeNull();
+    await clearMutedPids(owner);
+    expect(await readMutedPids(key, owner)).toEqual(new Set());
+    expect(await adoptLegacyPlaintextMutes(key, owner)).toEqual(new Set());
+    await assertApiPlaintextCleared();
+  });
   it("treats damaged mute ciphertext as absent and keeps a no-legacy adoption side-effect free", async () => {
     records.set(`mindpattern.patternMutes.v1.${owner}`, "invalid ciphertext");
     expect(await readMutedPids(key, owner)).toEqual(new Set());

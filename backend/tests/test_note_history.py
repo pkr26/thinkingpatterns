@@ -11,6 +11,9 @@ from __future__ import annotations
 import base64
 import json
 
+from sqlalchemy import update
+
+from app.models import User
 from app.security import crypto
 from tests.helpers import ClientEmulator, TherapistEmulator
 
@@ -194,3 +197,20 @@ async def test_deleting_a_note_cascades_its_revisions(client, app):
     async with app.state.sessionmaker() as session:
         remaining = (await session.execute(select(TherapistNoteRevision.id))).scalars().all()
     assert remaining == []
+
+
+async def test_retired_patient_note_update_hides_version_validation(client, app):
+    therapist, patient, note = await _shared_note(client)
+    url = f"/api/therapist/notes/{note['id']}"
+    body = {"blob": note["blob"]}
+    active = await client.patch(url, headers=therapist.headers, json=body)
+    assert active.status_code == 400, active.text
+    assert active.json()["code"] == "version_required"
+    async with app.state.sessionmaker() as session:
+        await session.execute(
+            update(User).where(User.id == patient.user_id).values(is_active=False)
+        )
+        await session.commit()
+    retired = await client.patch(url, headers=therapist.headers, json=body)
+    assert retired.status_code == 404, retired.text
+    assert retired.json()["code"] == "not_found"

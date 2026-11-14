@@ -52,6 +52,7 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
   const [status, setStatus] = useState<string | null>(null);
   const [statusTone, setStatusTone] = useState<InlineStatusTone>("ok");
   const statusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const statusIsSaved = useRef(false);
   const screenLifetime = useRef<object | null>(null);
   /** Live mirrors for the BackHandler subscription (audit 2026-09-28): a
    *  native-event listener outlives renders, so it must read refs, not the
@@ -124,11 +125,12 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
     ]);
   };
 
-  const showStatus = (message: string, tone: InlineStatusTone) => {
+  const showStatus = (message: string, tone: InlineStatusTone, isSaved = false) => {
     if (statusTimer.current) clearTimeout(statusTimer.current);
+    statusIsSaved.current = isSaved;
     setStatusTone(tone);
     setStatus(message);
-    statusTimer.current = setTimeout(() => setStatus(null), STATUS_MS);
+    statusTimer.current = setTimeout(() => { statusIsSaved.current = false; statusTimer.current = null; setStatus(null); }, STATUS_MS);
   };
 
   useEffect(() => {
@@ -260,7 +262,7 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
       });
       await draftWrites.current;
       if (!matchesSavedSnapshot()) persistDraft();
-      if (lifetime !== null && screenLifetime.current === lifetime) showStatus(tr("safetyplan.saved"), "ok");
+      if (lifetime !== null && screenLifetime.current === lifetime && matchesSavedSnapshot()) showStatus(tr("safetyplan.saved"), "ok", true);
     } catch {
       // Nothing was lost: the fields are still on screen exactly as typed.
       if (ownsPublication()) Alert.alert(tr("safetyplan.saveFailedTitle"), tr("safetyplan.saveFailedBody"));
@@ -331,7 +333,13 @@ export function SafetyPlanScreen({ navigation }: { navigation: any }): React.JSX
                 value={plan[field]}
                 onChangeText={(text) => {
                   touchActivity();
-                  updatePlan({ ...plan, [field]: text });
+                  if (statusIsSaved.current) {
+                    if (statusTimer.current) clearTimeout(statusTimer.current);
+                    statusTimer.current = null;
+                    statusIsSaved.current = false;
+                    setStatus(null);
+                  }
+                  updatePlan({ ...planRef.current, [field]: text });
                 }}
                 multiline
                 maxLength={MAX_FIELD_CHARS}

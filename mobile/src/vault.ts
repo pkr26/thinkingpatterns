@@ -36,6 +36,8 @@ export type SessionKeys = Pick<Keys, "authKey" | "dataKey"> & { authKeyKnown: bo
 let current: SessionKeys | null = null;
 let ownerUserId: string | null = null;
 let writesSuspended = false;
+// Opaque identity for the installed vault generation; it never contains key bytes.
+let dataKeyGeneration = Symbol("vault-data-key-generation");
 
 export const vault = {
   /** Unlock with the account these keys were derived for. The id is what
@@ -48,6 +50,7 @@ export const vault = {
     current = { authKey: keys.authKey, dataKey: keys.dataKey, authKeyKnown: opts.authKeyKnown ?? true };
     ownerUserId = userId ?? null;
     writesSuspended = opts.writeSuspended === true;
+    dataKeyGeneration = Symbol("vault-data-key-generation");
     notify();
   },
   get(): SessionKeys {
@@ -61,6 +64,7 @@ export const vault = {
     return current !== null && !writesSuspended;
   },
   canReauthenticate(): boolean { return current !== null; },
+  dataKeyGeneration(): symbol { return dataKeyGeneration; },
   /** The account id the unlocked keys belong to, or null if unknown
    *  (legacy callers) — key-shipping code must treat null as unverified. */
   ownerUserId(): string | null {
@@ -83,6 +87,7 @@ export const vault = {
     current = null;
     ownerUserId = null;
     writesSuspended = false;
+    dataKeyGeneration = Symbol("vault-data-key-generation");
     notify();
   },
   subscribe(listener: Listener): () => void {

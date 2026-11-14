@@ -6,7 +6,7 @@ import { api, auth, ApiError, clearSession, setSession, type LlmConsentState, ty
 import * as reauth from "../src/reauth";
 import * as queue from "../src/offlineQueue";
 import * as platform from "../src/platform";
-import { kv, setKvBackendForTests, StorageCommitError } from "../src/kvstore";
+import { kv, setKvBackendForTests, StorageCommitError, StorageReadError } from "../src/kvstore";
 import { vault } from "../src/vault";
 import { __setLocaleForTests, applyLanguagePref, getLanguagePref, t } from "../src/strings";
 import { readMeasureCadence, writeMeasureCadence } from "../src/measureCadence";
@@ -36,6 +36,219 @@ beforeEach(() => {
   vi.spyOn(reauth, "freshStepUp").mockResolvedValue({ ok: true, proof: "sensitive-proof" });
 });
 afterEach(() => { vi.restoreAllMocks(); applyLanguagePref("auto"); vi.unstubAllGlobals(); __setLocaleForTests("en"); });
+
+it("retains an undismissed device key reminder after a failed removal and retries it", async () => {
+  const slot = `mindpattern.rekeyHint.${owner}`; await kv.setItem(slot, "1");
+  vi.mocked(api.keyEnvelope).mockResolvedValue({ key_scheme: "v2", salt: "", kdf_params: null, wrapped_data_key: null });
+  const nativeRemove = kv.removeItem.bind(kv); let failHint = true, failedRemovals = 0;
+  vi.spyOn(kv, "removeItem").mockImplementation(async (...args) => {
+    if (args[0] === slot && failHint) { failedRemovals += 1; throw new StorageCommitError("temporary key-reminder device deletion failure"); }
+    return nativeRemove(...args);
+  });
+  const errors: unknown[] = [], observe = (reason: unknown) => { errors.push(reason); };
+  process.on("unhandledRejection", observe);
+  try {
+    const root = await mount(); expect(textOf(root)).toContain(t("settings.rekeyHintNote"));
+    await press(root, t("settings.rekeyHintDismiss")); await flush();
+    await vi.waitFor(() => expect(failedRemovals).toBe(1));
+    expect(errors.length, `Unhandled reminder deletion: ${errors.map(String).join(", ")}`).toBe(0);
+    expect(textOf(root)).toContain(t("settings.rekeyHintNote"));
+    expect(textOf(root)).toContain(t("settings.rekeyHintDismissFailed"));
+    expect(await kv.getItem(slot)).toBe("1");
+    failHint = false; await press(root, t("settings.rekeyHintDismiss"));
+    await vi.waitFor(() => expect(textOf(root)).not.toContain(t("settings.rekeyHintNote")));
+    expect(textOf(root)).not.toContain(t("settings.rekeyHintDismissFailed"));
+    expect(await kv.getItem(slot)).toBeNull();
+    expect(errors.length, `Unhandled reminder deletion: ${errors.map(String).join(", ")}`).toBe(0);
+  } finally { process.removeListener("unhandledRejection", observe); }
+});
+
+it("does not publish a retired device key-reminder deletion failure into replacement settings", async () => {
+  const slot = `mindpattern.rekeyHint.${owner}`; await kv.setItem(slot, "1");
+  vi.mocked(api.keyEnvelope).mockResolvedValue({ key_scheme: "v2", salt: "", kdf_params: null, wrapped_data_key: null });
+  const nativeRemove = kv.removeItem.bind(kv), gate = deferred<void>(); let admitted = false;
+  vi.spyOn(kv, "removeItem").mockImplementation(async (...args) => {
+    if (args[0] === slot) { admitted = true; await gate.promise; throw new StorageCommitError("retired device deletion failure"); }
+    return nativeRemove(...args);
+  });
+  const errors: unknown[] = [], observe = (reason: unknown) => { errors.push(reason); }; process.on("unhandledRejection", observe);
+  try {
+    const root = await mount(); await press(root, t("settings.rekeyHintDismiss"));
+    await vi.waitFor(() => expect(admitted).toBe(true));
+    clearSession(); installSession("replacement-hint-owner", "replacement-hint-user");
+    vault.unlock({ authKey: new Uint8Array(32).fill(73), dataKey: new Uint8Array(32).fill(75) }, "replacement-hint-owner");
+    const before = publicSurface(root.toJSON());
+    await act(async () => { gate.resolve(); }); await flush();
+    expect(publicSurface(root.toJSON())).toBe(before);
+    expect(textOf(root)).not.toContain(t("settings.rekeyHintDismissFailed"));
+    expect(await kv.getItem(slot)).toBe("1");
+    expect(errors.length, `Unhandled reminder deletion: ${errors.map(String).join(", ")}`).toBe(0);
+  } finally { gate.resolve(); process.removeListener("unhandledRejection", observe); }
+});
+
+it("allows a replacement owner to dismiss while a retired owner deletion is pending", async () => {
+  const oldSlot = `mindpattern.rekeyHint.${owner}`, newOwner = "replacement-hint-owner", newSlot = `mindpattern.rekeyHint.${newOwner}`;
+  await kv.setItem(oldSlot, "1");
+  vi.mocked(api.keyEnvelope).mockResolvedValue({ key_scheme: "v2", salt: "", kdf_params: null, wrapped_data_key: null });
+  vi.mocked(api.meta).mockRejectedValue(new Error("metadata unavailable"));
+  const nativeRemove = kv.removeItem.bind(kv), oldGate = deferred<void>(), newGate = deferred<void>(); let oldCalls = 0, newCalls = 0;
+  vi.spyOn(kv, "removeItem").mockImplementation(async (...args) => {
+    if (args[0] === oldSlot) { oldCalls += 1; await oldGate.promise; throw new StorageCommitError("retired deletion failure"); }
+    if (args[0] === newSlot) { newCalls += 1; await newGate.promise; }
+    return nativeRemove(...args);
+  });
+  const errors: unknown[] = [], observe = (reason: unknown) => { errors.push(reason); }; process.on("unhandledRejection", observe);
+  try {
+    const root = await mount(); await press(root, t("settings.rekeyHintDismiss"));
+    await vi.waitFor(() => expect(oldCalls).toBe(1));
+    clearSession(); installSession(newOwner, "replacement-hint-user");
+    vault.unlock({ authKey: new Uint8Array(32).fill(73), dataKey: new Uint8Array(32).fill(75) }, newOwner);
+    await kv.setItem(newSlot, "1"); await press(root, t("settings.llmRetry")); await flush();
+    expect(textOf(root)).toContain(t("settings.rekeyHintNote"));
+    await press(root, t("settings.rekeyHintDismiss")); await vi.waitFor(() => expect(newCalls).toBe(1));
+    await act(async () => { oldGate.resolve(); }); await flush();
+    expect(textOf(root)).not.toContain(t("settings.rekeyHintDismissFailed"));
+    await press(root, t("settings.rekeyHintDismiss")); await flush(); expect(newCalls).toBe(1);
+    await act(async () => { newGate.resolve(); });
+    await vi.waitFor(() => expect(textOf(root)).not.toContain(t("settings.rekeyHintNote")));
+    expect(await kv.getItem(oldSlot)).toBe("1"); expect(await kv.getItem(newSlot)).toBeNull();
+    expect(errors.length, `Unhandled reminder deletion: ${errors.map(String).join(", ")}`).toBe(0);
+  } finally { oldGate.resolve(); newGate.resolve(); process.removeListener("unhandledRejection", observe); }
+});
+
+it("refreshes the device key reminder after a same-owner reload overlaps dismissal", async () => {
+  const slot = `mindpattern.rekeyHint.${owner}`; await kv.setItem(slot, "1");
+  vi.mocked(api.keyEnvelope).mockResolvedValue({ key_scheme: "v2", salt: "", kdf_params: null, wrapped_data_key: null });
+  vi.mocked(api.meta).mockRejectedValue(new Error("metadata unavailable"));
+  const nativeRemove = kv.removeItem.bind(kv), gate = deferred<void>(); let admitted = false;
+  vi.spyOn(kv, "removeItem").mockImplementation(async (...args) => {
+    if (args[0] === slot && !admitted) { admitted = true; await gate.promise; }
+    return nativeRemove(...args);
+  });
+  try {
+    const root = await mount(); await press(root, t("settings.rekeyHintDismiss"));
+    await vi.waitFor(() => expect(admitted).toBe(true));
+    await press(root, t("settings.llmRetry")); await flush(); expect(textOf(root)).toContain(t("settings.rekeyHintNote"));
+    await act(async () => { gate.resolve(); });
+    await vi.waitFor(() => expect(textOf(root)).not.toContain(t("settings.rekeyHintNote")));
+    expect(await kv.getItem(slot)).toBeNull();
+  } finally { gate.resolve(); }
+});
+
+it("clears an old key-reminder dismissal warning after loading a replacement owner", async () => {
+  const oldSlot = `mindpattern.rekeyHint.${owner}`, newOwner = "replacement-hint-owner", newSlot = `mindpattern.rekeyHint.${newOwner}`;
+  await kv.setItem(oldSlot, "1");
+  vi.mocked(api.keyEnvelope).mockResolvedValue({ key_scheme: "v2", salt: "", kdf_params: null, wrapped_data_key: null });
+  vi.mocked(api.meta).mockRejectedValue(new Error("metadata unavailable"));
+  const nativeRemove = kv.removeItem.bind(kv);
+  vi.spyOn(kv, "removeItem").mockImplementation(async (...args) => {
+    if (args[0] === oldSlot) throw new StorageCommitError("old owner deletion failure");
+    return nativeRemove(...args);
+  });
+  const errors: unknown[] = [], observe = (reason: unknown) => { errors.push(reason); }; process.on("unhandledRejection", observe);
+  try {
+    const root = await mount(); await press(root, t("settings.rekeyHintDismiss"));
+    await vi.waitFor(() => expect(textOf(root)).toContain(t("settings.rekeyHintDismissFailed")));
+    clearSession(); installSession(newOwner, "replacement-hint-user");
+    vault.unlock({ authKey: new Uint8Array(32).fill(73), dataKey: new Uint8Array(32).fill(75) }, newOwner);
+    await kv.setItem(newSlot, "1"); await press(root, t("settings.llmRetry")); await flush();
+    expect(textOf(root)).toContain(t("settings.rekeyHintNote"));
+    expect(textOf(root)).not.toContain(t("settings.rekeyHintDismissFailed"));
+    expect(await kv.getItem(oldSlot)).toBe("1"); expect(await kv.getItem(newSlot)).toBe("1");
+    expect(errors.length, `Unhandled reminder deletion: ${errors.map(String).join(", ")}`).toBe(0);
+  } finally { process.removeListener("unhandledRejection", observe); }
+});
+
+it("keeps unrelated settings usable and retries a failed device key-reminder read", async () => {
+  const slot = `mindpattern.rekeyHint.${owner}`;
+  await kv.setItem(slot, "1");
+  vi.mocked(api.keyEnvelope).mockResolvedValue({ key_scheme: "v2", salt: "", kdf_params: null, wrapped_data_key: null });
+  vi.mocked(api.accessLogPage).mockResolvedValue({ rows: [row("independent-key-hint-access")], nextCursor: null });
+  const nativeRead = kv.getItem.bind(kv); let failHint = true, failedReads = 0;
+  vi.spyOn(kv, "getItem").mockImplementation(async (...args) => {
+    if (args[0] === slot && failHint) { failedReads += 1; throw new StorageReadError("temporary key-reminder device read failure"); }
+    return nativeRead(...args);
+  });
+  const errors: unknown[] = [], observe = (reason: unknown) => { errors.push(reason); };
+  process.on("unhandledRejection", observe);
+  try {
+    const root = await mount(); await flush();
+    expect(failedReads).toBe(1);
+    expect(errors.length, `Unhandled loader rejection: ${errors.map(String).join(", ")}`).toBe(0);
+    expect(textOf(root)).toContain(t("settings.rekeyHintReadFailed"));
+    expect(textOf(root)).toContain(t("settings.llmStatusOff"));
+    expect(textOf(root)).toContain("independent-key-hint-access");
+    expect(await nativeRead(slot)).toBe("1");
+    failHint = false;
+    await press(root, t("settings.rekeyHintRetry")); await flush();
+    expect(textOf(root)).not.toContain(t("settings.rekeyHintReadFailed"));
+    expect(textOf(root)).toContain(t("settings.rekeyHintNote"));
+    expect(await nativeRead(slot)).toBe("1");
+    expect(errors.length, `Unhandled loader rejection: ${errors.map(String).join(", ")}`).toBe(0);
+  } finally { process.removeListener("unhandledRejection", observe); }
+});
+
+it("reconciles a shown key reminder after a same-screen read failure and later removal", async () => {
+  const slot = `mindpattern.rekeyHint.${owner}`;
+  await kv.setItem(slot, "1");
+  vi.mocked(api.keyEnvelope).mockResolvedValue({ key_scheme: "v2", salt: "", kdf_params: null, wrapped_data_key: null });
+  vi.mocked(api.meta).mockRejectedValue(new Error("metadata unavailable"));
+  const nativeRead = kv.getItem.bind(kv); let failHint = false;
+  vi.spyOn(kv, "getItem").mockImplementation(async (...args) => {
+    if (args[0] === slot && failHint) throw new StorageReadError("temporary key-reminder device read failure");
+    return nativeRead(...args);
+  });
+  const errors: unknown[] = [], observe = (reason: unknown) => { errors.push(reason); };
+  process.on("unhandledRejection", observe);
+  try {
+    const root = await mount(); await flush();
+    expect(textOf(root)).toContain(t("settings.rekeyHintNote"));
+    failHint = true;
+    await press(root, t("settings.llmRetry")); await flush();
+    expect(textOf(root)).toContain(t("settings.rekeyHintReadFailed"));
+    expect(textOf(root)).not.toContain(t("settings.rekeyHintNote"));
+    expect(await nativeRead(slot)).toBe("1");
+    failHint = false;
+    await press(root, t("settings.rekeyHintRetry")); await flush();
+    expect(textOf(root)).not.toContain(t("settings.rekeyHintReadFailed"));
+    expect(textOf(root)).toContain(t("settings.rekeyHintNote"));
+    await kv.removeItem(slot);
+    await press(root, t("settings.llmRetry")); await flush();
+    expect(textOf(root)).not.toContain(t("settings.rekeyHintNote"));
+    expect(await nativeRead(slot)).toBeNull();
+    expect(errors.length, `Unhandled loader rejection: ${errors.map(String).join(", ")}`).toBe(0);
+  } finally { process.removeListener("unhandledRejection", observe); }
+});
+
+it("keeps access history usable and retries a failed device reminder preference read", async () => {
+  await writeMeasureCadence(owner, { enabled: true, intervalWeeks: 8, snoozedUntil: null });
+  const nativeRead = kv.getItem.bind(kv), slot = `mindpattern.measureCadence.${owner}`;
+  let failCadence = true, failedReads = 0;
+  vi.spyOn(kv, "getItem").mockImplementation(async (...args) => {
+    if (args[0] === slot && failCadence) { failedReads += 1; throw new StorageReadError("temporary device read failure"); }
+    return nativeRead(...args);
+  });
+  vi.mocked(api.accessLogPage).mockResolvedValue({ rows: [row("independent-access-history")], nextCursor: null });
+  const errors: unknown[] = [], observe = (reason: unknown) => { errors.push(reason); };
+  process.on("unhandledRejection", observe);
+  try {
+    const root = await mount(); await flush();
+    expect(failedReads).toBe(1);
+    expect(errors).toEqual([]);
+    expect(textOf(root)).toContain(t("settings.cadenceReadFailed"));
+    expect(textOf(root)).toContain("independent-access-history");
+    expect(api.accessLogPage).toHaveBeenCalledTimes(1);
+    expect(root.root.findAllByType("button").some(node => node.props.role === "switch" && String(node.props["aria-label"] ?? "").includes(t("settings.remindMeasures")))).toBe(false);
+    failCadence = false;
+    await press(root, t("settings.cadenceRetry")); await flush();
+    expect(textOf(root)).not.toContain(t("settings.cadenceReadFailed"));
+    expect(textOf(root)).toContain(t("measures.cadence.8"));
+    const reminder = root.root.findAllByType("button").find(node => node.props.role === "switch" && String(node.props["aria-label"] ?? "").includes(t("settings.remindMeasures")));
+    expect(reminder?.props["aria-checked"]).toBe(true);
+    expect(await readMeasureCadence(owner)).toEqual({ enabled: true, intervalWeeks: 8, snoozedUntil: null });
+    expect(errors).toEqual([]);
+  } finally { process.removeListener("unhandledRejection", observe); }
+});
 
 it("retires its public patient loaders after a vault lock without a native rejected UI continuation", async () => {
   const failures: unknown[] = [], observe = (reason: unknown) => { failures.push(reason); }; process.on("unhandledRejection", observe);
@@ -244,6 +457,49 @@ it("reflects each browser theme in the rendered selection and document, and retu
 it("reports singular queued writing and multiple rejected records without changing the recovery counts", async () => {
   vi.spyOn(queue, "queueLength").mockResolvedValue(1); vi.spyOn(queue, "rejectedEntries").mockResolvedValue([0, 1].map(index => ({ userId: owner, clientEntryId: `rejected-${index}`, blobB64: "kept ciphertext", entryDate: "2026-10-05" })));
   const root = await mount(); expect(textOf(root)).toContain(t("settings.queuedOne", { count: 1 })); expect(textOf(root)).toContain(t("settings.rejectedMany", { count: 2 }));
+});
+it.each(["queued", "rejected", "losses"] as const)("shows an offline inventory retry when the %s read fails while preserving successful counts", async failed => {
+  const held = [{ userId: owner, clientEntryId: "held-offline", blobB64: "retained ciphertext", entryDate: "2026-10-05" }];
+  const queued = vi.spyOn(queue, "queueLength").mockResolvedValue(1);
+  const rejected = vi.spyOn(queue, "rejectedEntries").mockResolvedValue(held);
+  const losses = vi.spyOn(queue, "queueEvictionSummary").mockResolvedValue({ rejected: 2, quarantine: 3 });
+  const unavailable = new StorageReadError("temporary offline inventory read failure");
+  if (failed === "queued") queued.mockRejectedValueOnce(unavailable);
+  else if (failed === "rejected") rejected.mockRejectedValueOnce(unavailable);
+  else losses.mockRejectedValueOnce(unavailable);
+  const root = await mount();
+  expect(textOf(root)).toContain(t("settings.queueInventoryFailed"));
+  if (failed !== "queued") expect(textOf(root)).toContain(t("settings.queuedOne", { count: 1 }));
+  if (failed !== "rejected") expect(textOf(root)).toContain(t("settings.rejectedOne", { count: 1 }));
+  else expect(root.root.findAllByType("button").some(node => textOfNode(node) === t("settings.requeue"))).toBe(false);
+  if (failed !== "losses") expect(textOf(root)).toContain(t("settings.queueEvictions", { count: 5 }));
+  await press(root, t("settings.queueInventoryRetry")); await flush();
+  expect(textOf(root)).not.toContain(t("settings.queueInventoryFailed"));
+  expect(textOf(root)).toContain(t("settings.queuedOne", { count: 1 }));
+  expect(textOf(root)).toContain(t("settings.rejectedOne", { count: 1 }));
+  expect(textOf(root)).toContain(t("settings.queueEvictions", { count: 5 }));
+});
+it("shows and retries a real rejected-drawer counter read failure without discarding its saved writing", async () => {
+  const records = new Map<string, string>(); let fail = false;
+  setKvBackendForTests({ getItem: async key => { if (fail && key.includes(".evictions.")) { fail = false; throw new Error("temporary counter read failure"); } return records.get(key) ?? null; }, setItem: async (key, value) => { records.set(key, value); }, removeItem: async key => { records.delete(key); }, keys: async () => [...records.keys()] });
+  try {
+    await queue.enqueue({ userId: owner, clientEntryId: "seed-counter", blobB64: "seed ciphertext", entryDate: "2026-10-05" });
+    const itemSlot = [...records.keys()].find(key => key.startsWith("mindpattern/queue.v1.items."))!;
+    const rejectedSlot = itemSlot.replace(".items.", ".rejected."), lossSlot = itemSlot.replace(".items.", ".evictions.");
+    const entries = Array.from({ length: 201 }, (_, i) => ({ userId: owner, clientEntryId: `offline-${i}`, blobB64: "retained ciphertext", entryDate: "2026-10-05" }));
+    const original = JSON.stringify({ v: 1, items: entries }), prior = JSON.stringify({ rejected: 2, quarantine: 3 }); records.set(rejectedSlot, original); records.set(lossSlot, prior);
+    const realSummary = queue.queueEvictionSummary;
+    vi.spyOn(queue, "queueEvictionSummary").mockResolvedValueOnce({ rejected: 2, quarantine: 3 }).mockImplementation(realSummary);
+    fail = true; const root = await mount();
+    expect(textOf(root)).toContain(t("settings.queueInventoryFailed"));
+    expect(root.root.findAllByType("button").some(node => textOfNode(node) === t("settings.requeue"))).toBe(false);
+    expect(records.get(rejectedSlot)).toBe(original); expect(records.get(lossSlot)).toBe(prior);
+    await press(root, t("settings.queueInventoryRetry")); await flush();
+    expect(textOf(root)).not.toContain(t("settings.queueInventoryFailed"));
+    expect(textOf(root)).toContain(t("settings.rejectedMany", { count: 200 }));
+    expect(JSON.parse(records.get(rejectedSlot)!).items).toEqual(entries.slice(1));
+    expect(JSON.parse(records.get(lossSlot)!)).toEqual({ rejected: 3, quarantine: 3 });
+  } finally { setKvBackendForTests(null); }
 });
 it("starts with empty access history after its first page fails and retries from the first page", async () => {
   const pages = vi.mocked(api.accessLogPage).mockRejectedValueOnce(new Error("first page unavailable")).mockResolvedValue({ rows: [row("recovered audit row")], nextCursor: null });

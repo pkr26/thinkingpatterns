@@ -91,6 +91,7 @@ async def test_transcription_503_when_stt_unconfigured(client, settings):
     )
     assert response.status_code == 503
     assert response.json()["code"] == "stt_unconfigured"
+    assert response.json()["detail"] == "speech-to-text is not configured on this server"
 
 
 async def test_meta_reports_audio_availability(client, voice_settings):
@@ -127,6 +128,7 @@ async def test_transcription_requires_consent(client, voice_settings, monkeypatc
     )
     assert response.status_code == 403
     assert response.json()["code"] == "voice_consent_required"
+    assert response.json()["detail"] == "voice transcription consent required"
 
 
 async def test_consent_requires_stt_configured(client, settings):
@@ -280,18 +282,24 @@ async def test_transcription_input_validation(client, voice_settings):
         json=audio_body(mime="audio/flac"),
     )
     assert bad_mime.status_code == 422
+    assert bad_mime.json() == {"detail": "unsupported audio format", "code": "validation_error"}
     too_long = await client.post(
         "/api/v1/audio/transcriptions",
         headers=emu.headers,
         json=audio_body(duration=3601),
     )
     assert too_long.status_code == 422
+    assert too_long.json() == {
+        "detail": "recording duration exceeds the allowed maximum",
+        "code": "validation_error",
+    }
     bad_b64 = await client.post(
         "/api/v1/audio/transcriptions",
         headers=emu.headers,
         json={**audio_body(), "audio_b64": "!!!not-base64!!!"},
     )
     assert bad_b64.status_code == 422
+    assert bad_b64.json() == {"detail": "audio must be base64", "code": "validation_error"}
     empty_audio = await client.post(
         "/api/v1/audio/transcriptions",
         headers=emu.headers,

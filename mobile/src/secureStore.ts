@@ -147,24 +147,22 @@ async function setEncryptedNow(key: string, value: string): Promise<void> {
   } finally { plain.fill(0); }
 }
 
-export const secureStore = {
-  setItem: (key: string, value: string): Promise<void> => serializedSlotWrite(key, () => setEncryptedNow(key, value)),
-  /** null when absent; undefined-vault-safe: corrupt ciphertext reads as
-   *  absent (a wiped/tampered store must not brick the session). */
-  async getItem(key: string): Promise<string | null> {
+async function getStoredItem(key: string, strict: boolean): Promise<string | null> {
     let plain: Buffer | null = null;
     const raw = await backend.getItem(key);
-    if (!raw) return null;
+    if (raw === null) return null;
+    if (raw === "") { if (strict) throw new Error("empty secure storage value"); return null; }
     if (raw.startsWith("{")) {
       // The v1 envelope. base64 never contains "{", so a leading brace is
       // an unambiguous format marker — anything else inside (wrong version,
       // corrupt ciphertext) reads as absent.
       try {
         const parsed = JSON.parse(raw) as { v?: unknown; c?: unknown };
-        if (parsed.v !== 1 || typeof parsed.c !== "string") return null;
+        if (parsed.v !== 1 || typeof parsed.c !== "string") { if (strict) throw new Error("invalid secure storage envelope"); return null; }
         plain = decrypt(await deviceKey(), Buffer.from(parsed.c, "base64"));
         return plain.toString("utf8");
-      } catch {
+      } catch (error) {
+        if (strict) throw error;
         return null;
       } finally { plain?.fill(0); }
     }
@@ -182,10 +180,19 @@ export const secureStore = {
         await setEncryptedNow(key, value);
       }).catch(() => {});
       return value;
-    } catch {
+    } catch (error) {
+      if (strict) throw error;
       return null;
     } finally { plain?.fill(0); }
-  },
+  }
+
+export const secureStore = {
+  setItem: (key: string, value: string): Promise<void> => serializedSlotWrite(key, () => setEncryptedNow(key, value)),
+  /** null when absent; undefined-vault-safe: corrupt ciphertext reads as
+   *  absent (a wiped/tampered store must not brick the session). */
+  getItem: (key: string): Promise<string | null> => getStoredItem(key, false),
+  /** Pin verification must distinguish absent data from unreadable data. */
+  getItemStrict: (key: string): Promise<string | null> => getStoredItem(key, true),
   async removeItem(key: string): Promise<void> {
     await serializedSlotWrite(key, () => backend.removeItem(key));
   },

@@ -703,19 +703,21 @@ class TestTherapistReads:
         assert second.headers["X-Next-Offset"] == "8"
 
     async def test_entries_default_page_is_25_and_exposes_an_exact_continuation(self, client):
-        patient, th = await self._shared_patient(client, days=THERAPIST_ENTRY_PAGE_SIZE + 1)
+        # Keep the expected contract independent of the implementation constant.
+        expected_page_size = 25
+        patient, th = await self._shared_patient(client, days=expected_page_size + 1)
         first = await client.get(
             f"/api/therapist/patients/{patient.user_id}/entries",
             headers=th.headers,
         )
         assert first.status_code == 200
-        assert len(first.json()) == THERAPIST_ENTRY_PAGE_SIZE
-        assert first.headers["X-Next-Offset"] == str(THERAPIST_ENTRY_PAGE_SIZE)
+        assert len(first.json()) == expected_page_size
+        assert first.headers["X-Next-Offset"] == str(expected_page_size)
 
         second = await client.get(
             f"/api/therapist/patients/{patient.user_id}/entries",
             headers=th.headers,
-            params={"offset": THERAPIST_ENTRY_PAGE_SIZE},
+            params={"offset": expected_page_size},
         )
         assert second.status_code == 200
         assert len(second.json()) == 1
@@ -724,7 +726,7 @@ class TestTherapistReads:
         too_many = await client.get(
             f"/api/therapist/patients/{patient.user_id}/entries",
             headers=th.headers,
-            params={"limit": THERAPIST_ENTRY_PAGE_SIZE + 1},
+            params={"limit": expected_page_size + 1},
         )
         assert too_many.status_code == 422
 

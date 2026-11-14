@@ -6,6 +6,7 @@
  *  register→login→unlock roundtrip, the unchanged v1 path, response
  *  tolerance, and both fail-closed envelope failures. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act } from "react";
 import type { ReactTestRenderer } from "react-test-renderer";
 import { LoginView, passwordPolicyError } from "../src/views/LoginView";
 import { hasSession } from "../src/api/client";
@@ -14,7 +15,7 @@ import { createRegistrationEnvelope } from "../src/crypto/envelope";
 import { derivePatientKeys } from "../src/crypto/keys";
 import { vault } from "../src/vault";
 import { jsonResponse, resetTestState, stubFetch } from "./helpers/api";
-import { isDisabled, press, render, setCheckbox, settle, textOf, typeInto } from "./helpers/rtr";
+import { isDisabled, press, render, setCheckbox, settle, textOf, typeInto, waitForResult } from "./helpers/rtr";
 
 const SALT_B64 = "AAECAwQFBgcICQoLDA0ODw=="; // 16 bytes, from the shared vectors
 const GOOD_PASSWORD = "correct horse battery staple";
@@ -401,7 +402,7 @@ describe("v2 key envelope (2026-09-26)", () => {
     await typeInto(root, "Confirm password", GOOD_PASSWORD);
     await confirmAge(root);
     await press(root, "Create journal");
-    await settle();
+    await waitForResult(() => vault.isUnlocked() && typeof registerBody.wrapped_data_key === "string", "v2 registration and envelope creation");
     const registeredKey = toBase64(vault.get().dataKey);
 
     // A fresh sign-in on the same stubbed account: login says v2 → the
@@ -412,7 +413,7 @@ describe("v2 key envelope (2026-09-26)", () => {
     await typeInto(root2, "Username", "v2user");
     await typeInto(root2, "Password", GOOD_PASSWORD);
     await press(root2, "Sign in");
-    await settle();
+    await waitForResult(() => onLogin.mock.calls.length > 0, "v2 roundtrip sign-in completion");
     expect(onLogin).toHaveBeenCalledWith({ userId: TEST_USER_ID, username: "v2user" });
     expect(vault.isUnlocked()).toBe(true);
     expect(toBase64(vault.get().dataKey)).toBe(registeredKey);
@@ -633,7 +634,12 @@ describe("v2 key envelope (2026-09-26)", () => {
     await typeInto(root, "Username", "v2user");
     await typeInto(root, "Password", GOOD_PASSWORD);
     await press(root, "Sign in");
-    await settle();
+    await act(async () => {
+      await vi.waitFor(
+        () => expect(onLogin).toHaveBeenCalledWith({ userId: TEST_USER_ID, username: "v2user" }),
+        { timeout: 5_000 },
+      );
+    });
     expect(onLogin).toHaveBeenCalledWith({ userId: TEST_USER_ID, username: "v2user" });
     expect(vault.isUnlocked()).toBe(true);
     expect(toBase64(vault.get().dataKey)).toBe(toBase64(envelope.dataKey));

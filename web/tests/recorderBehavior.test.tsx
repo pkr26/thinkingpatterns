@@ -1,4 +1,4 @@
-import { act, StrictMode } from "react";
+import { act, StrictMode, Suspense, startTransition, useLayoutEffect, useState } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useRecorder, type UseRecorder, pickRecorderMime, normalizeMime } from "../src/audio/recorder";
 import { render as renderWithCleanup } from "./helpers/rtr";
@@ -9,6 +9,7 @@ let current: UseRecorder, tracks: { stop: ReturnType<typeof vi.fn> }[], calls: n
 let failConstruct = false, failStart = false, reportedMime: string | null = null, connected = false;
 let recorder: FakeRecorder, pending: (() => Promise<MediaStream>) | null;
 let deferStops: boolean, stoppedEvents: (() => void)[];
+let deferTrackEnd = false, trackEndEvents: (() => void)[] = [];
 let frames: Map<number, () => void>, frameId: number, sample = 128;
 const close = vi.fn(async () => {});
 const win = window as unknown as Record<string, unknown>;
@@ -26,7 +27,7 @@ class FakeRecorder {
     for (const track of tracked) {
       if (vi.isMockFunction(track.stop)) {
         const stop = vi.mocked(track.stop), original = stop.getMockImplementation();
-        stop.mockImplementation(() => { original?.(); ended.add(track); if (ended.size === tracked.length) this.streamEnded(); });
+        stop.mockImplementation(() => { original?.(); ended.add(track); if (ended.size === tracked.length) { if (deferTrackEnd) trackEndEvents.push(() => this.streamEnded()); else this.streamEnded(); } });
       }
     }
   }
@@ -44,7 +45,7 @@ class Meter {
 }
 function Probe({ denied = "Permission denied" }: { denied?: string }): null { current = useRecorder({ unsupported: "Recording unavailable", permissionDenied: denied, failed: "Recording failed" }); return null; }
 beforeEach(() => {
-  roots = []; tracks = []; calls = 0; failConstruct = false; failStart = false; reportedMime = null; connected = false; pending = null; frameId = 0; frames = new Map(); sample = 128; deferStops = false; stoppedEvents = []; close.mockClear();
+  roots = []; tracks = []; calls = 0; failConstruct = false; failStart = false; reportedMime = null; connected = false; pending = null; frameId = 0; frames = new Map(); sample = 128; deferStops = false; stoppedEvents = []; deferTrackEnd = false; trackEndEvents = []; close.mockClear();
   vi.stubGlobal("MediaRecorder", FakeRecorder);
   vi.stubGlobal("navigator", { mediaDevices: { getUserMedia: async (constraints: MediaStreamConstraints) => { calls++; if (constraints.audio !== true) throw new Error("An audio capture request is required"); if (pending) return pending(); const track = { stop: vi.fn() }; tracks.push(track); return { getTracks: () => [track] } as unknown as MediaStream; } } });
   win.setInterval = (callback: () => void, ms: number) => setInterval(callback, ms); win.clearInterval = (id: ReturnType<typeof setInterval>) => clearInterval(id);
@@ -194,4 +195,126 @@ it("continues recording when the optional level meter fails", async () => {
   win.AudioContext = class { close = close; createMediaStreamSource(): never { throw new Error("meter unavailable"); } };
   const root = await render(<Probe />); await act(async () => current.start()); expect(current.state).toBe("recording"); expect(current.error).toBeNull(); expect(current.level).toBe(0);
   await act(async () => current.stop()); expect(current.state).toBe("stopped"); expect(tracks[0]!.stop).toHaveBeenCalledOnce(); expect(close).toHaveBeenCalledOnce(); await act(async () => root.unmount());
+});
+
+// The browser queues recorder inactivation after all tracks end. Explicit
+// stop(), by contrast, changes recorder.state synchronously.
+it("inactivates an active recorder immediately when resetting before the queued track-end task", async () => {
+  deferTrackEnd = true; const root = await render(<Probe />);
+  try {
+    await act(async () => current.start()); const active = recorder; expect(active.state).toBe("recording");
+    await act(async () => { current.reset(); expect(active.state).toBe("inactive"); });
+  } finally { await act(async () => { for (const dispatch of trackEndEvents.splice(0)) dispatch(); root.unmount(); }); }
+});
+it("inactivates an active recorder immediately when unmounting before the queued track-end task", async () => {
+  deferTrackEnd = true; const root = await render(<Probe />);
+  try {
+    await act(async () => current.start()); const active = recorder; expect(active.state).toBe("recording");
+    await act(async () => root.unmount()); expect(active.state).toBe("inactive");
+  } finally { await act(async () => { for (const dispatch of trackEndEvents.splice(0)) dispatch(); root.unmount(); }); }
+});
+
+it("does not add a discarded take's queued data to a replacement recording", async () => {
+  deferStops = true; const root = await render(<Probe />);
+  try {
+    await act(async () => current.start()); const old = recorder;
+    await act(async () => current.stop());
+    await act(async () => current.reset());
+    await act(async () => current.start()); const fresh = recorder;
+    await act(async () => {
+      old.ondataavailable?.({ data: new Blob(["discarded"]) });
+      fresh.ondataavailable?.({ data: new Blob(["fresh"]) });
+      current.stop();
+      for (const dispatch of stoppedEvents.splice(0)) dispatch();
+    });
+    expect(current.recording).not.toBeNull();
+    expect(await current.recording!.blob.text()).toBe("fresh");
+  } finally {
+    await act(async () => { current.reset(); for (const dispatch of stoppedEvents.splice(0)) dispatch(); root.unmount(); });
+  }
+});
+
+it("does not throw when stopping again after a replacement recorder fails to construct", async () => {
+  deferStops = true; const root = await render(<Probe />);
+  try {
+    await act(async () => current.start()); expect(current.state).toBe("recording");
+    await act(async () => current.stop());
+    failConstruct = true; await act(async () => current.start());
+    expect(current.error).toBe("Recording failed");
+    await act(async () => { expect(() => current.stop()).not.toThrow(); });
+  } finally {
+    await act(async () => { current.reset(); for (const dispatch of stoppedEvents.splice(0)) dispatch(); root.unmount(); });
+  }
+});
+
+
+it("allows the caller's layout effect to start before the recorder passive effect", async () => {
+  let started: Promise<void> | undefined;
+  function LayoutStart(): null {
+    current = useRecorder({ unsupported: "Recording unavailable", permissionDenied: "Permission denied", failed: "Recording failed" });
+    useLayoutEffect(() => { started = current.start(); }, []);
+    return null;
+  }
+  const root = await render(<LayoutStart />);
+  try {
+    expect(calls, "layout start reaches microphone acquisition").toBe(1);
+    await act(async () => { await started; });
+    expect(current.state).toBe("recording");
+  } finally { await act(async () => { await started; root.unmount(); }); }
+});
+
+
+it("retained idle stop cannot stop a later active recording", async () => {
+  await render(<Probe />);
+  const stopWhileIdle = current.stop;
+  await act(async () => current.start());
+  expect(current.state).toBe("recording");
+  expect(recorder.state).toBe("recording");
+  try {
+    await act(async () => stopWhileIdle());
+    expect(recorder.state).toBe("recording");
+  } finally {
+    await act(async () => current.reset());
+  }
+});
+
+
+it("repeated urgent stop does not bypass an earlier suspended finalize", async () => {
+  let pause!: (value: boolean) => void;
+  let release!: () => void;
+  let released = false;
+  let gateThrows = 0;
+  const pendingGate = new Promise<void>(resolve => { release = resolve; });
+  function Gate({ suspended }: { suspended: boolean }): null {
+    if (suspended && !released) { gateThrows++; throw pendingGate; }
+    return null;
+  }
+  function CommittedProbe(): null {
+    const recorderValue = useRecorder({ unsupported: "Recording unavailable", permissionDenied: "Permission denied", failed: "Recording failed" });
+    useLayoutEffect(() => { current = recorderValue; });
+    return null;
+  }
+  function Caller(): React.ReactElement {
+    const [suspended, setSuspended] = useState(false);
+    pause = setSuspended;
+    return <><CommittedProbe /><Suspense fallback={null}><Gate suspended={suspended} /></Suspense></>;
+  }
+  deferStops = true; sample = 224;
+  await render(<Caller />);
+  await act(async () => current.start());
+  expect(current.state).toBe("recording");
+  await frame();
+  expect(current.level).toBeGreaterThan(0);
+  try {
+    await act(async () => { startTransition(() => { current.stop(); pause(true); }); });
+    expect(gateThrows).toBeGreaterThan(0);
+    expect(recorder.state).toBe("inactive");
+    expect(stoppedEvents).toHaveLength(1);
+    expect(current.level).toBeGreaterThan(0);
+    await act(async () => current.stop());
+    expect(current.level).toBeGreaterThan(0);
+  } finally {
+    released = true; release();
+    await act(async () => { pause(false); current.reset(); });
+  }
 });

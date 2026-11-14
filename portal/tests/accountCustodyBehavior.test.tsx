@@ -123,6 +123,28 @@ it("authenticates legacy repair custody sealed under the intended password when 
  const reopened=await realCrypto.openNotesKeyring(new Uint8Array(32).fill(2),session.userId,server.notes_keyring_blob);for(const [index,row] of originalNotes.entries())await expect(realCrypto.decryptNoteAny(reopened.active,reopened.historical[0]!,session.userId,patient.user_id,row.client_note_id,row.blob,reopened.historical)).resolves.toBe(`Verified clinical note ${index}`);realCrypto.wipeNotesKeyring(reopened);
 });
 
+it("recovers an interrupted legacy account without a stored notes keyring and preserves every legacy note",async()=>{
+ window.sessionStorage.setItem(`mindpattern.interruptedRotateSalt.${session.userId}`,"QUJDREVGR0hJSktMTU5P");
+ const original=await api.me();let server={...original,notes_keyring_blob:undefined as string|undefined,custody_version:0};
+ vi.mocked(api.me).mockImplementation(async()=>server);
+ // A pre-custody account has current-password, identity and possibly intended-
+ // password notes, but no ciphertext encrypted under a missing keyring's keys.
+ originalNotes.splice(2);
+ const intended=await realCrypto.encryptNote(newKeys.noteKey,session.userId,patient.user_id,"legacy-intended","Clinical text from intended legacy password");
+ originalNotes.push({...originalNotes[0]!,id:"legacy-intended",client_note_id:intended.clientNoteId,blob:intended.blobB64});
+ vi.mocked(api.installNotesCustody).mockImplementation(async payload=>{server={...server,notes_keyring_blob:payload.notes_keyring_blob,custody_version:payload.custody_version};return null;});
+ const root=await ready();await typeInto(root,"Current password (the one you sign in with)","current-password");await typeInto(root,"The password you were changing to","intended-password");
+ await press(root,"Recover sharing key");
+ await vi.waitFor(()=>expect(textOf(root)).toContain("Sharing key recovered"));
+ expect(api.rotateWrapKey).toHaveBeenCalledOnce();expect(server.custody_version).toBe(1);
+ expect(window.sessionStorage.getItem(`mindpattern.interruptedRotateSalt.${session.userId}`)).toBeNull();
+ expect(server.notes_keyring_blob).toEqual(expect.any(String));
+ const reopened=await realCrypto.openNotesKeyring(new Uint8Array(32).fill(2),session.userId,server.notes_keyring_blob!);
+ try{
+  for(const [index,row] of originalNotes.entries())await expect(realCrypto.decryptNoteAny(reopened.active,reopened.historical[0]!,session.userId,patient.user_id,row.client_note_id,row.blob,reopened.historical)).resolves.toBe(index<2?`Verified clinical note ${index}`:"Clinical text from intended legacy password");
+ }finally{realCrypto.wipeNotesKeyring(reopened);}
+});
+
 it("ends the session after an atomic password change when only the sign-out callback is supplied",async()=>{
  const ended:string[]=[];const root=await render(<PatientsView displayName="Dr. Portal" session={session} onOpen={()=>{}} onSignOut={()=>{ended.push("signed out");}}/>);await flush();await press(root,"Show account security");await passwordFields(root);await press(root,"Change password");await vi.waitFor(()=>expect(ended).toEqual(["signed out"]));expect(api.changePasswordAtomic).toHaveBeenCalledOnce();
 });

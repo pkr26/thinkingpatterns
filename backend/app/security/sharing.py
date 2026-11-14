@@ -40,7 +40,7 @@ import hashlib
 import hmac
 import os
 
-from cryptography.exceptions import InvalidKey
+from cryptography.exceptions import InvalidKey, UnsupportedAlgorithm
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.serialization import (
     Encoding,
@@ -141,7 +141,7 @@ def _load_public(spki_der: bytes) -> ec.EllipticCurvePublicKey:
     that no honest unwrap could ever use."""
     try:
         key = load_der_public_key(spki_der)
-    except (ValueError, InvalidKey) as exc:
+    except (ValueError, InvalidKey, UnsupportedAlgorithm) as exc:
         raise SharingError("not a valid SPKI public key") from exc
     if not isinstance(key, ec.EllipticCurvePublicKey):
         raise SharingError("public key must be elliptic-curve")

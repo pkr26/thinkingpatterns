@@ -7,7 +7,6 @@
  * documented residuals (see the campaign REPORT).
  */
 import { describe, expect, it } from "vitest";
-import React from "react";
 
 const { MoodCalendar } = await import("../src/components/MoodCalendar");
 const { monthLabel } = await import("../src/historyFind");

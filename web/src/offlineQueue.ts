@@ -195,13 +195,13 @@ const QUARANTINE_MAX_RECORDS = 50;
 
 export interface QueueEvictionSummary { rejected: number; quarantine: number }
 
-async function recordEvictions(
+async function prepareEvictions(
   scope: QueueScope,
   kind: keyof QueueEvictionSummary,
   count: number,
   generation: number,
-): Promise<void> {
-  if (count <= 0 || wipedSince(generation)) return;
+): Promise<QueueEvictionSummary | null> {
+  if (count <= 0 || wipedSince(generation)) return null;
   let summary: QueueEvictionSummary = { rejected: 0, quarantine: 0 };
   try {
     const parsed = JSON.parse((await kv.getItem(scope.evictions)) ?? "null") as Partial<QueueEvictionSummary> | null;
@@ -209,9 +209,21 @@ async function recordEvictions(
       rejected: Number.isSafeInteger(parsed.rejected) && (parsed.rejected ?? 0) >= 0 ? parsed.rejected! : 0,
       quarantine: Number.isSafeInteger(parsed.quarantine) && (parsed.quarantine ?? 0) >= 0 ? parsed.quarantine! : 0,
     };
-  } catch { /* replace corrupt metadata with the truthful new count */ }
+  } catch (error) {
+    if (error instanceof StorageReadError) throw error;
+    // A readable but corrupt record is replaced by the truthful new count.
+  }
   summary[kind] = Math.min(Number.MAX_SAFE_INTEGER, summary[kind] + count);
-  if (!wipedSince(generation)) await kv.setItem(scope.evictions, JSON.stringify(summary), scope.permit);
+  return summary;
+}
+
+async function commitEvictions(scope: QueueScope, summary: QueueEvictionSummary | null, generation: number): Promise<void> {
+  if (summary !== null && !wipedSince(generation)) await kv.setItem(scope.evictions, JSON.stringify(summary), scope.permit);
+}
+
+async function recordEvictions(scope: QueueScope, kind: keyof QueueEvictionSummary, count: number, generation: number): Promise<void> {
+  const summary = await prepareEvictions(scope, kind, count, generation);
+  await commitEvictions(scope, summary, generation);
 }
 
 function quarantineBytes(records: string[]): number {
@@ -247,8 +259,10 @@ async function appendQuarantine(scope: QueueScope, raw: string, generation: numb
     records.shift();
     dropped += 1;
   }
+  const summary = await prepareEvictions(scope, "quarantine", dropped, generation);
+  if (wipedSince(generation)) return;
   await kv.setItem(scope.quarantine, JSON.stringify({ v: 1, records }),scope.permit);
-  await recordEvictions(scope, "quarantine", dropped, generation);
+  await commitEvictions(scope, summary, generation);
 }
 
 async function readItems(key: string, scope: QueueScope, generation: number): Promise<QueuedEntry[]> {
@@ -313,8 +327,13 @@ async function rejectedFor(scope: QueueScope, generation = queueGeneration): Pro
     dropped += 1;
   }
   if (dropped > 0 && !wipedSince(generation)) {
-    await writeItems(scope.rejected, items, scope.permit);
-    await recordEvictions(scope, "rejected", dropped, generation);
+    // For valid owner records, read the counter before trimming so a failed
+    // read leaves that drawer and its loss history available for retry.
+    const summary = await prepareEvictions(scope, "rejected", dropped, generation);
+    if (!wipedSince(generation)) {
+      await writeItems(scope.rejected, items, scope.permit);
+      await commitEvictions(scope, summary, generation);
+    }
   }
   return items;
 }
@@ -348,7 +367,8 @@ export async function queueEvictionSummary(userId?: string): Promise<QueueEvicti
         rejected: Number.isSafeInteger(parsed?.rejected) && (parsed?.rejected ?? 0) >= 0 ? parsed!.rejected! : 0,
         quarantine: Number.isSafeInteger(parsed?.quarantine) && (parsed?.quarantine ?? 0) >= 0 ? parsed!.quarantine! : 0,
       };
-    } catch {
+    } catch (error) {
+      if (error instanceof StorageReadError) throw error;
       return { rejected: 0, quarantine: 0 };
     }
   }));

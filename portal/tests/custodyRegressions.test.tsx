@@ -18,6 +18,32 @@ async function securityRoot(f:Awaited<ReturnType<typeof fixture>>){
  vi.spyOn(api,"me").mockImplementation(async()=>me);vi.spyOn(api,"patients").mockResolvedValue([patient]);
  const root=await render(<PatientsView displayName="Doctor" session={{username:USERNAME,userId:THERAPIST,noteKey:f.keys.noteKey,noteKeyV2:f.unlocked.noteKeyV2,privateKey:f.unlocked.privateKey,publicKeyB64:f.pair.publicKeySpkiB64}} onOpen={()=>{}} onSignOut={()=>{}} onSessionsEnded={()=>{}}/>);await flush();await press(root,"Show account security");return {root,me};
 }
+
+/** These custody fixtures answer every API request with an immediate real
+ * Promise. WebCrypto is their asynchronous producer: drain the original
+ * native Promises, including work started by their continuations, before
+ * asserting success or failure. An unexpected outcome must be an assertion
+ * failure rather than a wait for a success condition that will never occur. */
+async function completeNativeSecurityAction(root: Awaited<ReturnType<typeof render>>, label: string): Promise<void> {
+ const native=globalThis.crypto, producers:Promise<unknown>[]=[];
+ const subtle=new Proxy(native.subtle,{get(target,property){
+  const value=Reflect.get(target,property,target);
+  if(typeof value!=="function")return value;
+  return(...args:unknown[])=>{const original=value.apply(target,args);if(original&&typeof original.then==="function")producers.push(original);return original;};
+ }});
+ vi.stubGlobal("crypto",new Proxy(native,{get(target,property){if(property==="subtle")return subtle;const value=Reflect.get(target,property,target);return typeof value==="function"?value.bind(target):value;}}));
+ try{
+  await press(root,label);
+  let drained=-1;
+  while(drained!==producers.length){
+   drained=producers.length;
+   // Wrong-key authentication attempts are handled by the real custody
+   // operation; retaining each exact native result keeps those semantics.
+   await Promise.allSettled([...producers]);
+   await act(async()=>{await new Promise<void>(resolve=>setTimeout(resolve,0));});
+  }
+ }finally{vi.stubGlobal("crypto",native);}
+}
 describe("real crypto notes custody",()=>{
  it("repairs a legacy interrupted private wrap only after confirming custody for both password generations and historical revisions",async()=>{
   const f=await fixture();const pendingSalt=new Uint8Array(16).fill(9);const intended=await derivePortalKeys(await deriveMasterKey("intended-orchard-willow!",pendingSalt));
@@ -28,7 +54,7 @@ describe("real crypto notes custody",()=>{
   const {root,me}=await securityRoot(f);me.wrap_key_blob=pendingWrap;
   vi.spyOn(api,"notes").mockResolvedValue({notes:[{id:"n",client_note_id:"note",blob:newer.blobB64,pattern_pid:null,created_at:"2026-09-01",updated_at:"2026-09-02",version:2}],nextOffset:null,revision:"R1"});vi.spyOn(api,"noteRevisions").mockResolvedValue([{id:"r",blob:old.blobB64,created_at:"2026-09-01"}]);
   const installed=vi.spyOn(api,"installNotesCustody").mockImplementation(async value=>{me.notes_keyring_blob=value.notes_keyring_blob;me.custody_version=value.custody_version;return null;});const rotated=vi.spyOn(api,"rotateWrapKey").mockResolvedValue(null);const credential=vi.spyOn(api,"changePasswordAtomic");
-  await typeInto(root,"the one you sign in with",PW);await typeInto(root,"The password you were changing to","intended-orchard-willow!");await press(root,"Recover sharing key");await vi.waitFor(()=>expect(textOf(root)).toContain("sealed under your current sign-in password again"),{timeout:5000});
+  await typeInto(root,"the one you sign in with",PW);await typeInto(root,"The password you were changing to","intended-orchard-willow!");await completeNativeSecurityAction(root,"Recover sharing key");expect(textOf(root)).toContain("sealed under your current sign-in password again");
   expect(installed.mock.invocationCallOrder[0]).toBeLessThan(rotated.mock.invocationCallOrder[0]!);expect(rotated.mock.calls[0]![1]).toBe(f.pair.publicKeySpkiB64);expect(rotated.mock.calls[0]![3]).toBe(1);expect(credential).not.toHaveBeenCalled();expect(window.sessionStorage.getItem(saltSlot)).toBeNull();
   const ring=await openNotesKeyring(f.keys.wrapKek,THERAPIST,me.notes_keyring_blob!);await expect(decryptNoteAny(ring.active,f.keys.noteKey,THERAPIST,PATIENT,"note",old.blobB64,ring.historical)).resolves.toBe("old password revision");await expect(decryptNoteAny(ring.active,f.keys.noteKey,THERAPIST,PATIENT,"note",newer.blobB64,ring.historical)).resolves.toBe("interrupted generation text");
   const repaired=await unlockWrapPrivateKeyWithNotesKey(f.keys.wrapKek,rotated.mock.calls[0]![2],USERNAME);expect(toBase64(repaired.noteKeyV2)).toBe(toBase64(f.unlocked.noteKeyV2));wipeNotesKeyring(ring);await act(async()=>root.unmount());
@@ -39,7 +65,7 @@ describe("real crypto notes custody",()=>{
   const rows=[{id:"n1",client_note_id:"legacy",blob:legacy.blobB64},{id:"n2",client_note_id:"identity",blob:v2.blobB64}].map(row=>({...row,pattern_pid:null,created_at:"2026-09-01",updated_at:"2026-09-01",version:1}));
   vi.spyOn(api,"notes").mockResolvedValue({notes:rows,nextOffset:null,revision:"R1"});vi.spyOn(api,"noteRevisions").mockImplementation(async id=>id==="n2"?[{id:"rev1",blob:revision.blobB64,created_at:"2026-09-01"}]:[]);
   const atomic=vi.spyOn(api,"changePasswordAtomic").mockResolvedValue(null);const separate=vi.spyOn(api,"rotateWrapKey");const rewrite=vi.spyOn(api,"rekeyNotes");
-  await typeInto(root,"Current password",PW);await typeInto(root,"New password","fresh-copper-willow-Strong!");await typeInto(root,"Repeat new password","fresh-copper-willow-Strong!");await press(root,"Change password");await vi.waitFor(()=>expect(atomic).toHaveBeenCalledTimes(1),{timeout:5000});
+  await typeInto(root,"Current password",PW);await typeInto(root,"New password","fresh-copper-willow-Strong!");await typeInto(root,"Repeat new password","fresh-copper-willow-Strong!");await completeNativeSecurityAction(root,"Change password");expect(atomic).toHaveBeenCalledTimes(1);
   const payload=atomic.mock.calls[0]![0];expect(payload.wrap_pub_key).toBe(f.pair.publicKeySpkiB64);expect(payload.custody_version).toBe(1);expect(separate).not.toHaveBeenCalled();expect(rewrite).not.toHaveBeenCalled();
   const fresh=await derivePortalKeys(await deriveMasterKey("fresh-copper-willow-Strong!",fromBase64(payload.new_salt)));const unlocked=await unlockWrapPrivateKeyWithNotesKey(fresh.wrapKek,payload.wrap_key_blob,USERNAME);const ring=await openNotesKeyring(fresh.wrapKek,THERAPIST,payload.notes_keyring_blob);
   await expect(decryptNoteAny(ring.active,fresh.noteKey,THERAPIST,PATIENT,"legacy",legacy.blobB64,ring.historical)).resolves.toBe("legacy clinical text");
@@ -51,14 +77,14 @@ describe("real crypto notes custody",()=>{
   const f=await fixture();const saved=await encryptNote(f.unlocked.noteKeyV2,THERAPIST,PATIENT,"v2-note","permanent chart text");const {root,me}=await securityRoot(f);
   vi.spyOn(api,"notes").mockResolvedValue({notes:[{id:"n",client_note_id:"v2-note",blob:saved.blobB64,pattern_pid:null,created_at:"2026-09-01",updated_at:"2026-09-01",version:1}],nextOffset:null,revision:"R1"});vi.spyOn(api,"noteRevisions").mockResolvedValue([]);
   const installed=vi.spyOn(api,"installNotesCustody").mockImplementation(async value=>{me.notes_keyring_blob=value.notes_keyring_blob;me.custody_version=value.custody_version;return null;});const rotated=vi.spyOn(api,"rotateWrapKey").mockResolvedValue(null);
-  await typeInto(root,"Current password (to authorize rotation)",PW);await act(async()=>{root.root.findAllByType("input").find(n=>n.props["aria-label"]==="Confirm sharing-key rotation")!.props.onChange({target:{checked:true}});});await press(root,"Rotate sharing key");await vi.waitFor(()=>expect(rotated).toHaveBeenCalledTimes(1),{timeout:5000});
+  await typeInto(root,"Current password (to authorize rotation)",PW);await act(async()=>{root.root.findAllByType("input").find(n=>n.props["aria-label"]==="Confirm sharing-key rotation")!.props.onChange({target:{checked:true}});});await completeNativeSecurityAction(root,"Rotate sharing key");expect(rotated).toHaveBeenCalledTimes(1);
   expect(installed.mock.invocationCallOrder[0]).toBeLessThan(rotated.mock.invocationCallOrder[0]!);expect(rotated.mock.calls[0]![3]).toBe(1);
   const next=await unlockWrapPrivateKeyWithNotesKey(f.keys.wrapKek,rotated.mock.calls[0]![2],USERNAME);expect(toBase64(next.noteKeyV2)).not.toBe(toBase64(f.unlocked.noteKeyV2));const ring=await openNotesKeyring(f.keys.wrapKek,THERAPIST,me.notes_keyring_blob!);
   await expect(decryptNoteAny(ring.active,f.keys.noteKey,THERAPIST,PATIENT,"v2-note",saved.blobB64,ring.historical)).resolves.toBe("permanent chart text");wipeNotesKeyring(ring);await act(async()=>root.unmount());
  });
- it("fails closed if any historical revision cannot authenticate",async()=>{
-  const f=await fixture();const note=await encryptNote(f.unlocked.noteKeyV2,THERAPIST,PATIENT,"note","valid current");const {root}=await securityRoot(f);vi.spyOn(api,"notes").mockResolvedValue({notes:[{id:"n",client_note_id:"note",blob:note.blobB64,pattern_pid:null,created_at:"2026-09-01",updated_at:"2026-09-01",version:2}],nextOffset:null});vi.spyOn(api,"noteRevisions").mockResolvedValue([{id:"rev1",blob:"Y29ycnVwdA==",created_at:"2026-09-01"}]);const atomic=vi.spyOn(api,"changePasswordAtomic").mockResolvedValue(null);
-  await typeInto(root,"Current password",PW);await typeInto(root,"New password","fresh-copper-willow-Strong!");await typeInto(root,"Repeat new password","fresh-copper-willow-Strong!");await press(root,"Change password");await vi.waitFor(()=>expect(textOf(root)).toContain("could not be authenticated"),{timeout:5000});expect(atomic).not.toHaveBeenCalled();await act(async()=>root.unmount());
+ it.each(["current note","historical revision"])("fails closed if any %s cannot authenticate",async boundary=>{
+  const f=await fixture();const note=await encryptNote(f.unlocked.noteKeyV2,THERAPIST,PATIENT,"note","valid current");const {root}=await securityRoot(f);vi.spyOn(api,"notes").mockResolvedValue({notes:[{id:"n",client_note_id:"note",blob:boundary==="current note"?"Y29ycnVwdA==":note.blobB64,pattern_pid:null,created_at:"2026-09-01",updated_at:"2026-09-01",version:2}],nextOffset:null});vi.spyOn(api,"noteRevisions").mockResolvedValue([{id:"rev1",blob:boundary==="historical revision"?"Y29ycnVwdA==":note.blobB64,created_at:"2026-09-01"}]);const atomic=vi.spyOn(api,"changePasswordAtomic").mockResolvedValue(null);
+  await typeInto(root,"Current password",PW);await typeInto(root,"New password","fresh-copper-willow-Strong!");await typeInto(root,"Repeat new password","fresh-copper-willow-Strong!");await completeNativeSecurityAction(root,"Change password");expect(textOf(root)).toContain("could not be authenticated");expect(atomic).not.toHaveBeenCalled();await act(async()=>root.unmount());
  });
  it("encrypts pattern-scoped drafts and exact retry bodies, rejects wrong account/patient, and reports failed storage reads",async()=>{
   const key=new Uint8Array(32).fill(7);const map=new Map<string,string>();runTestControl(setKvBackendForTests, {getItem:async id=>map.get(id)??null,setItem:async(id,value)=>{map.set(id,value);},removeItem:async id=>{map.delete(id);}});

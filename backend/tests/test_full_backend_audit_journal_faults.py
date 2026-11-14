@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import builtins
+import errno
 import os
 import sqlite3
 from datetime import datetime, timezone
@@ -170,6 +171,50 @@ def test_compaction_io_failure_latches_health_and_preserves_published_source(tmp
     assert journal.read_text() == line()
     assert _audit.audit_journal_health() == (False, "io_failure")
     assert not list(tmp_path.glob(".*.compact-*"))
+
+
+def test_compaction_temp_creation_failure_removes_index_and_preserves_journal(
+    tmp_path, monkeypatch
+):
+    journal = tmp_path / "journal"
+    journal.write_text(line())
+    original_mkstemp = _audit.tempfile.mkstemp
+    index_paths = []
+
+    def fail_compaction_temp(*args, **kwargs):
+        if kwargs.get("dir") == str(tmp_path):
+            raise OSError(errno.ENOSPC, "cannot create compaction file")
+        descriptor, path = original_mkstemp(*args, **kwargs)
+        index_paths.append(Path(path))
+        return descriptor, path
+
+    monkeypatch.setattr(_audit.tempfile, "mkstemp", fail_compaction_temp)
+    try:
+        with pytest.raises(OSError) as failure:
+            _audit.compact_audit_journal(str(journal), "2026-10-03T00:00:00+00:00")
+        assert failure.value.errno == errno.ENOSPC
+        assert len(index_paths) == 1
+        assert not index_paths[0].exists()
+        assert journal.read_text() == line()
+        assert _audit.audit_journal_health() == (False, "io_failure")
+    finally:
+        for path in index_paths:
+            path.unlink(missing_ok=True)
+
+
+def test_compaction_accepts_a_valid_maximum_length_journal_name(tmp_path):
+    try:
+        name_max = os.pathconf(tmp_path, "PC_NAME_MAX")
+    except (AttributeError, OSError, ValueError):
+        pytest.skip("filesystem does not report its filename length limit")
+    if not 32 <= name_max <= 4096:
+        pytest.skip("filesystem filename length limit is not usable for this test")
+
+    journal = tmp_path / ("j" * name_max)
+    journal.write_text(line())
+
+    assert _audit.compact_audit_journal(str(journal), "2026-10-03T00:00:00+00:00") == (1, 0)
+    assert journal.read_text() == line()
 
 
 def test_failed_fdopen_releases_descriptor_zero_and_all_scratch_custody(tmp_path, monkeypatch):

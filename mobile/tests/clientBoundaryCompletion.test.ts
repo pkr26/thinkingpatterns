@@ -1,5 +1,6 @@
+import {createServer} from "node:http";
 import {afterEach,beforeEach,expect,it,vi} from "vitest";
-import {api,canonicalOrigin,setUnauthorizedHandler} from "../src/api/client";
+import {api,canonicalOrigin,setBaseUrl,setUnauthorizedHandler} from "../src/api/client";
 import {__resetLocalKeyLifecycleForTests,advanceLocalWriteScope,captureLocalWritePermit,installLocalDataKey} from "../src/localWriteGuard";
 import storage from "./helpers/storageMock";
 import {secureStore} from "../src/secureStore";
@@ -89,15 +90,51 @@ it("prioritizes dispatched ownership retirement over a malformed native response
   await expect(api.meta()).rejects.toMatchObject({status:0,code:"stale_operation",message:"The account or key generation changed. This request may already have committed; confirm its outcome before retrying."});
   expect(fetch).toHaveBeenCalledOnce();
 });
-it("retires a no-content response when ownership changes during asynchronous origin verification",async()=>{
-  const fetch=serve(()=>{
-    const response=new Response(null,{status:204});
-    Object.defineProperty(response,"url",{get:()=>{queueMicrotask(()=>advanceLocalWriteScope());return ORIGIN+"/api/v1/meta";}});
-    return response;
+it("refuses a no-content HTTP completion when an independent authentication continuation retires its owner during origin verification", async () => {
+  const receiver: Array<{ path: string; bearer: string | undefined }> = [];
+  const server = createServer((request, response) => {
+    receiver.push({ path: request.url!, bearer: request.headers.authorization });
+    response.writeHead(204); response.end();
   });
-  await expect(api.meta()).rejects.toMatchObject({status:0,code:"stale_operation",message:"The account or key generation changed. This request may already have committed; confirm its outcome before retrying."});
-  expect(fetch).toHaveBeenCalledOnce();
+  await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("SetupError: HTTP server has no address");
+  const origin = `http://127.0.0.1:${address.port}`;
+  let release!: () => void;
+  const admittedAuthentication = new Promise<void>(resolve => { release = resolve; });
+  let replacement: Promise<void> | undefined;
+  let pending: Promise<unknown> | undefined;
+  try {
+    expect(await setBaseUrl(origin)).toBeNull();
+    await api.setSession("old-owned-bearer", USER, "alice");
+    replacement = admittedAuthentication.then(() => api.setSession("replacement-bearer", "b".repeat(32), "bob"));
+    const transport = globalThis.fetch;
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const response = await transport(input, init);
+      // The authentication completion is already armed independently. This
+      // is a Promise-job delivery after native transport headers complete.
+      queueMicrotask(release);
+      return response;
+    });
+    pending = api.meta();
+    await expect(pending).rejects.toMatchObject({
+      status: 0, code: "stale_operation",
+      message: "The account or key generation changed. This request may already have committed; confirm its outcome before retrying.",
+    });
+    await replacement;
+    expect(receiver).toEqual([{ path: "/api/v1/meta", bearer: "Bearer old-owned-bearer" }]);
+    expect(await api.getUserId()).toBe("b".repeat(32));
+    expect(await api.getUsername()).toBe("bob");
+    expect(await api.isLoggedIn()).toBe(true);
+  } finally {
+    release();
+    await pending?.catch(() => {});
+    await replacement?.catch(() => {});
+    vi.unstubAllGlobals();
+    await new Promise<void>((resolve, reject) => { server.close(error => error ? reject(error) : resolve()); server.closeAllConnections(); });
+  }
 });
+
 it("prioritizes a retired username-read completion over a restored account mismatch",async()=>{
   const permit=captureLocalWritePermit(USER);await secureStore.setItem("@mindpattern/user_id","b".repeat(32));
   const read=storage.getItem;vi.spyOn(storage,"getItem").mockImplementation(async slot=>{

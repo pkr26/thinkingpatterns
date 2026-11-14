@@ -219,24 +219,27 @@ function armTokenExpiryGuard(expiresInSeconds: number | undefined): void {
     Math.max(expiresInSeconds * 1000 - TOKEN_EXPIRY_GUARD_MARGIN_MS, 0),
     TOKEN_EXPIRY_GUARD_MAX_MS,
   );
-  tokenExpiryTimer = setTimeout(() => {
+  const activeSession = session;
+  const timer = setTimeout(() => {
+    if (tokenExpiryTimer !== timer) return;
     tokenExpiryTimer = null;
-    if (!session) return; // a replacement session already cleared this
+    if (!activeSession || session !== activeSession) return;
     if (!sessionExpiredFired) {
       sessionExpiredFired = true;
       sessionExpiredHandler?.(
         new ApiError(401, "session token expired", "unauthorized"),
         {
-          userId: session.userId,
-          origin: session.baseUrl,
+          userId: activeSession.userId,
+          origin: activeSession.baseUrl,
           accountDeleted: false,
         },
       );
     }
-    clearSession();
-    // No new timer here by contract: only setSession (a fresh acquisition)
-    // arms the guard again — a locked session must not keep timers alive.
+    // The handler can synchronously install a successor session with its own
+    // expiry timer. Retire only the session whose timer actually fired.
+    if (session === activeSession) clearSession();
   }, delay);
+  tokenExpiryTimer = timer;
 }
 
 export function setSession(
@@ -264,9 +267,11 @@ export function setSession(
 }
 
 export function clearSession(): void {
+  const retiring = session;
   clearTokenExpiryGuard();
-  session?.controller.abort();
-  session = null;
+  retiring?.controller.abort();
+  // An abort listener may synchronously install a fresh session.
+  if (session === retiring) session = null;
 }
 
 export function hasSession(): boolean {
@@ -1517,6 +1522,7 @@ export const api = {
       }
       if (response.status === 410) {
         const raw = await response.text();
+        if (session !== activeSession) throw new ApiError(0, "session ended");
         const body = safeJson(raw);
         const code = sanitizeCode(body.code);
         const err = new ApiError(410, message(body.detail, 410), code);
@@ -1538,6 +1544,7 @@ export const api = {
       if (
         err instanceof ApiError &&
         err.status === 401 &&
+        session === activeSession &&
         !sessionExpiredFired
       ) {
         // The one-shot expiry latch (same funnel as every gated request):

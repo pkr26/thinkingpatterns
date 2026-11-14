@@ -21,6 +21,7 @@ from app.models import Entry, Insight, Measure, RekeyJournal, User
 from app.schemas import LocalRecomputeRequest, ProcessingSessionRequest, RekeyRequest
 from app.security import crypto
 from app.security.enclave import InMemoryKeyStore, KeyNotFound
+from app.services import threshold
 from tests.test_full_backend_collection_mutation import (
     BLOB,
     NOW,
@@ -42,6 +43,7 @@ def prepare(db, monkeypatch):
     monkeypatch.setattr(insights, "lifecycle_locks", locks)
     monkeypatch.setattr(insights, "_recompute_locks", UserLocks())
     monkeypatch.setattr(insights, "_utc_today", lambda: NOW.date())
+    monkeypatch.setattr(threshold, "_utc_today", lambda: NOW.date())
     db.settings.unlock_threshold_days = 3
     db.request.app.state.key_store = InMemoryKeyStore()
     preflight = insights._preflight_legacy_rotation

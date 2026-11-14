@@ -925,3 +925,65 @@ async def test_exhausted_positive_body_deadline_refuses_before_reading():
         "detail": "request body timed out",
         "code": "request_timeout",
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("path", "healthy", "expected"),
+    [("/api/example", False, 503), ("/healthz", False, 200),
+     ("/readyz", False, 200), ("/api/example", True, 200)],
+)
+async def test_guard_denial_and_health_exemption_finish_without_blocked_app(path, healthy, expected):
+    from app.middleware import HardeningMiddleware
+
+    calls = []
+
+    async def guard():
+        return healthy
+
+    async def app(scope, receive, send):
+        calls.append(scope["path"])
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    _, sent, reads = await exchange(HardeningMiddleware(app, 4, guard_check=guard), path=path)
+    assert sent[0]["status"] == expected
+    if expected == 503:
+        assert reads == 0 and calls == []
+        assert json.loads(sent[1]["body"]) == {
+            "detail": "instance ownership unavailable", "code": "service_unavailable"
+        }
+    else:
+        assert calls == [path]
+
+
+@pytest.mark.asyncio
+async def test_body_capacity_rejects_second_request_before_dispatch():
+    from app.middleware import HardeningMiddleware
+
+    entered, release = asyncio.Event(), asyncio.Event()
+    calls = []
+
+    async def app(scope, receive, send):
+        calls.append(scope["path"])
+        if scope["path"] == "/first":
+            entered.set()
+            await release.wait()
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    middleware = HardeningMiddleware(app, 4, body_buffer_concurrency=1)
+    first = asyncio.create_task(exchange(middleware, path="/first"))
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        assert middleware._body_admitted == 1 and calls == ["/first"]
+        _, sent, reads = await exchange(middleware, path="/second")
+        assert sent[0]["status"] == 503
+        assert reads == 0 and calls == ["/first"]
+        assert json.loads(sent[1]["body"]) == {
+            "detail": "request capacity reached", "code": "service_unavailable"
+        }
+    finally:
+        release.set()
+        await first
+    assert middleware._body_admitted == 0

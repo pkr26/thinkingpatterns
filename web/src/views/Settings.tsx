@@ -66,6 +66,7 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
   // yet read from the per-account slot; the interval control renders only
   // while the reminder is on.
   const [cadence, setCadence] = useState<MeasureCadencePref | null>(null);
+  const [cadenceReadFailed, setCadenceReadFailed] = useState(false);
   const [llm, setLlm] = useState<{
     available: boolean; enabled: boolean; stale: boolean; provider: string; retention: string; fingerprint: string;
   } | null>(null);
@@ -86,6 +87,7 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
   const [queued, setQueued] = useState<number | null>(null);
   const [rejected, setRejected] = useState<number>(0);
   const [queueEvictions, setQueueEvictions] = useState(0);
+  const [queueInventoryFailed, setQueueInventoryFailed] = useState(false);
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [deleteText, setDeleteText] = useState("");
@@ -108,6 +110,9 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
    *  itself ends in the epoch lockdown, so this view is always a FRESH
    *  mount after the sign-back-in when the notice is first seen. */
   const [showRekeyHint, setShowRekeyHint] = useState(false);
+  const [rekeyHintReadFailed, setRekeyHintReadFailed] = useState(false);
+  const [rekeyHintDismissFailed, setRekeyHintDismissFailed] = useState(false);
+  const rekeyHintDismissInFlight = useRef<{ current: () => boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [status, setStatus] = useState<string | null>(null);
@@ -129,6 +134,8 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
     if (!operation) return;
     const current = () => generation.current === run && operation.current();
     setSchemeUnknown(false);
+    setCadenceReadFailed(false);
+    setRekeyHintReadFailed(false);
     setLlmLoad("loading");
     const [meta, consentState, voiceConsent, envelope] = await Promise.all([
       api.meta().catch(() => null),
@@ -153,25 +160,30 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
       // so a leftover flag there is stale and gets swept, not shown.
       const ownerForHint = operation.owner;
       if (ownerForHint) {
-        const hintKey = rekeyHintKey(ownerForHint);
-        let hint = await kv.getItem(hintKey);
-        if (!current()) return;
-        // One-way migration for builds that stored the hint in
-        // localStorage. The KV commit is generation/deletion checked before
-        // the legacy value is removed; no new localStorage writes occur.
-        const legacyHintKey = legacyRekeyHintKey(ownerForHint);
-        if (hint === null && localStore.get(legacyHintKey)) {
-          await kv.setItem(hintKey, "1");
+        try {
+          const hintKey = rekeyHintKey(ownerForHint);
+          let hint = await kv.getItem(hintKey);
           if (!current()) return;
-          localStore.remove(legacyHintKey);
-          hint = "1";
-        }
-        if (hint) {
-          if (envelope.key_scheme === "v2") setShowRekeyHint(true);
-          else {
+          // One-way migration for builds that stored the hint in
+          // localStorage. The KV commit is generation/deletion checked before
+          // the legacy value is removed; no new localStorage writes occur.
+          const legacyHintKey = legacyRekeyHintKey(ownerForHint);
+          if (hint === null && localStore.get(legacyHintKey)) {
+            await kv.setItem(hintKey, "1");
+            if (!current()) return;
+            localStore.remove(legacyHintKey);
+            hint = "1";
+          }
+          if (hint && envelope.key_scheme !== "v2") {
             await kv.removeItem(hintKey);
             if (!current()) return;
           }
+          setShowRekeyHint(Boolean(hint && envelope.key_scheme === "v2"));
+          setRekeyHintDismissFailed(false);
+        } catch {
+          if (!current()) return;
+          setShowRekeyHint(false);
+          setRekeyHintReadFailed(true);
         }
       }
       // 2026-09-28 audit: remember the DECLARED params when they parse —
@@ -221,16 +233,18 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
     const owner = operation.owner;
     if (owner) {
       const [queued, rejected, losses, cadence] = await Promise.all([
-        queueLength(owner).catch(() => 0),
-        rejectedEntries(owner).catch(() => []),
-        queueEvictionSummary(owner).catch(() => ({ rejected: 0, quarantine: 0 })),
-        readMeasureCadence(owner),
+        queueLength(owner).catch(() => null),
+        rejectedEntries(owner).catch(() => null),
+        queueEvictionSummary(owner).catch(() => null),
+        readMeasureCadence(owner).catch(() => null),
       ]);
       if (!current()) return;
       setQueued(queued);
-      setRejected(rejected.length);
-      setQueueEvictions(losses.rejected + losses.quarantine);
+      setRejected(rejected?.length ?? 0);
+      setQueueEvictions(losses ? losses.rejected + losses.quarantine : 0);
+      setQueueInventoryFailed(queued === null || rejected === null || losses === null);
       setCadence(cadence);
+      setCadenceReadFailed(cadence === null);
     }
     if (!current()) return;
     await loadAccess();
@@ -791,9 +805,37 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
    *  the user has read it. A FUTURE v2 password change sets a fresh one;
    *  a completed full rotation sweeps it from the flow itself. */
   const dismissRekeyHint = async (): Promise<void> => {
-    setShowRekeyHint(false);
-    const owner = vault.ownerUserId();
-    if (owner) await kv.removeItem(rekeyHintKey(owner));
+    const operation = beginOperation();
+    if (!operation) {
+      setShowRekeyHint(false);
+      return;
+    }
+    if (rekeyHintDismissInFlight.current?.current()) return;
+    const run = generation.current;
+    const ticket = { current: operation.current };
+    rekeyHintDismissInFlight.current = ticket;
+    setRekeyHintDismissFailed(false);
+    try {
+      const permit = await kv.captureWritePermit(operation.owner, operation.keys.dataKey);
+      if (!operation.current()) return;
+      await kv.removeItem(rekeyHintKey(operation.owner), permit);
+      if (!operation.current()) return;
+      if (generation.current === run) {
+        setShowRekeyHint(false);
+      } else {
+        // A same-session reload may have read the old hint while deletion
+        // was pending. Refresh from storage rather than publishing that view.
+        const refresh = load();
+        const refreshGeneration = generation.current;
+        void refresh.catch(() => {
+          if (operation.current() && generation.current === refreshGeneration) setRekeyHintReadFailed(true);
+        });
+      }
+    } catch {
+      if (operation.current() && rekeyHintDismissInFlight.current === ticket) setRekeyHintDismissFailed(true);
+    } finally {
+      if (rekeyHintDismissInFlight.current === ticket) rekeyHintDismissInFlight.current = null;
+    }
   };
 
   const requestDeleteAccount = (): void => {
@@ -952,7 +994,12 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
 
       <Card title={t("settings.cadenceTitle")}>
         {cadence === null ? (
-          <Note role="status">{t("common.loading")}</Note>
+          cadenceReadFailed ? (
+            <>
+              <Note role="status" tone="warn">{t("settings.cadenceReadFailed")}</Note>
+              <Button label={t("settings.cadenceRetry")} onPress={() => void load()} small variant="ghost" />
+            </>
+          ) : <Note role="status">{t("common.loading")}</Note>
         ) : (
           <>
             <Toggle
@@ -1044,6 +1091,12 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
         <Note tone="muted">{t("settings.exportNote")}</Note>
         <Note tone="muted">{t("settings.recoveryKitHandoff")}</Note>
         <Note tone="warn">{t("settings.offlineColdStart")}</Note>
+        {queueInventoryFailed && (
+          <>
+            <Note role="status" tone="warn">{t("settings.queueInventoryFailed")}</Note>
+            <Button label={t("settings.queueInventoryRetry")} onPress={() => void load()} small variant="ghost" disabled={busy} />
+          </>
+        )}
         {queued !== null && queued > 0 && <Note tone="warn">{t(queued === 1 ? "settings.queuedOne" : "settings.queuedMany", { count: queued })}</Note>}
         {rejected > 0 && (
           <>
@@ -1079,6 +1132,12 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
           blocks the card — running the v1 flow against a v2 account would
           409 key_scheme_conflict at the very last step. */}
       <Card title={t("settings.rotateTitle")}>
+        {rekeyHintReadFailed && (
+          <>
+            <Note role="status" tone="warn">{t("settings.rekeyHintReadFailed")}</Note>
+            <Button label={t("settings.rekeyHintRetry")} onPress={() => void load()} small variant="ghost" disabled={busy} />
+          </>
+        )}
         {keyScheme === null ? (
           <>
             <Note tone={schemeUnknown ? "warn" : "muted"}>{t("settings.schemeUnknownNote")}</Note>
@@ -1097,7 +1156,10 @@ export function SettingsView(props: { onLockdown: (notice: string) => void; onOp
                 offered the full rotation (the rekey flow below, entered
                 with the typed password). */}
             {keyScheme === "v2" && showRekeyHint && (
-              <Note tone="warn">{t("settings.rekeyHintNote")}</Note>
+              <>
+                <Note tone="warn">{t("settings.rekeyHintNote")}</Note>
+                {rekeyHintDismissFailed && <Note role="status" tone="warn">{t("settings.rekeyHintDismissFailed")}</Note>}
+              </>
             )}
             <Field label={t("settings.newPasswordField")} value={newPassword} onChange={setNewPassword} type="password" autoComplete="new-password" />
             <Field label={t("settings.confirmPasswordField")} value={confirmPassword} onChange={setConfirmPassword} type="password" autoComplete="new-password" />

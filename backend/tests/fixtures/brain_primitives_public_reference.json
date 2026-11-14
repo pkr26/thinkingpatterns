@@ -1,0 +1,634 @@
+{
+  "textCases": [
+    {
+      "text": "",
+      "tokens": [],
+      "sentences": [],
+      "density": 0.0,
+      "languages": {
+        "None": {
+          "score": 0.0,
+          "components": [
+            0.0,
+            0.0
+          ],
+          "themes": []
+        },
+        "en": {
+          "score": 0.0,
+          "components": [
+            0.0,
+            0.0
+          ],
+          "themes": []
+        },
+        "es": {
+          "score": 0.0,
+          "components": [
+            0.0,
+            0.0
+          ],
+          "themes": []
+        },
+        "other": {
+          "score": 0.0,
+          "components": [
+            0.0,
+            0.0
+          ],
+          "themes": []
+        }
+      }
+    },
+    {
+      "text": "good work but not happy",
+      "tokens": [
+        "good",
+        "work",
+        "but",
+        "not",
+        "happy"
+      ],
+      "sentences": [
+        "good work but not happy"
+      ],
+      "density": 0.0,
+      "languages": {
+        "None": {
+          "score": -0.595,
+          "components": [
+            0.2375,
+            0.8324999999999999
+          ],
+          "themes": [
+            "work"
+          ]
+        },
+        "en": {
+          "score": -0.595,
+          "components": [
+            0.2375,
+            0.8324999999999999
+          ],
+          "themes": [
+            "work"
+          ]
+        },
+        "es": {
+          "score": -0.595,
+          "components": [
+            0.2375,
+            0.8324999999999999
+          ],
+          "themes": []
+        },
+        "other": {
+          "score": -0.595,
+          "components": [
+            0.2375,
+            0.8324999999999999
+          ],
+          "themes": [
+            "work"
+          ]
+        }
+      }
+    },
+    {
+      "text": "I don’t feel good, never really relaxed",
+      "tokens": [
+        "i",
+        "don't",
+        "feel",
+        "good",
+        "never",
+        "really",
+        "relaxed"
+      ],
+      "sentences": [
+        "i don't feel good never really relaxed"
+      ],
+      "density": 14.29,
+      "languages": {
+        "None": {
+          "score": -0.790875,
+          "components": [
+            0.0,
+            0.790875
+          ],
+          "themes": []
+        },
+        "en": {
+          "score": -0.790875,
+          "components": [
+            0.0,
+            0.790875
+          ],
+          "themes": []
+        },
+        "es": {
+          "score": -0.790875,
+          "components": [
+            0.0,
+            0.790875
+          ],
+          "themes": []
+        },
+        "other": {
+          "score": -0.790875,
+          "components": [
+            0.0,
+            0.790875
+          ],
+          "themes": []
+        }
+      }
+    },
+    {
+      "text": "muy feliz tranquilo con trabajo y familia",
+      "tokens": [
+        "muy",
+        "feliz",
+        "tranquilo",
+        "con",
+        "trabajo",
+        "y",
+        "familia"
+      ],
+      "sentences": [
+        "muy feliz tranquilo con trabajo y familia"
+      ],
+      "density": 0.0,
+      "languages": {
+        "None": {
+          "score": 1.0,
+          "components": [
+            1.0,
+            0.0
+          ],
+          "themes": []
+        },
+        "en": {
+          "score": 1.0,
+          "components": [
+            1.0,
+            0.0
+          ],
+          "themes": []
+        },
+        "es": {
+          "score": 1.0,
+          "components": [
+            1.0,
+            0.0
+          ],
+          "themes": [
+            "family",
+            "work"
+          ]
+        },
+        "other": {
+          "score": 1.0,
+          "components": [
+            1.0,
+            0.0
+          ],
+          "themes": []
+        }
+      }
+    },
+    {
+      "text": "no estoy feliz ni tranquilo",
+      "tokens": [
+        "no",
+        "estoy",
+        "feliz",
+        "ni",
+        "tranquilo"
+      ],
+      "sentences": [
+        "no estoy feliz ni tranquilo"
+      ],
+      "density": 0.0,
+      "languages": {
+        "None": {
+          "score": -0.925,
+          "components": [
+            0.0,
+            0.925
+          ],
+          "themes": []
+        },
+        "en": {
+          "score": 0.03200000000000003,
+          "components": [
+            0.55,
+            0.518
+          ],
+          "themes": []
+        },
+        "es": {
+          "score": -0.925,
+          "components": [
+            0.0,
+            0.925
+          ],
+          "themes": []
+        },
+        "other": {
+          "score": -0.925,
+          "components": [
+            0.0,
+            0.925
+          ],
+          "themes": []
+        }
+      }
+    },
+    {
+      "text": "depresión depresión café नमस्ते",
+      "tokens": [
+        "depresion",
+        "depresion",
+        "cafe"
+      ],
+      "sentences": [],
+      "density": 0.0,
+      "languages": {
+        "None": {
+          "score": -1.0,
+          "components": [
+            0.0,
+            1.0
+          ],
+          "themes": []
+        },
+        "en": {
+          "score": -1.0,
+          "components": [
+            0.0,
+            1.0
+          ],
+          "themes": []
+        },
+        "es": {
+          "score": -1.0,
+          "components": [
+            0.0,
+            1.0
+          ],
+          "themes": [
+            "food"
+          ]
+        },
+        "other": {
+          "score": -1.0,
+          "components": [
+            0.0,
+            1.0
+          ],
+          "themes": []
+        }
+      }
+    },
+    {
+      "text": "ά έ Ώ ḁ",
+      "tokens": [
+        "a"
+      ],
+      "sentences": [],
+      "density": 0.0,
+      "languages": {
+        "None": {
+          "score": 0.0,
+          "components": [
+            0.0,
+            0.0
+          ],
+          "themes": []
+        },
+        "en": {
+          "score": 0.0,
+          "components": [
+            0.0,
+            0.0
+          ],
+          "themes": []
+        },
+        "es": {
+          "score": 0.0,
+          "components": [
+            0.0,
+            0.0
+          ],
+          "themes": []
+        },
+        "other": {
+          "score": 0.0,
+          "components": [
+            0.0,
+            0.0
+          ],
+          "themes": []
+        }
+      }
+    },
+    {
+      "text": "❤️❤ 😊😢 😌",
+      "tokens": [
+        "❤️",
+        "❤️",
+        "😊",
+        "😢"
+      ],
+      "sentences": [],
+      "density": 0.0,
+      "languages": {
+        "None": {
+          "score": 1.0,
+          "components": [
+            1.0,
+            0.65
+          ],
+          "themes": []
+        },
+        "en": {
+          "score": 1.0,
+          "components": [
+            1.0,
+            0.65
+          ],
+          "themes": []
+        },
+        "es": {
+          "score": 1.0,
+          "components": [
+            1.0,
+            0.65
+          ],
+          "themes": []
+        },
+        "other": {
+          "score": 1.0,
+          "components": [
+            1.0,
+            0.65
+          ],
+          "themes": []
+        }
+      }
+    },
+    {
+      "text": "Bad un jour très triste",
+      "tokens": [
+        "bad",
+        "un",
+        "jour",
+        "tres",
+        "triste"
+      ],
+      "sentences": [
+        "bad un jour tres triste"
+      ],
+      "density": 0.0,
+      "languages": {
+        "None": {
+          "score": -1.0,
+          "components": [
+            0.0,
+            1.0
+          ],
+          "themes": []
+        },
+        "en": {
+          "score": -1.0,
+          "components": [
+            0.0,
+            1.0
+          ],
+          "themes": []
+        },
+        "es": {
+          "score": -1.0,
+          "components": [
+            0.0,
+            1.0
+          ],
+          "themes": []
+        },
+        "other": {
+          "score": -1.0,
+          "components": [
+            0.0,
+            1.0
+          ],
+          "themes": []
+        }
+      }
+    },
+    {
+      "text": "because i realized why this happened i now understand what it meant",
+      "tokens": [
+        "because",
+        "i",
+        "realized",
+        "why",
+        "this",
+        "happened",
+        "i",
+        "now",
+        "understand",
+        "what",
+        "it",
+        "meant"
+      ],
+      "sentences": [
+        "because i realized why this happened i now understand what it meant"
+      ],
+      "density": 0.0,
+      "languages": {
+        "None": {
+          "score": 0.0,
+          "components": [
+            0.0,
+            0.0
+          ],
+          "themes": []
+        },
+        "en": {
+          "score": 0.0,
+          "components": [
+            0.0,
+            0.0
+          ],
+          "themes": []
+        },
+        "es": {
+          "score": 0.0,
+          "components": [
+            0.0,
+            0.0
+          ],
+          "themes": []
+        },
+        "other": {
+          "score": 0.0,
+          "components": [
+            0.0,
+            0.0
+          ],
+          "themes": []
+        }
+      }
+    }
+  ],
+  "forms": [
+    {
+      "token": "hi",
+      "forms": [
+        "hi"
+      ]
+    },
+    {
+      "token": "is",
+      "forms": [
+        "is"
+      ]
+    },
+    {
+      "token": "boss",
+      "forms": [
+        "boss"
+      ]
+    },
+    {
+      "token": "ties",
+      "forms": [
+        "ties",
+        "ti",
+        "tie"
+      ]
+    },
+    {
+      "token": "tries",
+      "forms": [
+        "tries",
+        "try",
+        "tri",
+        "trie"
+      ]
+    },
+    {
+      "token": "studies",
+      "forms": [
+        "studies",
+        "study",
+        "studi",
+        "studie"
+      ]
+    },
+    {
+      "token": "buses",
+      "forms": [
+        "buses",
+        "bus",
+        "buse"
+      ]
+    },
+    {
+      "token": "running",
+      "forms": [
+        "running",
+        "runn",
+        "run",
+        "runne"
+      ]
+    },
+    {
+      "token": "stopped",
+      "forms": [
+        "stopped",
+        "stopp",
+        "stop",
+        "stoppe"
+      ]
+    },
+    {
+      "token": "worked",
+      "forms": [
+        "worked",
+        "work",
+        "worke"
+      ]
+    },
+    {
+      "token": "slept",
+      "forms": [
+        "slept",
+        "sleep"
+      ]
+    },
+    {
+      "token": "working",
+      "forms": [
+        "working",
+        "work",
+        "worke"
+      ]
+    },
+    {
+      "token": "happily",
+      "forms": [
+        "happily"
+      ]
+    },
+    {
+      "token": "tired",
+      "forms": [
+        "tired",
+        "tir",
+        "tire"
+      ]
+    },
+    {
+      "token": "depresion",
+      "forms": [
+        "depresion"
+      ]
+    },
+    {
+      "token": "abbing",
+      "forms": [
+        "abbing",
+        "abb",
+        "abbe"
+      ]
+    },
+    {
+      "token": "abbed",
+      "forms": [
+        "abbed",
+        "abb",
+        "abbe"
+      ]
+    },
+    {
+      "token": "abXXing",
+      "forms": [
+        "abXXing",
+        "abXX",
+        "abX",
+        "abXXe"
+      ]
+    },
+    {
+      "token": "abXXed",
+      "forms": [
+        "abXXed",
+        "abXX",
+        "abX",
+        "abXXe"
+      ]
+    }
+  ]
+}

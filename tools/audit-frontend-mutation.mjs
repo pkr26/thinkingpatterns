@@ -6,7 +6,7 @@ import { createRequire } from 'node:module';
 import { relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
-import { timedOut as testTimedOut, runnerFault, incompleteRun as zeroTestObservation, runtimeKill } from './mutation-observation.mjs';
+import { observationClassifierVersion, timedOut as testTimedOut, runnerFault, incompleteRun as zeroTestObservation, runtimeKill } from './mutation-observation.mjs';
 
 const statuses = new Set(['Killed', 'Survived', 'NoCoverage', 'Timeout', 'CompileError', 'RuntimeError', 'Ignored']);
 const unresolvedStatuses = new Set(['Survived', 'NoCoverage', 'Timeout', 'RuntimeError', 'Ignored']);
@@ -133,7 +133,7 @@ export function auditReport(sources, enumeration, report, reviews = []) {
   const unresolved = rows.filter((row) => row.disposition === 'Unresolved').length;
   return { scope: 'Runtime frontend JS/TS/TSX, including entrypoints and public scripts; excludes tests, build tooling, dependencies, and native platform source',
     note: 'Validates operator inventory, target bytes, report statuses and review linkage. Runtime oracle validity and equivalent reasoning require separate review. Timeouts, runner faults and absent/nonpositive testsCompleted receive no runtime-kill credit. zeroTestObservations includes missing or invalid completion counts.',
-    total, counts, runtimeKills, runnerFaultFailures,
+    observationClassifierVersion, total, counts, runtimeKills, runnerFaultFailures,
     testTimeoutFailures, zeroTestObservations, equivalent, nonTerminating, resourceExhaustion, unresolved, complete: unresolved === 0, targets, residuals: rows };
 }
 

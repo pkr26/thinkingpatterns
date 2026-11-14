@@ -922,9 +922,7 @@ _BENIGN_MASK_RES: tuple[re.Pattern[str], ...] = tuple(
 )
 
 
-def _mask_benign(
-    text: str, masks: tuple[re.Pattern[str], ...] = _BENIGN_MASK_RES
-) -> str:
+def _mask_benign(text: str, masks: tuple[re.Pattern[str], ...] = _BENIGN_MASK_RES) -> str:
     coverage: bytearray | None = None
     for mask in masks:
         for match in mask.finditer(text):
@@ -982,8 +980,7 @@ SUPPRESS_FOLDED_CONCAT_RE = _compile_tier(
 # pattern, so "suicide awareness" must stay masked in the folded channel
 # — including when the doubling is what hid it ("suiciide squaad").
 _BENIGN_MASK_FOLDED_RES: tuple[re.Pattern[str], ...] = tuple(
-    _benign_mask(folded)
-    for folded in (_dedup_fold(c) for c in BENIGN_COMPOUNDS)
+    _benign_mask(folded) for folded in (_dedup_fold(c) for c in BENIGN_COMPOUNDS)
 )
 
 
@@ -993,9 +990,7 @@ def _folded_variants(text: str) -> tuple[str, ...]:
     channel is untouched, so every pre-existing verdict keeps its exact
     form. The historical re-run of _normalize_pre_punct on the folded form
     is preserved (idempotent, but exact behavior is pinned by tests)."""
-    folded = _mask_benign(
-        _dedup_fold(_normalize_pre_punct(text)), _BENIGN_MASK_FOLDED_RES
-    )
+    folded = _mask_benign(_dedup_fold(_normalize_pre_punct(text)), _BENIGN_MASK_FOLDED_RES)
     out: list[str] = []
     for tokens in _variant_token_sets(_normalize_pre_punct(folded)):
         out.extend((_primary_join(tokens), _orphan_glue(tokens), _concat_join(tokens)))
@@ -1029,7 +1024,11 @@ def _tier_matches(
     the tier, or its concat form matches the tier's concat twin. The
     triples stay contiguous so one tier check covers every group."""
     for i in range(0, len(variants) - 2, 3):
-        if regex.search(variants[i]) or regex.search(variants[i + 1]):
+        # Punctuation removal can expose a new script junction. Adapt only
+        # the Python regex inputs: exported variants retain client parity.
+        if regex.search(_insert_script_boundaries(variants[i])) or regex.search(
+            _insert_script_boundaries(variants[i + 1])
+        ):
             return True
         if concat_regex.search(variants[i + 2]):
             return True

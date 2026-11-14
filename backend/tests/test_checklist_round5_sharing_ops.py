@@ -26,7 +26,6 @@ from datetime import date, timedelta
 import pytest
 from sqlalchemy import delete, select, update
 
-from app.api.therapist import PAIRING_RETENTION
 from app.models import Base, PairingCode
 from app.security import crypto
 from tests.helpers import ClientEmulator, TherapistEmulator, daterange
@@ -112,7 +111,7 @@ class TestPairingExpiryBoundary:
             await session.execute(
                 update(PairingCode)
                 .where(PairingCode.id == row.id)
-                .values(expires_at=utcnow() - PAIRING_RETENTION - timedelta(hours=1))
+                .values(expires_at=utcnow() - timedelta(hours=25))
             )
             await session.commit()
 

@@ -874,6 +874,7 @@ async def test_measure_delete_full_ladder(client, app):
     bare = await client.delete("/api/measures/m-del-1", headers=patient.headers)
     assert bare.status_code == 422
     assert bare.json()["code"] == "validation_error"
+    assert bare.json()["detail"] == "account verifier required (X-Account-Verifier header)"
 
     # Wrong verifier -> 403, row intact.
     wrong = await client.delete(
@@ -901,6 +902,7 @@ async def test_measure_delete_full_ladder(client, app):
         headers={**patient.headers, "X-Account-Verifier": patient.auth_key_b64},
     )
     assert again.status_code == 404
+    assert again.json() == {"detail": "measure not found", "code": "not_found"}
 
     # Someone else's measure id is also the flat 404 (never a leak).
     stranger = ClientEmulator("mdel-2", "deep-password")
@@ -911,6 +913,7 @@ async def test_measure_delete_full_ladder(client, app):
         headers={**patient.headers, "X-Account-Verifier": patient.auth_key_b64},
     )
     assert denied.status_code == 404
+    assert denied.json() == {"detail": "measure not found", "code": "not_found"}
 
     async with app.state.sessionmaker() as session:
         rows = (
