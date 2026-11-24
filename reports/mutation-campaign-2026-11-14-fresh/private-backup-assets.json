@@ -1,0 +1,120 @@
+{
+  "repo": "pkr26/thinkingpatterns-mutation-backup-2026-11-14",
+  "private": true,
+  "tag": "fresh-2026-11-14",
+  "release_url": "https://github.com/pkr26/thinkingpatterns-mutation-backup-2026-11-14/releases/tag/fresh-2026-11-14",
+  "assets": [
+    {
+      "name": "RESTORE.md",
+      "asset_id": 787980441,
+      "bytes": 3668,
+      "sha256": "74234994ceaa85af47b7573dd44f1e1eb1bc7825a9c23a0c22c01344c84cbf69",
+      "download_url": "https://github.com/pkr26/thinkingpatterns-mutation-backup-2026-11-14/releases/download/fresh-2026-11-14/RESTORE.md",
+      "already_uploaded": false
+    },
+    {
+      "name": "SHA256SUMS",
+      "asset_id": 787980508,
+      "bytes": 1171,
+      "sha256": "c6595eee354de9b520444ffd4c18e2efa1f07425d8dc2de55cead03de988a70d",
+      "download_url": "https://github.com/pkr26/thinkingpatterns-mutation-backup-2026-11-14/releases/download/fresh-2026-11-14/SHA256SUMS",
+      "already_uploaded": false
+    },
+    {
+      "name": "excluded-paths.json",
+      "asset_id": 787980562,
+      "bytes": 14362,
+      "sha256": "63d8e221c31d315b5d38b71a12eaa4cd35b6b1dffe5c5369d325f695204d29f0",
+      "download_url": "https://github.com/pkr26/thinkingpatterns-mutation-backup-2026-11-14/releases/download/fresh-2026-11-14/excluded-paths.json",
+      "already_uploaded": false
+    },
+    {
+      "name": "fresh-backend-logs.tar.gz",
+      "asset_id": 787966634,
+      "bytes": 51808027,
+      "sha256": "439d9cc1906f686b9c003df519fe3ad52f3dcf18f72745875d307d18613a5788",
+      "download_url": "https://github.com/pkr26/thinkingpatterns-mutation-backup-2026-11-14/releases/download/fresh-2026-11-14/fresh-backend-logs.tar.gz",
+      "already_uploaded": true
+    },
+    {
+      "name": "fresh-backend-results.tar.gz",
+      "asset_id": 787962460,
+      "bytes": 141697434,
+      "sha256": "4018afc1ec57dfbaef5e5d1ef0a5de2357861c6ef2f85fa559fe353a67492852",
+      "download_url": "https://github.com/pkr26/thinkingpatterns-mutation-backup-2026-11-14/releases/download/fresh-2026-11-14/fresh-backend-results.tar.gz",
+      "already_uploaded": true
+    },
+    {
+      "name": "fresh-backup-manifest.json",
+      "asset_id": 787980666,
+      "bytes": 3323,
+      "sha256": "db640c2fc1896672084b4e3d8d6314deeae06ae958d87095705473a1535d2505",
+      "download_url": "https://github.com/pkr26/thinkingpatterns-mutation-backup-2026-11-14/releases/download/fresh-2026-11-14/fresh-backup-manifest.json",
+      "already_uploaded": false
+    },
+    {
+      "name": "fresh-control-evidence.tar.gz",
+      "asset_id": 787980732,
+      "bytes": 8171239,
+      "sha256": "3b07f6e29486ec7724a5e6509e47fa9a60fb6d1f6c7f820d38f091140a26cb78",
+      "download_url": "https://github.com/pkr26/thinkingpatterns-mutation-backup-2026-11-14/releases/download/fresh-2026-11-14/fresh-control-evidence.tar.gz",
+      "already_uploaded": false
+    },
+    {
+      "name": "fresh-file-manifest.jsonl.gz",
+      "asset_id": 787981054,
+      "bytes": 4865382,
+      "sha256": "146d47f461b992ade8e2be267c8eaac8196e8f4981a69084d3ec0733702ccc02",
+      "download_url": "https://github.com/pkr26/thinkingpatterns-mutation-backup-2026-11-14/releases/download/fresh-2026-11-14/fresh-file-manifest.jsonl.gz",
+      "already_uploaded": false
+    },
+    {
+      "name": "fresh-frontend-logs.tar.gz",
+      "asset_id": 787968237,
+      "bytes": 119298986,
+      "sha256": "4849b09e0e2a6c064896e744e4b62df5a0dbe630203b5ff5dd963bd761ad69d2",
+      "download_url": "https://github.com/pkr26/thinkingpatterns-mutation-backup-2026-11-14/releases/download/fresh-2026-11-14/fresh-frontend-logs.tar.gz",
+      "already_uploaded": true
+    },
+    {
+      "name": "fresh-frontend-results.tar.gz",
+      "asset_id": 787966130,
+      "bytes": 144970540,
+      "sha256": "fcee249e2e3ce579c3d4b90aa8c269e73221be3b29ba775d1a7cc8af97845720",
+      "download_url": "https://github.com/pkr26/thinkingpatterns-mutation-backup-2026-11-14/releases/download/fresh-2026-11-14/fresh-frontend-results.tar.gz",
+      "already_uploaded": true
+    },
+    {
+      "name": "fresh-frozen-inputs.tar.gz",
+      "asset_id": 787967259,
+      "bytes": 22302552,
+      "sha256": "b42149f442ec2a4ebeebef61d2d03f8a6cb218d6002af71449b9cc9945d19f73",
+      "download_url": "https://github.com/pkr26/thinkingpatterns-mutation-backup-2026-11-14/releases/download/fresh-2026-11-14/fresh-frozen-inputs.tar.gz",
+      "already_uploaded": true
+    },
+    {
+      "name": "fresh-oracle-plans.tar.gz",
+      "asset_id": 787962466,
+      "bytes": 268574094,
+      "sha256": "9eb3b9df9c68d9dc371c81c7a2963628a49640a71bf67456049d838360ae5872",
+      "download_url": "https://github.com/pkr26/thinkingpatterns-mutation-backup-2026-11-14/releases/download/fresh-2026-11-14/fresh-oracle-plans.tar.gz",
+      "already_uploaded": true
+    },
+    {
+      "name": "summary.json",
+      "asset_id": 787981203,
+      "bytes": 2961,
+      "sha256": "14bd37a9ba36cb6a1e42f129599f4c0451ba75d9b1ffb11b180d4d98cbe22787",
+      "download_url": "https://github.com/pkr26/thinkingpatterns-mutation-backup-2026-11-14/releases/download/fresh-2026-11-14/summary.json",
+      "already_uploaded": false
+    },
+    {
+      "name": "verify_restore.py",
+      "asset_id": 787981271,
+      "bytes": 13896,
+      "sha256": "7a1951c998181ad7d70952fac82cd76bb072695bc6de6fe4d8b25a8c9f64ec09",
+      "download_url": "https://github.com/pkr26/thinkingpatterns-mutation-backup-2026-11-14/releases/download/fresh-2026-11-14/verify_restore.py",
+      "already_uploaded": false
+    }
+  ]
+}

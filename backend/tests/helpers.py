@@ -7,11 +7,13 @@ so every API test exercises the exact bytes a real device would send.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import json
 import os
 import uuid
+from contextlib import asynccontextmanager
 from datetime import date
 
 from httpx import AsyncClient
@@ -24,6 +26,36 @@ from app.security import crypto, kdf
 # callers, and this emulator is harness code, not the product. The key
 # schedule below (HKDF auth/data keys) is still the real library.
 FAST_ITERATIONS = 1_000
+
+
+@asynccontextmanager
+async def ready_test_app_lifespan(application):
+    """Finish the first purge transaction before test requests use SQLite.
+
+    In-memory SQLite shares one connection across sessions. The first purge's
+    closing read transaction can otherwise roll back registration writes made
+    by a manual-lifespan test. Observe completion of the real purge; subsequent
+    production maintenance remains active throughout the test.
+    """
+    from pytest import MonkeyPatch
+
+    from app import main as main_module
+
+    initial_purge_finished = asyncio.Event()
+    purge_once = main_module._purge_deleted_account_once
+
+    async def finish_initial_purge(app):
+        try:
+            return await purge_once(app)
+        finally:
+            if app is application:
+                initial_purge_finished.set()
+
+    with MonkeyPatch.context() as patch:
+        patch.setattr(main_module, "_purge_deleted_account_once", finish_initial_purge)
+        async with application.router.lifespan_context(application):
+            await asyncio.wait_for(initial_purge_finished.wait(), timeout=10)
+            yield application
 
 
 def production_secret_settings(**overrides: object) -> dict[str, object]:

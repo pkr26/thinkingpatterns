@@ -15,6 +15,7 @@ of current release readiness.
 | [simulation60](simulation60/SIMULATION_REPORT.md) | Reproducible 60-day simulation |
 | [Entire backend mutation campaign](mutation_report_2026-10-05.md) | All 95 production Python files, corrected dispositions and compact evidence |
 | [Entire frontend mutation campaign](frontend-mutation-2026-10-07/summary.json) | Web, mobile and therapist portals: all 177 runtime files, 80,362 mutations and reviewed dispositions |
+| [Fresh canonical mutation campaign, 2026-11-14](mutation-campaign-2026-11-14-fresh/README.md) | All 125,982 backend, web, mobile and portal controls; verified outcomes, portable ledgers and a checksummed migration-backup index |
 | [September mutation report](mutation_report_2026-09-30.md) | Historical scoped mutation-testing results |
 
 See [current remediation status](../docs/remediation-status.md) for open release

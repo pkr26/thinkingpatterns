@@ -11,7 +11,12 @@ import { setKvBackendForTests, type KvBackend } from "../src/kvstore";
 import { rejectedEntries } from "../src/offlineQueue";
 import { vault } from "../src/vault";
 import { installSession, jsonResponse, resetTestState, stubFetch } from "./helpers/api";
-import { press, pressSwitch, render, settle, textOf, textOfNode, typeInto, waitForResult } from "./helpers/rtr";
+import { buttonByLabel, press, pressSwitch, render, settle, textOf, textOfNode, typeInto, waitForResult } from "./helpers/rtr";
+
+/** Observe the public action returning after the native rotation completes. */
+async function finishSettingsOperation(root: Awaited<ReturnType<typeof render>>): Promise<void> {
+  await waitForResult(() => buttonByLabel(root, "Change password"), "settings rotation completion");
+}
 
 const ORIGIN = "http://localhost:5173";
 const USER = "user-1";
@@ -267,7 +272,7 @@ describe("SettingsView branches", () => {
     await typeInto(root, "New password", "another-new-passphrase-9");
     await typeInto(root, "Confirm new password", "another-new-passphrase-9");
     await press(root, "Change password");
-    await settle(60, 4);
+    await finishSettingsOperation(root);
     expect(onLockdown).toHaveBeenCalledTimes(1);
     expect(onLockdown.mock.calls[0]![0]).toContain("could not be authenticated");
     expect(onLockdown.mock.calls[0]![0]).not.toContain("NOTHING was changed");
@@ -315,7 +320,7 @@ describe("SettingsView rotation with an active grant (the rewrap loop)", () => {
     await typeInto(root, "New password", "rotation-with-rewrap-9x");
     await typeInto(root, "Confirm new password", "rotation-with-rewrap-9x");
     await press(root, "Change password");
-    await waitForResult(() => onLockdown.mock.calls.length > 0, "grant rewrap rotation lockdown");
+    await finishSettingsOperation(root);
     expect(order).toEqual(["session", "session", "rekey"]);
     expect(onLockdown).toHaveBeenCalledTimes(1);
   });

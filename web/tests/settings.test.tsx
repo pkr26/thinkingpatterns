@@ -24,7 +24,7 @@ import { savePendingMeasure } from "../src/pendingMeasure";
 import { applyLanguagePref, getLanguagePref, getLocale } from "../src/strings";
 import { vault } from "../src/vault";
 import { installSession, jsonResponse, resetTestState, stubFetch } from "./helpers/api";
-import { press, pressAria, pressSwitch, render, settle, textOf, textOfNode, typeInto, waitForResult } from "./helpers/rtr";
+import { buttonByLabel, press, pressAria, pressSwitch, render, settle, textOf, textOfNode, typeInto, waitForResult } from "./helpers/rtr";
 
 const ORIGIN = "http://localhost:5173";
 const USER = "user-1";
@@ -91,6 +91,12 @@ function baseStubs(extra?: { rekey?: (init: RequestInit) => Response; credential
   });
 }
 
+/** Native derivations finish on the threadpool. Wait for the public action
+ * to return after finally releases busy, including temporary-key cleanup. */
+async function finishSettingsOperation(root: Awaited<ReturnType<typeof render>>): Promise<void> {
+  await waitForResult(() => buttonByLabel(root, "Change password"), "settings operation completion");
+}
+
 async function fillRotateForm(root: Awaited<ReturnType<typeof render>>): Promise<void> {
   await typeInto(root, "New password", NEW_PASSWORD);
   await typeInto(root, "Confirm new password", NEW_PASSWORD);
@@ -144,7 +150,7 @@ describe("SettingsView rotation (H-4/M-W2, audit 2026-09-26)", () => {
     await settle(40, 3);
     await fillRotateForm(root);
     await press(root, "Change password");
-    await settle(120, 6);
+    await finishSettingsOperation(root);
     // The server HAS moved the corpus to the new key — a live session with
     // the now-dead old key must be locked down, honestly.
     expect(onLockdown).toHaveBeenCalledTimes(1);
@@ -182,7 +188,7 @@ describe("SettingsView rotation (H-4/M-W2, audit 2026-09-26)", () => {
     await settle(40, 3);
     await fillRotateForm(root);
     await press(root, "Change password");
-    await settle(120, 6);
+    await finishSettingsOperation(root);
     // The ladder resumed (no honest-stop lockdown copy) and the rotation
     // completed: the success lockdown fired, the rekey endpoint was only
     // ever asked once (idempotent completion, not a restart-from-zero)...
@@ -197,12 +203,12 @@ describe("SettingsView rotation (H-4/M-W2, audit 2026-09-26)", () => {
   it("exact atomic retries and a remounted retry reuse the credential operation and new salt", async () => {
     const requests: string[] = [];
     const failed=baseStubs({rekey:(init)=>{requests.push(String(init.body));return jsonResponse({detail:"lost response"},{status:500});}});
-    const first=vi.fn();let root=await render(<SettingsView onLockdown={first}/>);await settle(40,3);await fillRotateForm(root);await press(root,"Change password");await settle(120,8);
+    const first=vi.fn();let root=await render(<SettingsView onLockdown={first}/>);await settle(40,3);await fillRotateForm(root);await press(root,"Change password");await finishSettingsOperation(root);
     expect(first.mock.calls[0]![0]).toContain("could not be confirmed");expect(requests).toHaveLength(4);expect(new Set(requests).size).toBe(1);
     expect(failed.mock.calls.some(([url])=>String(url).endsWith("/account/credential"))).toBe(false);
     const saved=JSON.parse(requests[0]!);expect(saved.operation_id).toMatch(/^[a-f0-9-]{36}$/);expect(await kv.getItem(`mindpattern.localRotation.${USER}`)).not.toBeNull();
     const second=vi.fn();baseStubs({rekey:(init)=>{requests.push(String(init.body));return jsonResponse({credential_rotated:true,operation_id:JSON.parse(String(init.body)).operation_id});}});
-    root=await render(<SettingsView onLockdown={second}/>);await settle(40,3);await fillRotateForm(root);await press(root,"Change password");await settle(120,8);
+    root=await render(<SettingsView onLockdown={second}/>);await settle(40,3);await fillRotateForm(root);await press(root,"Change password");await finishSettingsOperation(root);
     expect(requests[4]).toBe(requests[0]);expect(second.mock.calls[0]![0]).toContain("Password changed");expect(await kv.getItem(`mindpattern.localRotation.${USER}`)).toBeNull();
   });
 
@@ -219,7 +225,7 @@ describe("SettingsView rotation (H-4/M-W2, audit 2026-09-26)", () => {
     await settle(40, 3);
     await fillRotateForm(root);
     await press(root, "Change password");
-    await settle(120, 6);
+    await finishSettingsOperation(root);
     // H-4 rule: the corpus is under a key this vault cannot read; the
     // session must not keep writing under the dead old key.
     expect(onLockdown).toHaveBeenCalledTimes(1);
@@ -246,7 +252,7 @@ describe("SettingsView rotation (H-4/M-W2, audit 2026-09-26)", () => {
     await settle(40, 3);
     await fillRotateForm(root);
     await press(root, "Change password");
-    await settle(120, 6);
+    await finishSettingsOperation(root);
     expect(onLockdown).toHaveBeenCalledTimes(1);
     expect(onLockdown.mock.calls[0]![0]).toContain("could not be authenticated");
   });
@@ -268,7 +274,7 @@ describe("SettingsView rotation (H-4/M-W2, audit 2026-09-26)", () => {
     await settle(40, 3);
     await fillRotateForm(root);
     await press(root, "Change password");
-    await settle(120, 6);
+    await finishSettingsOperation(root);
     expect(onLockdown).toHaveBeenCalledTimes(1);
     expect(onLockdown.mock.calls[0]![0]).toContain("Password changed");
     expect(await kv.getItem(PENDING_SALT_KEY)).toBeNull();
@@ -287,7 +293,7 @@ describe("SettingsView rotation (H-4/M-W2, audit 2026-09-26)", () => {
     await settle(40, 3);
     await fillRotateForm(root);
     await press(root, "Change password");
-    await settle(120, 8);
+    await finishSettingsOperation(root);
     expect(onLockdown).toHaveBeenCalledTimes(1);
     // Everything the user built must survive, readable under the NEW key.
     const { dataKey } = await derivePendingKeys();
@@ -334,7 +340,7 @@ describe("SettingsView rotation (H-4/M-W2, audit 2026-09-26)", () => {
     await settle(40, 3);
     await fillRotateForm(root);
     await press(root, "Change password");
-    await settle(120, 6);
+    await finishSettingsOperation(root);
     // The surviving grant WAS re-wrapped and the rotation COMPLETED despite
     // the second grant's failure — with the honest partial notice.
     expect(rewrapped).toEqual([CONSENT_OK,CONSENT_BAD]);
@@ -374,7 +380,7 @@ describe("SettingsView rotation × offline queue (audit 2026-09-27)", () => {
     await settle(40, 3);
     await fillRotateForm(root);
     await press(root, "Change password");
-    await settle(60, 5);
+    await finishSettingsOperation(root);
     expect(textOf(root)).toContain("still waiting to upload");
     expect(onLockdown).not.toHaveBeenCalled();
     // Nothing rotated: no processing session, no rekey, no credential call.
@@ -393,7 +399,7 @@ describe("SettingsView rotation × offline queue (audit 2026-09-27)", () => {
     await settle(40, 3);
     await fillRotateForm(root);
     await press(root, "Change password");
-    await settle(120, 8);
+    await finishSettingsOperation(root);
     expect(onLockdown).toHaveBeenCalledTimes(1);
     expect(onLockdown.mock.calls[0]![0]).toContain("Password changed");
   });
@@ -417,7 +423,7 @@ describe("SettingsView rotation × offline queue (audit 2026-09-27)", () => {
     await settle(40, 3);
     await fillRotateForm(root);
     await press(root, "Change password");
-    await settle(120, 8);
+    await finishSettingsOperation(root);
     expect(onLockdown).toHaveBeenCalledTimes(1);
     expect(onLockdown.mock.calls[0]![0]).toContain("Password changed");
     // Same id, readable under the NEW generation's key, plaintext intact.
@@ -491,7 +497,7 @@ describe("SettingsView key-scheme routing (v2 envelope, 2026-09-26)", () => {
     await typeInto(root, "New password", V2_NEW_PASSWORD);
     await typeInto(root, "Confirm new password", V2_NEW_PASSWORD);
     await press(root, "Change password");
-    await settle(120, 6);
+    await finishSettingsOperation(root);
 
     const calls = mock.mock.calls as [string, RequestInit][];
     const put = calls.find(([url, init]) => url.endsWith("/account/password") && init.method === "PUT");
@@ -547,7 +553,7 @@ describe("SettingsView key-scheme routing (v2 envelope, 2026-09-26)", () => {
     await typeInto(root, "New password", V2_NEW_PASSWORD);
     await typeInto(root, "Confirm new password", V2_NEW_PASSWORD);
     await press(root, "Change password");
-    await settle(120, 6);
+    await finishSettingsOperation(root);
     expect(broadcastSpy).toHaveBeenCalledWith("rotation");
     expect(sessionOpenedBeforeBroadcast.value).toBe(false);
     const calls = mock.mock.calls as [string, RequestInit][];
@@ -567,7 +573,7 @@ describe("SettingsView key-scheme routing (v2 envelope, 2026-09-26)", () => {
 
     await typeInto(root, "Current password (to authorize the upgrade)", "the-current-passphrase-3");
     await press(root, "Upgrade key protection");
-    await settle(120, 6);
+    await finishSettingsOperation(root);
 
     expect(upgrade).toHaveBeenCalledTimes(1);
     const [url, init] = upgrade.mock.calls[0] as unknown as [string, RequestInit];
@@ -607,7 +613,7 @@ describe("SettingsView key-scheme routing (v2 envelope, 2026-09-26)", () => {
     await settle(40, 3);
     await typeInto(root, "Current password (to authorize the upgrade)", "the-current-passphrase-3");
     await press(root, "Upgrade key protection");
-    await settle(120, 6);
+    await finishSettingsOperation(root);
     expect(textOf(root)).toContain("could not be verified against your stored journal");
     // Still v1: the upgrade action stays available for a fresh retry.
     expect(textOf(root)).toContain("Upgrade key protection");
@@ -657,7 +663,7 @@ describe("SettingsView key-scheme routing (v2 envelope, 2026-09-26)", () => {
     await typeInto(root, "New password", V2_NEW_PASSWORD);
     await typeInto(root, "Confirm new password", V2_NEW_PASSWORD);
     await press(root, "Change password");
-    await settle(200, 8);
+    await finishSettingsOperation(root);
 
     const calls = mock.mock.calls as [string, RequestInit][];
     const put = calls.find(([url, init]) => url.endsWith("/account/password") && init.method === "PUT");
@@ -709,7 +715,7 @@ describe("SettingsView key-scheme routing (v2 envelope, 2026-09-26)", () => {
       await typeInto(root, "New password", "a-fresh-long-passphrase-7");
       await typeInto(root, "Confirm new password", "a-fresh-long-passphrase-7");
       await press(root, "Change password");
-      await settle(120, 6);
+      await finishSettingsOperation(root);
       expect(onLockdown).toHaveBeenCalledTimes(1); // every session died
       // The hint is PERSISTED: the lockdown unmounts this view, so only a
       // per-account flag can carry it across the sign-back-in.
@@ -740,7 +746,7 @@ describe("SettingsView key-scheme routing (v2 envelope, 2026-09-26)", () => {
       await typeInto(root, "New password", "a-fresh-long-passphrase-7");
       await typeInto(root, "Confirm new password", "a-fresh-long-passphrase-7");
       await press(root, "Rotate encryption key");
-      await settle(200, 10);
+      await finishSettingsOperation(root);
 
       const calls = mock.mock.calls as [string, RequestInit][];
       // The corpus was rekeyed through two processing sessions...
@@ -799,7 +805,7 @@ describe("SettingsView v1 rotation × mid-flow vault lock (FE-4, pentest 2026-09
     await settle(40, 3);
     await fillRotateForm(root);
     await press(root, "Change password");
-    await settle(60, 4);
+    await finishSettingsOperation(root);
     expect(textOf(root)).toContain("Your session locked");
     expect(onLockdown).not.toHaveBeenCalled();
     const urls = mock.mock.calls.map(([u]) => String(u));
@@ -822,7 +828,7 @@ describe("SettingsView v1 rotation × mid-flow vault lock (FE-4, pentest 2026-09
     await settle(40, 3);
     await fillRotateForm(root);
     await press(root, "Change password");
-    await waitForResult(() => textOf(root).includes("Your session locked"), "rotation abort after vault lock during session opening");
+    await finishSettingsOperation(root);
     expect(textOf(root)).toContain("Your session locked");
     expect(onLockdown).not.toHaveBeenCalled();
     const urls = mock.mock.calls.map(([u]) => String(u));
@@ -847,7 +853,7 @@ describe("SettingsView v1 rotation × mid-flow vault lock (FE-4, pentest 2026-09
     await settle(40, 3);
     await fillRotateForm(root);
     await press(root, "Change password");
-    await waitForResult(() => onLockdown.mock.calls.length > 0, "post-rekey rotation lockdown");
+    await finishSettingsOperation(root);
     expect(onLockdown).toHaveBeenCalledTimes(1);
     expect(onLockdown.mock.calls[0]![0]).toContain("Password changed");
     // The mood log SURVIVED the zeroizing lock: readable under the NEW
@@ -905,7 +911,7 @@ describe("SettingsView deletion (M-W3, audit 2026-09-26)", () => {
     await press(root, "Delete my account");
     await typeInto(root, "Current password", reauthPassword);
     await press(root, "Verify and continue");
-    await settle(60, 4);
+    await finishSettingsOperation(root);
     expect(onLockdown).toHaveBeenCalledTimes(1);
     // Every ciphertext/cache is erased. A minimal deleted-generation marker
     // survives so suspended callbacks cannot recreate account ciphertext.
@@ -991,7 +997,7 @@ describe("SettingsView fresh step-up errors (SEC-001)", () => {
     await pressSwitch(root, "transcript translation");
     await typeInto(root, "Current password", password);
     await press(root, "Verify and continue");
-    await settle(60, 3);
+    await finishSettingsOperation(root);
 
     const passwordField = root.root.findAllByType("input").find((node) => node.props.type === "password" && textOfNode(node.parent).includes("Current password"));
     expect(passwordField?.props.value).toBe("");

@@ -1,0 +1,89 @@
+{
+  "campaign": "mutation-campaigns-2026-11-14/fresh",
+  "complete": true,
+  "completedAt": "2026-11-19T22:26:29.458871+00:00",
+  "countingPolicy": "Timeouts, oracle/runtime errors, invalid syntax and no coverage receive no kill credit. Qualification overlays replace outcomes without adding canonical controls.",
+  "packages": {
+    "backend": {
+      "controls": 44104,
+      "effectiveOutcomes": {
+        "InvalidSyntax": 25,
+        "Killed": 39932,
+        "OracleError": 670,
+        "Survived": 3417,
+        "Timeout": 60
+      },
+      "ledger": "backend-outcomes.jsonl.gz",
+      "ledgerSha256": "3fb5c50af14dd5ec224008891daa46421efe380bec03e22653748e8c258325f9",
+      "rawOutcomes": {
+        "INVALID_SYNTAX": 25,
+        "KILLED": 39932,
+        "ORACLE_ERROR": 670,
+        "SURVIVED": 3417,
+        "TIMEOUT": 60
+      }
+    },
+    "mobile": {
+      "controls": 41313,
+      "effectiveOutcomes": {
+        "Killed": 39702,
+        "NoCoverage": 95,
+        "RuntimeError": 1,
+        "Survived": 1389,
+        "Timeout": 126
+      },
+      "ledger": "mobile-outcomes.jsonl.gz",
+      "ledgerSha256": "2fabc65bdf1aa76fabb888691fbbffea515e31effe7d7389aac8907afaabd87a",
+      "rawOutcomes": {
+        "Killed": 39762,
+        "NoCoverage": 95,
+        "RuntimeError": 1,
+        "Survived": 1389,
+        "Timeout": 66
+      }
+    },
+    "portal": {
+      "controls": 6435,
+      "effectiveOutcomes": {
+        "Killed": 5925,
+        "NoCoverage": 34,
+        "Survived": 367,
+        "Timeout": 109
+      },
+      "ledger": "portal-outcomes.jsonl.gz",
+      "ledgerSha256": "138553b772f94a67c84369f522ec81f4b1cf972273eeec5d25cd17466b91de5c",
+      "rawOutcomes": {
+        "Killed": 6003,
+        "NoCoverage": 34,
+        "Survived": 367,
+        "Timeout": 31
+      }
+    },
+    "web": {
+      "controls": 34130,
+      "effectiveOutcomes": {
+        "Killed": 33069,
+        "NoCoverage": 42,
+        "RuntimeError": 2,
+        "Survived": 943,
+        "Timeout": 74
+      },
+      "ledger": "web-outcomes.jsonl.gz",
+      "ledgerSha256": "9659b4f64bfd83b4570a1bc17e04b4d9bebab3e29bf6b6221047603c72be6541",
+      "rawOutcomes": {
+        "Killed": 33102,
+        "NoCoverage": 42,
+        "RuntimeError": 2,
+        "Survived": 919,
+        "Timeout": 65
+      }
+    }
+  },
+  "plannedControls": 125982,
+  "privacy": "Public ledgers omit free-form test output, status reasons, contracts, response bodies, tracebacks, test names and replacement strings. Byte-exact originals are private-backup assets.",
+  "rawRecordHashPolicy": "SHA-256 of UTF-8 json.dumps(row,sort_keys=True,separators=(',',':'),ensure_ascii=True). Raw artifact byte hashes are in the private file manifest.",
+  "schemaVersion": 1,
+  "scope": "Execution completion is verified; surviving controls and unresolved execution outcomes remain findings, not release-readiness approval.",
+  "sourceCommit": "8e692b8b876ca902c1eb6bf0f7923a008c4c62cf",
+  "verifiedControls": 125982
+}

@@ -1,0 +1,35 @@
+{
+  "assetChecksumsVerified": 13,
+  "backendControls": 44104,
+  "backendOutcomes": {
+    "INVALID_SYNTAX": 25,
+    "KILLED": 39932,
+    "ORACLE_ERROR": 670,
+    "SURVIVED": 3417,
+    "TIMEOUT": 60
+  },
+  "checkedAt": "2026-11-24T16:38:49.068297+00:00",
+  "frontendControls": {
+    "mobile": 41313,
+    "portal": 6435,
+    "web": 34130
+  },
+  "frozenSourceFingerprints": {
+    "backend-source": "8a959ecbefc65fe3917ac16e71df890f002c39abd5db4a73f5a6cff9f321224e",
+    "backend-worker01-retry-source": "7543e5a4bc9fe26708594e3d6ed1de89c6e94aac98f68ef8512c0896a68445bc",
+    "backend-worker02-clock-source": "6a1f56905e1f294e132dec18fc98818fdbf7200f923339e90deba8ede4201158",
+    "snapshot": "8a959ecbefc65fe3917ac16e71df890f002c39abd5db4a73f5a6cff9f321224e"
+  },
+  "historicalPathsRewritten": false,
+  "note": "Transport verification of remote private assets is performed separately by the migration upload/download workflow. This record is generated after archive freezing and is not an additional canonical mutation result.",
+  "privateManifestSha256": "db640c2fc1896672084b4e3d8d6314deeae06ae958d87095705473a1535d2505",
+  "publicCatalogSha256": "e99433de46058f4c2b7c8e24b38572c16d8c98ad46121f75631b0dfae467433a",
+  "publicLedgerRowsAudited": 125982,
+  "restoreSafetyTestsPassed": 20,
+  "restoredFilesVerified": 111124,
+  "schemaVersion": 1,
+  "scope": "Full restoration into a new directory from the private compressed migration assets; original campaign untouched",
+  "totalControls": 125982,
+  "verified": true,
+  "verifyRestoreSha256": "7a1951c998181ad7d70952fac82cd76bb072695bc6de6fe4d8b25a8c9f64ec09"
+}

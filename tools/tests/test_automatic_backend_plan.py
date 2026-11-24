@@ -216,6 +216,71 @@ class BackendPlanTests(unittest.TestCase):
                 Path("python"),
             )
 
+    def test_fileless_collection_nodes_cannot_guess_between_matching_test_files(self):
+        other = self.snapshot / "backend/tests/test_other.py"
+        other.write_text("def test_allowed():\n    assert True\n")
+        result = mock.Mock(returncode=0, stdout="::test_allowed\n")
+        with (
+            mock.patch.object(planner.subprocess, "run", return_value=result),
+            self.assertRaisesRegex(ValueError, "zero tests"),
+        ):
+            planner.verify_collection(
+                self.snapshot,
+                {
+                    "A": ["tests/test_logic.py::test_allowed"],
+                    "B": ["tests/test_other.py::test_allowed"],
+                },
+                self.root / "ambiguous-fileless.log",
+                Path("python"),
+            )
+
+    def test_collection_accepts_directory_selectors_with_current_descendant_tests(self):
+        external = self.snapshot / "tools/tests/test_external.py"
+        external.parent.mkdir(parents=True)
+        external.write_text("def test_external():\n    assert True\n")
+        result = mock.Mock(
+            returncode=0,
+            stdout=(
+                "backend/tests/test_logic.py::test_allowed[branch/one]\n"
+                "tools/tests/test_external.py::test_external\n"
+            ),
+        )
+        for selector in ("tests", "./tests/", "../tools/tests/"):
+            with (
+                self.subTest(selector=selector),
+                mock.patch.object(planner.subprocess, "run", return_value=result),
+            ):
+                report = planner.verify_collection(
+                    self.snapshot,
+                    {"A": [selector]},
+                    self.root / "directories.log",
+                    Path("python"),
+                )
+                self.assertEqual(report["verified_selectors"], 1)
+                self.assertEqual(report["collected"], 2)
+
+    def test_collection_rejects_empty_directories_and_sibling_prefix_matches(self):
+        (self.snapshot / "backend/tests/empty").mkdir()
+        sibling = self.snapshot / "backend/tests_extra/test_neighbor.py"
+        sibling.parent.mkdir()
+        sibling.write_text("def test_neighbor():\n    assert True\n")
+        result = mock.Mock(
+            returncode=0,
+            stdout="tests_extra/test_neighbor.py::test_neighbor\n",
+        )
+        for selector in ("tests", "tests/empty"):
+            with (
+                self.subTest(selector=selector),
+                mock.patch.object(planner.subprocess, "run", return_value=result),
+                self.assertRaisesRegex(ValueError, "zero tests"),
+            ):
+                planner.verify_collection(
+                    self.snapshot,
+                    {"A": [selector]},
+                    self.root / "empty-directory.log",
+                    Path("python"),
+                )
+
     def test_collection_refreshes_changed_parameter_labels_to_current_behavioral_family(self):
         plan = {"A": ["tests/test_logic.py::test_allowed[old]"]}
         result = mock.Mock(returncode=0, stdout="tests/test_logic.py::test_allowed[current]\n")

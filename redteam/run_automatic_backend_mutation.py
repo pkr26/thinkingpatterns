@@ -17,6 +17,7 @@ import functools
 import hashlib
 import io
 import json
+import math
 import os
 import pathlib
 import re
@@ -499,10 +500,15 @@ def pytest_child(backend, selectors, log, timeout, capture_contracts=False, expe
             reporter = Reporter(capture_contracts, expected_contracts, capture_public_values)
             if capture_contracts:
                 reporter.install_http_contract_capture()
-            status = pytest.main(['-x', '-q', '-m', 'not slow',
-                                  '--basetemp', str(temporary / 'pytest'),
-                                  '-p', 'pytest_asyncio.plugin',
-                                  *selectors], plugins=[reporter])
+            # Collection and execution must load the same async plugins.
+            # AnyIO supplies parameter IDs such as [asyncio] even when
+            # pytest-asyncio owns execution through asyncio_mode=auto.
+            arguments = ['-x', '-q', '-m', 'not slow', '-o', 'addopts=',
+                         '--basetemp', str(temporary / 'pytest'),
+                         '-p', 'pytest_asyncio.plugin', '-p', 'anyio.pytest_plugin']
+            if (backend / 'pyproject.toml').is_file():
+                arguments.extend(['-c', str(backend / 'pyproject.toml')])
+            status = pytest.main([*arguments, *selectors], plugins=[reporter])
             result_path.write_text(json.dumps({'returncode': int(status),
                 'failures': reporter.failures, 'errors': reporter.errors,
                 'passed': reporter.passed, 'skipped': reporter.skipped,
@@ -646,7 +652,7 @@ class FrozenFiles:
 
 
 def run_shard(snapshot, output, rows, shard, selectors, timeout, capture_contracts=False,
-              expected_runner_sha256=None, capture_public_values=False):
+              expected_runner_sha256=None, capture_public_values=False, baseline_timeout=60):
     from redteam.deep_backend_mutation.runner import make_copy
 
     if expected_runner_sha256 is not None and RUNNER_SHA256 != expected_runner_sha256:
@@ -672,6 +678,7 @@ def run_shard(snapshot, output, rows, shard, selectors, timeout, capture_contrac
     preload()
     logs = output / 'logs' / f'worker-{shard:02d}'
     logs.mkdir(parents=True, exist_ok=True)
+    baseline_budget = max(timeout, baseline_timeout)
     baselines = {}
     result = output / f'results-{shard:02d}.jsonl'
     source = {name: (backend / name).read_text() for name in {row['file'] for row in rows}}
@@ -682,8 +689,9 @@ def run_shard(snapshot, output, rows, shard, selectors, timeout, capture_contrac
             key = json.dumps(selected)
             if key not in baselines:
                 baseline = pytest_child(backend, selected,
-                    logs / f'baseline-{len(baselines):05d}.log', max(timeout, 60), capture_contracts,
+                    logs / f'baseline-{len(baselines):05d}.log', baseline_budget, capture_contracts,
                     capture_public_values=capture_public_values)
+                baseline['timeout_seconds'] = baseline_budget
                 baseline['restored'] = frozen.restore()
                 baseline['selectors'] = selected
                 baseline['baseline_id'] = f'{shard:02d}-{len(baselines):05d}'
@@ -691,7 +699,7 @@ def run_shard(snapshot, output, rows, shard, selectors, timeout, capture_contrac
                     raise RuntimeError(f'failed selector baseline: {baseline}')
                 if capture_contracts:
                     repeated = pytest_child(backend, selected,
-                        logs / f'baseline-repeat-{len(baselines):05d}.log', max(timeout, 60), True,
+                        logs / f'baseline-repeat-{len(baselines):05d}.log', baseline_budget, True,
                         capture_public_values=capture_public_values)
                     repeated['restored'] = frozen.restore()
                     if repeated['status'] != 'SURVIVED' or repeated['contracts'] != baseline['contracts']:
@@ -741,6 +749,8 @@ def main():
     parser.add_argument('--workers', type=int, default=10)
     parser.add_argument('--timeout', type=float, default=20,
                         help='minimum mutant budget; also allow twice its pristine duration plus ten seconds')
+    parser.add_argument('--baseline-timeout', type=float, default=60,
+                        help='minimum pristine oracle budget in seconds; does not set the mutant minimum')
     parser.add_argument('--selectors', nargs='+', default=['../tools/tests/test_backend_boot_contract.py'],
                         help='real pytest behavior oracles; source scans and digest pins cannot earn kill credit')
     parser.add_argument('--ids', nargs='*')
@@ -749,6 +759,8 @@ def main():
     parser.add_argument('--runtime-public-values', action='store_true',
                         help='also verify documented frontend enum/counter/version values; implies HTTP contracts')
     args = parser.parse_args()
+    if not math.isfinite(args.baseline_timeout) or args.baseline_timeout <= 0:
+        parser.error('--baseline-timeout must be a positive finite number')
     snapshot, output = args.snapshot.resolve(), args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     sources = {p.relative_to(snapshot).as_posix(): p.read_bytes()
@@ -799,7 +811,7 @@ def main():
         futures = [pool.submit(run_shard, snapshot, output, shard,
                                index, args.selectors, args.timeout,
                                args.runtime_http_contracts or args.runtime_public_values,
-                               RUNNER_SHA256, args.runtime_public_values)
+                               RUNNER_SHA256, args.runtime_public_values, args.baseline_timeout)
                    for index, shard in enumerate(grouped_shards(rows, args.workers, args.selectors))]
         for future in concurrent.futures.as_completed(futures):
             try:

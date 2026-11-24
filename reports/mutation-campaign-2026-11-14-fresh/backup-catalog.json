@@ -1,0 +1,80 @@
+{
+  "campaign": "mutation-campaigns-2026-11-14/fresh",
+  "components": [
+    {
+      "bytes": 8171239,
+      "file": "fresh-control-evidence.tar.gz",
+      "objects": 265,
+      "sha256": "3b07f6e29486ec7724a5e6509e47fa9a60fb6d1f6c7f820d38f091140a26cb78",
+      "uncompressedObjectBytes": 18084258
+    },
+    {
+      "bytes": 141697434,
+      "file": "fresh-backend-results.tar.gz",
+      "objects": 41,
+      "sha256": "4018afc1ec57dfbaef5e5d1ef0a5de2357861c6ef2f85fa559fe353a67492852",
+      "uncompressedObjectBytes": 1052897126
+    },
+    {
+      "bytes": 51808027,
+      "file": "fresh-backend-logs.tar.gz",
+      "objects": 82686,
+      "sha256": "439d9cc1906f686b9c003df519fe3ad52f3dcf18f72745875d307d18613a5788",
+      "uncompressedObjectBytes": 218414810
+    },
+    {
+      "bytes": 144970540,
+      "file": "fresh-frontend-results.tar.gz",
+      "objects": 379,
+      "sha256": "fcee249e2e3ce579c3d4b90aa8c269e73221be3b29ba775d1a7cc8af97845720",
+      "uncompressedObjectBytes": 1173748484
+    },
+    {
+      "bytes": 119298986,
+      "file": "fresh-frontend-logs.tar.gz",
+      "objects": 215,
+      "sha256": "4849b09e0e2a6c064896e744e4b62df5a0dbe630203b5ff5dd963bd761ad69d2",
+      "uncompressedObjectBytes": 471261339
+    },
+    {
+      "bytes": 22302552,
+      "file": "fresh-frozen-inputs.tar.gz",
+      "objects": 2023,
+      "sha256": "b42149f442ec2a4ebeebef61d2d03f8a6cb218d6002af71449b9cc9945d19f73",
+      "uncompressedObjectBytes": 54853100
+    },
+    {
+      "bytes": 268574094,
+      "file": "fresh-oracle-plans.tar.gz",
+      "objects": 15,
+      "sha256": "9eb3b9df9c68d9dc371c81c7a2963628a49640a71bf67456049d838360ae5872",
+      "uncompressedObjectBytes": 1909246521
+    }
+  ],
+  "controls": 125982,
+  "createdAt": "2026-11-24T16:36:40.897146+00:00",
+  "excludedPolicy": "Redundant runtime copies, dependencies, caches, PID/lock files, coverage databases, notification orchestration, symlinks, environment files, private keys and databases are excluded; exact exclusions are private excluded-paths.json.",
+  "fileManifest": "fresh-file-manifest.jsonl.gz",
+  "files": 111124,
+  "finalization": "Native dependency lock files retained; restore helper hardened; current code-validation evidence and Git patch captured.",
+  "privateBackupRequired": true,
+  "privateManifestSha256": "db640c2fc1896672084b4e3d8d6314deeae06ae958d87095705473a1535d2505",
+  "publicSummarySha256": "14bd37a9ba36cb6a1e42f129599f4c0451ba75d9b1ffb11b180d4d98cbe22787",
+  "restorePolicy": "Original artifact bytes and historical absolute path strings are preserved. Resolve historical campaign-root paths in memory against the chosen extraction root.",
+  "schemaVersion": 1,
+  "sourceCommit": "8e692b8b876ca902c1eb6bf0f7923a008c4c62cf",
+  "supportFiles": [
+    {
+      "bytes": 4865382,
+      "file": "fresh-file-manifest.jsonl.gz",
+      "sha256": "146d47f461b992ade8e2be267c8eaac8196e8f4981a69084d3ec0733702ccc02"
+    },
+    {
+      "bytes": 14362,
+      "file": "excluded-paths.json",
+      "sha256": "63d8e221c31d315b5d38b71a12eaa4cd35b6b1dffe5c5369d325f695204d29f0"
+    }
+  ],
+  "uncompressedRestoredBytes": 5500634873,
+  "uniqueObjects": 85624
+}

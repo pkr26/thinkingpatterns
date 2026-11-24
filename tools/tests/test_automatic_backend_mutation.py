@@ -2,6 +2,8 @@
 
 import ast
 import importlib.util
+import io
+import json
 import os
 import pathlib
 import sys
@@ -206,10 +208,115 @@ class AutomaticRestorationTests(unittest.TestCase):
         self.assertTrue((self.root / ".venv").is_symlink())
 
 
+class AutomaticBaselineBudgetTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = pathlib.Path(self.temp.name)
+        self.snapshot = self.root / "snapshot"
+        self.source = self.snapshot / "backend/app/logic.py"
+        self.source.parent.mkdir(parents=True)
+        self.source.write_text("value = True\n")
+        self.row = {
+            "id": "M000001", "file": "app/logic.py", "position": 8,
+            "before": "True", "after": "False",
+        }
+
+    def run_control(self, name, seconds, capture_contracts=False, **options):
+        output = self.root / name
+
+        def copy_files(destination, files):
+            for relative, content in files.items():
+                path = destination / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(content)
+
+        baseline = {
+            "status": "SURVIVED", "seconds": seconds, "contracts": {},
+            "log": str(output / "pristine.log"),
+        }
+        results = [baseline.copy()]
+        if capture_contracts:
+            results.append(baseline.copy())
+        results.append({"status": "KILLED", "seconds": 0.1})
+        with (
+            mock.patch.object(sys, "path", [str(ROOT), *sys.path]),
+            mock.patch.dict(os.environ),
+            mock.patch("redteam.deep_backend_mutation.runner.make_copy", copy_files),
+            mock.patch.object(runner, "preload"),
+            mock.patch.object(runner, "pytest_child", side_effect=results) as child,
+        ):
+            path = runner.run_shard(
+                self.snapshot, output, [self.row], 0, ["tests"], 20,
+                capture_contracts=capture_contracts, **options,
+            )
+        self.assertEqual(
+            (output / "copies/worker-00/backend/app/logic.py").read_text(),
+            "value = True\n",
+        )
+        return child.call_args_list, json.loads(pathlib.Path(path).read_text())
+
+    def test_long_pristine_budget_does_not_become_the_mutant_minimum(self):
+        for capture in (False, True):
+            with self.subTest(repeated_http_contract_baseline=capture):
+                calls, result = self.run_control(
+                    f"long-{capture}", 90, capture_contracts=capture,
+                    baseline_timeout=3600,
+                )
+                self.assertEqual([call.args[3] for call in calls[:-1]], [3600] * (1 + capture))
+                self.assertEqual(calls[-1].args[3], 190)
+                self.assertEqual(result["timeout_seconds"], 190)
+                self.assertEqual(result["status"], "KILLED")
+                self.assertTrue(result["restored"])
+
+    def test_default_preserves_the_previous_sixty_second_pristine_budget(self):
+        calls, result = self.run_control("default", 2)
+        self.assertEqual([call.args[3] for call in calls], [60, 20])
+        self.assertEqual(result["timeout_seconds"], 20)
+
+    def test_cli_passes_pristine_budget_to_each_worker(self):
+        output = self.root / "cli"
+        output.mkdir()
+        (output / "mutants.json").write_text(json.dumps([self.row]))
+        future = mock.Mock()
+        future.result.return_value = "unused-result-path"
+        pool = mock.MagicMock()
+        pool.__enter__.return_value.submit.return_value = future
+        with (
+            mock.patch.object(sys, "argv", [
+                "runner", "--snapshot", str(self.snapshot), "--output", str(output),
+                "--baseline-timeout", "3600", "--workers", "1",
+            ]),
+            mock.patch.object(runner.concurrent.futures, "ProcessPoolExecutor", return_value=pool),
+            mock.patch.object(runner.concurrent.futures, "as_completed", return_value=[future]),
+            mock.patch("sys.stdout", new_callable=io.StringIO),
+        ):
+            self.assertEqual(runner.main(), 1)  # No fake verdict earns completion.
+        call = pool.__enter__.return_value.submit.call_args
+        self.assertEqual(call.args[0], runner.run_shard)
+        self.assertEqual(call.args[-1], 3600)
+
+    def test_cli_rejects_nonpositive_or_nonfinite_pristine_budget(self):
+        for value in ("0", "-1", "nan", "inf"):
+            with (
+                self.subTest(value=value),
+                mock.patch.object(sys, "argv", [
+                    "runner", "--snapshot", str(self.snapshot), "--output", str(self.root / "invalid"),
+                    "--baseline-timeout", value,
+                ]),
+                mock.patch("sys.stderr", new_callable=io.StringIO),
+            ):
+                with self.assertRaises(SystemExit) as error:
+                    runner.main()
+                self.assertEqual(error.exception.code, 2)
+        self.assertFalse((self.root / "invalid").exists())
+
+
 @unittest.skipUnless(
     hasattr(os, "fork")
     and importlib.util.find_spec("pytest")
-    and importlib.util.find_spec("pytest_asyncio"),
+    and importlib.util.find_spec("pytest_asyncio")
+    and importlib.util.find_spec("anyio"),
     "execution tests require fork and locked pytest plugins",
 )
 class AutomaticOracleTests(unittest.TestCase):
@@ -238,6 +345,55 @@ class AutomaticOracleTests(unittest.TestCase):
         return runner.pytest_child(
             self.root, [test.name], self.root / f"{name}.log", timeout
         )
+
+    def test_anyio_parameter_selectors_collect_and_execute_in_the_same_profile(self):
+        plan_spec = importlib.util.spec_from_file_location(
+            "plugin_parity_plan", ROOT / "redteam/prepare_automatic_backend_plan.py"
+        )
+        planner = importlib.util.module_from_spec(plan_spec)
+        plan_spec.loader.exec_module(planner)
+        snapshot = self.root / "snapshot"
+        backend = snapshot / "backend"
+        tests = backend / "tests"
+        tests.mkdir(parents=True)
+        (backend / "pyproject.toml").write_text(
+            '[tool.pytest.ini_options]\nasyncio_mode = "auto"\n'
+        )
+        oracle = tests / "test_async.py"
+        source = (
+            "import anyio\nimport pytest\n"
+            "@pytest.fixture(params=['asyncio'])\n"
+            "def anyio_backend(request):\n    return request.param\n"
+            "@pytest.mark.anyio\n"
+            "@pytest.mark.parametrize('value, expected', [(1, 2), (2, 3)], ids=['low', 'high'])\n"
+            "async def test_parameter(value, expected):\n"
+            "    await anyio.sleep(0)\n    assert value + 1 == expected\n"
+            "@pytest.mark.anyio\n"
+            "async def test_async_only():\n"
+            "    await anyio.sleep(0)\n    assert True\n"
+        )
+        oracle.write_text(source)
+        selectors = [
+            "tests/test_async.py::test_parameter[asyncio-low]",
+            "tests/test_async.py::test_parameter[asyncio-high]",
+            "tests/test_async.py::test_async_only[asyncio]",
+        ]
+        plan = {"A": selectors[:]}
+        collection = planner.verify_collection(
+            snapshot, plan, self.root / "plugin-collection.log", pathlib.Path(sys.executable)
+        )
+        self.assertEqual(collection["verified_selectors"], 3)
+        self.assertEqual(plan["A"], selectors)
+        baseline = runner.pytest_child(backend, selectors, self.root / "anyio-baseline.log", 20)
+        self.assertEqual(baseline["status"], "SURVIVED", baseline)
+        self.assertEqual(baseline["passed"], 3)
+        oracle.write_text(source.replace("value + 1", "value + 2"))
+        mutant = runner.pytest_child(
+            backend, [selectors[0]], self.root / "anyio-mutant.log", 20
+        )
+        self.assertEqual(mutant["status"], "KILLED", mutant)
+        self.assertEqual(mutant["failures"][0]["phase"], "call")
+        self.assertFalse(mutant["errors"])
 
     def test_reporter_separates_call_failures_from_collection_setup_and_teardown(self):
         reporter = runner.Reporter()

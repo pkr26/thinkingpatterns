@@ -1,7 +1,7 @@
 /** LoginView: the zero-knowledge sign-in/register flows, the honest error
  *  mapping, the therapist-account rejection, and key hygiene on every
  *  failure path. Uses REAL crypto (the fixed salt makes keys
- *  deterministic; PBKDF2-600k runs in ~40 ms). The v2 describe block
+ *  deterministic; native PBKDF2 finishes on the threadpool). The v2 describe block
  *  covers the 2026-09-26 key envelope: registration default, the
  *  register→login→unlock roundtrip, the unchanged v1 path, response
  *  tolerance, and both fail-closed envelope failures. */
@@ -15,7 +15,7 @@ import { createRegistrationEnvelope } from "../src/crypto/envelope";
 import { derivePatientKeys } from "../src/crypto/keys";
 import { vault } from "../src/vault";
 import { jsonResponse, resetTestState, stubFetch } from "./helpers/api";
-import { isDisabled, press, render, setCheckbox, settle, textOf, typeInto, waitForResult } from "./helpers/rtr";
+import { buttonByLabel, isDisabled, press, render, setCheckbox, settle, textOf, typeInto, waitForResult } from "./helpers/rtr";
 
 const SALT_B64 = "AAECAwQFBgcICQoLDA0ODw=="; // 16 bytes, from the shared vectors
 const GOOD_PASSWORD = "correct horse battery staple";
@@ -36,6 +36,11 @@ const tokenResponse = (overrides: Record<string, unknown> = {}): Record<string, 
  *  every register-flow test ticks it after filling the fields. */
 async function confirmAge(root: ReactTestRenderer): Promise<void> {
   await setCheckbox(root, "I am 18 or older", true);
+}
+
+/** Wait for native KDF/adoption and cleanup to return the public submit action. */
+async function finishLogin(root: ReactTestRenderer): Promise<void> {
+  await waitForResult(() => buttonByLabel(root, "Sign in") || buttonByLabel(root, "Create journal"), "login completion");
 }
 
 function authRoutes(overrides: { login?: Record<string, unknown>; register?: Record<string, unknown> } = {}): ReturnType<typeof stubFetch> {
@@ -96,7 +101,7 @@ describe("sign in", () => {
     await typeInto(root, "Username", "alice");
     await typeInto(root, "Password", GOOD_PASSWORD);
     await press(root, "Sign in");
-    await settle();
+    await finishLogin(root);
     expect(onSuccess).toHaveBeenCalledWith({ userId: TEST_USER_ID, username: "alice" });
     expect(hasSession()).toBe(true);
     expect(vault.isUnlocked()).toBe(true);
@@ -111,7 +116,7 @@ describe("sign in", () => {
     await typeInto(root, "Username", "alice");
     await typeInto(root, "Password", GOOD_PASSWORD);
     await press(root, "Sign in");
-    await settle();
+    await finishLogin(root);
     expect(onSuccess).not.toHaveBeenCalled();
     expect(hasSession()).toBe(false);
     expect(vault.isUnlocked()).toBe(false);
@@ -126,7 +131,7 @@ describe("sign in", () => {
     await typeInto(root, "Username", "dr.smith");
     await typeInto(root, "Password", GOOD_PASSWORD);
     await press(root, "Sign in");
-    await settle();
+    await finishLogin(root);
     expect(onSuccess).not.toHaveBeenCalled();
     expect(hasSession()).toBe(false);
     expect(vault.isUnlocked()).toBe(false);
@@ -142,7 +147,7 @@ describe("sign in", () => {
     await typeInto(root, "Username", "alice");
     await typeInto(root, "Password", GOOD_PASSWORD);
     await press(root, "Sign in");
-    await settle();
+    await finishLogin(root);
     expect(onSuccess).not.toHaveBeenCalled();
     expect(hasSession()).toBe(false);
     expect(vault.isUnlocked()).toBe(false);
@@ -163,7 +168,7 @@ describe("sign in", () => {
       await typeInto(root, "Username", "alice");
       await typeInto(root, "Password", GOOD_PASSWORD);
       await press(root, "Sign in");
-      await settle();
+      await finishLogin(root);
       expect(onSuccess).not.toHaveBeenCalled();
       expect(hasSession()).toBe(false);
     }
@@ -178,7 +183,7 @@ describe("sign in", () => {
     await typeInto(root, "Username", "alice");
     await typeInto(root, "Password", GOOD_PASSWORD);
     await press(root, "Sign in");
-    await settle();
+    await finishLogin(root);
     expect(textOf(root)).toContain("about 30s");
   });
 
@@ -209,7 +214,7 @@ describe("register", () => {
     await typeInto(root, "Confirm password", GOOD_PASSWORD);
     await confirmAge(root);
     await press(root, "Create journal");
-    await settle();
+    await finishLogin(root);
     expect(onSuccess).toHaveBeenCalledWith({ userId: TEST_USER_ID, username: "newuser" });
     expect(vault.isUnlocked()).toBe(true);
   });
@@ -224,7 +229,7 @@ describe("register", () => {
     await typeInto(root, "Confirm password", GOOD_PASSWORD);
     await confirmAge(root);
     await press(root, "Create journal");
-    await settle();
+    await finishLogin(root);
     expect(onSuccess).not.toHaveBeenCalled();
     expect(hasSession()).toBe(false);
     expect(vault.isUnlocked()).toBe(false);
@@ -270,7 +275,7 @@ describe("register", () => {
     await typeInto(root, "Confirm password", GOOD_PASSWORD);
     await confirmAge(root);
     await press(root, "Create journal");
-    await settle();
+    await finishLogin(root);
     expect(onSuccess).not.toHaveBeenCalled();
     expect(vault.isUnlocked()).toBe(false);
     expect(textOf(root)).toContain("That username is already in use");
@@ -353,7 +358,7 @@ describe("v2 key envelope (2026-09-26)", () => {
     await typeInto(root, "Confirm password", GOOD_PASSWORD);
     await confirmAge(root);
     await press(root, "Create journal");
-    await settle();
+    await finishLogin(root);
     const body = bodies.register as Record<string, unknown>;
     // Both-or-neither on the wire, the documented canonical params blob,
     // and the exact 60-byte envelope.
@@ -459,7 +464,7 @@ describe("v2 key envelope (2026-09-26)", () => {
     await typeInto(root, "Username", "v2user");
     await typeInto(root, "Password", GOOD_PASSWORD);
     await press(root, "Sign in");
-    await settle();
+    await finishLogin(root);
 
     // The envelope fetch left the tab AUTHENTICATED with the fresh token.
     expect(envelopeAuth).toEqual(["Bearer tok-1"]);
@@ -492,7 +497,7 @@ describe("v2 key envelope (2026-09-26)", () => {
     await typeInto(root, "Username", "v2user");
     await typeInto(root, "Password", GOOD_PASSWORD);
     await press(root, "Sign in");
-    await settle();
+    await finishLogin(root);
 
     expect(onLogin).not.toHaveBeenCalled();
     expect(textOf(root)).toContain("key envelope could not be opened");
@@ -516,7 +521,7 @@ describe("v2 key envelope (2026-09-26)", () => {
     await typeInto(root, "Username", "legacy");
     await typeInto(root, "Password", GOOD_PASSWORD);
     await press(root, "Sign in");
-    await settle();
+    await finishLogin(root);
     expect(vault.isUnlocked()).toBe(true);
     expect(urls.some((url) => url.endsWith("/auth/key-envelope"))).toBe(false);
     // And the key is exactly the pre-wave derivation (the shared contract).
@@ -547,7 +552,7 @@ describe("v2 key envelope (2026-09-26)", () => {
     await typeInto(root, "Username", "tolerant");
     await typeInto(root, "Password", GOOD_PASSWORD);
     await press(root, "Sign in");
-    await settle();
+    await finishLogin(root);
     expect(onSuccess).toHaveBeenCalledWith({ userId: TEST_USER_ID, username: "tolerant" });
     expect(vault.isUnlocked()).toBe(true);
   });
@@ -564,7 +569,7 @@ describe("v2 key envelope (2026-09-26)", () => {
     await typeInto(root, "Username", "v2broken");
     await typeInto(root, "Password", GOOD_PASSWORD);
     await press(root, "Sign in");
-    await settle();
+    await finishLogin(root);
     expect(onSuccess).not.toHaveBeenCalled();
     expect(hasSession()).toBe(false);
     expect(vault.isUnlocked()).toBe(false);
@@ -597,7 +602,7 @@ describe("v2 key envelope (2026-09-26)", () => {
     await typeInto(root, "Username", "v2tamper");
     await typeInto(root, "Password", GOOD_PASSWORD);
     await press(root, "Sign in");
-    await settle();
+    await finishLogin(root);
     expect(onSuccess).not.toHaveBeenCalled();
     expect(hasSession()).toBe(false);
     expect(vault.isUnlocked()).toBe(false);
@@ -667,7 +672,7 @@ describe("v2 key envelope (2026-09-26)", () => {
     await typeInto(root, "Username", "argon");
     await typeInto(root, "Password", GOOD_PASSWORD);
     await press(root, "Sign in");
-    await settle();
+    await finishLogin(root);
     expect(onLogin).not.toHaveBeenCalled();
     expect(hasSession()).toBe(false);
     expect(vault.isUnlocked()).toBe(false);
@@ -696,7 +701,7 @@ describe("v2 key envelope (2026-09-26)", () => {
     await typeInto(root, "Confirm password", GOOD_PASSWORD);
     await setCheckbox(root, "I am 18 or older", true);
     await press(root, "Create journal");
-    await settle();
+    await finishLogin(root);
     expect(vault.isUnlocked()).toBe(true);
     // v1 semantics: the vault holds the password-DERIVED label — the
     // envelope upload happened, but without the echo the random key the

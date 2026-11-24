@@ -518,9 +518,15 @@ def prepare(snapshot, manifest, archive, coverage=None):
 
 
 def verify_collection(snapshot, plan, log, python):
-    """Collect each named test file once, then verify every planned selector."""
+    """Collect each test path once, then verify every planned selector."""
     selectors = sorted({value for values in plan.values() for value in values})
     files = sorted({value.split("::", 1)[0] for value in selectors})
+    directories = {
+        selector: path
+        for selector in selectors
+        if "::" not in selector
+        and (path := selector_path(snapshot, selector)).is_dir()
+    }
     command = [
         str(python),
         "-m",
@@ -532,10 +538,19 @@ def verify_collection(snapshot, plan, log, python):
         str(snapshot),
         "-o",
         "addopts=",
+        "-m",
+        "not slow",
         "-p",
         "no:cacheprovider",
-        *files,
+        "-p",
+        "pytest_asyncio.plugin",
+        "-p",
+        "anyio.pytest_plugin",
     ]
+    configuration = snapshot / "backend/pyproject.toml"
+    if configuration.is_file():
+        command.extend(["-c", str(configuration)])
+    command.extend(files)
     result = subprocess.run(
         command,
         check=False,
@@ -546,6 +561,7 @@ def verify_collection(snapshot, plan, log, python):
         env={
             **os.environ,
             "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
             "MINDPATTERN_ENV": "development",
         },
     )
@@ -557,12 +573,17 @@ def verify_collection(snapshot, plan, log, python):
     nodes = set()
     for line in result.stdout.splitlines():
         filename, separator, _names = line.partition("::")
-        if separator and filename.endswith(".py"):
-            normalized = node_selector(snapshot, line)
+        if separator and (filename.endswith(".py") or not filename):
+            normalized = node_selector(snapshot, line, files)
             if normalized:
                 nodes.add(normalized)
 
     def collected(selector):
+        if selector in directories:
+            return any(
+                selector_path(snapshot, node).is_relative_to(directories[selector])
+                for node in nodes
+            )
         return any(
             node == selector or node.startswith((selector + "::", selector + "["))
             for node in nodes

@@ -1,0 +1,54 @@
+{
+  "scope": "Current uncommitted mutation-campaign code validation",
+  "source_sha256": {
+    "backend/tests/helpers.py": "559d3497dc892bec107c1588de58e06dd2092a5d29c8a41f384f002374204fca",
+    "backend/tests/test_pentest_2026_09_26_fixes.py": "fe779245ba38f4f55b6dc2401c3eddb2aa8dd6fead618342a575903f67188ea1",
+    "redteam/prepare_automatic_backend_plan.py": "f246a213a6c56e217eb92b169d9409be50fbc40ea93be4cac6f6f6da9e86b23f",
+    "redteam/run_automatic_backend_mutation.py": "646e8fdd4b04d26e8a537e7fea83313107e577471944c0a5ef2d36ac772fe843",
+    "tools/tests/test_automatic_backend_mutation.py": "09496907928897bf545ff8cc9f505f557d9e43fff64aa08d1429f153e13524a0",
+    "tools/tests/test_automatic_backend_plan.py": "e423a2a69a4a440e021464673e25e3bcdd1d55c9477df3aae313f4b5f418c2bb",
+    "web/tests/login.test.tsx": "e514973a4f442112c037378aca005cf94b62a72ea40e617af812782a6ac301c3",
+    "web/tests/loginNativeCompletion.test.tsx": "c0861376b4693d73f593ad852d4ea789f06783dccd568828746d063cb5e47fab",
+    "web/tests/parityBranches.test.tsx": "0a5058ed1f0e3b55fc5a4c0a61c77a56d73019e92858325bf5ff5777b3cc82f1",
+    "web/tests/settings.test.tsx": "27d80aa4b40e5bfc74f68027713b0e0498533425a5a15f014110e9c64a0bd0b6"
+  },
+  "checks": {
+    "python_planner_runner_unittests": {
+      "passed": 35,
+      "failed": 0
+    },
+    "backend_pentest_module": {
+      "passed": 5,
+      "failed": 0
+    },
+    "backend_changed_files_ruff": "passed",
+    "backend_changed_files_ruff_format": "passed",
+    "mutation_tooling_ruff_F_E9": "passed",
+    "git_diff_check": "passed",
+    "web_focused_tests": {
+      "passed": 133,
+      "failed": 0,
+      "pending": 0
+    },
+    "web_typecheck": {
+      "passed": true,
+      "returncode": 0
+    }
+  },
+  "assertion_preservation": {
+    "web_expectation_expressions": 754,
+    "web_test_declarations": 94,
+    "backend_assertions": 54,
+    "backend_test_signatures": 5,
+    "all_unchanged": true
+  },
+  "environment": {
+    "python": "existing frozen campaign Python3.12",
+    "node": "24.21.0 (workspace .nvmrc requests22)",
+    "npm": "12.1.0",
+    "web_dependencies": "npm ci --ignore-scripts from unchanged package-lock.json in isolated temp copy",
+    "workspace_package_lock_unchanged": true
+  },
+  "source_edits_by_validator": false,
+  "fixed_by_root": "Removed unused settle import only; runtime tests remain applicable."
+}
